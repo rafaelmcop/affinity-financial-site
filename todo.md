@@ -45,3 +45,8 @@
 ## Deployment
 - [x] Final checkpoint creation
 - [x] Site publication
+
+## Melhorias Solicitadas
+- [x] Aumentar significativamente o tamanho da logo (usar como referência visual mas não como padrão)
+- [x] Logo maior na navegação superior
+- [x] Logo maior no footer

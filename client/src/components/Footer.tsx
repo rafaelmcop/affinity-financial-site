@@ -26,7 +26,7 @@ export function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-12">
           {/* Company Info */}
           <div>
-            <Logo />
+            <Logo size="medium" />
             <p className="text-gray-400 text-sm leading-relaxed mt-4">
               {t('footer.company_name')}
             </p>

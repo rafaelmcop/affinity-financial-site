@@ -28,11 +28,11 @@ export function Navigation() {
   return (
     <nav className="fixed top-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-b border-gold/20 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
+        <div className="flex justify-between items-center h-24">
           {/* Logo */}
           <div className="flex-shrink-0">
             <a href="#home" className="hover:opacity-80 transition-opacity">
-              <Logo />
+              <Logo size="medium" />
             </a>
           </div>
 
@@ -65,7 +65,7 @@ export function Navigation() {
 
         {/* Mobile Navigation */}
         {isOpen && (
-          <div className="md:hidden pb-4 space-y-2 border-t border-gold/20">
+          <div className="md:hidden pb-4 space-y-2 border-t border-gold/20 mt-2">
             {navItems.map((item) => (
               <button
                 key={item.id}
