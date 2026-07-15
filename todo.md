@@ -50,3 +50,8 @@
 - [x] Aumentar significativamente o tamanho da logo (usar como referência visual mas não como padrão)
 - [x] Logo maior na navegação superior
 - [x] Logo maior no footer
+
+## Ajustes de Logo
+- [x] Remover logo de imagem
+- [x] Exibir nome "Affinity Financial Consulting" como texto na navegação
+- [x] Exibir nome "Affinity Financial Consulting" como texto no footer

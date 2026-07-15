@@ -1,5 +1,4 @@
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Logo } from './Logo';
 import { Instagram, Phone, Mail, MapPin } from 'lucide-react';
 
 export function Footer() {
@@ -26,8 +25,9 @@ export function Footer() {
         <div className="grid md:grid-cols-4 gap-8 mb-12">
           {/* Company Info */}
           <div>
-            <Logo size="medium" />
-            <p className="text-gray-400 text-sm leading-relaxed mt-4">
+            <h3 className="text-2xl font-bold text-gold mb-2">Affinity Financial</h3>
+            <p className="text-xs text-gold/80 mb-4">Consulting Inc.</p>
+            <p className="text-gray-400 text-sm leading-relaxed">
               {t('footer.company_name')}
             </p>
           </div>

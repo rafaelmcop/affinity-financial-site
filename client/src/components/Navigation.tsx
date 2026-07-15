@@ -1,7 +1,6 @@
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
 import { LanguageSelector } from './LanguageSelector';
-import { Logo } from './Logo';
 import { Menu, X } from 'lucide-react';
 import { useState } from 'react';
 
@@ -28,11 +27,14 @@ export function Navigation() {
   return (
     <nav className="fixed top-0 left-0 right-0 bg-black/95 backdrop-blur-sm border-b border-gold/20 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-24">
+        <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <div className="flex-shrink-0">
             <a href="#home" className="hover:opacity-80 transition-opacity">
-              <Logo size="medium" />
+              <div className="text-lg font-bold text-gold whitespace-nowrap leading-tight">
+                <div>Affinity Financial</div>
+                <div className="text-xs text-gold/80">Consulting Inc.</div>
+              </div>
             </a>
           </div>
 
