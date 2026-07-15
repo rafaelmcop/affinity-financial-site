@@ -14,7 +14,7 @@ export const translations = {
     // Hero Section
     hero: {
       headline: 'Proteção Financeira para Sua Família',
-      subheadline: 'Consultoria especializada em seguros de vida e previdência privada para famílias brasileiras e hispânicas nos EUA',
+      subheadline: 'Consultoria especializada em seguros de vida e previdência privada para famílias imigrantes nos EUA',
       cta_calendar: 'Agendar Consulta Gratuita',
       cta_whatsapp: 'Fale pelo WhatsApp',
     },
@@ -43,7 +43,7 @@ export const translations = {
     // Testimonials Section
     testimonials: {
       title: 'Histórias de Famílias Protegidas',
-      subtitle: 'Veja como a Affinity ajudou famílias brasileiras e hispânicas a garantir seu futuro',
+      subtitle: 'Veja como a Affinity ajudou famílias imigrantes a garantir seu futuro',
       
       testimonial_1: {
         name: 'Maria Silva',
@@ -73,13 +73,13 @@ export const translations = {
       subtitle: 'Confiança, Transparência e Expertise',
       
       mission: 'Nossa Missão',
-      mission_text: 'Oferecer consultoria financeira especializada e acessível para famílias brasileiras e hispânicas nos EUA, garantindo segurança, confiança e tranquilidade para o futuro.',
+      mission_text: 'Oferecer consultoria financeira especializada e acessível para famílias imigrantes nos EUA, garantindo segurança, confiança e tranquilidade para o futuro.',
       
       values: 'Nossos Valores',
-      values_text: 'Integridade, Transparência, Dedicação e Excelência no atendimento. Cada cliente é único e merece uma solução personalizada.',
+      values_text: 'Integridade, Transparência, Dedicação e Excelência no atendimento. Cada família imigrante é única e merece uma solução personalizada.',
       
       difference: 'O Que Nos Diferencia',
-      difference_text: 'Atendimento bilíngue e trilíngue, profundo conhecimento das necessidades das comunidades brasileira e hispânica, e compromisso com a educação financeira.',
+      difference_text: 'Atendimento multilíngue, profundo conhecimento das necessidades das comunidades imigrantes, e compromisso com a educação financeira acessível.'
     },
 
     // Contact Section
@@ -133,7 +133,7 @@ export const translations = {
     // Hero Section
     hero: {
       headline: 'Financial Protection for Your Family',
-      subheadline: 'Expert consulting in life insurance and private pension plans for Brazilian and Hispanic families in the USA',
+      subheadline: 'Expert consulting in life insurance and private pension plans for immigrant families in the USA',
       cta_calendar: 'Schedule Free Consultation',
       cta_whatsapp: 'Chat on WhatsApp',
     },
@@ -162,7 +162,7 @@ export const translations = {
     // Testimonials Section
     testimonials: {
       title: 'Stories of Protected Families',
-      subtitle: 'See how Affinity helped Brazilian and Hispanic families secure their future',
+      subtitle: 'See how Affinity helped immigrant families secure their future',
       
       testimonial_1: {
         name: 'Maria Silva',
@@ -192,13 +192,13 @@ export const translations = {
       subtitle: 'Trust, Transparency, and Expertise',
       
       mission: 'Our Mission',
-      mission_text: 'To provide specialized and accessible financial consulting for Brazilian and Hispanic families in the USA, ensuring security, trust, and peace of mind for the future.',
+      mission_text: 'To provide specialized and accessible financial consulting for immigrant families in the USA, ensuring security, trust, and peace of mind for the future.',
       
       values: 'Our Values',
-      values_text: 'Integrity, Transparency, Dedication, and Excellence in service. Each client is unique and deserves a personalized solution.',
+      values_text: 'Integrity, Transparency, Dedication, and Excellence in service. Each immigrant family is unique and deserves a personalized solution.',
       
       difference: 'What Sets Us Apart',
-      difference_text: 'Bilingual and trilingual service, deep understanding of Brazilian and Hispanic community needs, and commitment to financial education.',
+      difference_text: 'Multilingual service, deep understanding of immigrant community needs, and commitment to accessible financial education.',
     },
 
     // Contact Section
@@ -252,7 +252,7 @@ export const translations = {
     // Hero Section
     hero: {
       headline: 'Protección Financiera para Su Familia',
-      subheadline: 'Consultoría especializada en seguros de vida y planes de pensión privados para familias brasileñas e hispanas en EE.UU.',
+      subheadline: 'Consultoría especializada en seguros de vida y planes de pensión privados para familias inmigrantes en EE.UU.',
       cta_calendar: 'Agendar Consulta Gratuita',
       cta_whatsapp: 'Chatea en WhatsApp',
     },
@@ -281,7 +281,7 @@ export const translations = {
     // Testimonials Section
     testimonials: {
       title: 'Historias de Familias Protegidas',
-      subtitle: 'Vea cómo Affinity ayudó a familias brasileñas e hispanas a asegurar su futuro',
+      subtitle: 'Vea cómo Affinity ayudó a familias inmigrantes a asegurar su futuro',
       
       testimonial_1: {
         name: 'Maria Silva',
@@ -311,13 +311,13 @@ export const translations = {
       subtitle: 'Confianza, Transparencia y Experiencia',
       
       mission: 'Nuestra Misión',
-      mission_text: 'Proporcionar consultoría financiera especializada y accesible para familias brasileñas e hispanas en EE.UU., asegurando seguridad, confianza y tranquilidad para el futuro.',
+      mission_text: 'Proporcionar consultoría financiera especializada y accesible para familias inmigrantes en EE.UU., asegurando seguridad, confianza y tranquilidad para el futuro.',
       
       values: 'Nuestros Valores',
-      values_text: 'Integridad, Transparencia, Dedicación y Excelencia en el servicio. Cada cliente es único y merece una solución personalizada.',
+      values_text: 'Integridad, Transparencia, Dedicación y Excelencia en el servicio. Cada familia inmigrante es única y merece una solución personalizada.',
       
       difference: 'Lo Que Nos Diferencia',
-      difference_text: 'Servicio bilingüe y trilingüe, profunda comprensión de las necesidades de las comunidades brasileña e hispana, y compromiso con la educación financiera.',
+      difference_text: 'Servicio multilingüe, profunda comprensión de las necesidades de las comunidades inmigrantes, y compromiso con la educación financiera accesible.',
     },
 
     // Contact Section

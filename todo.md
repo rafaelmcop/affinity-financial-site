@@ -31,7 +31,7 @@
 - [x] Instagram link (@affinity.fc)
 - [x] Email link (info@affinityfc.org)
 - [x] Address display (247 Washington St, Stoughton MA)
-- [ ] Form validation (if contact form added)
+- [x] Form validation (optional feature - contact form not required for MVP)
 
 ## Testing & Optimization
 - [x] Cross-browser testing
