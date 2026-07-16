@@ -53,19 +53,6 @@ export function Navigation() {
 
           {/* Right Side - Language Selector + Mobile Menu */}
           <div className="flex items-center gap-4">
-            <a
-              href="/afiliados"
-              className="hidden sm:block text-white hover:text-gold transition-colors text-sm font-medium"
-            >
-              Afiliados
-            </a>
-            <a
-              href="/admin/login"
-              className="hidden sm:block text-white/60 hover:text-gold transition-colors text-xs font-medium"
-              title="Painel de Administração"
-            >
-              Admin
-            </a>
             <LanguageSelector />
 
             {/* Mobile Menu Button */}
@@ -90,18 +77,6 @@ export function Navigation() {
                 {item.label}
               </button>
             ))}
-            <a
-              href="/afiliados"
-              className="block w-full text-left px-4 py-2 text-white hover:bg-gold/10 hover:text-gold transition-colors text-sm font-medium"
-            >
-              Afiliados
-            </a>
-            <a
-              href="/admin/login"
-              className="block w-full text-left px-4 py-2 text-white/60 hover:bg-gold/10 hover:text-gold transition-colors text-sm font-medium"
-            >
-              Admin
-            </a>
           </div>
         )}
       </div>

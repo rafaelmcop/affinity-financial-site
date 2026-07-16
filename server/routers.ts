@@ -323,6 +323,38 @@ export const appRouter = router({
         await updateAffiliateStatus(input.affiliateId, 'rejected');
         return { success: true };
       }),
+
+    addPolicy: publicProcedure
+      .input(z.object({
+        policyNumber: z.string().min(1),
+        clientName: z.string().min(1),
+        policyType: z.string().min(1),
+        points: z.number().min(0),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+
+        const { policies } = await import('../drizzle/schema');
+        const existing = await db.select().from(policies).where(eq(policies.policyNumber, input.policyNumber)).limit(1);
+        if (existing.length > 0) {
+          throw new Error('Número de apólice já existe');
+        }
+
+        await db.insert(policies).values({
+          affiliateId: 0,
+          policyNumber: input.policyNumber,
+          clientName: input.clientName,
+          policyType: input.policyType,
+          status: 'approved',
+          points: input.points,
+          submittedAt: new Date(),
+          approvedAt: new Date(),
+        });
+
+        return { success: true, message: 'Apólice adicionada com sucesso!' };
+      }),
   }),
 
   notification: notificationRouter,

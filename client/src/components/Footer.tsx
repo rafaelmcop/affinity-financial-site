@@ -72,20 +72,37 @@ export function Footer() {
             </ul>
           </div>
 
-          {/* Social Media */}
+          {/* Social Media & Access */}
           <div>
             <h4 className="text-white font-semibold mb-4">
               {t('footer.follow_us')}
             </h4>
-            <a
-              href="https://instagram.com/affinity.fc"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 bg-gold/20 hover:bg-gold/30 text-gold px-4 py-2 rounded-lg transition-colors"
-            >
-              <Instagram size={20} />
-              @affinity.fc
-            </a>
+            <div className="space-y-3">
+              <a
+                href="https://instagram.com/affinity.fc"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-gold/20 hover:bg-gold/30 text-gold px-4 py-2 rounded-lg transition-colors"
+              >
+                <Instagram size={20} />
+                @affinity.fc
+              </a>
+              <div className="pt-3 border-t border-gold/20">
+                <p className="text-gray-400 text-xs mb-2 font-semibold">Acesso</p>
+                <ul className="space-y-1">
+                  <li>
+                    <a href="/afiliados" className="text-gray-400 hover:text-gold transition-colors text-sm">
+                      Portal de Afiliados
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/admin/login" className="text-gray-400 hover:text-gold transition-colors text-sm">
+                      Painel Admin
+                    </a>
+                  </li>
+                </ul>
+              </div>
+            </div>
           </div>
         </div>
 

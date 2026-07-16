@@ -2,16 +2,27 @@ import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { trpc } from '@/lib/trpc';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { LogOut, CheckCircle, Clock, XCircle } from 'lucide-react';
+import { LogOut, CheckCircle, Clock, XCircle, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AdminDashboard() {
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
   const [selectedPeriod, setSelectedPeriod] = useState<'7' | '30' | '90'>('30');
+  
+  // Form states for adding policy
+  const [policyForm, setPolicyForm] = useState({
+    policyNumber: '',
+    clientName: '',
+    policyType: '',
+    points: '',
+  });
 
   useEffect(() => {
     const adminSession = localStorage.getItem('adminSession');
@@ -25,6 +36,7 @@ export default function AdminDashboard() {
 
   const statsQuery = trpc.admin.getStats.useQuery();
   const policiesQuery = trpc.admin.getPoliciesPending.useQuery();
+  const addPolicyMutation = trpc.admin.addPolicy.useMutation();
 
   if (isLoading) {
     return (
@@ -49,198 +61,264 @@ export default function AdminDashboard() {
 
   const pendingPolicies = policiesQuery.data || [];
 
-  // Mock data for charts
-  const conversionData = [
-    { month: 'Jan', conversions: 12, target: 20 },
-    { month: 'Fev', conversions: 19, target: 20 },
-    { month: 'Mar', conversions: 15, target: 20 },
-    { month: 'Abr', conversions: 25, target: 20 },
-    { month: 'Mai', conversions: 22, target: 20 },
-    { month: 'Jun', conversions: 28, target: 20 },
-  ];
-
-  const commissionData = [
-    { affiliate: 'Afiliado A', commission: 2500 },
-    { affiliate: 'Afiliado B', commission: 1800 },
-    { affiliate: 'Afiliado C', commission: 3200 },
-    { affiliate: 'Afiliado D', commission: 2100 },
-  ];
-
-  const policyStatusData = [
-    { name: 'Aprovadas', value: stats.approvedPolicies, color: '#d4af37' },
-    { name: 'Pendentes', value: stats.pendingPolicies, color: '#666' },
-  ];
-
   const handleLogout = () => {
     localStorage.removeItem('adminSession');
-    toast.success('Logout realizado');
     setLocation('/admin/login');
   };
 
+  const handleAddPolicy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!policyForm.policyNumber || !policyForm.clientName || !policyForm.points) {
+      toast.error('Preencha todos os campos obrigatórios');
+      return;
+    }
+
+    try {
+      await addPolicyMutation.mutateAsync({
+        policyNumber: policyForm.policyNumber,
+        clientName: policyForm.clientName,
+        policyType: policyForm.policyType || 'Seguro de Vida',
+        points: parseInt(policyForm.points),
+      });
+      
+      toast.success('Apólice adicionada com sucesso!');
+      setPolicyForm({ policyNumber: '', clientName: '', policyType: '', points: '' });
+      policiesQuery.refetch();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao adicionar apólice');
+    }
+  };
+
+  const conversionData = [
+    { month: 'Jan', conversions: 12 },
+    { month: 'Fev', conversions: 19 },
+    { month: 'Mar', conversions: 15 },
+    { month: 'Abr', conversions: 25 },
+    { month: 'Mai', conversions: 22 },
+    { month: 'Jun', conversions: 30 },
+  ];
+
+  const commissionData = [
+    { name: 'João Silva', commission: 2500 },
+    { name: 'Maria Santos', commission: 3200 },
+    { name: 'Pedro Costa', commission: 1800 },
+    { name: 'Ana Oliveira', commission: 2800 },
+  ];
+
+  const policyStatusData = [
+    { name: 'Pendentes', value: stats.pendingPolicies, fill: '#FCD34D' },
+    { name: 'Aprovadas', value: stats.approvedPolicies, fill: '#10B981' },
+    { name: 'Rejeitadas', value: 5, fill: '#EF4444' },
+  ];
+
   return (
-    <div className="min-h-screen bg-black pt-24 pb-12 px-4">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-black text-white pt-20">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex justify-between items-start mb-8">
-          <div>
-            <h1 className="text-4xl font-bold text-gold mb-2">Dashboard de Administração</h1>
-            <p className="text-gray-400">Visão geral do desempenho da plataforma</p>
-          </div>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold text-gold">Painel de Administração</h1>
           <Button
             onClick={handleLogout}
             variant="outline"
-            className="border-gold/30 text-gold hover:bg-gold/10"
+            className="flex items-center gap-2"
           >
-            <LogOut className="w-4 h-4 mr-2" />
-            Sair
+            <LogOut size={18} />
+            Logout
           </Button>
         </div>
 
-        {/* Key Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <Card className="bg-black border-gold/20 p-6">
-            <p className="text-gray-400 text-sm mb-2">Total de Afiliados</p>
-            <p className="text-3xl font-bold text-gold">{stats.totalAffiliates}</p>
-            <p className="text-xs text-gold/60 mt-2">{stats.pendingAffiliates} pendentes</p>
-          </Card>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-3 bg-gold/10 p-1 rounded-lg">
+            <TabsTrigger value="overview" className="data-[state=active]:bg-gold/20">Visão Geral</TabsTrigger>
+            <TabsTrigger value="policies" className="data-[state=active]:bg-gold/20">Gerenciar Apólices</TabsTrigger>
+            <TabsTrigger value="pending" className="data-[state=active]:bg-gold/20">Apólices Pendentes</TabsTrigger>
+          </TabsList>
 
-          <Card className="bg-black border-gold/20 p-6">
-            <p className="text-gray-400 text-sm mb-2">Total de Apólices</p>
-            <p className="text-3xl font-bold text-gold">{stats.totalPolicies}</p>
-            <p className="text-xs text-gold/60 mt-2">{stats.pendingPolicies} pendentes</p>
-          </Card>
+          {/* Overview Tab */}
+          <TabsContent value="overview" className="space-y-6">
+            {/* Stats Cards */}
+            <div className="grid md:grid-cols-3 gap-4">
+              <Card className="bg-gold/10 border-gold/20 p-6">
+                <p className="text-gray-400 text-sm">Total de Afiliados</p>
+                <p className="text-3xl font-bold text-gold mt-2">{stats.totalAffiliates}</p>
+                <p className="text-xs text-gray-500 mt-2">{stats.pendingAffiliates} pendentes</p>
+              </Card>
+              <Card className="bg-gold/10 border-gold/20 p-6">
+                <p className="text-gray-400 text-sm">Total de Apólices</p>
+                <p className="text-3xl font-bold text-gold mt-2">{stats.totalPolicies}</p>
+                <p className="text-xs text-gray-500 mt-2">{stats.pendingPolicies} pendentes</p>
+              </Card>
+              <Card className="bg-gold/10 border-gold/20 p-6">
+                <p className="text-gray-400 text-sm">Comissões Totais</p>
+                <p className="text-3xl font-bold text-gold mt-2">R$ {stats.totalCommissions.toFixed(2)}</p>
+              </Card>
+            </div>
 
-          <Card className="bg-black border-gold/20 p-6">
-            <p className="text-gray-400 text-sm mb-2">Comissões Pagas</p>
-            <p className="text-3xl font-bold text-gold">${stats.totalCommissions.toFixed(0)}</p>
-            <p className="text-xs text-gold/60 mt-2">Este mês</p>
-          </Card>
+            {/* Charts */}
+            <div className="grid md:grid-cols-2 gap-6">
+              <Card className="bg-gold/5 border-gold/20 p-6">
+                <h3 className="text-white font-semibold mb-4">Conversões por Mês</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={conversionData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                    <XAxis stroke="#999" />
+                    <YAxis stroke="#999" />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #d4af37' }} />
+                    <Legend />
+                    <Line type="monotone" dataKey="conversions" stroke="#d4af37" strokeWidth={2} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
 
-          <Card className="bg-black border-gold/20 p-6 border-2 border-gold">
-            <p className="text-gray-400 text-sm mb-2">Apólices Aprovadas</p>
-            <p className="text-3xl font-bold text-gold">{stats.approvedPolicies}</p>
-            <p className="text-xs text-gold/60 mt-2">Taxa de sucesso</p>
-          </Card>
-        </div>
+              <Card className="bg-gold/5 border-gold/20 p-6">
+                <h3 className="text-white font-semibold mb-4">Comissões por Afiliado</h3>
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={commissionData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                    <XAxis stroke="#999" />
+                    <YAxis stroke="#999" />
+                    <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #d4af37' }} />
+                    <Legend />
+                    <Bar dataKey="commission" fill="#d4af37" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+            </div>
 
-        {/* Period Selector */}
-        <div className="flex gap-2 mb-8">
-          {(['7', '30', '90'] as const).map((period) => (
-            <Button
-              key={period}
-              onClick={() => setSelectedPeriod(period)}
-              variant={selectedPeriod === period ? 'default' : 'outline'}
-              className={selectedPeriod === period ? 'bg-gold text-black' : 'border-gold/30 text-gold'}
-            >
-              Últimos {period} dias
-            </Button>
-          ))}
-        </div>
+            <Card className="bg-gold/5 border-gold/20 p-6">
+              <h3 className="text-white font-semibold mb-4">Status das Apólices</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={policyStatusData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, value }) => `${name}: ${value}`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {policyStatusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <Tooltip contentStyle={{ backgroundColor: '#1a1a1a', border: '1px solid #d4af37' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </Card>
+          </TabsContent>
 
-        {/* Charts */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
-          {/* Conversions Chart */}
-          <Card className="bg-black border-gold/20 p-6">
-            <h2 className="text-xl font-semibold text-gold mb-4">Conversões por Mês</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={conversionData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis stroke="#666" />
-                <YAxis stroke="#666" />
-                <Tooltip contentStyle={{ backgroundColor: '#000', border: '1px solid #d4af37' }} />
-                <Legend />
-                <Line type="monotone" dataKey="conversions" stroke="#d4af37" strokeWidth={2} />
-                <Line type="monotone" dataKey="target" stroke="#666" strokeDasharray="5 5" />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Commission by Affiliate */}
-          <Card className="bg-black border-gold/20 p-6">
-            <h2 className="text-xl font-semibold text-gold mb-4">Comissões por Afiliado</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={commissionData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#333" />
-                <XAxis stroke="#666" />
-                <YAxis stroke="#666" />
-                <Tooltip contentStyle={{ backgroundColor: '#000', border: '1px solid #d4af37' }} />
-                <Bar dataKey="commission" fill="#d4af37" />
-              </BarChart>
-            </ResponsiveContainer>
-          </Card>
-        </div>
-
-        {/* Policy Status & Pending Policies */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
-          {/* Status Pie Chart */}
-          <Card className="bg-black border-gold/20 p-6">
-            <h2 className="text-xl font-semibold text-gold mb-4">Status das Apólices</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={policyStatusData}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ name, value }) => `${name}: ${value}`}
-                  outerRadius={80}
-                  fill="#d4af37"
-                  dataKey="value"
-                >
-                  {policyStatusData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#000', border: '1px solid #d4af37' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
-
-          {/* Pending Policies List */}
-          <Card className="bg-black border-gold/20 p-6 lg:col-span-2">
-            <h2 className="text-xl font-semibold text-gold mb-4">Apólices Pendentes de Aprovação</h2>
-            {pendingPolicies.length === 0 ? (
-              <p className="text-gray-400">Nenhuma apólice pendente</p>
-            ) : (
-              <div className="space-y-3 max-h-96 overflow-y-auto">
-                {pendingPolicies.map((policy: any) => (
-                  <div key={policy.id} className="flex items-center justify-between p-3 bg-gold/5 border border-gold/10 rounded">
-                    <div className="flex-1">
-                      <p className="text-white font-semibold">{policy.policyNumber}</p>
-                      <p className="text-gray-400 text-sm">{policy.clientName}</p>
-                    </div>
-                    <Clock className="text-gold w-5 h-5" />
+          {/* Manage Policies Tab */}
+          <TabsContent value="policies" className="space-y-6">
+            <Card className="bg-gold/5 border-gold/20 p-6">
+              <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+                <Plus size={20} />
+                Adicionar Nova Apólice
+              </h3>
+              <form onSubmit={handleAddPolicy} className="space-y-4">
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-gray-400 text-sm mb-2 block">Número da Apólice *</label>
+                    <Input
+                      type="text"
+                      placeholder="Ex: POL-2024-001"
+                      value={policyForm.policyNumber}
+                      onChange={(e) => setPolicyForm({ ...policyForm, policyNumber: e.target.value })}
+                      className="bg-black border-gold/20 text-white"
+                    />
                   </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
+                  <div>
+                    <label className="text-gray-400 text-sm mb-2 block">Nome do Cliente *</label>
+                    <Input
+                      type="text"
+                      placeholder="Ex: João Silva"
+                      value={policyForm.clientName}
+                      onChange={(e) => setPolicyForm({ ...policyForm, clientName: e.target.value })}
+                      className="bg-black border-gold/20 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm mb-2 block">Tipo de Apólice</label>
+                    <Input
+                      type="text"
+                      placeholder="Ex: Seguro de Vida"
+                      value={policyForm.policyType}
+                      onChange={(e) => setPolicyForm({ ...policyForm, policyType: e.target.value })}
+                      className="bg-black border-gold/20 text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm mb-2 block">Pontos *</label>
+                    <Input
+                      type="number"
+                      placeholder="Ex: 100"
+                      value={policyForm.points}
+                      onChange={(e) => setPolicyForm({ ...policyForm, points: e.target.value })}
+                      className="bg-black border-gold/20 text-white"
+                    />
+                  </div>
+                </div>
+                <Button
+                  type="submit"
+                  className="bg-gold text-black hover:bg-gold/90 w-full"
+                  disabled={addPolicyMutation.isPending}
+                >
+                  {addPolicyMutation.isPending ? 'Adicionando...' : 'Adicionar Apólice'}
+                </Button>
+              </form>
+            </Card>
+          </TabsContent>
 
-        {/* Quick Actions */}
-        <Card className="bg-black border-gold/20 p-6">
-          <h2 className="text-xl font-semibold text-gold mb-4">Ações Rápidas</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Button
-              onClick={() => setLocation('/admin/afiliados')}
-              className="bg-gold text-black hover:bg-gold/90 font-semibold"
-            >
-              Gerenciar Afiliados
-            </Button>
-            <Button
-              variant="outline"
-              className="border-gold/30 text-gold hover:bg-gold/10"
-            >
-              Aprovar Apólices
-            </Button>
-            <Button
-              variant="outline"
-              className="border-gold/30 text-gold hover:bg-gold/10"
-            >
-              Gerar Relatório
-            </Button>
-          </div>
-        </Card>
+          {/* Pending Policies Tab */}
+          <TabsContent value="pending" className="space-y-6">
+            <Card className="bg-gold/5 border-gold/20 p-6">
+              <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+                <Clock size={20} className="text-yellow-500" />
+                Apólices Pendentes de Aprovação
+              </h3>
+              {pendingPolicies.length === 0 ? (
+                <p className="text-gray-400">Nenhuma apólice pendente</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-gold/20">
+                        <th className="text-left py-2 px-2 text-gray-400">Número</th>
+                        <th className="text-left py-2 px-2 text-gray-400">Cliente</th>
+                        <th className="text-left py-2 px-2 text-gray-400">Afiliado</th>
+                        <th className="text-left py-2 px-2 text-gray-400">Data</th>
+                        <th className="text-left py-2 px-2 text-gray-400">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingPolicies.map((policy: any) => (
+                        <tr key={policy.id} className="border-b border-gold/10 hover:bg-gold/5">
+                          <td className="py-3 px-2 text-white">{policy.policyNumber}</td>
+                          <td className="py-3 px-2 text-white">{policy.clientName}</td>
+                          <td className="py-3 px-2 text-gray-400">{policy.affiliateName || 'N/A'}</td>
+                          <td className="py-3 px-2 text-gray-400">
+                            {new Date(policy.submittedAt).toLocaleDateString('pt-BR')}
+                          </td>
+                          <td className="py-3 px-2 flex gap-2">
+                            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                              <CheckCircle size={16} />
+                            </Button>
+                            <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white">
+                              <XCircle size={16} />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
     </div>
   );
