@@ -55,3 +55,12 @@
 - [x] Remover logo de imagem
 - [x] Exibir nome "Affinity Financial Consulting" como texto na navegação
 - [x] Exibir nome "Affinity Financial Consulting" como texto no footer
+
+## Área de Afiliados
+- [x] Criar tabelas de banco de dados para afiliados e comissões
+- [x] Implementar página de login/autenticação para afiliados
+- [x] Criar dashboard de afiliados com links de referência
+- [x] Adicionar relatórios de desempenho e conversões
+- [ ] Implementar material de marketing para download
+- [x] Testar fluxo completo de login e acesso
+- [ ] Publicar área de afiliados

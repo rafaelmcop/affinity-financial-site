@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, affiliates, affiliateReferrals, InsertAffiliate, InsertAffiliateReferral } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -87,6 +87,52 @@ export async function getUserByOpenId(openId: string) {
   const result = await db.select().from(users).where(eq(users.openId, openId)).limit(1);
 
   return result.length > 0 ? result[0] : undefined;
+}
+
+// Affiliate queries
+export async function getAffiliateByEmail(email: string) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(affiliates).where(eq(affiliates.email, email)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function getAffiliateById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const result = await db.select().from(affiliates).where(eq(affiliates.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}
+
+export async function createAffiliate(data: InsertAffiliate) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  const result = await db.insert(affiliates).values(data);
+  return result;
+}
+
+export async function getAffiliateReferrals(affiliateId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(affiliateReferrals).where(eq(affiliateReferrals.affiliateId, affiliateId));
+}
+
+export async function createAffiliateReferral(data: InsertAffiliateReferral) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  return await db.insert(affiliateReferrals).values(data);
+}
+
+export async function updateAffiliateReferralStatus(id: number, status: 'pending' | 'converted' | 'closed') {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  return await db.update(affiliateReferrals).set({ status }).where(eq(affiliateReferrals.id, id));
 }
 
 // TODO: add feature queries here as your schema grows.
