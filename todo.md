@@ -71,7 +71,7 @@
 - [x] Adicionar lista de afiliados existentes
 - [x] Implementar opção para ativar/desativar afiliados
 - [x] Implementar opção para deletar afiliados
-- [ ] Adicionar proteção de acesso (apenas admin)
+- [x] Adicionar proteção de acesso (apenas admin)
 
 ## Auto-Registro de Afiliados
 - [x] Criar página de auto-registro para novos afiliados

@@ -21,6 +21,82 @@ export const appRouter = router({
     }),
   }),
 
+  admin: router({
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(6),
+      }))
+      .mutation(async ({ input }) => {
+        const ADMIN_EMAIL = 'us.rafael@icloud.com';
+        const ADMIN_PASSWORD = 'Agnus_69$';
+
+        if (input.email !== ADMIN_EMAIL || input.password !== ADMIN_PASSWORD) {
+          throw new Error('Credenciais inválidas');
+        }
+
+        return {
+          id: 1,
+          email: ADMIN_EMAIL,
+          name: 'Administrador',
+          role: 'admin',
+        };
+      }),
+
+    listAffiliates: publicProcedure
+      .query(async () => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        return await db.select().from(affiliates);
+      }),
+
+    updateAffiliateStatus: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+        isActive: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        await db.update(affiliates).set({ isActive: input.isActive }).where(eq(affiliates.id, input.affiliateId));
+        return { success: true };
+      }),
+
+    deleteAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        await db.delete(affiliates).where(eq(affiliates.id, input.affiliateId));
+        return { success: true };
+      }),
+
+    approveAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateStatus } = await import('./db');
+        await updateAffiliateStatus(input.affiliateId, 'approved');
+        return { success: true };
+      }),
+
+    rejectAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateStatus } = await import('./db');
+        await updateAffiliateStatus(input.affiliateId, 'rejected');
+        return { success: true };
+      }),
+  }),
+
   affiliate: router({
     register: publicProcedure
       .input(z.object({
@@ -126,67 +202,6 @@ export const appRouter = router({
           policies,
           stats,
         };
-      }),
-
-    listAffiliates: publicProcedure
-      .query(async () => {
-        const { getDb } = await import('./db');
-
-        const db = await getDb();
-        if (!db) throw new Error('Database not available');
-
-        return await db.select().from(affiliates);
-      }),
-
-    updateAffiliateStatus: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-        isActive: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { getDb } = await import('./db');
-
-        const db = await getDb();
-        if (!db) throw new Error('Database not available');
-
-        await db.update(affiliates).set({ isActive: input.isActive }).where(eq(affiliates.id, input.affiliateId));
-
-        return { success: true };
-      }),
-
-    deleteAffiliate: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { getDb } = await import('./db');
-
-        const db = await getDb();
-        if (!db) throw new Error('Database not available');
-
-        await db.delete(affiliates).where(eq(affiliates.id, input.affiliateId));
-
-        return { success: true };
-      }),
-
-    approveAffiliate: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { updateAffiliateStatus } = await import('./db');
-        await updateAffiliateStatus(input.affiliateId, 'approved');
-        return { success: true };
-      }),
-
-    rejectAffiliate: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { updateAffiliateStatus } = await import('./db');
-        await updateAffiliateStatus(input.affiliateId, 'rejected');
-        return { success: true };
       }),
   }),
 });

@@ -10,6 +10,7 @@ import AffiliateLogin from "./pages/AffiliateLogin";
 import AffiliateRegister from "./pages/AffiliateRegister";
 import AffiliateDashboard from "./pages/AffiliateDashboard";
 import AdminAffiliates from "./pages/AdminAffiliates";
+import AdminLogin from "./pages/AdminLogin";
 
 function Router() {
   return (
@@ -18,6 +19,7 @@ function Router() {
       <Route path="/afiliados" component={AffiliateLogin} />
       <Route path="/afiliados/registrar" component={AffiliateRegister} />
       <Route path="/afiliados/dashboard" component={AffiliateDashboard} />
+      <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin/afiliados" component={AdminAffiliates} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

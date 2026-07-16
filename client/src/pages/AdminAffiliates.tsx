@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +10,31 @@ import { Trash2, Power, Plus, Check, X } from 'lucide-react';
 export default function AdminAffiliates() {
   const [, setLocation] = useLocation();
   const [showForm, setShowForm] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const adminSession = localStorage.getItem('adminSession');
+    if (!adminSession) {
+      setLocation('/admin/login');
+      return;
+    }
+    setIsAuthenticated(true);
+    setIsLoading(false);
+  }, [setLocation]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center pt-16">
+        <p className="text-gold">Carregando...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [formData, setFormData] = useState({
     email: '',
@@ -20,11 +45,11 @@ export default function AdminAffiliates() {
     commissionRate: 10,
   });
 
-  const listQuery = trpc.affiliate.listAffiliates.useQuery();
-  const updateStatusMutation = trpc.affiliate.updateAffiliateStatus.useMutation();
-  const deleteMutation = trpc.affiliate.deleteAffiliate.useMutation();
-  const approveMutation = trpc.affiliate.approveAffiliate.useMutation();
-  const rejectMutation = trpc.affiliate.rejectAffiliate.useMutation();
+  const listQuery = trpc.admin.listAffiliates.useQuery();
+  const updateStatusMutation = trpc.admin.updateAffiliateStatus.useMutation();
+  const deleteMutation = trpc.admin.deleteAffiliate.useMutation();
+  const approveMutation = trpc.admin.approveAffiliate.useMutation();
+  const rejectMutation = trpc.admin.rejectAffiliate.useMutation();
 
   const handleCreateAffiliate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,7 +100,7 @@ export default function AdminAffiliates() {
     }
   };
 
-  const affiliates = (listQuery.data || []).filter(a => {
+  const affiliates = (listQuery.data || []).filter((a: any) => {
     if (filterStatus === 'all') return true;
     return a.status === filterStatus;
   });
@@ -148,7 +173,7 @@ export default function AdminAffiliates() {
                     </td>
                   </tr>
                 ) : (
-                  affiliates.map((affiliate) => (
+                  affiliates.map((affiliate: any) => (
                     <tr key={affiliate.id} className="border-b border-gold/10 hover:bg-gold/5">
                       <td className="px-4 py-3 text-white">{affiliate.name}</td>
                       <td className="px-4 py-3 text-white text-sm">{affiliate.email}</td>
