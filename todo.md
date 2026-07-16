@@ -116,26 +116,26 @@
 ## Sistema de Apólices com Sincronização Bidirecional
 
 ### Admin - Adicionar Apólices Manualmente
-- [ ] Criar formulário no painel admin para adicionar apólices (número, cliente, data, tipo, pontos)
-- [ ] Validar número de apólice único (não permitir duplicatas)
-- [ ] Salvar apólice no banco com status "aprovada"
-- [ ] Atualizar tabela de apólices em tempo real
+- [x] Criar formulário no painel admin para adicionar apólices (número, cliente, data, tipo, pontos)
+- [x] Validar número de apólice único (não permitir duplicatas)
+- [x] Salvar apólice no banco com status "aprovada"
+- [x] Atualizar tabela de apólices em tempo real
 
 ### Afiliado - Submeter Apólices
-- [ ] Criar formulário melhorado com campos: número, cliente, data de submissão
-- [ ] Validar número de apólice único (não permitir duplicatas)
-- [ ] Salvar apólice com status "pendente"
-- [ ] Mostrar confirmação de submissão
+- [x] Criar formulário melhorado com campos: número, cliente, data de submissão
+- [x] Validar número de apólice único (não permitir duplicatas)
+- [x] Salvar apólice com status "pendente"
+- [x] Mostrar confirmação de submissão
 
 ### Admin - Aba de Verificação
-- [ ] Criar aba separada para "Apólices Pendentes"
-- [ ] Listar apólices com status "pendente" de todos os afiliados
-- [ ] Botão "Aceitar" - muda status para "aprovada"
-- [ ] Botão "Rejeitar" - muda status para "rejeitada"
-- [ ] Enviar notificação ao afiliado quando aceita/rejeita
+- [x] Criar aba separada para "Apólices Pendentes"
+- [x] Listar apólices com status "pendente" de todos os afiliados
+- [x] Botão "Aceitar" - muda status para "aprovada"
+- [x] Botão "Rejeitar" - muda status para "rejeitada"
+- [x] Enviar notificação ao afiliado quando aceita/rejeita
 
 ### Sincronização Bidirecional
-- [ ] Quando admin aceita apólice, aparece no dashboard do afiliado
-- [ ] Quando afiliado submete, aparece na aba de verificação do admin
-- [ ] Validação de duplicatas em ambos os lados
-- [ ] Atualização em tempo real das tabelas
+- [x] Quando admin aceita apólice, aparece no dashboard do afiliado
+- [x] Quando afiliado submete, aparece na aba de verificação do admin
+- [x] Validação de duplicatas em ambos os lados
+- [x] Atualização em tempo real das tabelas

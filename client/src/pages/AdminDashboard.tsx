@@ -22,6 +22,7 @@ export default function AdminDashboard() {
     clientName: '',
     policyType: '',
     points: '',
+    submissionDate: new Date().toISOString().split('T')[0],
   });
 
   useEffect(() => {
@@ -37,6 +38,8 @@ export default function AdminDashboard() {
   const statsQuery = trpc.admin.getStats.useQuery();
   const policiesQuery = trpc.admin.getPoliciesPending.useQuery();
   const addPolicyMutation = trpc.admin.addPolicy.useMutation();
+  const approvePolicyMutation = trpc.admin.approvePolicyAdmin.useMutation();
+  const rejectPolicyMutation = trpc.admin.rejectPolicyAdmin.useMutation();
 
   if (isLoading) {
     return (
@@ -66,6 +69,28 @@ export default function AdminDashboard() {
     setLocation('/admin/login');
   };
 
+  const handleApprovePolicy = async (policyId: number, points: number) => {
+    try {
+      await approvePolicyMutation.mutateAsync({ policyId, points });
+      toast.success('Apólice aprovada!');
+      policiesQuery.refetch();
+      statsQuery.refetch();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao aprovar apólice');
+    }
+  };
+
+  const handleRejectPolicy = async (policyId: number) => {
+    try {
+      await rejectPolicyMutation.mutateAsync({ policyId });
+      toast.success('Apólice rejeitada!');
+      policiesQuery.refetch();
+      statsQuery.refetch();
+    } catch (error: any) {
+      toast.error(error.message || 'Erro ao rejeitar apólice');
+    }
+  };
+
   const handleAddPolicy = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -83,7 +108,7 @@ export default function AdminDashboard() {
       });
       
       toast.success('Apólice adicionada com sucesso!');
-      setPolicyForm({ policyNumber: '', clientName: '', policyType: '', points: '' });
+      setPolicyForm({ policyNumber: '', clientName: '', policyType: '', points: '', submissionDate: new Date().toISOString().split('T')[0] });
       policiesQuery.refetch();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao adicionar apólice');
@@ -260,6 +285,15 @@ export default function AdminDashboard() {
                       className="bg-black border-gold/20 text-white"
                     />
                   </div>
+                  <div>
+                    <label className="text-gray-400 text-sm mb-2 block">Data de Submissão</label>
+                    <Input
+                      type="date"
+                      value={policyForm.submissionDate}
+                      onChange={(e) => setPolicyForm({ ...policyForm, submissionDate: e.target.value })}
+                      className="bg-black border-gold/20 text-white"
+                    />
+                  </div>
                 </div>
                 <Button
                   type="submit"
@@ -303,10 +337,20 @@ export default function AdminDashboard() {
                             {new Date(policy.submittedAt).toLocaleDateString('pt-BR')}
                           </td>
                           <td className="py-3 px-2 flex gap-2">
-                            <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white">
+                            <Button 
+                              size="sm" 
+                              className="bg-green-600 hover:bg-green-700 text-white"
+                              onClick={() => handleApprovePolicy(policy.id, policy.points || 0)}
+                              disabled={approvePolicyMutation.isPending}
+                            >
                               <CheckCircle size={16} />
                             </Button>
-                            <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white">
+                            <Button 
+                              size="sm" 
+                              className="bg-red-600 hover:bg-red-700 text-white"
+                              onClick={() => handleRejectPolicy(policy.id)}
+                              disabled={rejectPolicyMutation.isPending}
+                            >
                               <XCircle size={16} />
                             </Button>
                           </td>
