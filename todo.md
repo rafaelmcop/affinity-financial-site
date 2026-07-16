@@ -74,17 +74,17 @@
 - [ ] Adicionar proteção de acesso (apenas admin)
 
 ## Auto-Registro de Afiliados
-- [ ] Criar página de auto-registro para novos afiliados
-- [ ] Adicionar link "Criar Conta" na página de login
-- [ ] Implementar validação de email e senha
-- [ ] Alterar status de novo afiliado para "pendente" por padrão
-- [ ] Adicionar filtro no admin para afiliados pendentes
-- [ ] Implementar botão de aceitar/rejeitar no admin
+- [x] Criar página de auto-registro para novos afiliados
+- [x] Adicionar link "Criar Conta" na página de login
+- [x] Implementar validação de email e senha
+- [x] Alterar status de novo afiliado para "pendente" por padrão
+- [x] Adicionar filtro no admin para afiliados pendentes
+- [x] Implementar botão de aceitar/rejeitar no admin
 
 ## Sistema de Apólices
-- [ ] Criar tabela de apólices no banco de dados
-- [ ] Adicionar campos: número, cliente, data, status, pontos
-- [ ] Criar página para afiliado submeter apólices
-- [ ] Implementar tabela de apólices no dashboard do afiliado
-- [ ] Adicionar cálculo de pontos dos últimos 12 meses
-- [ ] Exibir soma de pontos em destaque no dashboard
+- [x] Criar tabela de apólices no banco de dados
+- [x] Adicionar campos: número, cliente, data, status, pontos
+- [x] Criar página para afiliado submeter apólices
+- [x] Implementar tabela de apólices no dashboard do afiliado
+- [x] Adicionar cálculo de pontos dos últimos 12 meses
+- [x] Exibir soma de pontos em destaque no dashboard
