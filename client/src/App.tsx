@@ -7,14 +7,18 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import { LanguageProvider } from "./contexts/LanguageContext";
 import Home from "./pages/Home";
 import AffiliateLogin from "./pages/AffiliateLogin";
+import AffiliateRegister from "./pages/AffiliateRegister";
 import AffiliateDashboard from "./pages/AffiliateDashboard";
+import AdminAffiliates from "./pages/AdminAffiliates";
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/afiliados" component={AffiliateLogin} />
+      <Route path="/afiliados/registrar" component={AffiliateRegister} />
       <Route path="/afiliados/dashboard" component={AffiliateDashboard} />
+      <Route path="/admin/afiliados" component={AdminAffiliates} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

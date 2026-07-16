@@ -135,4 +135,56 @@ export async function updateAffiliateReferralStatus(id: number, status: 'pending
   return await db.update(affiliateReferrals).set({ status }).where(eq(affiliateReferrals.id, id));
 }
 
+// Policy queries
+export async function getPoliciesByAffiliateId(affiliateId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { policies } = await import('../drizzle/schema');
+  return await db.select().from(policies).where(eq(policies.affiliateId, affiliateId));
+}
+
+export async function createPolicy(data: any) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  const { policies } = await import('../drizzle/schema');
+  return await db.insert(policies).values(data);
+}
+
+export async function updatePolicyStatus(id: number, status: 'pending' | 'approved' | 'rejected' | 'active' | 'cancelled', points: number = 0) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  const { policies } = await import('../drizzle/schema');
+  return await db.update(policies).set({ status, points, approvedAt: new Date() }).where(eq(policies.id, id));
+}
+
+export async function getPoliciesLast12Months(affiliateId: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { policies } = await import('../drizzle/schema');
+  const { and } = await import('drizzle-orm');
+  const oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+
+  return await db.select().from(policies)
+    .where(and(eq(policies.affiliateId, affiliateId), eq(policies.status, 'approved')));
+}
+
+export async function updateAffiliateStatus(id: number, status: 'pending' | 'approved' | 'rejected') {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+
+  return await db.update(affiliates).set({ status }).where(eq(affiliates.id, id));
+}
+
+export async function getPendingAffiliates() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(affiliates).where(eq(affiliates.status, 'pending'));
+}
+
 // TODO: add feature queries here as your schema grows.

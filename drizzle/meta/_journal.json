@@ -15,6 +15,13 @@
       "when": 1784163895411,
       "tag": "0001_previous_phantom_reporter",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1784165717472,
+      "tag": "0002_adorable_colonel_america",
+      "breakpoints": true
     }
   ]
 }

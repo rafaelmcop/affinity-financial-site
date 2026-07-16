@@ -61,6 +61,30 @@
 - [x] Implementar página de login/autenticação para afiliados
 - [x] Criar dashboard de afiliados com links de referência
 - [x] Adicionar relatórios de desempenho e conversões
-- [ ] Implementar material de marketing para download
+- [x] Implementar material de marketing para download (links de cópia disponíveis)
 - [x] Testar fluxo completo de login e acesso
-- [ ] Publicar área de afiliados
+- [x] Publicar área de afiliados
+
+## Painel de Administração de Afiliados
+- [x] Criar página de admin para gerenciar afiliados
+- [x] Implementar formulário para criar novo afiliado
+- [x] Adicionar lista de afiliados existentes
+- [x] Implementar opção para ativar/desativar afiliados
+- [x] Implementar opção para deletar afiliados
+- [ ] Adicionar proteção de acesso (apenas admin)
+
+## Auto-Registro de Afiliados
+- [ ] Criar página de auto-registro para novos afiliados
+- [ ] Adicionar link "Criar Conta" na página de login
+- [ ] Implementar validação de email e senha
+- [ ] Alterar status de novo afiliado para "pendente" por padrão
+- [ ] Adicionar filtro no admin para afiliados pendentes
+- [ ] Implementar botão de aceitar/rejeitar no admin
+
+## Sistema de Apólices
+- [ ] Criar tabela de apólices no banco de dados
+- [ ] Adicionar campos: número, cliente, data, status, pontos
+- [ ] Criar página para afiliado submeter apólices
+- [ ] Implementar tabela de apólices no dashboard do afiliado
+- [ ] Adicionar cálculo de pontos dos últimos 12 meses
+- [ ] Exibir soma de pontos em destaque no dashboard

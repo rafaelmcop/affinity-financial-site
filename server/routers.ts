@@ -1,11 +1,15 @@
-import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { systemRouter } from "./_core/systemRouter";
-import { publicProcedure, router } from "./_core/trpc";
-import { z } from "zod";
+import { z } from 'zod';
+import { eq } from 'drizzle-orm';
+import { publicProcedure, router } from './_core/trpc';
+import { affiliates } from '../drizzle/schema';
+import { COOKIE_NAME } from '../shared/const';
+import { getSessionCookieOptions } from './_core/cookies';
 
 export const appRouter = router({
-  system: systemRouter,
+  system: router({
+    ping: publicProcedure.query(() => 'pong' as const),
+  }),
+
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {
@@ -18,6 +22,44 @@ export const appRouter = router({
   }),
 
   affiliate: router({
+    register: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(6),
+        name: z.string().min(1),
+        company: z.string().optional(),
+        phone: z.string().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getAffiliateByEmail, createAffiliate } = await import('./db');
+        const { hashPassword, generateAffiliateCode } = await import('./auth');
+
+        const existing = await getAffiliateByEmail(input.email);
+        if (existing) {
+          throw new Error('Email já cadastrado');
+        }
+
+        const affiliateCode = generateAffiliateCode();
+        const passwordHash = hashPassword(input.password);
+
+        await createAffiliate({
+          email: input.email,
+          passwordHash,
+          name: input.name,
+          company: input.company || null,
+          phone: input.phone || null,
+          commissionRate: '10.00',
+          affiliateCode,
+          isActive: 1,
+          status: 'pending',
+        });
+
+        return {
+          success: true,
+          message: 'Conta criada com sucesso! Aguarde aprovação.',
+        };
+      }),
+
     login: publicProcedure
       .input(z.object({
         email: z.string().email(),
@@ -36,6 +78,10 @@ export const appRouter = router({
           throw new Error('Affiliate account is not active');
         }
 
+        if (affiliate.status !== 'approved') {
+          throw new Error('Sua conta ainda não foi aprovada');
+        }
+
         return {
           id: affiliate.id,
           email: affiliate.email,
@@ -50,7 +96,7 @@ export const appRouter = router({
         affiliateId: z.number(),
       }))
       .query(async ({ input }) => {
-        const { getAffiliateById, getAffiliateReferrals } = await import('./db');
+        const { getAffiliateById, getAffiliateReferrals, getPoliciesByAffiliateId, getPoliciesLast12Months } = await import('./db');
 
         const affiliate = await getAffiliateById(input.affiliateId);
         if (!affiliate) {
@@ -58,6 +104,10 @@ export const appRouter = router({
         }
 
         const referrals = await getAffiliateReferrals(input.affiliateId);
+        const policies = await getPoliciesByAffiliateId(input.affiliateId);
+        const policiesLast12 = await getPoliciesLast12Months(input.affiliateId);
+
+        const totalPoints = policiesLast12.reduce((sum, p) => sum + (p.points || 0), 0);
 
         const stats = {
           totalReferrals: referrals.length,
@@ -66,13 +116,77 @@ export const appRouter = router({
           totalCommission: referrals
             .filter(r => r.status === 'converted')
             .reduce((sum, r) => sum + (parseFloat(r.commissionAmount?.toString() || '0')), 0),
+          totalPolicies: policies.length,
+          totalPoints,
         };
 
         return {
           affiliate,
           referrals,
+          policies,
           stats,
         };
+      }),
+
+    listAffiliates: publicProcedure
+      .query(async () => {
+        const { getDb } = await import('./db');
+
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+
+        return await db.select().from(affiliates);
+      }),
+
+    updateAffiliateStatus: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+        isActive: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+
+        await db.update(affiliates).set({ isActive: input.isActive }).where(eq(affiliates.id, input.affiliateId));
+
+        return { success: true };
+      }),
+
+    deleteAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+
+        await db.delete(affiliates).where(eq(affiliates.id, input.affiliateId));
+
+        return { success: true };
+      }),
+
+    approveAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateStatus } = await import('./db');
+        await updateAffiliateStatus(input.affiliateId, 'approved');
+        return { success: true };
+      }),
+
+    rejectAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateStatus } = await import('./db');
+        await updateAffiliateStatus(input.affiliateId, 'rejected');
+        return { success: true };
       }),
   }),
 });

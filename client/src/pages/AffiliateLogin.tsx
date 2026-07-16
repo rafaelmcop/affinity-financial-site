@@ -80,12 +80,20 @@ export default function AffiliateLogin() {
             </Button>
           </form>
 
-          <p className="text-gray-400 text-sm text-center mt-6">
-            Não é um afiliado?{' '}
-            <a href="#contact" className="text-gold hover:text-gold/80">
-              Entre em contato conosco
-            </a>
-          </p>
+          <div className="space-y-4 mt-6">
+            <p className="text-gray-400 text-sm text-center">
+              Não tem uma conta?
+              <a href="/afiliados/registrar" className="text-gold hover:text-gold/80 ml-1">
+                Criar conta
+              </a>
+            </p>
+            <p className="text-gray-400 text-sm text-center border-t border-gold/20 pt-4">
+              Não é um afiliado?
+              <a href="#contact" className="text-gold hover:text-gold/80 ml-1">
+                Entre em contato conosco
+              </a>
+            </p>
+          </div>
         </div>
       </Card>
     </div>

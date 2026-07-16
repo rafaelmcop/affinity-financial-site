@@ -38,6 +38,7 @@ export const affiliates = mysqlTable("affiliates", {
   commissionRate: decimal("commissionRate", { precision: 5, scale: 2 }).default("10.00").notNull(),
   affiliateCode: varchar("affiliateCode", { length: 50 }).notNull().unique(),
   isActive: int("isActive").default(1).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -64,3 +65,25 @@ export const affiliateReferrals = mysqlTable("affiliateReferrals", {
 
 export type AffiliateReferral = typeof affiliateReferrals.$inferSelect;
 export type InsertAffiliateReferral = typeof affiliateReferrals.$inferInsert;
+
+/**
+ * Policies table to track insurance policies submitted by affiliates
+ */
+export const policies = mysqlTable("policies", {
+  id: int("id").autoincrement().primaryKey(),
+  affiliateId: int("affiliateId").notNull(),
+  policyNumber: varchar("policyNumber", { length: 100 }).notNull().unique(),
+  clientName: text("clientName").notNull(),
+  clientEmail: varchar("clientEmail", { length: 320 }),
+  clientPhone: varchar("clientPhone", { length: 20 }),
+  policyType: varchar("policyType", { length: 100 }).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "active", "cancelled"]).default("pending").notNull(),
+  points: int("points").default(0).notNull(),
+  submittedAt: timestamp("submittedAt").defaultNow().notNull(),
+  approvedAt: timestamp("approvedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Policy = typeof policies.$inferSelect;
+export type InsertPolicy = typeof policies.$inferInsert;
