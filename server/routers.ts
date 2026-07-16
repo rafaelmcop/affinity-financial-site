@@ -21,82 +21,6 @@ export const appRouter = router({
     }),
   }),
 
-  admin: router({
-    login: publicProcedure
-      .input(z.object({
-        email: z.string().email(),
-        password: z.string().min(6),
-      }))
-      .mutation(async ({ input }) => {
-        const ADMIN_EMAIL = 'us.rafael@icloud.com';
-        const ADMIN_PASSWORD = 'Agnus_69$';
-
-        if (input.email !== ADMIN_EMAIL || input.password !== ADMIN_PASSWORD) {
-          throw new Error('Credenciais inválidas');
-        }
-
-        return {
-          id: 1,
-          email: ADMIN_EMAIL,
-          name: 'Administrador',
-          role: 'admin',
-        };
-      }),
-
-    listAffiliates: publicProcedure
-      .query(async () => {
-        const { getDb } = await import('./db');
-        const db = await getDb();
-        if (!db) throw new Error('Database not available');
-        return await db.select().from(affiliates);
-      }),
-
-    updateAffiliateStatus: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-        isActive: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { getDb } = await import('./db');
-        const db = await getDb();
-        if (!db) throw new Error('Database not available');
-        await db.update(affiliates).set({ isActive: input.isActive }).where(eq(affiliates.id, input.affiliateId));
-        return { success: true };
-      }),
-
-    deleteAffiliate: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { getDb } = await import('./db');
-        const db = await getDb();
-        if (!db) throw new Error('Database not available');
-        await db.delete(affiliates).where(eq(affiliates.id, input.affiliateId));
-        return { success: true };
-      }),
-
-    approveAffiliate: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { updateAffiliateStatus } = await import('./db');
-        await updateAffiliateStatus(input.affiliateId, 'approved');
-        return { success: true };
-      }),
-
-    rejectAffiliate: publicProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-      }))
-      .mutation(async ({ input }) => {
-        const { updateAffiliateStatus } = await import('./db');
-        await updateAffiliateStatus(input.affiliateId, 'rejected');
-        return { success: true };
-      }),
-  }),
-
   affiliate: router({
     register: publicProcedure
       .input(z.object({
@@ -202,6 +126,159 @@ export const appRouter = router({
           policies,
           stats,
         };
+      }),
+
+    submitPolicy: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+        policyNumber: z.string().min(1),
+        clientName: z.string().min(1),
+        clientEmail: z.string().email().optional(),
+        clientPhone: z.string().optional(),
+        policyType: z.string(),
+      }))
+      .mutation(async ({ input }) => {
+        const { createPolicy } = await import('./db');
+
+        const policy = await createPolicy({
+          affiliateId: input.affiliateId,
+          policyNumber: input.policyNumber,
+          clientName: input.clientName,
+          clientEmail: input.clientEmail || null,
+          clientPhone: input.clientPhone || null,
+          policyType: input.policyType,
+          status: 'pending',
+          points: 0,
+          submittedAt: new Date(),
+          approvedAt: null,
+        });
+
+        return {
+          success: true,
+          message: 'Apólice submetida com sucesso! Aguarde aprovação.',
+        };
+      }),
+  }),
+
+  admin: router({
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(6),
+      }))
+      .mutation(async ({ input }) => {
+        const ADMIN_EMAIL = 'us.rafael@icloud.com';
+        const ADMIN_PASSWORD = 'Agnus_69$';
+
+        if (input.email !== ADMIN_EMAIL || input.password !== ADMIN_PASSWORD) {
+          throw new Error('Credenciais inválidas');
+        }
+
+        return {
+          id: 1,
+          email: ADMIN_EMAIL,
+          name: 'Administrador',
+          role: 'admin',
+        };
+      }),
+
+    getStats: publicProcedure
+      .query(async () => {
+        const { getAdminStats, getPoliciesByStatus, getCommissionsByAffiliate } = await import('./db');
+
+        const stats = await getAdminStats();
+        const pendingPolicies = await getPoliciesByStatus('pending');
+        const approvedPolicies = await getPoliciesByStatus('approved');
+        const commissions = await getCommissionsByAffiliate();
+
+        const totalCommissions = commissions.reduce((sum, c) => sum + (parseFloat(c.commissionAmount?.toString() || '0')), 0);
+
+        return {
+          ...stats,
+          pendingPolicies: pendingPolicies.length,
+          approvedPolicies: approvedPolicies.length,
+          totalCommissions,
+        };
+      }),
+
+    getPoliciesPending: publicProcedure
+      .query(async () => {
+        const { getPoliciesByStatus } = await import('./db');
+        return await getPoliciesByStatus('pending');
+      }),
+
+    approvePolicyAdmin: publicProcedure
+      .input(z.object({
+        policyId: z.number(),
+        points: z.number().min(0),
+      }))
+      .mutation(async ({ input }) => {
+        const { updatePolicyStatus } = await import('./db');
+        await updatePolicyStatus(input.policyId, 'approved', input.points);
+        return { success: true, message: 'Apólice aprovada!' };
+      }),
+
+    rejectPolicyAdmin: publicProcedure
+      .input(z.object({
+        policyId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updatePolicyStatus } = await import('./db');
+        await updatePolicyStatus(input.policyId, 'rejected', 0);
+        return { success: true, message: 'Apólice rejeitada!' };
+      }),
+
+    listAffiliates: publicProcedure
+      .query(async () => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        return await db.select().from(affiliates);
+      }),
+
+    updateAffiliateStatus: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+        isActive: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        await db.update(affiliates).set({ isActive: input.isActive }).where(eq(affiliates.id, input.affiliateId));
+        return { success: true };
+      }),
+
+    deleteAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        await db.delete(affiliates).where(eq(affiliates.id, input.affiliateId));
+        return { success: true };
+      }),
+
+    approveAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateStatus } = await import('./db');
+        await updateAffiliateStatus(input.affiliateId, 'approved');
+        return { success: true };
+      }),
+
+    rejectAffiliate: publicProcedure
+      .input(z.object({
+        affiliateId: z.number(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateStatus } = await import('./db');
+        await updateAffiliateStatus(input.affiliateId, 'rejected');
+        return { success: true };
       }),
   }),
 });

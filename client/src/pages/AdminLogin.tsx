@@ -22,7 +22,7 @@ export default function AdminLogin() {
       const result = await loginMutation.mutateAsync({ email, password });
       localStorage.setItem('adminSession', JSON.stringify(result));
       toast.success('Login realizado com sucesso!');
-      setLocation('/admin/afiliados');
+      setLocation('/admin/dashboard');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao fazer login');
     } finally {

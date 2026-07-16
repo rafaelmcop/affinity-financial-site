@@ -188,7 +188,7 @@ export default function AffiliateDashboard() {
           <div className="flex justify-between items-center mb-4">
             <h2 className="text-2xl font-bold text-gold">Apólices Submetidas</h2>
             <Button
-              onClick={() => setShowPolicyForm(!showPolicyForm)}
+              onClick={() => setLocation('/afiliados/submeter-apolice')}
               className="bg-gold text-black hover:bg-gold/90"
             >
               <Plus className="w-4 h-4 mr-2" />

@@ -188,3 +188,50 @@ export async function getPendingAffiliates() {
 }
 
 // TODO: add feature queries here as your schema grows.
+
+export async function getAdminStats() {
+  const db = await getDb();
+  if (!db) return { totalAffiliates: 0, totalPolicies: 0, totalCommissions: 0, pendingAffiliates: 0 };
+
+  const { policies } = await import('../drizzle/schema');
+  const { count } = await import('drizzle-orm');
+
+  const affiliatesResult = await db.select({ count: count() }).from(affiliates);
+  const policiesResult = await db.select({ count: count() }).from(policies);
+  const pendingResult = await db.select({ count: count() }).from(affiliates).where(eq(affiliates.status, 'pending'));
+
+  return {
+    totalAffiliates: affiliatesResult[0]?.count || 0,
+    totalPolicies: policiesResult[0]?.count || 0,
+    totalCommissions: 0,
+    pendingAffiliates: pendingResult[0]?.count || 0,
+  };
+}
+
+export async function getPoliciesByStatus(status: string) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { policies } = await import('../drizzle/schema');
+  return await db.select().from(policies).where(eq(policies.status, status as any));
+}
+
+export async function getPoliciesLastNDays(days: number) {
+  const db = await getDb();
+  if (!db) return [];
+
+  const { policies } = await import('../drizzle/schema');
+  const { and, gte } = await import('drizzle-orm');
+  const nDaysAgo = new Date();
+  nDaysAgo.setDate(nDaysAgo.getDate() - days);
+
+  return await db.select().from(policies)
+    .where(and(gte(policies.submittedAt, nDaysAgo), eq(policies.status, 'approved')));
+}
+
+export async function getCommissionsByAffiliate() {
+  const db = await getDb();
+  if (!db) return [];
+
+  return await db.select().from(affiliateReferrals).where(eq(affiliateReferrals.status, 'converted'));
+}
