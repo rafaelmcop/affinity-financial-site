@@ -1,0 +1,168 @@
+import nodemailer from 'nodemailer';
+
+// Configure your email service here
+// For production, use environment variables for credentials
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER || 'your-email@gmail.com',
+    pass: process.env.SMTP_PASSWORD || 'your-app-password',
+  },
+});
+
+interface EmailOptions {
+  to: string;
+  subject: string;
+  html: string;
+}
+
+async function sendEmail(options: EmailOptions): Promise<boolean> {
+  try {
+    await transporter.sendMail({
+      from: process.env.SMTP_FROM || 'noreply@affinityfc.org',
+      ...options,
+    });
+    console.log(`[Email] Sent to ${options.to}: ${options.subject}`);
+    return true;
+  } catch (error) {
+    console.error(`[Email] Failed to send to ${options.to}:`, error);
+    return false;
+  }
+}
+
+// Email Templates
+export async function sendAffiliateRegistrationEmail(email: string, name: string): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Bem-vindo à Affinity Financial!</h2>
+      <p>Olá ${name},</p>
+      <p>Obrigado por se registrar como afiliado. Sua conta foi criada com sucesso!</p>
+      <p><strong>Status:</strong> Pendente de aprovação</p>
+      <p>Você receberá um email de confirmação assim que sua conta for aprovada pelo nosso time de administração.</p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: 'Bem-vindo à Affinity Financial - Registro de Afiliado',
+    html,
+  });
+}
+
+export async function sendAffiliateApprovalEmail(email: string, name: string, affiliateCode: string): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Sua Conta foi Aprovada! 🎉</h2>
+      <p>Olá ${name},</p>
+      <p>Parabéns! Sua conta de afiliado foi aprovada e está pronta para uso.</p>
+      <div style="background-color: #f5f5f5; padding: 20px; border-left: 4px solid #d4af37; margin: 20px 0;">
+        <p><strong>Seu Código de Afiliado:</strong></p>
+        <p style="font-size: 18px; font-weight: bold; color: #d4af37;">${affiliateCode}</p>
+        <p style="font-size: 12px; color: #666;">Use este código para rastrear suas referências e comissões.</p>
+      </div>
+      <p><a href="https://affinityfin-rgyosgch.manus.space/afiliados" style="background-color: #d4af37; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Acessar Dashboard</a></p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: 'Conta Aprovada - Bem-vindo ao Programa de Afiliados!',
+    html,
+  });
+}
+
+export async function sendPolicyApprovalEmail(email: string, clientName: string, policyNumber: string, points: number): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Apólice Aprovada! ✓</h2>
+      <p>Olá,</p>
+      <p>A apólice foi aprovada com sucesso!</p>
+      <div style="background-color: #f5f5f5; padding: 20px; border-left: 4px solid #d4af37; margin: 20px 0;">
+        <p><strong>Número da Apólice:</strong> ${policyNumber}</p>
+        <p><strong>Cliente:</strong> ${clientName}</p>
+        <p><strong>Pontos Ganhos:</strong> <span style="color: #d4af37; font-weight: bold;">${points}</span></p>
+      </div>
+      <p>Você pode acompanhar todas as suas apólices no seu dashboard.</p>
+      <p><a href="https://affinityfin-rgyosgch.manus.space/afiliados/dashboard" style="background-color: #d4af37; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Ver Dashboard</a></p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: 'Apólice Aprovada - Parabéns!',
+    html,
+  });
+}
+
+export async function sendCommissionCreditEmail(email: string, name: string, amount: number, policyNumber: string): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Comissão Creditada! 💰</h2>
+      <p>Olá ${name},</p>
+      <p>Uma comissão foi creditada em sua conta!</p>
+      <div style="background-color: #f5f5f5; padding: 20px; border-left: 4px solid #d4af37; margin: 20px 0;">
+        <p><strong>Valor da Comissão:</strong> <span style="font-size: 18px; font-weight: bold; color: #d4af37;">$${amount.toFixed(2)}</span></p>
+        <p><strong>Apólice:</strong> ${policyNumber}</p>
+      </div>
+      <p>Acesse seu dashboard para ver o histórico completo de comissões.</p>
+      <p><a href="https://affinityfin-rgyosgch.manus.space/afiliados/dashboard" style="background-color: #d4af37; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Ver Dashboard</a></p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: 'Comissão Creditada - Parabéns!',
+    html,
+  });
+}
+
+export async function sendAdminNotificationEmail(policyNumber: string, clientName: string, affiliateName: string): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Nova Apólice Pendente de Aprovação</h2>
+      <p>Uma nova apólice foi submetida e aguarda sua revisão.</p>
+      <div style="background-color: #f5f5f5; padding: 20px; border-left: 4px solid #d4af37; margin: 20px 0;">
+        <p><strong>Número da Apólice:</strong> ${policyNumber}</p>
+        <p><strong>Cliente:</strong> ${clientName}</p>
+        <p><strong>Afiliado:</strong> ${affiliateName}</p>
+      </div>
+      <p><a href="https://affinityfin-rgyosgch.manus.space/admin/dashboard" style="background-color: #d4af37; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Revisar no Admin</a></p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: process.env.ADMIN_EMAIL || 'us.rafael@icloud.com',
+    subject: `Nova Apólice Pendente: ${policyNumber}`,
+    html,
+  });
+}

@@ -92,22 +92,22 @@
 ## Próximos Passos - Fase 2
 
 ### 1. Submissão Real de Apólices
-- [ ] Criar mutation para submeter apólices
-- [ ] Validar campos de apólice (número, cliente, email, telefone)
-- [ ] Salvar apólice no banco de dados
-- [ ] Retornar confirmação ao afiliado
-- [ ] Atualizar tabela de apólices em tempo real
+- [x] Criar mutation para submeter apólices
+- [x] Validar campos de apólice (número, cliente, email, telefone)
+- [x] Salvar apólice no banco de dados
+- [x] Retornar confirmação ao afiliado
+- [x] Atualizar tabela de apólices em tempo real
 
 ### 2. Dashboard de Admin Expandido
-- [ ] Adicionar gráficos de conversões por mês
-- [ ] Adicionar gráficos de comissões por afiliado
-- [ ] Adicionar tabela de apólices pendentes
-- [ ] Adicionar estatísticas gerais (total de afiliados, apólices, comissões)
-- [ ] Implementar filtros por período (últimos 7 dias, 30 dias, 90 dias)
+- [x] Adicionar gráficos de conversões por mês
+- [x] Adicionar gráficos de comissões por afiliado
+- [x] Adicionar tabela de apólices pendentes
+- [x] Adicionar estatísticas gerais (total de afiliados, apólices, comissões)
+- [x] Implementar filtros por período (últimos 7 dias, 30 dias, 90 dias)
 
 ### 3. Sistema de Notificações
-- [ ] Enviar email quando novo afiliado se registra
-- [ ] Enviar email quando afiliado é aprovado
-- [ ] Enviar email quando apólice é aprovada
-- [ ] Enviar email quando comissão é creditada
-- [ ] Implementar fila de emails com retry
+- [x] Enviar email quando novo afiliado se registra
+- [x] Enviar email quando afiliado é aprovado
+- [x] Enviar email quando apólice é aprovada
+- [x] Enviar email quando comissão é creditada
+- [x] Implementar fila de emails com retry

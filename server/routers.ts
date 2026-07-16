@@ -5,6 +5,49 @@ import { affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 
+// Notification routes (internal use)
+const notificationRouter = router({
+  sendAffiliateRegistrationEmail: publicProcedure
+    .input(z.object({ email: z.string().email(), name: z.string() }))
+    .mutation(async ({ input }) => {
+      const { sendAffiliateRegistrationEmail } = await import('./notifications');
+      const success = await sendAffiliateRegistrationEmail(input.email, input.name);
+      return { success };
+    }),
+
+  sendAffiliateApprovalEmail: publicProcedure
+    .input(z.object({ email: z.string().email(), name: z.string(), affiliateCode: z.string() }))
+    .mutation(async ({ input }) => {
+      const { sendAffiliateApprovalEmail } = await import('./notifications');
+      const success = await sendAffiliateApprovalEmail(input.email, input.name, input.affiliateCode);
+      return { success };
+    }),
+
+  sendPolicyApprovalEmail: publicProcedure
+    .input(z.object({ email: z.string().email(), clientName: z.string(), policyNumber: z.string(), points: z.number() }))
+    .mutation(async ({ input }) => {
+      const { sendPolicyApprovalEmail } = await import('./notifications');
+      const success = await sendPolicyApprovalEmail(input.email, input.clientName, input.policyNumber, input.points);
+      return { success };
+    }),
+
+  sendCommissionCreditEmail: publicProcedure
+    .input(z.object({ email: z.string().email(), name: z.string(), amount: z.number(), policyNumber: z.string() }))
+    .mutation(async ({ input }) => {
+      const { sendCommissionCreditEmail } = await import('./notifications');
+      const success = await sendCommissionCreditEmail(input.email, input.name, input.amount, input.policyNumber);
+      return { success };
+    }),
+
+  sendAdminNotificationEmail: publicProcedure
+    .input(z.object({ policyNumber: z.string(), clientName: z.string(), affiliateName: z.string() }))
+    .mutation(async ({ input }) => {
+      const { sendAdminNotificationEmail } = await import('./notifications');
+      const success = await sendAdminNotificationEmail(input.policyNumber, input.clientName, input.affiliateName);
+      return { success };
+    }),
+});
+
 export const appRouter = router({
   system: router({
     ping: publicProcedure.query(() => 'pong' as const),
@@ -281,6 +324,8 @@ export const appRouter = router({
         return { success: true };
       }),
   }),
+
+  notification: notificationRouter,
 });
 
 export type AppRouter = typeof appRouter;
