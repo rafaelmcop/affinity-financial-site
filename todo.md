@@ -152,10 +152,10 @@
 
 
 ## Melhorias de UX - Filtros, Recuperação de Senha e Links
-- [ ] Completar barra de pesquisa e filtros na tabela de apólices
-- [ ] Adicionar link "Esqueceu a senha?" no login de afiliados
-- [ ] Adicionar link "Esqueceu a senha?" no login de admin
-- [ ] Adicionar link "Voltar ao Site" nos formulários de login de afiliados
-- [ ] Adicionar link "Voltar ao Site" nos formulários de login de admin
-- [ ] Criar aba no admin para gerenciar afiliados pendentes (aceitar/recusar)
+- [x] Completar barra de pesquisa e filtros na tabela de apólices
+- [x] Adicionar link "Esqueceu a senha?" no login de afiliados
+- [x] Adicionar link "Esqueceu a senha?" no login de admin
+- [x] Adicionar link "Voltar ao Site" nos formulários de login de afiliados
+- [x] Adicionar link "Voltar ao Site" nos formulários de login de admin
+- [x] Criar aba no admin para gerenciar afiliados pendentes (aceitar/recusar)
 - [ ] Implementar notificação quando afiliado é aceito/recusado

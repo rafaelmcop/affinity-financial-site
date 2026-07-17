@@ -44,9 +44,12 @@ export default function AdminDashboard() {
 
   const statsQuery = trpc.admin.getStats.useQuery();
   const policiesQuery = trpc.admin.getPoliciesPending.useQuery();
+  const affiliatesQuery = trpc.admin.getPendingAffiliates.useQuery();
   const addPolicyMutation = trpc.admin.addPolicy.useMutation();
   const approvePolicyMutation = trpc.admin.approvePolicyAdmin.useMutation();
   const rejectPolicyMutation = trpc.admin.rejectPolicyAdmin.useMutation();
+  const approveAffiliateMutation = trpc.admin.approveAffiliate.useMutation();
+  const rejectAffiliateMutation = trpc.admin.rejectAffiliate.useMutation();
 
   if (isLoading) {
     return (

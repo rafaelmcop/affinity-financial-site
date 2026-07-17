@@ -48,6 +48,7 @@ const notificationRouter = router({
     }),
 });
 
+// Main app router
 export const appRouter = router({
   system: router({
     ping: publicProcedure.query(() => 'pong' as const),
@@ -355,6 +356,14 @@ export const appRouter = router({
 
         return { success: true, message: 'Apólice adicionada com sucesso!' };
       }),
+
+    getPendingAffiliates: publicProcedure
+      .query(async () => {
+        const { getPendingAffiliates } = await import('./db');
+        return await getPendingAffiliates();
+      }),
+
+
   }),
 
   notification: notificationRouter,

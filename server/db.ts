@@ -235,3 +235,16 @@ export async function getCommissionsByAffiliate() {
 
   return await db.select().from(affiliateReferrals).where(eq(affiliateReferrals.status, 'converted'));
 }
+
+
+export async function approveAffiliate(affiliateId: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(affiliates).set({ status: 'approved', isActive: 1 }).where(eq(affiliates.id, affiliateId));
+}
+
+export async function rejectAffiliate(affiliateId: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(affiliates).set({ status: 'rejected', isActive: 0 }).where(eq(affiliates.id, affiliateId));
+}
