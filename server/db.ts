@@ -248,3 +248,13 @@ export async function rejectAffiliate(affiliateId: number) {
   if (!db) throw new Error('Database not available');
   await db.update(affiliates).set({ status: 'rejected', isActive: 0 }).where(eq(affiliates.id, affiliateId));
 }
+
+
+export async function getPolicyById(id: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+
+  const { policies } = await import('../drizzle/schema');
+  const result = await db.select().from(policies).where(eq(policies.id, id)).limit(1);
+  return result.length > 0 ? result[0] : undefined;
+}

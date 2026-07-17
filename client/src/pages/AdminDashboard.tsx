@@ -486,11 +486,83 @@ export default function AdminDashboard() {
                   <p className="text-gold text-2xl font-bold">{stats.pendingAffiliates}</p>
                 </Card>
                 
-                <Button
-                  className="w-full bg-gold text-black hover:bg-gold/90"
-                >
-                  Visualizar Afiliados Pendentes
-                </Button>
+                {affiliatesQuery.isLoading ? (
+                  <p className="text-gray-400">Carregando afiliados...</p>
+                ) : affiliatesQuery.data && affiliatesQuery.data.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gold/20">
+                          <th className="text-left py-2 px-2 text-gray-400">Nome</th>
+                          <th className="text-left py-2 px-2 text-gray-400">Email</th>
+                          <th className="text-left py-2 px-2 text-gray-400">Status</th>
+                          <th className="text-left py-2 px-2 text-gray-400">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {affiliatesQuery.data.map((affiliate: any) => (
+                          <tr key={affiliate.id} className="border-b border-gold/10 hover:bg-gold/5">
+                            <td className="py-3 px-2 text-white">{affiliate.name}</td>
+                            <td className="py-3 px-2 text-white">{affiliate.email}</td>
+                            <td className="py-3 px-2">
+                              <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                                affiliate.status === 'pending' ? 'bg-yellow-500/20 text-yellow-400' :
+                                affiliate.status === 'approved' ? 'bg-green-500/20 text-green-400' :
+                                'bg-red-500/20 text-red-400'
+                              }`}>
+                                {affiliate.status === 'pending' ? 'Pendente' :
+                                 affiliate.status === 'approved' ? 'Aprovado' :
+                                 'Rejeitado'}
+                              </span>
+                            </td>
+                            <td className="py-3 px-2 flex gap-2">
+                              {affiliate.status === 'pending' && (
+                                <>
+                                  <Button 
+                                    size="sm" 
+                                    className="bg-green-600 hover:bg-green-700 text-white"
+                                    onClick={async () => {
+                                      try {
+                                        await approveAffiliateMutation.mutateAsync({ affiliateId: affiliate.id });
+                                        toast.success('Afiliado aprovado!');
+                                        affiliatesQuery.refetch();
+                                        statsQuery.refetch();
+                                      } catch (error: any) {
+                                        toast.error(error.message || 'Erro ao aprovar afiliado');
+                                      }
+                                    }}
+                                    disabled={approveAffiliateMutation.isPending}
+                                  >
+                                    <CheckCircle size={16} />
+                                  </Button>
+                                  <Button 
+                                    size="sm" 
+                                    className="bg-red-600 hover:bg-red-700 text-white"
+                                    onClick={async () => {
+                                      try {
+                                        await rejectAffiliateMutation.mutateAsync({ affiliateId: affiliate.id });
+                                        toast.success('Afiliado rejeitado!');
+                                        affiliatesQuery.refetch();
+                                        statsQuery.refetch();
+                                      } catch (error: any) {
+                                        toast.error(error.message || 'Erro ao rejeitar afiliado');
+                                      }
+                                    }}
+                                    disabled={rejectAffiliateMutation.isPending}
+                                  >
+                                    <XCircle size={16} />
+                                  </Button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="text-gray-400">Nenhum afiliado pendente</p>
+                )}
               </div>
             </Card>
           </TabsContent>

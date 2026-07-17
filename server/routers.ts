@@ -257,8 +257,19 @@ export const appRouter = router({
         points: z.number().min(0),
       }))
       .mutation(async ({ input }) => {
-        const { updatePolicyStatus } = await import('./db');
+        const { updatePolicyStatus, getPolicyById, getAffiliateById } = await import('./db');
+        const policy = await getPolicyById(input.policyId);
+        if (!policy) throw new Error('Apólice não encontrada');
+        
         await updatePolicyStatus(input.policyId, 'approved', input.points);
+        
+        // Send approval email to affiliate
+        const affiliate = await getAffiliateById(policy.affiliateId);
+        if (affiliate) {
+          const { sendPolicyApprovalEmail } = await import('./notifications');
+          await sendPolicyApprovalEmail(affiliate.email, policy.clientName, policy.policyNumber, input.points);
+        }
+        
         return { success: true, message: 'Apólice aprovada!' };
       }),
 
@@ -267,8 +278,19 @@ export const appRouter = router({
         policyId: z.number(),
       }))
       .mutation(async ({ input }) => {
-        const { updatePolicyStatus } = await import('./db');
+        const { updatePolicyStatus, getPolicyById, getAffiliateById } = await import('./db');
+        const policy = await getPolicyById(input.policyId);
+        if (!policy) throw new Error('Apólice não encontrada');
+        
         await updatePolicyStatus(input.policyId, 'rejected', 0);
+        
+        // Send rejection email to affiliate
+        const affiliate = await getAffiliateById(policy.affiliateId);
+        if (affiliate) {
+          const { sendPolicyRejectionEmail } = await import('./notifications');
+          await sendPolicyRejectionEmail(affiliate.email, policy.clientName, policy.policyNumber);
+        }
+        
         return { success: true, message: 'Apólice rejeitada!' };
       }),
 
@@ -310,8 +332,16 @@ export const appRouter = router({
         affiliateId: z.number(),
       }))
       .mutation(async ({ input }) => {
-        const { updateAffiliateStatus } = await import('./db');
+        const { updateAffiliateStatus, getAffiliateById } = await import('./db');
+        const affiliate = await getAffiliateById(input.affiliateId);
+        if (!affiliate) throw new Error('Afiliado não encontrado');
+        
         await updateAffiliateStatus(input.affiliateId, 'approved');
+        
+        // Send approval email
+        const { sendAffiliateApprovalEmail } = await import('./notifications');
+        await sendAffiliateApprovalEmail(affiliate.email, affiliate.name, affiliate.affiliateCode);
+        
         return { success: true };
       }),
 
@@ -320,8 +350,16 @@ export const appRouter = router({
         affiliateId: z.number(),
       }))
       .mutation(async ({ input }) => {
-        const { updateAffiliateStatus } = await import('./db');
+        const { updateAffiliateStatus, getAffiliateById } = await import('./db');
+        const affiliate = await getAffiliateById(input.affiliateId);
+        if (!affiliate) throw new Error('Afiliado não encontrado');
+        
         await updateAffiliateStatus(input.affiliateId, 'rejected');
+        
+        // Send rejection email
+        const { sendAffiliateRejectionEmail } = await import('./notifications');
+        await sendAffiliateRejectionEmail(affiliate.email, affiliate.name);
+        
         return { success: true };
       }),
 

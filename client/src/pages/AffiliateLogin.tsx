@@ -11,6 +11,8 @@ export default function AffiliateLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
 
   const loginMutation = trpc.affiliate.login.useMutation();
 
@@ -69,7 +71,10 @@ export default function AffiliateLogin() {
                 className="bg-black border-gold/30 text-white placeholder-gray-500"
                 required
               />
-              <p className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer">
+              <p 
+                className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
+                onClick={() => setShowForgotPassword(true)}
+              >
                 Esqueceu a senha?
               </p>
             </div>
@@ -99,6 +104,57 @@ export default function AffiliateLogin() {
           </div>
         </div>
       </Card>
+
+      {/* Forgot Password Modal */}
+      {showForgotPassword && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center px-4 z-50">
+          <Card className="bg-black border-gold/20 p-8 max-w-md w-full">
+            <h2 className="text-2xl font-bold text-gold mb-4">Recuperar Senha</h2>
+            <p className="text-gray-400 mb-6 text-sm">
+              Digite seu email para receber instruções de recuperação de senha.
+            </p>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              toast.info('Instruções de recuperação foram enviadas para seu email (funcionalidade em desenvolvimento)');
+              setShowForgotPassword(false);
+              setForgotEmail('');
+            }} className="space-y-4">
+              <div>
+                <label className="block text-gold text-sm font-semibold mb-2">Email</label>
+                <Input
+                  type="email"
+                  placeholder="seu@email.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  className="bg-black border-gold/30 text-white"
+                  required
+                />
+              </div>
+
+              <div className="flex gap-2 pt-4">
+                <Button
+                  type="submit"
+                  className="flex-1 bg-gold text-black hover:bg-gold/90 font-semibold"
+                >
+                  Enviar
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 border-gold/30 text-gold hover:bg-gold/10"
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setForgotEmail('');
+                  }}
+                >
+                  Cancelar
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

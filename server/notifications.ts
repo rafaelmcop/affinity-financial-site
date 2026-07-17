@@ -166,3 +166,62 @@ export async function sendAdminNotificationEmail(policyNumber: string, clientNam
     html,
   });
 }
+
+export async function sendAffiliateRejectionEmail(email: string, name: string): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Atualização sobre sua Solicitação</h2>
+      <p>Olá ${name},</p>
+      <p>Infelizmente, sua solicitação para se tornar afiliado foi rejeitada neste momento.</p>
+      <p>Se você tiver dúvidas ou gostaria de mais informações, entre em contato conosco:</p>
+      <p>
+        <strong>Email:</strong> info@affinityfc.org<br>
+        <strong>Telefone:</strong> (857) 421-8325
+      </p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: 'Atualização sobre sua Solicitação de Afiliado',
+    html,
+  });
+}
+
+export async function sendPolicyRejectionEmail(email: string, clientName: string, policyNumber: string): Promise<boolean> {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Apólice Rejeitada</h2>
+      <p>Olá,</p>
+      <p>A apólice foi rejeitada e não será processada neste momento.</p>
+      <div style="background-color: #f5f5f5; padding: 20px; border-left: 4px solid #d4af37; margin: 20px 0;">
+        <p><strong>Número da Apólice:</strong> ${policyNumber}</p>
+        <p><strong>Cliente:</strong> ${clientName}</p>
+      </div>
+      <p>Entre em contato com nosso suporte para mais informações:</p>
+      <p>
+        <strong>Email:</strong> info@affinityfc.org<br>
+        <strong>Telefone:</strong> (857) 421-8325
+      </p>
+      <p><a href="https://affinityfin-rgyosgch.manus.space/afiliados/dashboard" style="background-color: #d4af37; color: #000; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">Ver Dashboard</a></p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: 'Apólice Rejeitada',
+    html,
+  });
+}
