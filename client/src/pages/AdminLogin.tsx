@@ -58,6 +58,11 @@ export default function AdminLogin() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleLogin(e as any);
+                }
+              }}
               className="bg-black border-gold/30 text-white"
               required
             />

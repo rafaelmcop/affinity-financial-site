@@ -19,6 +19,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/afiliados" component={AffiliateLogin} />
+      <Route path="/afiliados/login" component={AffiliateLogin} />
       <Route path="/afiliados/registrar" component={AffiliateRegister} />
       <Route path="/afiliados/dashboard" component={AffiliateDashboard} />
       <Route path="/afiliados/submeter-apolice" component={SubmitPolicy} />

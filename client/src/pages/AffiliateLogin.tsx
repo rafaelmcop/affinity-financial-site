@@ -67,6 +67,11 @@ export default function AffiliateLogin() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleLogin(e as any);
+                  }
+                }}
                 placeholder="••••••••"
                 className="bg-black border-gold/30 text-white placeholder-gray-500"
                 required
