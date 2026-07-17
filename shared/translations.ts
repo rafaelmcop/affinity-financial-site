@@ -25,7 +25,7 @@ export const translations = {
       subtitle: 'Soluções financeiras completas para proteger seu futuro',
       
       life_insurance: {
-        title: 'Seguro de Vida',
+        title: 'Seguro de Vida com Benefícios em Vida',
         description: 'Proteção completa para sua família com coberturas flexíveis e prêmios competitivos. Garanta a segurança financeira de quem você ama.',
       },
       
@@ -35,8 +35,8 @@ export const translations = {
       },
       
       living_benefits: {
-        title: 'Benefícios em Vida',
-        description: 'Acesse seus benefícios enquanto vive. Proteção contra doenças graves, crônicas ou terminais, sem esperar.',
+        title: 'Plano College',
+        description: 'Prepare-se para a faculdade dos seus filhos com um planejamento personalizado e proteção financeira para sua família.',
       },
     },
 
@@ -144,7 +144,7 @@ export const translations = {
       subtitle: 'Complete financial solutions to protect your future',
       
       life_insurance: {
-        title: 'Life Insurance',
+        title: 'Life Insurance with Living Benefits',
         description: 'Comprehensive protection for your family with flexible coverage and competitive rates. Ensure financial security for your loved ones.',
       },
       
@@ -154,8 +154,8 @@ export const translations = {
       },
       
       living_benefits: {
-        title: 'Living Benefits',
-        description: 'Access your benefits while you live. Protection against serious, chronic, or terminal illnesses without waiting.',
+        title: 'College Plan',
+        description: 'Prepare for your children\'s college education with personalized planning and financial protection for your family.',
       },
     },
 
@@ -263,7 +263,7 @@ export const translations = {
       subtitle: 'Soluciones financieras completas para proteger su futuro',
       
       life_insurance: {
-        title: 'Seguro de Vida',
+        title: 'Seguro de Vida con Beneficios en Vida',
         description: 'Protección completa para su familia con cobertura flexible y tasas competitivas. Asegure la seguridad financiera de sus seres queridos.',
       },
       
@@ -273,8 +273,8 @@ export const translations = {
       },
       
       living_benefits: {
-        title: 'Beneficios en Vida',
-        description: 'Acceda a sus beneficios mientras vive. Protección contra enfermedades graves, crónicas o terminales sin esperar.',
+        title: 'Plan Universitario',
+        description: 'Prepárese para la educación universitaria de sus hijos con planificación personalizada y protección financiera para su familia.',
       },
     },
 
