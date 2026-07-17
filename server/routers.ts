@@ -403,6 +403,46 @@ export const appRouter = router({
         return await getPendingAffiliates();
       }),
 
+    getAllAffiliates: publicProcedure
+      .query(async () => {
+        const { getAllAffiliates } = await import('./db');
+        return await getAllAffiliates();
+      }),
+
+    blockAffiliate: publicProcedure
+      .input(z.object({ affiliateId: z.number() }))
+      .mutation(async ({ input }) => {
+        const { blockAffiliate } = await import('./db');
+        await blockAffiliate(input.affiliateId);
+        return { success: true, message: 'Afiliado bloqueado com sucesso!' };
+      }),
+
+    reactivateAffiliate: publicProcedure
+      .input(z.object({ affiliateId: z.number() }))
+      .mutation(async ({ input }) => {
+        const { reactivateAffiliate } = await import('./db');
+        await reactivateAffiliate(input.affiliateId);
+        return { success: true, message: 'Afiliado reativado com sucesso!' };
+      }),
+
+
+
+    updateAffiliateEmail: publicProcedure
+      .input(z.object({ affiliateId: z.number(), newEmail: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const { updateAffiliateEmail } = await import('./db');
+        await updateAffiliateEmail(input.affiliateId, input.newEmail);
+        return { success: true, message: 'Email atualizado com sucesso!' };
+      }),
+
+    resetAffiliatePasswordByAdmin: publicProcedure
+      .input(z.object({ affiliateId: z.number(), newPassword: z.string().min(6) }))
+      .mutation(async ({ input }) => {
+        const { resetAffiliatePasswordByAdmin } = await import('./db');
+        await resetAffiliatePasswordByAdmin(input.affiliateId, input.newPassword);
+        return { success: true, message: 'Senha redefinida com sucesso!' };
+      }),
+
 
   }),
 

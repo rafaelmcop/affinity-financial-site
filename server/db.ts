@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { InsertUser, users, affiliates, affiliateReferrals, InsertAffiliate, InsertAffiliateReferral, passwordResetTokens, smtpConfig } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import crypto from 'crypto';
+import bcryptjs from 'bcryptjs';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -423,4 +424,74 @@ export async function updateAffiliatePassword(email: string, hashedPassword: str
   await db.update(affiliates)
     .set({ passwordHash: hashedPassword })
     .where(eq(affiliates.email, email));
+}
+
+
+// Affiliate Management Functions
+export async function getAllAffiliates() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(affiliates);
+}
+
+export async function blockAffiliate(affiliateId: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.update(affiliates)
+    .set({ isActive: 0 })
+    .where(eq(affiliates.id, affiliateId));
+}
+
+export async function reactivateAffiliate(affiliateId: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.update(affiliates)
+    .set({ isActive: 1 })
+    .where(eq(affiliates.id, affiliateId));
+}
+
+export async function deleteAffiliate(affiliateId: number) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  // Delete affiliated referrals first (foreign key constraint)
+  await db.delete(affiliateReferrals)
+    .where(eq(affiliateReferrals.affiliateId, affiliateId));
+  
+  // Then delete affiliate
+  await db.delete(affiliates)
+    .where(eq(affiliates.id, affiliateId));
+}
+
+export async function updateAffiliateEmail(affiliateId: number, newEmail: string) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  // Check if email already exists
+  const existingAffiliate = await db.select()
+    .from(affiliates)
+    .where(eq(affiliates.email, newEmail))
+    .limit(1);
+  
+  if (existingAffiliate && existingAffiliate.length > 0) {
+    throw new Error('Este email já está em uso');
+  }
+  
+  await db.update(affiliates)
+    .set({ email: newEmail })
+    .where(eq(affiliates.id, affiliateId));
+}
+
+export async function resetAffiliatePasswordByAdmin(affiliateId: number, newPassword: string) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  const hashedPassword = await bcryptjs.hash(newPassword, 10);
+  
+  await db.update(affiliates)
+    .set({ passwordHash: hashedPassword })
+    .where(eq(affiliates.id, affiliateId));
 }

@@ -188,6 +188,13 @@ export default function AdminDashboard() {
           <h1 className="text-3xl font-bold text-gold">Painel de Administração</h1>
           <div className="flex gap-3">
             <Button
+              onClick={() => setLocation('/admin/affiliates')}
+              variant="outline"
+              className="flex items-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border-purple-600/30 text-purple-400"
+            >
+              👥 Gerenciar Afiliados
+            </Button>
+            <Button
               onClick={() => setLocation('/admin/smtp-config')}
               variant="outline"
               className="flex items-center gap-2 bg-blue-600/20 hover:bg-blue-600/30 border-blue-600/30 text-blue-400"
