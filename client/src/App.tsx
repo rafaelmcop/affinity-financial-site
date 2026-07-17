@@ -15,7 +15,8 @@ import SubmitPolicy from "./pages/SubmitPolicy";
 import AdminDashboard from "./pages/AdminDashboard";
 import SmtpConfig from "./pages/SmtpConfig";
 import ResetPassword from "./pages/ResetPassword";
-import AdminAffiliatesManagement from "./pages/AdminAffiliatesManagement";
+import AdminAffiliatesManagement from './pages/AdminAffiliatesManagement';
+import AdminTestimonials from './pages/AdminTestimonials';
 
 function Router() {
   return (
@@ -31,6 +32,7 @@ function Router() {
       <Route path="/admin/afiliados" component={AdminAffiliates} />
         <Route path="/admin/smtp-config" component={SmtpConfig} />
         <Route path="/admin/affiliates" component={AdminAffiliatesManagement} />
+      <Route path="/admin/testimonials" component={AdminTestimonials} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

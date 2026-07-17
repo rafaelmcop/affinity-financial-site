@@ -124,3 +124,23 @@ export const smtpConfig = mysqlTable("smtpConfig", {
 
 export type SmtpConfig = typeof smtpConfig.$inferSelect;
 export type InsertSmtpConfig = typeof smtpConfig.$inferInsert;
+
+
+/**
+ * Testimonials table for managing customer testimonials
+ */
+export const testimonials = mysqlTable("testimonials", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  role: varchar("role", { length: 255 }).notNull(),
+  quote: text("quote").notNull(),
+  mediaUrl: varchar("mediaUrl", { length: 500 }),
+  mediaType: mysqlEnum("mediaType", ["image", "video"]).default("image"),
+  isActive: int("isActive").default(1).notNull(),
+  language: mysqlEnum("language", ["pt", "en", "es"]).default("pt").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type Testimonial = typeof testimonials.$inferSelect;
+export type InsertTestimonial = typeof testimonials.$inferInsert;

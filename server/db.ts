@@ -1,6 +1,6 @@
 import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, affiliates, affiliateReferrals, InsertAffiliate, InsertAffiliateReferral, passwordResetTokens, smtpConfig } from "../drizzle/schema";
+import { InsertUser, users, affiliates, affiliateReferrals, InsertAffiliate, InsertAffiliateReferral, passwordResetTokens, smtpConfig, testimonials, InsertTestimonial } from "../drizzle/schema";
 import { ENV } from './_core/env';
 import crypto from 'crypto';
 import bcryptjs from 'bcryptjs';
@@ -494,4 +494,53 @@ export async function resetAffiliatePasswordByAdmin(affiliateId: number, newPass
   await db.update(affiliates)
     .set({ passwordHash: hashedPassword })
     .where(eq(affiliates.id, affiliateId));
+}
+
+
+// Testimonials Functions
+export async function getAllTestimonials() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(testimonials);
+}
+
+export async function getActiveTestimonials() {
+  const db = await getDb();
+  if (!db) return [];
+  
+  return await db.select().from(testimonials).where(eq(testimonials.isActive, 1));
+}
+
+export async function createTestimonial(data: InsertTestimonial): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.insert(testimonials).values(data);
+}
+
+export async function updateTestimonial(id: number, data: Partial<InsertTestimonial>): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.update(testimonials)
+    .set(data)
+    .where(eq(testimonials.id, id));
+}
+
+export async function deleteTestimonial(id: number): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.delete(testimonials)
+    .where(eq(testimonials.id, id));
+}
+
+export async function toggleTestimonialActive(id: number, isActive: boolean): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.update(testimonials)
+    .set({ isActive: isActive ? 1 : 0 })
+    .where(eq(testimonials.id, id));
 }

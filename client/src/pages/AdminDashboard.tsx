@@ -204,6 +204,13 @@ export default function AdminDashboard() {
               ⚙️ SMTP
             </Button>
             <Button
+              onClick={() => setLocation('/admin/testimonials')}
+              variant="outline"
+              className="flex items-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border-purple-600/30 text-purple-400"
+            >
+              💬 Depoimentos
+            </Button>
+            <Button
               onClick={handleLogout}
               variant="outline"
               className="flex items-center gap-2"

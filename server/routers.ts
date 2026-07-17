@@ -478,6 +478,75 @@ export const appRouter = router({
   }),
 
   notification: notificationRouter,
+
+  testimonials: router({
+    getAll: publicProcedure
+      .query(async () => {
+        const { getAllTestimonials } = await import('./db');
+        return await getAllTestimonials();
+      }),
+
+    getActive: publicProcedure
+      .query(async () => {
+        const { getActiveTestimonials } = await import('./db');
+        return await getActiveTestimonials();
+      }),
+
+    create: publicProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        role: z.string().min(1),
+        quote: z.string().min(1),
+        mediaUrl: z.string().optional(),
+        mediaType: z.enum(['image', 'video']).optional(),
+        language: z.enum(['pt', 'en', 'es']).default('pt'),
+      }))
+      .mutation(async ({ input }) => {
+        const { createTestimonial } = await import('./db');
+        await createTestimonial({
+          name: input.name,
+          role: input.role,
+          quote: input.quote,
+          mediaUrl: input.mediaUrl,
+          mediaType: (input.mediaType || 'image') as 'image' | 'video',
+          language: input.language,
+        });
+        return { success: true, message: 'Depoimento adicionado com sucesso!' };
+      }),
+
+    update: publicProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().optional(),
+        role: z.string().optional(),
+        quote: z.string().optional(),
+        mediaUrl: z.string().optional(),
+        mediaType: z.enum(['image', 'video']).optional(),
+        language: z.enum(['pt', 'en', 'es']).optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const { updateTestimonial } = await import('./db');
+        const { id, ...data } = input;
+        await updateTestimonial(id, data);
+        return { success: true, message: 'Depoimento atualizado com sucesso!' };
+      }),
+
+    delete: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const { deleteTestimonial } = await import('./db');
+        await deleteTestimonial(input.id);
+        return { success: true, message: 'Depoimento deletado com sucesso!' };
+      }),
+
+    toggleActive: publicProcedure
+      .input(z.object({ id: z.number(), isActive: z.boolean() }))
+      .mutation(async ({ input }) => {
+        const { toggleTestimonialActive } = await import('./db');
+        await toggleTestimonialActive(input.id, input.isActive);
+        return { success: true, message: 'Status do depoimento atualizado!' };
+      }),
+  }),
 });
 
 export type AppRouter = typeof appRouter;
