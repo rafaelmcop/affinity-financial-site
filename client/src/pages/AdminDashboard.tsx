@@ -8,6 +8,7 @@ import { trpc } from '@/lib/trpc';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { LogOut, CheckCircle, Clock, XCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
+import Header from '@/components/Header';
 
 export default function AdminDashboard() {
   // All state declarations first
@@ -181,11 +182,12 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-black text-white pt-20">
+    <div className="min-h-screen bg-black text-white">
+      <Header title="Painel de Administração" userType="admin" showBackButton={false} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
+        {/* Header Actions */}
         <div className="flex justify-between items-center mb-8">
-          <h1 className="text-3xl font-bold text-gold">Painel de Administração</h1>
+          <div></div>
           <div className="flex gap-3">
             <Button
               onClick={() => setLocation('/admin/affiliates')}

@@ -6,6 +6,7 @@ import { Card } from '@/components/ui/card';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 import { Trash2, Power, Plus, Check, X } from 'lucide-react';
+import Header from '@/components/Header';
 
 export default function AdminAffiliates() {
   const [, setLocation] = useLocation();
@@ -111,10 +112,11 @@ export default function AdminAffiliates() {
   });
 
   return (
-    <div className="min-h-screen bg-black pt-20 px-4 pb-10">
-      <div className="max-w-7xl mx-auto">
+    <div className="min-h-screen bg-black">
+      <Header title="Gerenciar Afiliados" userType="admin" />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
-          <h1 className="text-4xl font-bold text-gold">Gerenciar Afiliados</h1>
+          <div></div>
           <Button
             onClick={() => setShowForm(!showForm)}
             className="bg-gold text-black hover:bg-gold/90 font-semibold"

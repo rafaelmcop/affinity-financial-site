@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Edit2, Trash2, Lock, Unlock } from 'lucide-react';
+import Header from '@/components/Header';
 
 export default function AdminAffiliatesManagement() {
   const [, setLocation] = useLocation();
@@ -103,11 +104,9 @@ export default function AdminAffiliatesManagement() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-gold mb-2">Gerenciamento de Afiliados</h2>
-        <p className="text-gray-400">Gerencie todos os afiliados do sistema</p>
-      </div>
+    <div className="min-h-screen bg-black text-white">
+      <Header title="Gerenciamento de Afiliados" userType="admin" />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
       <Card className="bg-black border-gold/20 overflow-hidden">
         <Table>
@@ -296,6 +295,7 @@ export default function AdminAffiliatesManagement() {
           <p className="text-gray-400">Nenhum afiliado encontrado</p>
         </Card>
       )}
+      </div>
     </div>
   );
 }

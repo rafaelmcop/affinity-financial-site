@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 import { Copy, LogOut, Plus } from 'lucide-react';
+import Header from '@/components/Header';
 
 interface AffiliateSession {
   id: number;
@@ -103,22 +104,12 @@ export default function AffiliateDashboard() {
   const policies = dashboardQuery.data?.policies || [];
 
   return (
-    <div className="min-h-screen bg-black pt-24 pb-12 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-start mb-8">
-          <div>
-            <h1 className="text-4xl font-bold text-gold mb-2">Dashboard de Afiliados</h1>
-            <p className="text-gray-400">Bem-vindo, {session.name}!</p>
-          </div>
-          <Button
-            onClick={handleLogout}
-            variant="outline"
-            className="border-gold/30 text-gold hover:bg-gold/10"
-          >
-            <LogOut className="w-4 h-4 mr-2" />
-            Sair
-          </Button>
+    <div className="min-h-screen bg-black">
+      <Header title="Dashboard de Afiliados" userType="affiliate" showBackButton={false} />
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Bem-vindo */}
+        <div className="mb-8">
+          <p className="text-gray-400">Bem-vindo, <span className="text-gold font-semibold">{session.name}</span>!</p>
         </div>
 
         {/* Affiliate Code Section */}
