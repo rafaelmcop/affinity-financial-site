@@ -15,6 +15,7 @@ export default function AdminLogin() {
   const [forgotEmail, setForgotEmail] = useState('');
 
   const loginMutation = trpc.admin.login.useMutation();
+  const resetPasswordMutation = trpc.passwordReset.requestReset.useMutation();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,12 +112,16 @@ export default function AdminLogin() {
                 return;
               }
               try {
-                // TODO: Implementar chamada ao backend para enviar email de recuperação
+                // Chamar endpoint de password reset
+                await resetPasswordMutation.mutateAsync({
+                  email: forgotEmail,
+                  userType: 'admin',
+                });
                 toast.success('Instruções de recuperação foram enviadas para seu email');
                 setShowForgotPassword(false);
                 setForgotEmail('');
               } catch (error) {
-                toast.error('Erro ao enviar email de recuperação');
+                toast.error(error instanceof Error ? error.message : 'Erro ao enviar email de recuperação');
               }
             }} className="space-y-4">
               <div>

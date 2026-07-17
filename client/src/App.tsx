@@ -14,6 +14,7 @@ import AdminLogin from "./pages/AdminLogin";
 import SubmitPolicy from "./pages/SubmitPolicy";
 import AdminDashboard from "./pages/AdminDashboard";
 import SmtpConfig from "./pages/SmtpConfig";
+import ResetPassword from "./pages/ResetPassword";
 
 function Router() {
   return (
@@ -28,6 +29,7 @@ function Router() {
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/afiliados" component={AdminAffiliates} />
       <Route path="/admin/smtp-config" component={SmtpConfig} />
+      <Route path="/reset-password" component={ResetPassword} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

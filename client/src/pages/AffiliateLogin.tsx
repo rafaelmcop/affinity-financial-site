@@ -15,6 +15,7 @@ export default function AffiliateLogin() {
   const [forgotEmail, setForgotEmail] = useState('');
 
   const loginMutation = trpc.affiliate.login.useMutation();
+  const resetPasswordMutation = trpc.passwordReset.requestReset.useMutation();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,12 +127,16 @@ export default function AffiliateLogin() {
                 return;
               }
               try {
-                // TODO: Implementar chamada ao backend para enviar email de recuperação
+                // Chamar endpoint de password reset
+                await resetPasswordMutation.mutateAsync({
+                  email: forgotEmail,
+                  userType: 'affiliate',
+                });
                 toast.success('Instruções de recuperação foram enviadas para seu email');
                 setShowForgotPassword(false);
                 setForgotEmail('');
               } catch (error) {
-                toast.error('Erro ao enviar email de recuperação');
+                toast.error(error instanceof Error ? error.message : 'Erro ao enviar email de recuperação');
               }
             }} className="space-y-4">
               <div>
