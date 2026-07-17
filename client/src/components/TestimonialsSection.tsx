@@ -8,10 +8,13 @@ export function TestimonialsSection() {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingThumbnails, setIsLoadingThumbnails] = useState(false);
+  const [showLoadingOverlay, setShowLoadingOverlay] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(true);
   const [videoThumbnails, setVideoThumbnails] = useState<Record<number, string>>({});
+  const [loadedThumbnails, setLoadedThumbnails] = useState<Set<number>>(new Set());
 
   // Get active testimonials from database
   const testimonialsQuery = trpc.testimonials.getActive.useQuery();
@@ -27,7 +30,7 @@ export function TestimonialsSection() {
   };
 
   // Extract thumbnail from video
-  const extractVideoThumbnail = (videoUrl: string, index: number) => {
+  const extractVideoThumbnail = (videoUrl: string, index: number, onComplete?: () => void) => {
     const video = document.createElement('video');
     video.src = encodeURI(videoUrl);
     video.crossOrigin = 'anonymous';
@@ -45,16 +48,22 @@ export function TestimonialsSection() {
           ...prev,
           [index]: thumbnail,
         }));
+        setLoadedThumbnails((prev) => new Set(Array.from(prev).concat(index)));
       }
+      if (onComplete) onComplete();
     };
 
     video.onerror = () => {
       console.log('Não foi possível extrair thumbnail do vídeo:', videoUrl);
+      if (onComplete) onComplete();
     };
   };
 
   useEffect(() => {
     if (testimonialsQuery.data) {
+      setIsLoading(true);
+      setIsLoadingThumbnails(true);
+      
       // Filter by current language
       const currentLang = localStorage.getItem('language') || 'pt';
       const filtered = testimonialsQuery.data.filter((t: any) => t.language === currentLang);
@@ -67,13 +76,29 @@ export function TestimonialsSection() {
       setTestimonials(shuffled);
       
       // Extract thumbnails for video testimonials
+      const videoCount = shuffled.filter((t: any) => t.mediaType === 'video' && t.mediaUrl).length;
+      let thumbnailsLoaded = 0;
+      
       shuffled.forEach((testimonial, index) => {
         if (testimonial.mediaType === 'video' && testimonial.mediaUrl) {
-          extractVideoThumbnail(testimonial.mediaUrl, index);
+          extractVideoThumbnail(testimonial.mediaUrl, index, () => {
+            thumbnailsLoaded++;
+            if (thumbnailsLoaded === videoCount) {
+              setIsLoadingThumbnails(false);
+            }
+          });
         }
       });
       
-      setIsLoading(false);
+      if (videoCount === 0) {
+        setIsLoadingThumbnails(false);
+      }
+      
+      // Simulate minimum loading time for smooth animation
+      setTimeout(() => {
+        setIsLoading(false);
+        setShowLoadingOverlay(false);
+      }, 500);
     }
   }, [testimonialsQuery.data]);
 
@@ -148,8 +173,11 @@ export function TestimonialsSection() {
             </p>
             <div className="w-20 h-1 bg-gold mx-auto mt-6" />
           </div>
-          <div className="text-center text-gray-400">
-            Carregando depoimentos...
+          <div className="flex justify-center items-center py-12">
+            <div className="animate-pulse flex flex-col items-center gap-4">
+              <div className="w-16 h-16 rounded-full border-4 border-gold/30 border-t-gold animate-spin" />
+              <p className="text-gray-400 text-sm">Carregando depoimentos...</p>
+            </div>
           </div>
         </div>
       </section>
@@ -158,6 +186,7 @@ export function TestimonialsSection() {
 
   const currentTestimonial = testimonials[currentIndex];
   const currentThumbnail = videoThumbnails[currentIndex];
+  const isThumbnailLoading = currentTestimonial?.mediaType === 'video' && !currentThumbnail && !loadedThumbnails.has(currentIndex);
 
   return (
     <section
@@ -201,8 +230,13 @@ export function TestimonialsSection() {
                     <div className="flex flex-col md:flex-row gap-8 items-center">
                       {/* Media (Image or Video) */}
                       <div className="flex-shrink-0 md:w-1/3 relative group">
+                        {/* Loading Skeleton */}
+                        {isThumbnailLoading && (
+                          <div className="absolute inset-0 bg-gradient-to-r from-gray-800 via-gray-700 to-gray-800 rounded-lg border-2 border-gold/30 animate-pulse z-10" />
+                        )}
+                        
                         {testimonial.mediaType === 'video' && testimonial.mediaUrl ? (
-                          <div className="relative">
+                          <div className={`relative transition-opacity duration-500 ${isThumbnailLoading ? 'opacity-50' : 'opacity-100'}`}>
                             <video
                               ref={index === currentIndex ? videoRef : null}
                               controls
