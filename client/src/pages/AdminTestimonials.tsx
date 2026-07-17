@@ -5,20 +5,14 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Eye, EyeOff } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Upload } from 'lucide-react';
 import Header from '@/components/Header';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 
 export default function AdminTestimonials() {
   const [, setLocation] = useLocation();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     role: '',
@@ -34,18 +28,73 @@ export default function AdminTestimonials() {
   const deleteMutation = trpc.testimonials.delete.useMutation();
   const toggleActiveMutation = trpc.testimonials.toggleActive.useMutation();
 
-  const handleAddTestimonial = async (e: React.FormEvent) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const formDataUpload = new FormData();
+      formDataUpload.append('file', file);
+
+      // Upload to server endpoint
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        body: formDataUpload,
+      });
+
+      if (!response.ok) {
+        throw new Error('Erro ao fazer upload do arquivo');
+      }
+
+      const data = await response.json();
+      const mediaUrl = data.url || data.path;
+
+      // Detect media type from file
+      const isVideo = file.type.startsWith('video/');
+      
+      setFormData({
+        ...formData,
+        mediaUrl,
+        mediaType: isVideo ? 'video' : 'image',
+      });
+
+      toast.success('Arquivo enviado com sucesso!');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Erro ao fazer upload');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleAddOrUpdateTestimonial = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await createMutation.mutateAsync({
-        name: formData.name,
-        role: formData.role,
-        quote: formData.quote,
-        mediaUrl: formData.mediaUrl || undefined,
-        mediaType: formData.mediaType,
-        language: formData.language,
-      });
-      toast.success('Depoimento adicionado com sucesso!');
+      if (editingId) {
+        // Update existing
+        await updateMutation.mutateAsync({
+          id: editingId,
+          name: formData.name,
+          role: formData.role,
+          quote: formData.quote,
+          mediaUrl: formData.mediaUrl || undefined,
+          mediaType: formData.mediaType,
+          language: formData.language,
+        });
+        toast.success('Depoimento atualizado com sucesso!');
+      } else {
+        // Create new
+        await createMutation.mutateAsync({
+          name: formData.name,
+          role: formData.role,
+          quote: formData.quote,
+          mediaUrl: formData.mediaUrl || undefined,
+          mediaType: formData.mediaType,
+          language: formData.language,
+        });
+        toast.success('Depoimento adicionado com sucesso!');
+      }
+
       setFormData({
         name: '',
         role: '',
@@ -54,11 +103,25 @@ export default function AdminTestimonials() {
         mediaType: 'image',
         language: 'pt',
       });
+      setEditingId(null);
       setShowForm(false);
       await testimonialsQuery.refetch();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erro ao adicionar depoimento');
+      toast.error(error instanceof Error ? error.message : 'Erro ao salvar depoimento');
     }
+  };
+
+  const handleEditTestimonial = (testimonial: any) => {
+    setFormData({
+      name: testimonial.name,
+      role: testimonial.role,
+      quote: testimonial.quote,
+      mediaUrl: testimonial.mediaUrl || '',
+      mediaType: testimonial.mediaType || 'image',
+      language: testimonial.language || 'pt',
+    });
+    setEditingId(testimonial.id);
+    setShowForm(true);
   };
 
   const handleDeleteTestimonial = async (id: number) => {
@@ -82,6 +145,19 @@ export default function AdminTestimonials() {
     }
   };
 
+  const handleCancelEdit = () => {
+    setFormData({
+      name: '',
+      role: '',
+      quote: '',
+      mediaUrl: '',
+      mediaType: 'image',
+      language: 'pt',
+    });
+    setEditingId(null);
+    setShowForm(false);
+  };
+
   const testimonials = testimonialsQuery.data || [];
 
   return (
@@ -91,7 +167,16 @@ export default function AdminTestimonials() {
         <div className="flex justify-between items-center mb-6">
           <div></div>
           <Button
-            onClick={() => setShowForm(!showForm)}
+            onClick={() => {
+              if (showForm && !editingId) {
+                setShowForm(false);
+              } else {
+                setShowForm(!showForm);
+                if (editingId) {
+                  handleCancelEdit();
+                }
+              }
+            }}
             className="bg-gold text-black hover:bg-gold/90 font-semibold"
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -101,8 +186,10 @@ export default function AdminTestimonials() {
 
         {showForm && (
           <Card className="bg-black border-gold/20 p-6 mb-6">
-            <h3 className="text-xl font-semibold text-gold mb-4">Adicionar Depoimento</h3>
-            <form onSubmit={handleAddTestimonial} className="space-y-4">
+            <h3 className="text-xl font-semibold text-gold mb-4">
+              {editingId ? 'Editar Depoimento' : 'Adicionar Depoimento'}
+            </h3>
+            <form onSubmit={handleAddOrUpdateTestimonial} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Input
                   type="text"
@@ -131,14 +218,59 @@ export default function AdminTestimonials() {
                 required
               />
 
+              {/* File Upload Section */}
+              <div className="border-2 border-dashed border-gold/30 rounded-lg p-6 text-center">
+                <div className="flex flex-col items-center gap-3">
+                  <Upload className="w-8 h-8 text-gold" />
+                  <div>
+                    <p className="text-white font-semibold">Enviar Arquivo de Mídia</p>
+                    <p className="text-gray-400 text-sm">Vídeo ou Imagem</p>
+                  </div>
+                  <label className="cursor-pointer">
+                    <input
+                      type="file"
+                      accept="image/*,video/*"
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                      className="hidden"
+                    />
+                    <Button
+                      type="button"
+                      onClick={(e) => {
+                        e.currentTarget.parentElement?.querySelector('input')?.click();
+                      }}
+                      disabled={isUploading}
+                      className="bg-gold/20 text-gold hover:bg-gold/30 border border-gold/30"
+                    >
+                      {isUploading ? 'Enviando...' : 'Selecionar Arquivo'}
+                    </Button>
+                  </label>
+                </div>
+              </div>
+
+              {/* Media URL Display */}
+              {formData.mediaUrl && (
+                <div className="bg-gold/10 border border-gold/30 rounded p-4">
+                  <p className="text-gold text-sm font-semibold mb-2">Mídia Selecionada:</p>
+                  <p className="text-gray-300 text-sm break-all">{formData.mediaUrl}</p>
+                  {formData.mediaType === 'video' && (
+                    <video
+                      src={formData.mediaUrl}
+                      controls
+                      className="w-full h-40 mt-3 rounded bg-black"
+                    />
+                  )}
+                  {formData.mediaType === 'image' && (
+                    <img
+                      src={formData.mediaUrl}
+                      alt="Preview"
+                      className="w-full h-40 object-cover mt-3 rounded"
+                    />
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Input
-                  type="text"
-                  placeholder="URL da Mídia (ex: /manus-storage/video.mp4)"
-                  value={formData.mediaUrl}
-                  onChange={(e) => setFormData({ ...formData, mediaUrl: e.target.value })}
-                  className="bg-black border-gold/30 text-white"
-                />
                 <select
                   value={formData.mediaType}
                   onChange={(e) => setFormData({ ...formData, mediaType: e.target.value as 'image' | 'video' })}
@@ -160,11 +292,11 @@ export default function AdminTestimonials() {
 
               <div className="flex gap-2">
                 <Button type="submit" className="bg-gold text-black hover:bg-gold/90">
-                  Adicionar
+                  {editingId ? 'Atualizar' : 'Adicionar'}
                 </Button>
                 <Button
                   type="button"
-                  onClick={() => setShowForm(false)}
+                  onClick={handleCancelEdit}
                   variant="outline"
                   className="border-gold/30 text-gold"
                 >
@@ -225,6 +357,13 @@ export default function AdminTestimonials() {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
+                          <button
+                            onClick={() => handleEditTestimonial(testimonial)}
+                            className="text-blue-400 hover:text-blue-300 transition"
+                            title="Editar"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
                           <button
                             onClick={() => handleToggleActive(testimonial.id, testimonial.isActive === 1)}
                             className={`transition ${
