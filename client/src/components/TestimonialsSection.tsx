@@ -121,16 +121,19 @@ export function TestimonialsSection() {
                               controlsList="nodownload"
                               onError={(e) => {
                                 console.error('Erro ao carregar vídeo:', testimonial.mediaUrl, e);
+                                // Tentar com URL codificada
+                                const encodedUrl = encodeURI(testimonial.mediaUrl);
+                                console.log('Tentando URL codificada:', encodedUrl);
                               }}
                             >
-                              <source src={testimonial.mediaUrl} type="video/mp4" />
-                              <source src={testimonial.mediaUrl.replace(/\.mp4$/i, '.webm')} type="video/webm" />
-                              <source src={testimonial.mediaUrl.replace(/\.mp4$/i, '.ogv')} type="video/ogg" />
+                              <source src={encodeURI(testimonial.mediaUrl)} type="video/mp4" />
+                              <source src={encodeURI(testimonial.mediaUrl.replace(/\.mp4$/i, '.webm'))} type="video/webm" />
+                              <source src={encodeURI(testimonial.mediaUrl.replace(/\.mp4$/i, '.ogv'))} type="video/ogg" />
                               Seu navegador não suporta a tag de vídeo. Por favor, atualize seu navegador.
                             </video>
                           ) : testimonial.mediaUrl ? (
                             <img
-                              src={testimonial.mediaUrl}
+                              src={encodeURI(testimonial.mediaUrl)}
                               alt={testimonial.name}
                               className="w-full h-64 object-cover rounded-lg border-2 border-gold/30"
                               onError={(e) => {
