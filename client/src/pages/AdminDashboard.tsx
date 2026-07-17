@@ -10,6 +10,7 @@ import { LogOut, CheckCircle, Clock, XCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AdminDashboard() {
+  // All state declarations first
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -32,6 +33,7 @@ export default function AdminDashboard() {
   const [filterDateStart, setFilterDateStart] = useState('');
   const [filterDateEnd, setFilterDateEnd] = useState('');
 
+  // All hooks MUST be called unconditionally before any returns
   useEffect(() => {
     const adminSession = localStorage.getItem('adminSession');
     if (!adminSession) {
@@ -42,6 +44,7 @@ export default function AdminDashboard() {
     setIsLoading(false);
   }, [setLocation]);
 
+  // All tRPC queries - called unconditionally
   const statsQuery = trpc.admin.getStats.useQuery();
   const policiesQuery = trpc.admin.getPoliciesPending.useQuery();
   const affiliatesQuery = trpc.admin.getPendingAffiliates.useQuery();
@@ -51,28 +54,17 @@ export default function AdminDashboard() {
   const approveAffiliateMutation = trpc.admin.approveAffiliate.useMutation();
   const rejectAffiliateMutation = trpc.admin.rejectAffiliate.useMutation();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center pt-16">
-        <p className="text-gold">Carregando...</p>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return null;
-  }
-
-  const stats = statsQuery.data || {
+  // All useMemo hooks - called unconditionally
+  const stats = useMemo(() => statsQuery.data || {
     totalAffiliates: 0,
     totalPolicies: 0,
     totalCommissions: 0,
     pendingAffiliates: 0,
     pendingPolicies: 0,
     approvedPolicies: 0,
-  };
+  }, [statsQuery.data]);
 
-  const allPolicies = policiesQuery.data || [];
+  const allPolicies = useMemo(() => policiesQuery.data || [], [policiesQuery.data]);
 
   const filteredPolicies = useMemo(() => {
     return allPolicies.filter((policy: any) => {
@@ -90,6 +82,19 @@ export default function AdminDashboard() {
       return true;
     });
   }, [allPolicies, searchPolicyNumber, searchClientName, filterStatus, filterDateStart, filterDateEnd]);
+
+  // Now we can have early returns after all hooks are called
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center pt-16">
+        <p className="text-gold">Carregando...</p>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   const handleClearFilters = () => {
     setSearchPolicyNumber('');
