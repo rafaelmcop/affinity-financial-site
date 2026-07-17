@@ -369,6 +369,7 @@ export const appRouter = router({
         clientName: z.string().min(1),
         policyType: z.string().min(1),
         points: z.number().min(0),
+        affiliateId: z.number().min(1),
       }))
       .mutation(async ({ input }) => {
         const { getDb } = await import('./db');
@@ -382,14 +383,13 @@ export const appRouter = router({
         }
 
         await db.insert(policies).values({
-          affiliateId: 0,
+          affiliateId: input.affiliateId,
           policyNumber: input.policyNumber,
           clientName: input.clientName,
           policyType: input.policyType,
-          status: 'approved',
+          status: 'pending',
           points: input.points,
           submittedAt: new Date(),
-          approvedAt: new Date(),
         });
 
         return { success: true, message: 'Apólice adicionada com sucesso!' };

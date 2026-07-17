@@ -212,8 +212,29 @@ export async function getPoliciesByStatus(status: string) {
   const db = await getDb();
   if (!db) return [];
 
-  const { policies } = await import('../drizzle/schema');
-  return await db.select().from(policies).where(eq(policies.status, status as any));
+  const { policies, affiliates } = await import('../drizzle/schema');
+  const drizzle = await import('drizzle-orm');
+  const { eq } = drizzle;
+  return await db.select({
+    id: policies.id,
+    affiliateId: policies.affiliateId,
+    policyNumber: policies.policyNumber,
+    clientName: policies.clientName,
+    clientEmail: policies.clientEmail,
+    clientPhone: policies.clientPhone,
+    policyType: policies.policyType,
+    status: policies.status,
+    points: policies.points,
+    submittedAt: policies.submittedAt,
+    approvedAt: policies.approvedAt,
+    createdAt: policies.createdAt,
+    updatedAt: policies.updatedAt,
+    affiliateName: affiliates.name,
+    affiliateEmail: affiliates.email,
+  })
+  .from(policies)
+  .innerJoin(affiliates, eq(policies.affiliateId, affiliates.id))
+  .where(eq(policies.status, status as any));
 }
 
 export async function getPoliciesLastNDays(days: number) {

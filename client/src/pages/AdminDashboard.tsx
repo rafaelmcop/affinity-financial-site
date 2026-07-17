@@ -23,6 +23,7 @@ export default function AdminDashboard() {
     clientName: '',
     policyType: '',
     points: '',
+    affiliateId: '',
     submissionDate: new Date().toISOString().split('T')[0],
   });
 
@@ -134,7 +135,7 @@ export default function AdminDashboard() {
   const handleAddPolicy = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!policyForm.policyNumber || !policyForm.clientName || !policyForm.points) {
+    if (!policyForm.policyNumber || !policyForm.clientName || !policyForm.points || !policyForm.affiliateId) {
       toast.error('Preencha todos os campos obrigatórios');
       return;
     }
@@ -145,11 +146,13 @@ export default function AdminDashboard() {
         clientName: policyForm.clientName,
         policyType: policyForm.policyType || 'Seguro de Vida',
         points: parseInt(policyForm.points),
+        affiliateId: parseInt(policyForm.affiliateId),
       });
       
       toast.success('Apólice adicionada com sucesso!');
-      setPolicyForm({ policyNumber: '', clientName: '', policyType: '', points: '', submissionDate: new Date().toISOString().split('T')[0] });
+      setPolicyForm({ policyNumber: '', clientName: '', policyType: '', points: '', affiliateId: '', submissionDate: new Date().toISOString().split('T')[0] });
       policiesQuery.refetch();
+      statsQuery.refetch();
     } catch (error: any) {
       toast.error(error.message || 'Erro ao adicionar apólice');
     }
@@ -325,6 +328,21 @@ export default function AdminDashboard() {
                       onChange={(e) => setPolicyForm({ ...policyForm, points: e.target.value })}
                       className="bg-black border-gold/20 text-white"
                     />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-sm mb-2 block">Afiliado Responsável *</label>
+                    <select
+                      value={policyForm.affiliateId}
+                      onChange={(e) => setPolicyForm({ ...policyForm, affiliateId: e.target.value })}
+                      className="w-full bg-black border border-gold/20 text-white rounded px-3 py-2"
+                    >
+                      <option value="">Selecione um afiliado...</option>
+                      {affiliatesQuery.data?.map((affiliate: any) => (
+                        <option key={affiliate.id} value={affiliate.id}>
+                          {affiliate.name} ({affiliate.email})
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div>
                     <label className="text-gray-400 text-sm mb-2 block">Data de Submissão</label>
