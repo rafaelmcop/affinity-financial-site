@@ -406,6 +406,37 @@ export const appRouter = router({
 
   }),
 
+  passwordReset: router({
+    requestReset: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        userType: z.enum(['admin', 'affiliate']),
+      }))
+      .mutation(async ({ input }) => {
+        const { createPasswordResetToken } = await import('./db');
+        const { sendPasswordResetEmail } = await import('./notifications');
+        
+        // Generate reset token
+        const token = await createPasswordResetToken(input.email, input.userType);
+        
+        // Create reset link
+        const resetLink = `${process.env.VITE_FRONTEND_URL || 'http://localhost:3000'}/reset-password?token=${token}`;
+        
+        // Send email
+        await sendPasswordResetEmail(input.email, 'User', resetLink, input.userType);
+        
+        return { success: true };
+      }),
+
+    validateToken: publicProcedure
+      .input(z.object({ token: z.string() }))
+      .query(async ({ input }) => {
+        const { validatePasswordResetToken } = await import('./db');
+        const result = await validatePasswordResetToken(input.token);
+        return { valid: result !== null, userType: result?.userType };
+      }),
+  }),
+
   notification: notificationRouter,
 });
 

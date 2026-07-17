@@ -88,3 +88,39 @@ export const policies = mysqlTable("policies", {
 
 export type Policy = typeof policies.$inferSelect;
 export type InsertPolicy = typeof policies.$inferInsert;
+
+
+/**
+ * Password reset tokens table for managing password recovery
+ */
+export const passwordResetTokens = mysqlTable("passwordResetTokens", {
+  id: int("id").autoincrement().primaryKey(),
+  token: varchar("token", { length: 255 }).notNull().unique(),
+  email: varchar("email", { length: 320 }).notNull(),
+  userType: mysqlEnum("userType", ["admin", "affiliate"]).notNull(),
+  expiresAt: timestamp("expiresAt").notNull(),
+  used: int("used").default(0).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = typeof passwordResetTokens.$inferInsert;
+
+/**
+ * SMTP Configuration table for email settings
+ */
+export const smtpConfig = mysqlTable("smtpConfig", {
+  id: int("id").autoincrement().primaryKey(),
+  host: varchar("host", { length: 255 }).notNull(),
+  port: int("port").notNull(),
+  secure: int("secure").default(0).notNull(),
+  user: varchar("user", { length: 255 }).notNull(),
+  password: varchar("password", { length: 255 }).notNull(),
+  fromEmail: varchar("fromEmail", { length: 320 }).notNull(),
+  fromName: varchar("fromName", { length: 255 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type SmtpConfig = typeof smtpConfig.$inferSelect;
+export type InsertSmtpConfig = typeof smtpConfig.$inferInsert;

@@ -1,7 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, affiliates, affiliateReferrals, InsertAffiliate, InsertAffiliateReferral } from "../drizzle/schema";
+import { InsertUser, users, affiliates, affiliateReferrals, InsertAffiliate, InsertAffiliateReferral, passwordResetTokens, smtpConfig } from "../drizzle/schema";
 import { ENV } from './_core/env';
+import crypto from 'crypto';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -284,4 +285,142 @@ export async function updateAffiliateAgentNumber(affiliateId: number, agentNumbe
   const db = await getDb();
   if (!db) throw new Error('Database not available');
   await db.update(affiliates).set({ agentNumber }).where(eq(affiliates.id, affiliateId));
+}
+
+
+// Password Reset Token Functions
+export async function createPasswordResetToken(email: string, userType: 'admin' | 'affiliate'): Promise<string> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  // Generate secure token
+  const token = crypto.randomBytes(32).toString('hex');
+  
+  // Set expiration to 1 hour from now
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+  
+  // Delete any existing unused tokens for this email
+  await db.delete(passwordResetTokens)
+    .where(eq(passwordResetTokens.email, email));
+  
+  // Create new token
+  await db.insert(passwordResetTokens).values({
+    token,
+    email,
+    userType,
+    expiresAt,
+    used: 0,
+  });
+  
+  return token;
+}
+
+export async function validatePasswordResetToken(token: string): Promise<{ email: string; userType: 'admin' | 'affiliate' } | null> {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const resetToken = await db.select()
+    .from(passwordResetTokens)
+    .where(eq(passwordResetTokens.token, token))
+    .limit(1);
+  
+  if (!resetToken || resetToken.length === 0) {
+    return null;
+  }
+  
+  const tokenData = resetToken[0];
+  
+  // Check if token is expired
+  if (new Date() > tokenData.expiresAt) {
+    return null;
+  }
+  
+  // Check if token was already used
+  if (tokenData.used === 1) {
+    return null;
+  }
+  
+  return {
+    email: tokenData.email,
+    userType: tokenData.userType,
+  };
+}
+
+export async function markPasswordResetTokenAsUsed(token: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.update(passwordResetTokens)
+    .set({ used: 1 })
+    .where(eq(passwordResetTokens.token, token));
+}
+
+export async function cleanupExpiredPasswordResetTokens(): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  
+  // Delete expired tokens
+  await db.delete(passwordResetTokens)
+    .where(lt(passwordResetTokens.expiresAt, new Date()));
+}
+
+// SMTP Configuration Functions
+export async function getSmtpConfig() {
+  const db = await getDb();
+  if (!db) return null;
+  
+  const config = await db.select()
+    .from(smtpConfig)
+    .limit(1);
+  
+  return config && config.length > 0 ? config[0] : null;
+}
+
+export async function updateSmtpConfig(data: {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password: string;
+  fromEmail: string;
+  fromName?: string;
+}): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  const existingConfig = await getSmtpConfig();
+  
+  if (existingConfig) {
+    await db.update(smtpConfig)
+      .set({
+        host: data.host,
+        port: data.port,
+        secure: data.secure ? 1 : 0,
+        user: data.user,
+        password: data.password,
+        fromEmail: data.fromEmail,
+        fromName: data.fromName,
+      })
+      .where(eq(smtpConfig.id, existingConfig.id));
+  } else {
+    await db.insert(smtpConfig).values({
+      host: data.host,
+      port: data.port,
+      secure: data.secure ? 1 : 0,
+      user: data.user,
+      password: data.password,
+      fromEmail: data.fromEmail,
+      fromName: data.fromName,
+    });
+  }
+}
+
+
+export async function updateAffiliatePassword(email: string, hashedPassword: string): Promise<void> {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  
+  await db.update(affiliates)
+    .set({ passwordHash: hashedPassword })
+    .where(eq(affiliates.email, email));
 }

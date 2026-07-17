@@ -186,14 +186,23 @@ export default function AdminDashboard() {
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-gold">Painel de Administração</h1>
-          <Button
-            onClick={handleLogout}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <LogOut size={18} />
-            Logout
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              onClick={() => setLocation('/admin/smtp-config')}
+              variant="outline"
+              className="flex items-center gap-2 bg-blue-600/20 hover:bg-blue-600/30 border-blue-600/30 text-blue-400"
+            >
+              ⚙️ SMTP
+            </Button>
+            <Button
+              onClick={handleLogout}
+              variant="outline"
+              className="flex items-center gap-2"
+            >
+              <LogOut size={18} />
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Tabs */}
