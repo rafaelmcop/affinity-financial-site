@@ -69,6 +69,9 @@ export default function AffiliateLogin() {
                 className="bg-black border-gold/30 text-white placeholder-gray-500"
                 required
               />
+              <p className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer">
+                Esqueceu a senha?
+              </p>
             </div>
 
             <Button
@@ -89,8 +92,8 @@ export default function AffiliateLogin() {
             </p>
             <p className="text-gray-400 text-sm text-center border-t border-gold/20 pt-4">
               Não é um afiliado?
-              <a href="#contact" className="text-gold hover:text-gold/80 ml-1">
-                Entre em contato conosco
+              <a href="/" className="text-gold hover:text-gold/80 ml-1">
+                Voltar ao site
               </a>
             </p>
           </div>

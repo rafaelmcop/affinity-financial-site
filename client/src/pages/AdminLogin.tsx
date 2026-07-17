@@ -59,6 +59,9 @@ export default function AdminLogin() {
               className="bg-black border-gold/30 text-white"
               required
             />
+            <p className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer">
+              Esqueceu a senha?
+            </p>
           </div>
 
           <Button
@@ -70,9 +73,16 @@ export default function AdminLogin() {
           </Button>
         </form>
 
-        <p className="text-gray-400 text-sm text-center mt-6">
-          Acesso restrito a administradores
-        </p>
+        <div className="space-y-4 mt-6">
+          <p className="text-gray-400 text-sm text-center">
+            Acesso restrito a administradores
+          </p>
+          <p className="text-gray-400 text-sm text-center border-t border-gold/20 pt-4">
+            <a href="/" className="text-gold hover:text-gold/80">
+              Voltar ao site
+            </a>
+          </p>
+        </div>
       </Card>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { trpc } from '@/lib/trpc';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { LogOut, CheckCircle, Clock, XCircle, Plus } from 'lucide-react';
+import { LogOut, CheckCircle, Clock, XCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function AdminDashboard() {
@@ -24,6 +24,13 @@ export default function AdminDashboard() {
     points: '',
     submissionDate: new Date().toISOString().split('T')[0],
   });
+
+  // Filter states
+  const [searchPolicyNumber, setSearchPolicyNumber] = useState('');
+  const [searchClientName, setSearchClientName] = useState('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [filterDateStart, setFilterDateStart] = useState('');
+  const [filterDateEnd, setFilterDateEnd] = useState('');
 
   useEffect(() => {
     const adminSession = localStorage.getItem('adminSession');
@@ -62,7 +69,32 @@ export default function AdminDashboard() {
     approvedPolicies: 0,
   };
 
-  const pendingPolicies = policiesQuery.data || [];
+  const allPolicies = policiesQuery.data || [];
+
+  const filteredPolicies = useMemo(() => {
+    return allPolicies.filter((policy: any) => {
+      if (searchPolicyNumber && !policy.policyNumber.toLowerCase().includes(searchPolicyNumber.toLowerCase())) return false;
+      if (searchClientName && !policy.clientName.toLowerCase().includes(searchClientName.toLowerCase())) return false;
+      if (filterStatus !== 'all' && policy.status !== filterStatus) return false;
+      if (filterDateStart) {
+        const policyDate = new Date(policy.submittedAt).toISOString().split('T')[0];
+        if (policyDate < filterDateStart) return false;
+      }
+      if (filterDateEnd) {
+        const policyDate = new Date(policy.submittedAt).toISOString().split('T')[0];
+        if (policyDate > filterDateEnd) return false;
+      }
+      return true;
+    });
+  }, [allPolicies, searchPolicyNumber, searchClientName, filterStatus, filterDateStart, filterDateEnd]);
+
+  const handleClearFilters = () => {
+    setSearchPolicyNumber('');
+    setSearchClientName('');
+    setFilterStatus('all');
+    setFilterDateStart('');
+    setFilterDateEnd('');
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('adminSession');
@@ -155,10 +187,11 @@ export default function AdminDashboard() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3 bg-gold/10 p-1 rounded-lg">
+          <TabsList className="grid w-full grid-cols-4 bg-gold/10 p-1 rounded-lg">
             <TabsTrigger value="overview" className="data-[state=active]:bg-gold/20">Visão Geral</TabsTrigger>
             <TabsTrigger value="policies" className="data-[state=active]:bg-gold/20">Gerenciar Apólices</TabsTrigger>
             <TabsTrigger value="pending" className="data-[state=active]:bg-gold/20">Apólices Pendentes</TabsTrigger>
+            <TabsTrigger value="affiliates" className="data-[state=active]:bg-gold/20">Afiliados</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
@@ -313,7 +346,79 @@ export default function AdminDashboard() {
                 <Clock size={20} className="text-yellow-500" />
                 Apólices Pendentes de Aprovação
               </h3>
-              {pendingPolicies.length === 0 ? (
+              
+              {/* Filters */}
+              <div className="mb-6 space-y-4 bg-black/50 p-4 rounded-lg border border-gold/10">
+                <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-3">
+                  <div>
+                    <label className="text-gray-400 text-xs mb-1 block">Número da Apólice</label>
+                    <Input
+                      type="text"
+                      placeholder="Pesquisar..."
+                      value={searchPolicyNumber}
+                      onChange={(e) => setSearchPolicyNumber(e.target.value)}
+                      className="bg-black border-gold/20 text-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-xs mb-1 block">Nome do Cliente</label>
+                    <Input
+                      type="text"
+                      placeholder="Pesquisar..."
+                      value={searchClientName}
+                      onChange={(e) => setSearchClientName(e.target.value)}
+                      className="bg-black border-gold/20 text-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-xs mb-1 block">Status</label>
+                    <select
+                      value={filterStatus}
+                      onChange={(e) => setFilterStatus(e.target.value as any)}
+                      className="w-full bg-black border border-gold/20 text-white text-sm rounded px-2 py-1.5"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="pending">Pendente</option>
+                      <option value="approved">Aprovada</option>
+                      <option value="rejected">Rejeitada</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-xs mb-1 block">De</label>
+                    <Input
+                      type="date"
+                      value={filterDateStart}
+                      onChange={(e) => setFilterDateStart(e.target.value)}
+                      className="bg-black border-gold/20 text-white text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-gray-400 text-xs mb-1 block">Até</label>
+                    <Input
+                      type="date"
+                      value={filterDateEnd}
+                      onChange={(e) => setFilterDateEnd(e.target.value)}
+                      className="bg-black border-gold/20 text-white text-sm"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleClearFilters}
+                    variant="outline"
+                    className="text-gold border-gold/30 hover:bg-gold/10"
+                    size="sm"
+                  >
+                    <X size={16} className="mr-1" />
+                    Limpar Filtros
+                  </Button>
+                  <span className="text-gold text-sm flex items-center ml-auto">
+                    {filteredPolicies.length} resultado(s)
+                  </span>
+                </div>
+              </div>
+              
+              {filteredPolicies.length === 0 ? (
                 <p className="text-gray-400">Nenhuma apólice pendente</p>
               ) : (
                 <div className="overflow-x-auto">
@@ -328,7 +433,7 @@ export default function AdminDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {pendingPolicies.map((policy: any) => (
+                      {filteredPolicies.map((policy: any) => (
                         <tr key={policy.id} className="border-b border-gold/10 hover:bg-gold/5">
                           <td className="py-3 px-2 text-white">{policy.policyNumber}</td>
                           <td className="py-3 px-2 text-white">{policy.clientName}</td>
@@ -360,6 +465,30 @@ export default function AdminDashboard() {
                   </table>
                 </div>
               )}
+            </Card>
+          </TabsContent>
+
+          {/* Affiliates Tab */}
+          <TabsContent value="affiliates" className="space-y-6">
+            <Card className="bg-gold/5 border-gold/20 p-6">
+              <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
+                <CheckCircle size={20} className="text-yellow-500" />
+                Gerenciar Afiliados
+              </h3>
+              <p className="text-gray-400 text-sm mb-4">Aqui você pode aceitar ou recusar novos afiliados pendentes de aprovação.</p>
+              
+              <div className="space-y-4">
+                <Card className="bg-black/50 border-gold/10 p-4">
+                  <p className="text-gray-400 text-sm mb-3">Afiliados Pendentes de Aprovação</p>
+                  <p className="text-gold text-2xl font-bold">{stats.pendingAffiliates}</p>
+                </Card>
+                
+                <Button
+                  className="w-full bg-gold text-black hover:bg-gold/90"
+                >
+                  Visualizar Afiliados Pendentes
+                </Button>
+              </div>
             </Card>
           </TabsContent>
         </Tabs>

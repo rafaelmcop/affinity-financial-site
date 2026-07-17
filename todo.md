@@ -139,3 +139,23 @@
 - [x] Quando afiliado submete, aparece na aba de verificação do admin
 - [x] Validação de duplicatas em ambos os lados
 - [x] Atualização em tempo real das tabelas
+
+
+## Filtros e Pesquisa na Tabela de Apólices
+- [ ] Adicionar barra de pesquisa por número de apólice
+- [ ] Adicionar barra de pesquisa por nome do cliente
+- [ ] Adicionar filtro por status (pendente, aprovada, rejeitada)
+- [ ] Adicionar filtro por data de submissão (intervalo)
+- [ ] Implementar lógica de filtro combinado
+- [ ] Exibir contagem de resultados filtrados
+- [ ] Adicionar botão para limpar todos os filtros
+
+
+## Melhorias de UX - Filtros, Recuperação de Senha e Links
+- [ ] Completar barra de pesquisa e filtros na tabela de apólices
+- [ ] Adicionar link "Esqueceu a senha?" no login de afiliados
+- [ ] Adicionar link "Esqueceu a senha?" no login de admin
+- [ ] Adicionar link "Voltar ao Site" nos formulários de login de afiliados
+- [ ] Adicionar link "Voltar ao Site" nos formulários de login de admin
+- [ ] Criar aba no admin para gerenciar afiliados pendentes (aceitar/recusar)
+- [ ] Implementar notificação quando afiliado é aceito/recusado
