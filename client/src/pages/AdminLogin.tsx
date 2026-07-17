@@ -104,11 +104,20 @@ export default function AdminLogin() {
               Digite seu email para receber instruções de recuperação de senha.
             </p>
 
-            <form onSubmit={(e) => {
+            <form onSubmit={async (e) => {
               e.preventDefault();
-              toast.info('Instruções de recuperação foram enviadas para seu email (funcionalidade em desenvolvimento)');
-              setShowForgotPassword(false);
-              setForgotEmail('');
+              if (!forgotEmail) {
+                toast.error('Por favor, digite seu email');
+                return;
+              }
+              try {
+                // TODO: Implementar chamada ao backend para enviar email de recuperação
+                toast.success('Instruções de recuperação foram enviadas para seu email');
+                setShowForgotPassword(false);
+                setForgotEmail('');
+              } catch (error) {
+                toast.error('Erro ao enviar email de recuperação');
+              }
             }} className="space-y-4">
               <div>
                 <label className="block text-gold text-sm font-semibold mb-2">Email</label>

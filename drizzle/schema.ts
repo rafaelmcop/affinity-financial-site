@@ -37,6 +37,7 @@ export const affiliates = mysqlTable("affiliates", {
   phone: varchar("phone", { length: 20 }),
   commissionRate: decimal("commissionRate", { precision: 5, scale: 2 }).default("10.00").notNull(),
   affiliateCode: varchar("affiliateCode", { length: 50 }).notNull().unique(),
+  agentNumber: varchar("agentNumber", { length: 50 }),
   isActive: int("isActive").default(1).notNull(),
   status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

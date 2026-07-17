@@ -545,8 +545,13 @@ export default function AdminDashboard() {
                                     size="sm" 
                                     className="bg-green-600 hover:bg-green-700 text-white"
                                     onClick={async () => {
+                                      const agentNumber = prompt('Digite o número de agente para este afiliado:');
+                                      if (!agentNumber) {
+                                        toast.error('Número de agente é obrigatório');
+                                        return;
+                                      }
                                       try {
-                                        await approveAffiliateMutation.mutateAsync({ affiliateId: affiliate.id });
+                                        await approveAffiliateMutation.mutateAsync({ affiliateId: affiliate.id, agentNumber });
                                         toast.success('Afiliado aprovado!');
                                         affiliatesQuery.refetch();
                                         statsQuery.refetch();

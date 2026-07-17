@@ -279,3 +279,9 @@ export async function getPolicyById(id: number) {
   const result = await db.select().from(policies).where(eq(policies.id, id)).limit(1);
   return result.length > 0 ? result[0] : undefined;
 }
+
+export async function updateAffiliateAgentNumber(affiliateId: number, agentNumber: string) {
+  const db = await getDb();
+  if (!db) throw new Error('Database not available');
+  await db.update(affiliates).set({ agentNumber }).where(eq(affiliates.id, affiliateId));
+}

@@ -81,8 +81,13 @@ export default function AdminAffiliates() {
   };
 
   const handleApprove = async (affiliateId: number) => {
+    const agentNumber = prompt('Digite o número de agente para este afiliado:');
+    if (!agentNumber) {
+      toast.error('Número de agente é obrigatório');
+      return;
+    }
     try {
-      await approveMutation.mutateAsync({ affiliateId });
+      await approveMutation.mutateAsync({ affiliateId, agentNumber });
       toast.success('Afiliado aprovado!');
       await listQuery.refetch();
     } catch (error) {

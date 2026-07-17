@@ -21,7 +21,7 @@ interface EmailOptions {
 async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'noreply@affinityfc.org',
+      from: process.env.SMTP_FROM || 'info@affinityfc.org',
       ...options,
     });
     console.log(`[Email] Sent to ${options.to}: ${options.subject}`);
@@ -222,6 +222,44 @@ export async function sendPolicyRejectionEmail(email: string, clientName: string
   return sendEmail({
     to: email,
     subject: 'Apólice Rejeitada',
+    html,
+  });
+}
+
+
+export async function sendPasswordResetEmail(email: string, name: string, resetLink: string, userType: 'admin' | 'affiliate'): Promise<boolean> {
+  const userTypeLabel = userType === 'admin' ? 'Administrador' : 'Afiliado';
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <h2 style="color: #d4af37;">Recuperação de Senha - ${userTypeLabel}</h2>
+      <p>Olá ${name},</p>
+      <p>Recebemos uma solicitação para redefinir sua senha. Se você não fez essa solicitação, ignore este email.</p>
+      <p>Para redefinir sua senha, clique no link abaixo:</p>
+      <p style="margin: 30px 0;">
+        <a href="${resetLink}" style="background-color: #d4af37; color: #000; padding: 12px 30px; text-decoration: none; border-radius: 5px; display: inline-block; font-weight: bold;">
+          Redefinir Senha
+        </a>
+      </p>
+      <p style="color: #666; font-size: 12px;">
+        Este link expira em 1 hora. Se o link expirou, solicite um novo reset de senha.
+      </p>
+      <p style="color: #666; font-size: 12px;">
+        Se você tiver problemas, entre em contato conosco:<br>
+        <strong>Email:</strong> info@affinityfc.org<br>
+        <strong>Telefone:</strong> (857) 421-8325
+      </p>
+      <hr style="border: none; border-top: 1px solid #d4af37; margin: 20px 0;">
+      <p style="color: #666; font-size: 12px;">
+        Affinity Financial Consulting Inc.<br>
+        247 Washington St, Stoughton, MA<br>
+        (857) 421-8325
+      </p>
+    </div>
+  `;
+
+  return sendEmail({
+    to: email,
+    subject: `Recuperação de Senha - ${userTypeLabel}`,
     html,
   });
 }

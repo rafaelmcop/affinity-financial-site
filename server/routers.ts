@@ -330,17 +330,19 @@ export const appRouter = router({
     approveAffiliate: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
+        agentNumber: z.string().min(1),
       }))
       .mutation(async ({ input }) => {
-        const { updateAffiliateStatus, getAffiliateById } = await import('./db');
+        const { updateAffiliateStatus, getAffiliateById, updateAffiliateAgentNumber } = await import('./db');
         const affiliate = await getAffiliateById(input.affiliateId);
         if (!affiliate) throw new Error('Afiliado não encontrado');
         
         await updateAffiliateStatus(input.affiliateId, 'approved');
+        await updateAffiliateAgentNumber(input.affiliateId, input.agentNumber);
         
         // Send approval email
         const { sendAffiliateApprovalEmail } = await import('./notifications');
-        await sendAffiliateApprovalEmail(affiliate.email, affiliate.name, affiliate.affiliateCode);
+        await sendAffiliateApprovalEmail(affiliate.email, affiliate.name, input.agentNumber);
         
         return { success: true };
       }),
