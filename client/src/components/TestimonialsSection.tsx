@@ -15,6 +15,7 @@ export function TestimonialsSection() {
   const [isVisible, setIsVisible] = useState(true);
   const [videoThumbnails, setVideoThumbnails] = useState<Record<number, string>>({});
   const [loadedThumbnails, setLoadedThumbnails] = useState<Set<number>>(new Set());
+  const [processedIndices, setProcessedIndices] = useState<Set<number>>(new Set());
 
   // Get active testimonials from database
   const testimonialsQuery = trpc.testimonials.getActive.useQuery();
@@ -31,6 +32,12 @@ export function TestimonialsSection() {
 
   // Extract thumbnail from video
   const extractVideoThumbnail = (videoUrl: string, index: number, onComplete?: () => void) => {
+    // Skip if already processed
+    if (processedIndices.has(index)) {
+      if (onComplete) onComplete();
+      return;
+    }
+
     const video = document.createElement('video');
     video.src = encodeURI(videoUrl);
     video.crossOrigin = 'anonymous';
@@ -49,20 +56,45 @@ export function TestimonialsSection() {
           [index]: thumbnail,
         }));
         setLoadedThumbnails((prev) => new Set(Array.from(prev).concat(index)));
+        setProcessedIndices((prev) => new Set(Array.from(prev).concat(index)));
       }
       if (onComplete) onComplete();
     };
 
     video.onerror = () => {
       console.log('Não foi possível extrair thumbnail do vídeo:', videoUrl);
+      setProcessedIndices((prev) => new Set(Array.from(prev).concat(index)));
       if (onComplete) onComplete();
     };
   };
 
+  // Load thumbnail for current and adjacent testimonials (lazy loading)
+  useEffect(() => {
+    if (testimonials.length === 0) return;
+
+    // Determine which indices to load
+    const indicesToLoad = [
+      currentIndex,
+      (currentIndex - 1 + testimonials.length) % testimonials.length,
+      (currentIndex + 1) % testimonials.length,
+    ];
+
+    indicesToLoad.forEach((index) => {
+      const testimonial = testimonials[index];
+      if (
+        testimonial.mediaType === 'video' &&
+        testimonial.mediaUrl &&
+        !processedIndices.has(index) &&
+        !loadedThumbnails.has(index)
+      ) {
+        extractVideoThumbnail(testimonial.mediaUrl, index);
+      }
+    });
+  }, [currentIndex, testimonials, processedIndices, loadedThumbnails]);
+
   useEffect(() => {
     if (testimonialsQuery.data) {
       setIsLoading(true);
-      setIsLoadingThumbnails(true);
       
       // Filter by current language
       const currentLang = localStorage.getItem('language') || 'pt';
@@ -75,30 +107,19 @@ export function TestimonialsSection() {
       const shuffled = shuffleArray(toShow);
       setTestimonials(shuffled);
       
-      // Extract thumbnails for video testimonials
-      const videoCount = shuffled.filter((t: any) => t.mediaType === 'video' && t.mediaUrl).length;
-      let thumbnailsLoaded = 0;
-      
-      shuffled.forEach((testimonial, index) => {
-        if (testimonial.mediaType === 'video' && testimonial.mediaUrl) {
-          extractVideoThumbnail(testimonial.mediaUrl, index, () => {
-            thumbnailsLoaded++;
-            if (thumbnailsLoaded === videoCount) {
-              setIsLoadingThumbnails(false);
-            }
-          });
-        }
-      });
-      
-      if (videoCount === 0) {
-        setIsLoadingThumbnails(false);
+      // Load only the first testimonial thumbnail initially (lazy loading)
+      if (shuffled.length > 0 && shuffled[0].mediaType === 'video' && shuffled[0].mediaUrl) {
+        setIsLoadingThumbnails(true);
+        extractVideoThumbnail(shuffled[0].mediaUrl, 0, () => {
+          setIsLoadingThumbnails(false);
+        });
       }
       
       // Simulate minimum loading time for smooth animation
       setTimeout(() => {
         setIsLoading(false);
         setShowLoadingOverlay(false);
-      }, 500);
+      }, 300);
     }
   }, [testimonialsQuery.data]);
 
@@ -174,9 +195,13 @@ export function TestimonialsSection() {
             <div className="w-20 h-1 bg-gold mx-auto mt-6" />
           </div>
           <div className="flex justify-center items-center py-12">
-            <div className="animate-pulse flex flex-col items-center gap-4">
-              <div className="w-16 h-16 rounded-full border-4 border-gold/30 border-t-gold animate-spin" />
-              <p className="text-gray-400 text-sm">Carregando depoimentos...</p>
+            <div className="flex flex-col items-center gap-4">
+              {/* Animated Spinner */}
+              <div className="relative w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-4 border-gold/20" />
+                <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-gold animate-spin" />
+              </div>
+              <p className="text-gray-400 text-sm animate-pulse">Carregando depoimentos...</p>
             </div>
           </div>
         </div>
