@@ -136,6 +136,7 @@ export const testimonials = mysqlTable("testimonials", {
   quote: text("quote").notNull(),
   mediaUrl: varchar("mediaUrl", { length: 500 }),
   mediaType: mysqlEnum("mediaType", ["image", "video"]).default("image"),
+  thumbnailUrl: text("thumbnailUrl"),
   isActive: int("isActive").default(1).notNull(),
   language: mysqlEnum("language", ["pt", "en", "es"]).default("pt").notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

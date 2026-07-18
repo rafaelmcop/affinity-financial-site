@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Upload } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Upload, Sliders } from 'lucide-react';
 import Header from '@/components/Header';
 
 export default function AdminTestimonials() {
@@ -13,6 +13,13 @@ export default function AdminTestimonials() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [showFrameSelector, setShowFrameSelector] = useState(false);
+  const [frameTime, setFrameTime] = useState(1);
+  const [videoDuration, setVideoDuration] = useState(0);
+  const [selectedThumbnail, setSelectedThumbnail] = useState<string | null>(null);
+  const videoPreviewRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const [formData, setFormData] = useState({
     name: '',
     role: '',
@@ -20,6 +27,7 @@ export default function AdminTestimonials() {
     mediaUrl: '',
     mediaType: 'image' as 'image' | 'video',
     language: 'pt' as 'pt' | 'en' | 'es',
+    thumbnailUrl: '',
   });
 
   const testimonialsQuery = trpc.testimonials.getAll.useQuery();
@@ -57,13 +65,45 @@ export default function AdminTestimonials() {
         ...formData,
         mediaUrl,
         mediaType: isVideo ? 'video' : 'image',
+        thumbnailUrl: '',
       });
+
+      // Reset frame selector
+      setFrameTime(1);
+      setSelectedThumbnail(null);
 
       toast.success('Arquivo enviado com sucesso!');
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao fazer upload');
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleVideoLoadedMetadata = () => {
+    if (videoPreviewRef.current) {
+      setVideoDuration(videoPreviewRef.current.duration);
+      // Auto-extract thumbnail at 1 second
+      videoPreviewRef.current.currentTime = 1;
+    }
+  };
+
+  const handleVideoSeeked = () => {
+    if (videoPreviewRef.current && canvasRef.current) {
+      const ctx = canvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoPreviewRef.current, 0, 0);
+        const thumbnail = canvasRef.current.toDataURL('image/jpeg', 0.85);
+        setSelectedThumbnail(thumbnail);
+      }
+    }
+  };
+
+  const handleFrameTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newTime = parseFloat(e.target.value);
+    setFrameTime(newTime);
+    if (videoPreviewRef.current) {
+      videoPreviewRef.current.currentTime = newTime;
     }
   };
 
@@ -80,6 +120,7 @@ export default function AdminTestimonials() {
           mediaUrl: formData.mediaUrl || undefined,
           mediaType: formData.mediaType,
           language: formData.language,
+          thumbnailUrl: selectedThumbnail || undefined,
         });
         toast.success('Depoimento atualizado com sucesso!');
       } else {
@@ -91,6 +132,7 @@ export default function AdminTestimonials() {
           mediaUrl: formData.mediaUrl || undefined,
           mediaType: formData.mediaType,
           language: formData.language,
+          thumbnailUrl: selectedThumbnail || undefined,
         });
         toast.success('Depoimento adicionado com sucesso!');
       }
@@ -102,9 +144,13 @@ export default function AdminTestimonials() {
         mediaUrl: '',
         mediaType: 'image',
         language: 'pt',
+        thumbnailUrl: '',
       });
       setEditingId(null);
       setShowForm(false);
+      setShowFrameSelector(false);
+      setSelectedThumbnail(null);
+      setFrameTime(1);
       await testimonialsQuery.refetch();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Erro ao salvar depoimento');
@@ -119,7 +165,9 @@ export default function AdminTestimonials() {
       mediaUrl: testimonial.mediaUrl || '',
       mediaType: testimonial.mediaType || 'image',
       language: testimonial.language || 'pt',
+      thumbnailUrl: testimonial.thumbnailUrl || '',
     });
+    setSelectedThumbnail(testimonial.thumbnailUrl || null);
     setEditingId(testimonial.id);
     setShowForm(true);
   };
@@ -153,9 +201,13 @@ export default function AdminTestimonials() {
       mediaUrl: '',
       mediaType: 'image',
       language: 'pt',
+      thumbnailUrl: '',
     });
     setEditingId(null);
     setShowForm(false);
+    setShowFrameSelector(false);
+    setSelectedThumbnail(null);
+    setFrameTime(1);
   };
 
   const testimonials = testimonialsQuery.data || [];
@@ -253,13 +305,63 @@ export default function AdminTestimonials() {
                 <div className="bg-gold/10 border border-gold/30 rounded p-4">
                   <p className="text-gold text-sm font-semibold mb-2">Mídia Selecionada:</p>
                   <p className="text-gray-300 text-sm break-all">{formData.mediaUrl}</p>
+                  
                   {formData.mediaType === 'video' && (
-                    <video
-                      src={formData.mediaUrl}
-                      controls
-                      className="w-full h-40 mt-3 rounded bg-black"
-                    />
+                    <div className="mt-4 space-y-4">
+                      <video
+                        ref={videoPreviewRef}
+                        src={formData.mediaUrl}
+                        onLoadedMetadata={handleVideoLoadedMetadata}
+                        onSeeked={handleVideoSeeked}
+                        className="w-full h-40 rounded bg-black"
+                      />
+                      
+                      {/* Frame Selector */}
+                      <div className="bg-black border border-gold/20 rounded p-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Sliders className="w-4 h-4 text-gold" />
+                          <p className="text-gold font-semibold text-sm">Selecionar Quadro para Capa</p>
+                        </div>
+                        
+                        <div className="space-y-2">
+                          <input
+                            type="range"
+                            min="0"
+                            max={videoDuration || 0}
+                            step="0.1"
+                            value={frameTime}
+                            onChange={handleFrameTimeChange}
+                            className="w-full"
+                          />
+                          <div className="flex justify-between text-xs text-gray-400">
+                            <span>{frameTime.toFixed(1)}s</span>
+                            <span>{videoDuration.toFixed(1)}s</span>
+                          </div>
+                        </div>
+
+                        {/* Thumbnail Preview */}
+                        {selectedThumbnail && (
+                          <div className="mt-3">
+                            <p className="text-gray-300 text-xs mb-2">Capa Selecionada:</p>
+                            <img
+                              src={selectedThumbnail}
+                              alt="Thumbnail"
+                              className="w-full h-32 object-cover rounded border border-gold/20"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Hidden Canvas for Thumbnail Extraction */}
+                      <canvas
+                        ref={canvasRef}
+                        className="hidden"
+                        width={320}
+                        height={180}
+                      />
+                    </div>
                   )}
+                  
                   {formData.mediaType === 'image' && (
                     <img
                       src={formData.mediaUrl}

@@ -10,7 +10,7 @@ export function TestimonialsSection() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingThumbnails, setIsLoadingThumbnails] = useState(false);
   const [showLoadingOverlay, setShowLoadingOverlay] = useState(true);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRefs = useRef<Record<number, HTMLVideoElement | null>>({});
   const containerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(true);
   const [videoThumbnails, setVideoThumbnails] = useState<Record<number, string>>({});
@@ -30,7 +30,7 @@ export function TestimonialsSection() {
     return shuffled;
   };
 
-  // Extract thumbnail from video
+  // Extract thumbnail from video with guaranteed loading
   const extractVideoThumbnail = (videoUrl: string, index: number, onComplete?: () => void) => {
     // Skip if already processed
     if (processedIndices.has(index)) {
@@ -43,7 +43,11 @@ export function TestimonialsSection() {
     video.crossOrigin = 'anonymous';
     video.currentTime = 1; // Get frame at 1 second
 
-    video.onloadedmetadata = () => {
+    let metadataLoaded = false;
+
+    const extractThumbnail = () => {
+      if (!metadataLoaded) return;
+      
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -59,6 +63,17 @@ export function TestimonialsSection() {
         setProcessedIndices((prev) => new Set(Array.from(prev).concat(index)));
       }
       if (onComplete) onComplete();
+    };
+
+    video.onloadedmetadata = () => {
+      metadataLoaded = true;
+      extractThumbnail();
+    };
+
+    video.onseeked = () => {
+      if (metadataLoaded) {
+        extractThumbnail();
+      }
     };
 
     video.onerror = () => {
@@ -128,9 +143,14 @@ export function TestimonialsSection() {
     const observer = new IntersectionObserver(
       ([entry]) => {
         setIsVisible(entry.isIntersecting);
-        if (!entry.isIntersecting && videoRef.current) {
-          videoRef.current.pause();
-          videoRef.current.currentTime = 0;
+        if (!entry.isIntersecting) {
+          // Pause all videos when container is out of view
+          Object.values(videoRefs.current).forEach((video) => {
+            if (video) {
+              video.pause();
+              video.currentTime = 0;
+            }
+          });
         }
       },
       { threshold: 0.5 }
@@ -147,12 +167,14 @@ export function TestimonialsSection() {
     };
   }, []);
 
-  // Pause video when changing testimonial
+  // Pause ALL videos when changing testimonial
   useEffect(() => {
-    if (videoRef.current) {
-      videoRef.current.pause();
-      videoRef.current.currentTime = 0;
-    }
+    Object.values(videoRefs.current).forEach((video) => {
+      if (video) {
+        video.pause();
+        video.currentTime = 0;
+      }
+    });
   }, [currentIndex]);
 
   const nextTestimonial = () => {
@@ -167,16 +189,17 @@ export function TestimonialsSection() {
     }
   };
 
-  const toggleFullscreen = () => {
-    if (videoRef.current) {
-      if (videoRef.current.requestFullscreen) {
-        videoRef.current.requestFullscreen();
-      } else if ((videoRef.current as any).webkitRequestFullscreen) {
-        (videoRef.current as any).webkitRequestFullscreen();
-      } else if ((videoRef.current as any).mozRequestFullScreen) {
-        (videoRef.current as any).mozRequestFullScreen();
-      } else if ((videoRef.current as any).msRequestFullscreen) {
-        (videoRef.current as any).msRequestFullscreen();
+  const toggleFullscreen = (index: number) => {
+    const video = videoRefs.current[index];
+    if (video) {
+      if (video.requestFullscreen) {
+        video.requestFullscreen();
+      } else if ((video as any).webkitRequestFullscreen) {
+        (video as any).webkitRequestFullscreen();
+      } else if ((video as any).mozRequestFullScreen) {
+        (video as any).mozRequestFullScreen();
+      } else if ((video as any).msRequestFullscreen) {
+        (video as any).msRequestFullscreen();
       }
     }
   };
@@ -210,8 +233,12 @@ export function TestimonialsSection() {
   }
 
   const currentTestimonial = testimonials[currentIndex];
-  const currentThumbnail = videoThumbnails[currentIndex];
+  // Use custom thumbnail if available, otherwise use extracted thumbnail
+  const currentThumbnail = currentTestimonial?.thumbnailUrl || videoThumbnails[currentIndex];
   const isThumbnailLoading = currentTestimonial?.mediaType === 'video' && !currentThumbnail && !loadedThumbnails.has(currentIndex);
+  
+  // Skip thumbnail extraction if custom thumbnail already exists
+  const shouldExtractThumbnail = currentTestimonial?.mediaType === 'video' && !currentTestimonial?.thumbnailUrl && !currentThumbnail && !loadedThumbnails.has(currentIndex);
 
   return (
     <section
@@ -263,7 +290,9 @@ export function TestimonialsSection() {
                         {testimonial.mediaType === 'video' && testimonial.mediaUrl ? (
                           <div className={`relative transition-opacity duration-500 ${isThumbnailLoading ? 'opacity-50' : 'opacity-100'}`}>
                             <video
-                              ref={index === currentIndex ? videoRef : null}
+                              ref={(el) => {
+                                if (el) videoRefs.current[index] = el;
+                              }}
                               controls
                               className="w-full h-64 object-cover rounded-lg border-2 border-gold/30 bg-black"
                               poster={currentThumbnail || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23000%22 width=%22100%22 height=%22100%22/%3E%3Cpolygon fill=%22%23d4af37%22 points=%2235,25 35,75 75,50%22/%3E%3C/svg%3E'}
@@ -280,7 +309,7 @@ export function TestimonialsSection() {
                             
                             {/* Fullscreen Button */}
                             <button
-                              onClick={toggleFullscreen}
+                              onClick={() => toggleFullscreen(index)}
                               className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-gold/70 text-gold rounded-lg transition-all duration-300 opacity-0 group-hover:opacity-100"
                               title="Tela inteira"
                             >

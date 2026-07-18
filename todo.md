@@ -170,3 +170,10 @@
 - [x] Implementar modal de recuperação de senha no AdminLogin
 - [x] Implementar modal de recuperação de senha no AffiliateLogin
 - [x] Testar todas as funcionalidades do sistema
+
+
+## Melhorias de Depoimentos em Vídeo
+- [x] Fix video pause logic when navigating between testimonials
+- [x] Ensure thumbnails are generated before displaying videos
+- [x] Add frame selector UI in admin panel for custom thumbnail selection
+- [x] Test video pause functionality across different scenarios

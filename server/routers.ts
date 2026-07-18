@@ -500,6 +500,7 @@ export const appRouter = router({
         mediaUrl: z.string().optional(),
         mediaType: z.enum(['image', 'video']).optional(),
         language: z.enum(['pt', 'en', 'es']).default('pt'),
+        thumbnailUrl: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const { createTestimonial } = await import('./db');
@@ -510,6 +511,7 @@ export const appRouter = router({
           mediaUrl: input.mediaUrl,
           mediaType: (input.mediaType || 'image') as 'image' | 'video',
           language: input.language,
+          thumbnailUrl: input.thumbnailUrl,
         });
         return { success: true, message: 'Depoimento adicionado com sucesso!' };
       }),
@@ -523,6 +525,7 @@ export const appRouter = router({
         mediaUrl: z.string().optional(),
         mediaType: z.enum(['image', 'video']).optional(),
         language: z.enum(['pt', 'en', 'es']).optional(),
+        thumbnailUrl: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
         const { updateTestimonial } = await import('./db');
