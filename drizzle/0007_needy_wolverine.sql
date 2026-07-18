@@ -1,0 +1,20 @@
+CREATE TABLE `unifiedUsers` (
+	`id` int AUTO_INCREMENT NOT NULL,
+	`email` varchar(320) NOT NULL,
+	`passwordHash` varchar(255) NOT NULL,
+	`name` text NOT NULL,
+	`userType` enum('admin','affiliate') NOT NULL,
+	`isAdmin` int NOT NULL DEFAULT 0,
+	`company` text,
+	`phone` varchar(20),
+	`commissionRate` decimal(5,2) DEFAULT '10.00',
+	`affiliateCode` varchar(50),
+	`agentNumber` varchar(50),
+	`isActive` int NOT NULL DEFAULT 1,
+	`status` enum('pending','approved','rejected') NOT NULL DEFAULT 'pending',
+	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	CONSTRAINT `unifiedUsers_id` PRIMARY KEY(`id`),
+	CONSTRAINT `unifiedUsers_email_unique` UNIQUE(`email`),
+	CONSTRAINT `unifiedUsers_affiliateCode_unique` UNIQUE(`affiliateCode`)
+);

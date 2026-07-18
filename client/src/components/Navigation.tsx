@@ -51,9 +51,18 @@ export function Navigation() {
             ))}
           </div>
 
-          {/* Right Side - Language Selector + Mobile Menu */}
+          {/* Right Side - Language Selector + Login + Mobile Menu */}
           <div className="flex items-center gap-4">
             <LanguageSelector />
+            
+            <a href="/painel/login" className="hidden md:block">
+              <Button
+                size="sm"
+                className="bg-gold hover:bg-gold/90 text-black font-bold"
+              >
+                Acessar Painel
+              </Button>
+            </a>
 
             {/* Mobile Menu Button */}
             <button
@@ -77,6 +86,14 @@ export function Navigation() {
                 {item.label}
               </button>
             ))}
+            <a href="/painel/login" className="block w-full px-4 py-2">
+              <Button
+                size="sm"
+                className="w-full bg-gold hover:bg-gold/90 text-black font-bold"
+              >
+                Acessar Painel
+              </Button>
+            </a>
           </div>
         )}
       </div>

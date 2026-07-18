@@ -26,6 +26,30 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
 /**
+ * Unified authentication table for admin and affiliate users
+ */
+export const unifiedUsers = mysqlTable("unifiedUsers", {
+  id: int("id").autoincrement().primaryKey(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  name: text("name").notNull(),
+  userType: mysqlEnum("userType", ["admin", "affiliate"]).notNull(),
+  isAdmin: int("isAdmin").default(0).notNull(),
+  company: text("company"),
+  phone: varchar("phone", { length: 20 }),
+  commissionRate: decimal("commissionRate", { precision: 5, scale: 2 }).default("10.00"),
+  affiliateCode: varchar("affiliateCode", { length: 50 }).unique(),
+  agentNumber: varchar("agentNumber", { length: 50 }),
+  isActive: int("isActive").default(1).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type UnifiedUser = typeof unifiedUsers.$inferSelect;
+export type InsertUnifiedUser = typeof unifiedUsers.$inferInsert;
+
+/**
  * Affiliates table for managing affiliate program
  */
 export const affiliates = mysqlTable("affiliates", {

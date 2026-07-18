@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { publicProcedure, router } from './_core/trpc';
-import { affiliates } from '../drizzle/schema';
+import { affiliates, unifiedUsers } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 
@@ -63,6 +63,56 @@ export const appRouter = router({
         success: true,
       } as const;
     }),
+  }),
+
+  unifiedAuth: router({
+    login: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(6),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db');
+        const { verifyPassword } = await import('./auth');
+
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+
+        const user = await db.select().from(unifiedUsers).where(eq(unifiedUsers.email, input.email)).limit(1);
+        if (user.length === 0) {
+          throw new Error('Email ou senha inválidos');
+        }
+
+        const unifiedUser = user[0];
+        if (!verifyPassword(input.password, unifiedUser.passwordHash)) {
+          throw new Error('Email ou senha inválidos');
+        }
+
+        if (!unifiedUser.isActive) {
+          throw new Error('Sua conta foi desativada');
+        }
+
+        if (unifiedUser.userType === 'affiliate' && unifiedUser.status !== 'approved') {
+          throw new Error('Sua conta ainda não foi aprovada');
+        }
+
+        const cookieOptions = getSessionCookieOptions(ctx.req);
+        ctx.res.cookie(COOKIE_NAME, JSON.stringify({
+          id: unifiedUser.id,
+          email: unifiedUser.email,
+          name: unifiedUser.name,
+          userType: unifiedUser.userType,
+          isAdmin: unifiedUser.isAdmin,
+        }), cookieOptions);
+
+        return {
+          id: unifiedUser.id,
+          email: unifiedUser.email,
+          name: unifiedUser.name,
+          userType: unifiedUser.userType,
+          isAdmin: unifiedUser.isAdmin,
+        };
+      }),
   }),
 
   affiliate: router({
@@ -223,6 +273,48 @@ export const appRouter = router({
           email: ADMIN_EMAIL,
           name: 'Administrador',
           role: 'admin',
+        };
+            }),
+
+    createUser: publicProcedure
+      .input(z.object({
+        email: z.string().email(),
+        password: z.string().min(6),
+        name: z.string().min(1),
+        isAdmin: z.number().min(0).max(1),
+      }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const { hashPassword, generateAffiliateCode } = await import('./auth');
+
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+
+        const existing = await db.select().from(unifiedUsers).where(eq(unifiedUsers.email, input.email)).limit(1);
+        if (existing.length > 0) {
+          throw new Error('Email já cadastrado');
+        }
+
+        const passwordHash = hashPassword(input.password);
+        const affiliateCode = input.isAdmin === 0 ? generateAffiliateCode() : null;
+
+        await db.insert(unifiedUsers).values({
+          email: input.email,
+          passwordHash,
+          name: input.name,
+          userType: input.isAdmin === 1 ? 'admin' : 'affiliate',
+          isAdmin: input.isAdmin,
+          company: null,
+          phone: null,
+          commissionRate: input.isAdmin === 1 ? null : '10.00',
+          affiliateCode: affiliateCode,
+          isActive: 1,
+          status: input.isAdmin === 1 ? 'approved' : 'pending',
+        });
+
+        return {
+          success: true,
+          message: 'Usuário criado com sucesso!',
         };
       }),
 
