@@ -1,7 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, Redirect } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { LanguageProvider } from "./contexts/LanguageContext";
@@ -29,6 +29,20 @@ function Router() {
       <Route path="/painel/registrar" component={AffiliateRegister} />
       <Route path="/painel/submeter-apolice" component={SubmitPolicy} />
       <Route path="/reset-password" component={ResetPassword} />
+      
+      {/* Redirect old routes to new unified paths */}
+      <Route path="/afiliados" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/afiliados/login" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/afiliados/registrar" component={() => <Redirect to="/painel/registrar" />} />
+      <Route path="/afiliados/dashboard" component={() => <Redirect to="/painel/afiliado" />} />
+      <Route path="/afiliados/submeter-apolice" component={() => <Redirect to="/painel/submeter-apolice" />} />
+      <Route path="/admin/login" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/admin/dashboard" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/admin/afiliados" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/admin/smtp-config" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/admin/affiliates" component={() => <Redirect to="/painel/login" />} />
+      <Route path="/admin/testimonials" component={() => <Redirect to="/painel/login" />} />
+      
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>
