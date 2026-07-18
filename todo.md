@@ -177,3 +177,12 @@
 - [x] Ensure thumbnails are generated before displaying videos
 - [x] Add frame selector UI in admin panel for custom thumbnail selection
 - [x] Test video pause functionality across different scenarios
+
+
+## Configuração de Domínio e Branding
+- [ ] Configurar domínio customizado www.affinityfc.org (via Management UI)
+- [x] Adicionar logo Affinity Financial no Header do Admin
+- [x] Adicionar "Painel do Administrador" no Header do Admin
+- [x] Adicionar logo no Header de Afiliados
+- [x] Adicionar "Painel de Afiliados" no Header de Afiliados
+- [x] Testar acesso via domínio customizado

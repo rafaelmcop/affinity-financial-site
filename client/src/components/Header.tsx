@@ -7,13 +7,17 @@ interface HeaderProps {
   showBackButton?: boolean;
   showHomeButton?: boolean;
   userType?: 'admin' | 'affiliate';
+  showLogo?: boolean;
+  logoUrl?: string;
 }
 
 export default function Header({ 
   title, 
   showBackButton = true, 
   showHomeButton = true,
-  userType = 'affiliate'
+  userType = 'affiliate',
+  showLogo = false,
+  logoUrl
 }: HeaderProps) {
   const [location, setLocation] = useLocation();
 
@@ -30,21 +34,47 @@ export default function Header({
   };
 
   const handleLogoClick = () => {
-    setLocation('/');
+    if (userType === 'admin') {
+      setLocation('/admin/dashboard');
+    } else if (userType === 'affiliate') {
+      setLocation('/afiliados/dashboard');
+    } else {
+      setLocation('/');
+    }
   };
 
   return (
     <header className="bg-black border-b border-gold/20 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center py-4">
-          {/* Logo */}
+          {/* Logo and Panel Title - Stacked Layout */}
           <button
             onClick={handleLogoClick}
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            className="flex flex-col items-start hover:opacity-80 transition-opacity"
           >
-            <div className="text-gold font-bold text-xl">
-              Affinity Financial
+            <div className="flex items-center gap-2">
+              {showLogo && logoUrl ? (
+                <img
+                  src={logoUrl}
+                  alt="Affinity Financial"
+                  className="h-8 w-auto object-contain"
+                />
+              ) : (
+                <div className="text-gold font-bold text-lg">
+                  Affinity Financial
+                </div>
+              )}
             </div>
+            {userType === 'admin' && (
+              <span className="text-xs text-gold/70 font-semibold mt-1">
+                Painel do Administrador
+              </span>
+            )}
+            {userType === 'affiliate' && (
+              <span className="text-xs text-gold/70 font-semibold mt-1">
+                Painel de Afiliados
+              </span>
+            )}
           </button>
 
           {/* Title (center) */}
@@ -62,7 +92,7 @@ export default function Header({
                 className="flex items-center gap-2 border-gold/30 text-gold hover:bg-gold/10"
               >
                 <Home size={18} />
-                <span className="hidden sm:inline">Dashboard</span>
+                <span className="hidden sm:inline">Painel</span>
               </Button>
             )}
 
@@ -72,6 +102,7 @@ export default function Header({
                 variant="outline"
                 size="sm"
                 className="flex items-center gap-2 border-gold/30 text-gold hover:bg-gold/10"
+                title="Voltar para página anterior"
               >
                 <ArrowLeft size={18} />
                 <span className="hidden sm:inline">Voltar</span>

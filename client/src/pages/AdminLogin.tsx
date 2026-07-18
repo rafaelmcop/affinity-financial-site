@@ -34,67 +34,86 @@ export default function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-4 pt-16">
-      <Card className="bg-black border-gold/20 p-8 max-w-md w-full">
-        <h1 className="text-3xl font-bold text-gold mb-2">Affinity Financial</h1>
-        <p className="text-gray-400 mb-6">Painel de Administração</p>
-
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="block text-gold text-sm font-semibold mb-2">Email</label>
-            <Input
-              type="email"
-              placeholder="seu@email.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="bg-black border-gold/30 text-white"
-              required
-            />
-          </div>
-
-          <div>
-            <label className="block text-gold text-sm font-semibold mb-2">Senha</label>
-            <Input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleLogin(e as any);
-                }
-              }}
-              className="bg-black border-gold/30 text-white"
-              required
-            />
-            <p 
-              className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
-              onClick={() => setShowForgotPassword(true)}
+    <div className="min-h-screen bg-black flex flex-col">
+      {/* Header */}
+      <header className="bg-black border-b border-gold/20 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-4">
+            <div className="flex items-center gap-3">
+              <div className="text-gold font-bold text-xl">Affinity Financial</div>
+              <span className="text-sm text-gold/80 font-semibold hidden sm:inline">
+                Painel do Administrador
+              </span>
+            </div>
+            <Button
+              onClick={() => setLocation('/')}
+              variant="outline"
+              className="border-gold/30 text-gold hover:bg-gold/10"
             >
-              Esqueceu a senha?
+              Voltar ao Site
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Login Content */}
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
+        <Card className="bg-black border-gold/20 p-8 max-w-md w-full">
+          <h1 className="text-3xl font-bold text-gold mb-2">Bem-vindo</h1>
+          <p className="text-gray-400 mb-6">Faça login para acessar o painel</p>
+
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-gold text-sm font-semibold mb-2">Email</label>
+              <Input
+                type="email"
+                placeholder="seu@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="bg-black border-gold/30 text-white"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-gold text-sm font-semibold mb-2">Senha</label>
+              <Input
+                type="password"
+                placeholder="••••••••"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleLogin(e as any);
+                  }
+                }}
+                className="bg-black border-gold/30 text-white"
+                required
+              />
+              <p 
+                className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
+                onClick={() => setShowForgotPassword(true)}
+              >
+                Esqueceu a senha?
+              </p>
+            </div>
+
+            <Button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-gold text-black hover:bg-gold/90 font-semibold"
+            >
+              {isLoading ? 'Entrando...' : 'Entrar'}
+            </Button>
+          </form>
+
+          <div className="space-y-4 mt-6">
+            <p className="text-gray-400 text-sm text-center">
+              Acesso restrito a administradores
             </p>
           </div>
-
-          <Button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-gold text-black hover:bg-gold/90 font-semibold"
-          >
-            {isLoading ? 'Entrando...' : 'Entrar'}
-          </Button>
-        </form>
-
-        <div className="space-y-4 mt-6">
-          <p className="text-gray-400 text-sm text-center">
-            Acesso restrito a administradores
-          </p>
-          <p className="text-gray-400 text-sm text-center border-t border-gold/20 pt-4">
-            <a href="/" className="text-gold hover:text-gold/80">
-              Voltar ao site
-            </a>
-          </p>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       {/* Forgot Password Modal */}
       {showForgotPassword && (

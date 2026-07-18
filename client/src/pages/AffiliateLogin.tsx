@@ -39,77 +39,95 @@ export default function AffiliateLogin() {
   };
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center pt-16 px-4">
-      <Card className="w-full max-w-md bg-black border-gold/20">
-        <div className="p-8">
-          <h1 className="text-3xl font-bold text-gold mb-2">Affinity Financial</h1>
-          <p className="text-gray-400 text-sm mb-8">Área de Afiliados</p>
-
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-white text-sm font-medium mb-2">
-                Email
-              </label>
-              <Input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu@email.com"
-                className="bg-black border-gold/30 text-white placeholder-gray-500"
-                required
-              />
+    <div className="min-h-screen bg-black flex flex-col">
+      {/* Header */}
+      <header className="bg-black border-b border-gold/20 sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-4">
+            <div className="flex items-center gap-3">
+              <div className="text-gold font-bold text-xl">Affinity Financial</div>
+              <span className="text-sm text-gold/80 font-semibold hidden sm:inline">
+                Painel de Afiliados
+              </span>
             </div>
-
-            <div>
-              <label className="block text-white text-sm font-medium mb-2">
-                Senha
-              </label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleLogin(e as any);
-                  }
-                }}
-                placeholder="••••••••"
-                className="bg-black border-gold/30 text-white placeholder-gray-500"
-                required
-              />
-              <p 
-                className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
-                onClick={() => setShowForgotPassword(true)}
-              >
-                Esqueceu a senha?
-              </p>
-            </div>
-
             <Button
-              type="submit"
-              disabled={isLoading}
-              className="w-full bg-gold text-black hover:bg-gold/90 font-semibold"
+              onClick={() => setLocation('/')}
+              variant="outline"
+              className="border-gold/30 text-gold hover:bg-gold/10"
             >
-              {isLoading ? 'Entrando...' : 'Entrar'}
+              Voltar ao Site
             </Button>
-          </form>
-
-          <div className="space-y-4 mt-6">
-            <p className="text-gray-400 text-sm text-center">
-              Não tem uma conta?
-              <a href="/afiliados/registrar" className="text-gold hover:text-gold/80 ml-1">
-                Criar conta
-              </a>
-            </p>
-            <p className="text-gray-400 text-sm text-center border-t border-gold/20 pt-4">
-              Não é um afiliado?
-              <a href="/" className="text-gold hover:text-gold/80 ml-1">
-                Voltar ao site
-              </a>
-            </p>
           </div>
         </div>
-      </Card>
+      </header>
+
+      {/* Login Content */}
+      <div className="flex-1 flex items-center justify-center px-4 py-8">
+        <Card className="w-full max-w-md bg-black border-gold/20">
+          <div className="p-8">
+            <h1 className="text-3xl font-bold text-gold mb-2">Bem-vindo</h1>
+            <p className="text-gray-400 text-sm mb-8">Faça login para acessar o painel</p>
+
+            <form onSubmit={handleLogin} className="space-y-6">
+              <div>
+                <label className="block text-white text-sm font-medium mb-2">
+                  Email
+                </label>
+                <Input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="seu@email.com"
+                  className="bg-black border-gold/30 text-white placeholder-gray-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-white text-sm font-medium mb-2">
+                  Senha
+                </label>
+                <Input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      handleLogin(e as any);
+                    }
+                  }}
+                  placeholder="••••••••"
+                  className="bg-black border-gold/30 text-white placeholder-gray-500"
+                  required
+                />
+                <p 
+                  className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
+                  onClick={() => setShowForgotPassword(true)}
+                >
+                  Esqueceu a senha?
+                </p>
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-gold text-black hover:bg-gold/90 font-semibold"
+              >
+                {isLoading ? 'Entrando...' : 'Entrar'}
+              </Button>
+            </form>
+
+            <div className="space-y-4 mt-6">
+              <p className="text-gray-400 text-sm text-center">
+                Não tem uma conta?
+                <a href="/afiliados/registrar" className="text-gold hover:text-gold/80 ml-1">
+                  Criar conta
+                </a>
+              </p>
+            </div>
+          </div>
+        </Card>
+      </div>
 
       {/* Forgot Password Modal */}
       {showForgotPassword && (
