@@ -1,6 +1,6 @@
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Home } from 'lucide-react';
+import { ArrowLeft, Home, ExternalLink } from 'lucide-react';
 
 interface HeaderProps {
   title?: string;
@@ -34,23 +34,19 @@ export default function Header({
   };
 
   const handleLogoClick = () => {
-    if (userType === 'admin') {
-      setLocation('/admin/dashboard');
-    } else if (userType === 'affiliate') {
-      setLocation('/afiliados/dashboard');
-    } else {
-      setLocation('/');
-    }
+    // Logo always links to main site
+    setLocation('/');
   };
 
   return (
     <header className="bg-black border-b border-gold/20 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center py-4">
-          {/* Logo and Panel Title - Stacked Layout */}
+          {/* Logo and Panel Title - Stacked Layout - Links to Main Site */}
           <button
             onClick={handleLogoClick}
             className="flex flex-col items-start hover:opacity-80 transition-opacity"
+            title="Voltar para o site principal"
           >
             <div className="flex items-center gap-2">
               {showLogo && logoUrl ? (
@@ -84,6 +80,18 @@ export default function Header({
 
           {/* Navigation Buttons */}
           <div className="flex items-center gap-3">
+            {/* Back to Main Site Button */}
+            <Button
+              onClick={() => setLocation('/')}
+              variant="outline"
+              size="sm"
+              className="flex items-center gap-2 border-gold/30 text-gold hover:bg-gold/10"
+              title="Voltar para o site principal"
+            >
+              <ExternalLink size={18} />
+              <span className="hidden sm:inline">Site Principal</span>
+            </Button>
+
             {showHomeButton && (
               <Button
                 onClick={handleHome}

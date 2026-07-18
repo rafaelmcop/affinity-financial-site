@@ -186,3 +186,5 @@
 - [x] Adicionar logo no Header de Afiliados
 - [x] Adicionar "Painel de Afiliados" no Header de Afiliados
 - [x] Testar acesso via domínio customizado
+- [x] Adicionar botão "Site Principal" em todos os headers
+- [x] Logo como link para o site principal
