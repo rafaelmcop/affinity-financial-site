@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useLocation } from 'wouter';
-import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { LayoutGrid, Users } from 'lucide-react';
 import Header from '@/components/Header';
@@ -10,21 +9,24 @@ export default function PanelSelector() {
 
   useEffect(() => {
     // Check if user is admin
-    const userCookie = document.cookie
-      .split('; ')
-      .find(row => row.startsWith('session='));
+    const userStr = localStorage.getItem('user');
     
-    if (!userCookie) {
+    if (!userStr) {
+      console.log('[PANEL SELECTOR] No user found, redirecting to login');
       setLocation('/painel/login');
       return;
     }
 
     try {
-      const userData = JSON.parse(decodeURIComponent(userCookie.split('=')[1]));
+      const userData = JSON.parse(userStr);
+      console.log('[PANEL SELECTOR] User data:', userData);
+      
       if (userData.userType !== 'admin' || !userData.isAdmin) {
+        console.log('[PANEL SELECTOR] User is not admin, redirecting to affiliate panel');
         setLocation('/painel/afiliado');
       }
     } catch (e) {
+      console.error('[PANEL SELECTOR] Failed to parse user data:', e);
       setLocation('/painel/login');
     }
   }, [setLocation]);

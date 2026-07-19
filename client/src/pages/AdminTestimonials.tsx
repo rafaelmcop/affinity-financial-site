@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,31 @@ import Header from '@/components/Header';
 
 export default function AdminTestimonials() {
   const [, setLocation] = useLocation();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [showForm, setShowForm] = useState(false);
+
+  useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    if (!userStr) {
+      setLocation('/painel/login');
+      return;
+    }
+
+    try {
+      const user = JSON.parse(userStr);
+      if (user.userType !== 'admin' || !user.isAdmin) {
+        setLocation('/painel/login');
+        return;
+      }
+      setIsAuthenticated(true);
+    } catch (error) {
+      setLocation('/painel/login');
+    }
+  }, [setLocation]);
+
+  if (!isAuthenticated) {
+    return null;
+  }
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showFrameSelector, setShowFrameSelector] = useState(false);

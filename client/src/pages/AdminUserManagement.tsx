@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,6 +18,7 @@ import {
 } from '@/components/ui/table';
 
 export default function AdminUserManagement() {
+  const [, setLocation] = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
@@ -24,6 +26,30 @@ export default function AdminUserManagement() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    if (!userStr) {
+      setLocation('/painel/login');
+      return;
+    }
+
+    try {
+      const user = JSON.parse(userStr);
+      if (user.userType !== 'admin' || !user.isAdmin) {
+        setLocation('/painel/login');
+        return;
+      }
+      setIsAuthenticated(true);
+    } catch (error) {
+      setLocation('/painel/login');
+    }
+  }, [setLocation]);
+
+  if (!isAuthenticated) {
+    return null;
+  }
 
   const createUserMutation = trpc.admin.createUser.useMutation({
     onSuccess: () => {
