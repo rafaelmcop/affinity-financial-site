@@ -37,32 +37,13 @@ export default function AdminDashboard() {
 
   // All hooks MUST be called unconditionally before any returns
   useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) {
-      console.log('[ADMIN DASHBOARD] No user found, redirecting to login');
-      setLocation('/painel/login');
+    const adminSession = localStorage.getItem('adminSession');
+    if (!adminSession) {
+      setLocation('/admin/login');
       return;
     }
-
-    try {
-      const user = JSON.parse(userStr);
-      console.log('[ADMIN DASHBOARD] User:', user);
-      
-      // Only allow admin users
-      if (user.userType !== 'admin' || !user.isAdmin) {
-        console.log('[ADMIN DASHBOARD] User is not admin');
-        setLocation('/painel/seletor');
-        return;
-      }
-      
-      setIsAuthenticated(true);
-    } catch (error) {
-      console.error('[ADMIN DASHBOARD] Failed to parse user:', error);
-      localStorage.removeItem('user');
-      setLocation('/painel/login');
-    } finally {
-      setIsLoading(false);
-    }
+    setIsAuthenticated(true);
+    setIsLoading(false);
   }, [setLocation]);
 
   // All tRPC queries - called unconditionally
@@ -126,8 +107,8 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('user');
-    setLocation('/painel/login');
+    localStorage.removeItem('adminSession');
+    setLocation('/admin/login');
   };
 
   const handleApprovePolicy = async (policyId: number, points: number) => {

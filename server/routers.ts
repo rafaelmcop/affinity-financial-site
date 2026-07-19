@@ -78,19 +78,13 @@ export const appRouter = router({
         const db = await getDb();
         if (!db) throw new Error('Database not available');
 
-        console.log('[LOGIN] Attempting login for:', input.email);
         const user = await db.select().from(unifiedUsers).where(eq(unifiedUsers.email, input.email)).limit(1);
         if (user.length === 0) {
-          console.log('[LOGIN] User not found');
           throw new Error('Email ou senha inválidos');
         }
 
         const unifiedUser = user[0];
-        console.log('[LOGIN] User found, checking password');
-        const isPasswordValid = verifyPassword(input.password, unifiedUser.passwordHash);
-        console.log('[LOGIN] Password valid:', isPasswordValid);
-        
-        if (!isPasswordValid) {
+        if (!verifyPassword(input.password, unifiedUser.passwordHash)) {
           throw new Error('Email ou senha inválidos');
         }
 
@@ -103,14 +97,13 @@ export const appRouter = router({
         }
 
         const cookieOptions = getSessionCookieOptions(ctx.req);
-        const cookieData = JSON.stringify({
+        ctx.res.cookie(COOKIE_NAME, JSON.stringify({
           id: unifiedUser.id,
           email: unifiedUser.email,
           name: unifiedUser.name,
           userType: unifiedUser.userType,
           isAdmin: unifiedUser.isAdmin,
-        });
-        ctx.res.cookie(COOKIE_NAME, encodeURIComponent(cookieData), cookieOptions);
+        }), cookieOptions);
 
         return {
           id: unifiedUser.id,

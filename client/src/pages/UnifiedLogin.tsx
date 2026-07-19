@@ -17,20 +17,13 @@ export default function UnifiedLogin() {
 
   const loginMutation = trpc.unifiedAuth.login.useMutation({
     onSuccess: (data) => {
-      console.log('[LOGIN SUCCESS]', data);
-      // Store user data in localStorage
-      localStorage.setItem('user', JSON.stringify(data));
-      
       if (data.userType === 'admin') {
-        console.log('[REDIRECT] Going to /painel/seletor');
-        setTimeout(() => setLocation('/painel/seletor'), 100);
+        setLocation('/painel/seletor');
       } else {
-        console.log('[REDIRECT] Going to /painel/afiliado');
-        setTimeout(() => setLocation('/painel/afiliado'), 100);
+        setLocation('/painel/afiliado');
       }
     },
     onError: (err) => {
-      console.log('[LOGIN ERROR]', err);
       setError(err.message || 'Erro ao fazer login');
       setIsLoading(false);
     },
@@ -47,7 +40,6 @@ export default function UnifiedLogin() {
       return;
     }
 
-    console.log('[LOGIN ATTEMPT] Email:', email);
     loginMutation.mutate({ email, password });
   };
 

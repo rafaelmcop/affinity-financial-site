@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,31 +14,7 @@ import Header from '@/components/Header';
 
 export default function AdminAffiliatesManagement() {
   const [, setLocation] = useLocation();
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [selectedAffiliate, setSelectedAffiliate] = useState<any>(null);
-
-  useEffect(() => {
-    const userStr = localStorage.getItem('user');
-    if (!userStr) {
-      setLocation('/painel/login');
-      return;
-    }
-
-    try {
-      const user = JSON.parse(userStr);
-      if (user.userType !== 'admin' || !user.isAdmin) {
-        setLocation('/painel/login');
-        return;
-      }
-      setIsAuthenticated(true);
-    } catch (error) {
-      setLocation('/painel/login');
-    }
-  }, [setLocation]);
-
-  if (!isAuthenticated) {
-    return null;
-  }
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showEditEmailDialog, setShowEditEmailDialog] = useState(false);
   const [showResetPasswordDialog, setShowResetPasswordDialog] = useState(false);
