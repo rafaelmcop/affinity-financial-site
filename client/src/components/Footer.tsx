@@ -91,8 +91,13 @@ export function Footer() {
                 <p className="text-gray-400 text-xs mb-2 font-semibold">Acesso</p>
                 <ul className="space-y-1">
                   <li>
-                    <a href="/painel/login" className="text-gray-400 hover:text-gold transition-colors text-sm">
-                      Acessar Painel
+                    <a href="/afiliados" className="text-gray-400 hover:text-gold transition-colors text-sm">
+                      Portal de Afiliados
+                    </a>
+                  </li>
+                  <li>
+                    <a href="/admin/login" className="text-gray-400 hover:text-gold transition-colors text-sm">
+                      Painel Admin
                     </a>
                   </li>
                 </ul>

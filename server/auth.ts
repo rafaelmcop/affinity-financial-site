@@ -1,27 +1,17 @@
 import crypto from 'crypto';
 
 /**
- * Hash a password using PBKDF2 with salt
+ * Hash a password using SHA-256
  */
 export function hashPassword(password: string): string {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
-  return salt + ':' + hash;
+  return crypto.createHash('sha256').update(password).digest('hex');
 }
 
 /**
- * Verify a password against a PBKDF2 hash
+ * Verify a password against a hash
  */
-export function verifyPassword(password: string, storedHash: string): boolean {
-  try {
-    const [salt, hash] = storedHash.split(':');
-    if (!salt || !hash) return false;
-    
-    const computedHash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
-    return computedHash === hash;
-  } catch (error) {
-    return false;
-  }
+export function verifyPassword(password: string, hash: string): boolean {
+  return hashPassword(password) === hash;
 }
 
 /**

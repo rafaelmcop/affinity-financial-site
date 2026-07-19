@@ -180,7 +180,7 @@
 
 
 ## Configuração de Domínio e Branding
-- [x] Configurar domínio customizado www.affinityfc.org (via Management UI - PENDENTE: Usuário deve fazer manualmente)
+- [ ] Configurar domínio customizado www.affinityfc.org (via Management UI)
 - [x] Adicionar logo Affinity Financial no Header do Admin
 - [x] Adicionar "Painel do Administrador" no Header do Admin
 - [x] Adicionar logo no Header de Afiliados
@@ -188,16 +188,3 @@
 - [x] Testar acesso via domínio customizado
 - [x] Adicionar botão "Site Principal" em todos os headers
 - [x] Logo como link para o site principal
-
-
-## Unificação de Painéis (Admin + Afiliados)
-- [x] Atualizar schema do banco de dados para sistema unificado de usuários
-- [x] Criar página de login unificada
-- [x] Implementar lógica de autenticação unificada
-- [x] Criar seletor de painel para usuários admin
-- [x] Implementar gerenciamento de usuários (criar novo usuário com role)
-- [x] Atualizar roteamento para sistema unificado
-- [x] Testar login unificado e seletor de painel
-- [x] Remover links antigos de /afiliados e /admin
-- [x] Criar link único de login em /painel/login
-- [x] Adicionar botão "Acessar Painel" na navegação e footer
