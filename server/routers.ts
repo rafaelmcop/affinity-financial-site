@@ -211,8 +211,9 @@ export const appRouter = router({
         password: z.string().min(6),
       }))
       .mutation(async ({ input }) => {
-        const ADMIN_EMAIL = 'us.rafael@icloud.com';
-        const ADMIN_PASSWORD = 'Agnus_69$';
+        // TODO: Replace with database query for admin users
+        const ADMIN_EMAIL = 'admin';
+        const ADMIN_PASSWORD = 'admin';
 
         if (input.email !== ADMIN_EMAIL || input.password !== ADMIN_PASSWORD) {
           throw new Error('Credenciais inválidas');
