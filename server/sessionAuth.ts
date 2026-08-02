@@ -1,4 +1,5 @@
 import { parse } from "cookie";
+import { createHash } from "node:crypto";
 import type { Request } from "express";
 import { SignJWT, jwtVerify } from "jose";
 
@@ -8,11 +9,11 @@ export const AFFILIATE_SESSION_COOKIE = "affinity_affiliate_session";
 const encoder = new TextEncoder();
 
 function getSigningKey() {
-  const secret = process.env.JWT_SECRET;
-  if (!secret || secret.length < 32) {
-    throw new Error("JWT_SECRET must be configured with at least 32 characters");
+  const secret = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD;
+  if (!secret || secret.length < 12) {
+    throw new Error("JWT_SECRET or ADMIN_PASSWORD must be configured");
   }
-  return encoder.encode(secret);
+  return createHash("sha256").update(encoder.encode(secret)).digest();
 }
 
 function readCookie(req: Request, name: string) {
