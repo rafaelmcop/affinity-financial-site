@@ -55,7 +55,6 @@ export default function AdminDashboard() {
   const rejectPolicyMutation = trpc.admin.rejectPolicyAdmin.useMutation();
   const approveAffiliateMutation = trpc.admin.approveAffiliate.useMutation();
   const rejectAffiliateMutation = trpc.admin.rejectAffiliate.useMutation();
-  const logoutMutation = trpc.auth.logout.useMutation();
 
   // All useMemo hooks - called unconditionally
   const stats = useMemo(() => statsQuery.data || {
@@ -107,8 +106,7 @@ export default function AdminDashboard() {
     setFilterDateEnd('');
   };
 
-  const handleLogout = async () => {
-    await logoutMutation.mutateAsync();
+  const handleLogout = () => {
     localStorage.removeItem('adminSession');
     setLocation('/admin/login');
   };

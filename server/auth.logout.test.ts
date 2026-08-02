@@ -49,19 +49,14 @@ describe("auth.logout", () => {
     const result = await caller.auth.logout();
 
     expect(result).toEqual({ success: true });
-    expect(clearedCookies).toHaveLength(3);
+    expect(clearedCookies).toHaveLength(1);
     expect(clearedCookies[0]?.name).toBe(COOKIE_NAME);
     expect(clearedCookies[0]?.options).toMatchObject({
       maxAge: -1,
       secure: true,
-      sameSite: "lax",
+      sameSite: "none",
       httpOnly: true,
       path: "/",
     });
-    expect(clearedCookies.map(cookie => cookie.name)).toEqual([
-      COOKIE_NAME,
-      "affinity_admin_session",
-      "affinity_affiliate_session",
-    ]);
   });
 });

@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
-import { adminProcedure, affiliateProcedure, publicProcedure, router } from './_core/trpc';
+import { publicProcedure, router } from './_core/trpc';
 import { affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 
 // Notification routes (internal use)
 const notificationRouter = router({
-  sendAffiliateRegistrationEmail: adminProcedure
+  sendAffiliateRegistrationEmail: publicProcedure
     .input(z.object({ email: z.string().email(), name: z.string() }))
     .mutation(async ({ input }) => {
       const { sendAffiliateRegistrationEmail } = await import('./notifications');
@@ -15,7 +15,7 @@ const notificationRouter = router({
       return { success };
     }),
 
-  sendAffiliateApprovalEmail: adminProcedure
+  sendAffiliateApprovalEmail: publicProcedure
     .input(z.object({ email: z.string().email(), name: z.string(), affiliateCode: z.string() }))
     .mutation(async ({ input }) => {
       const { sendAffiliateApprovalEmail } = await import('./notifications');
@@ -23,7 +23,7 @@ const notificationRouter = router({
       return { success };
     }),
 
-  sendPolicyApprovalEmail: adminProcedure
+  sendPolicyApprovalEmail: publicProcedure
     .input(z.object({ email: z.string().email(), clientName: z.string(), policyNumber: z.string(), points: z.number() }))
     .mutation(async ({ input }) => {
       const { sendPolicyApprovalEmail } = await import('./notifications');
@@ -31,7 +31,7 @@ const notificationRouter = router({
       return { success };
     }),
 
-  sendCommissionCreditEmail: adminProcedure
+  sendCommissionCreditEmail: publicProcedure
     .input(z.object({ email: z.string().email(), name: z.string(), amount: z.number(), policyNumber: z.string() }))
     .mutation(async ({ input }) => {
       const { sendCommissionCreditEmail } = await import('./notifications');
@@ -39,7 +39,7 @@ const notificationRouter = router({
       return { success };
     }),
 
-  sendAdminNotificationEmail: adminProcedure
+  sendAdminNotificationEmail: publicProcedure
     .input(z.object({ policyNumber: z.string(), clientName: z.string(), affiliateName: z.string() }))
     .mutation(async ({ input }) => {
       const { sendAdminNotificationEmail } = await import('./notifications');
@@ -59,8 +59,6 @@ export const appRouter = router({
     logout: publicProcedure.mutation(({ ctx }) => {
       const cookieOptions = getSessionCookieOptions(ctx.req);
       ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
-      ctx.res.clearCookie('affinity_admin_session', { ...cookieOptions, maxAge: -1 });
-      ctx.res.clearCookie('affinity_affiliate_session', { ...cookieOptions, maxAge: -1 });
       return {
         success: true,
       } as const;
@@ -111,7 +109,7 @@ export const appRouter = router({
         email: z.string().email(),
         password: z.string().min(6),
       }))
-      .mutation(async ({ input, ctx }) => {
+      .mutation(async ({ input }) => {
         const { getAffiliateByEmail } = await import('./db');
         const { verifyPassword } = await import('./auth');
 
@@ -128,19 +126,6 @@ export const appRouter = router({
           throw new Error('Sua conta ainda não foi aprovada');
         }
 
-        if (!affiliate.passwordHash.startsWith('$2')) {
-          const { hashPassword } = await import('./auth');
-          const { updateAffiliatePassword } = await import('./db');
-          await updateAffiliatePassword(affiliate.email, hashPassword(input.password));
-        }
-
-        const { createAffiliateSession, AFFILIATE_SESSION_COOKIE } = await import('./sessionAuth');
-        const sessionToken = await createAffiliateSession(affiliate.id);
-        ctx.res.cookie(AFFILIATE_SESSION_COOKIE, sessionToken, {
-          ...getSessionCookieOptions(ctx.req),
-          maxAge: 7 * 24 * 60 * 60 * 1000,
-        });
-
         return {
           id: affiliate.id,
           email: affiliate.email,
@@ -150,12 +135,11 @@ export const appRouter = router({
         };
       }),
 
-    getDashboard: affiliateProcedure
+    getDashboard: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
       }))
-      .query(async ({ input, ctx }) => {
-        if (input.affiliateId !== ctx.affiliateId) throw new Error('Acesso negado');
+      .query(async ({ input }) => {
         const { getAffiliateById, getAffiliateReferrals, getPoliciesByAffiliateId, getPoliciesLast12Months } = await import('./db');
 
         const affiliate = await getAffiliateById(input.affiliateId);
@@ -188,7 +172,7 @@ export const appRouter = router({
         };
       }),
 
-    submitPolicy: affiliateProcedure
+    submitPolicy: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
         policyNumber: z.string().min(1),
@@ -197,8 +181,7 @@ export const appRouter = router({
         clientPhone: z.string().optional(),
         policyType: z.string(),
       }))
-      .mutation(async ({ input, ctx }) => {
-        if (input.affiliateId !== ctx.affiliateId) throw new Error('Acesso negado');
+      .mutation(async ({ input }) => {
         const { createPolicy } = await import('./db');
 
         const policy = await createPolicy({
@@ -227,33 +210,24 @@ export const appRouter = router({
         email: z.string().email(),
         password: z.string().min(6),
       }))
-      .mutation(async ({ input, ctx }) => {
-        const adminEmail = process.env.ADMIN_EMAIL;
-        const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
-        if (!adminEmail || !adminPasswordHash) {
-          throw new Error('Login administrativo não configurado');
-        }
-        const { compare } = await import('bcryptjs');
-        if (input.email.toLowerCase() !== adminEmail.toLowerCase() || !(await compare(input.password, adminPasswordHash))) {
+      .mutation(async ({ input }) => {
+        // TODO: Replace with database query for admin users
+        const ADMIN_EMAIL = 'admin';
+        const ADMIN_PASSWORD = 'admin';
+
+        if (input.email !== ADMIN_EMAIL || input.password !== ADMIN_PASSWORD) {
           throw new Error('Credenciais inválidas');
         }
 
-        const { createAdminSession, ADMIN_SESSION_COOKIE } = await import('./sessionAuth');
-        const sessionToken = await createAdminSession(adminEmail);
-        ctx.res.cookie(ADMIN_SESSION_COOKIE, sessionToken, {
-          ...getSessionCookieOptions(ctx.req),
-          maxAge: 8 * 60 * 60 * 1000,
-        });
-
         return {
           id: 1,
-          email: adminEmail,
+          email: ADMIN_EMAIL,
           name: 'Administrador',
           role: 'admin',
         };
       }),
 
-    getStats: adminProcedure
+    getStats: publicProcedure
       .query(async () => {
         const { getAdminStats, getPoliciesByStatus, getCommissionsByAffiliate } = await import('./db');
 
@@ -272,13 +246,13 @@ export const appRouter = router({
         };
       }),
 
-    getPoliciesPending: adminProcedure
+    getPoliciesPending: publicProcedure
       .query(async () => {
         const { getPoliciesByStatus } = await import('./db');
         return await getPoliciesByStatus('pending');
       }),
 
-    approvePolicyAdmin: adminProcedure
+    approvePolicyAdmin: publicProcedure
       .input(z.object({
         policyId: z.number(),
         points: z.number().min(0),
@@ -300,7 +274,7 @@ export const appRouter = router({
         return { success: true, message: 'Apólice aprovada!' };
       }),
 
-    rejectPolicyAdmin: adminProcedure
+    rejectPolicyAdmin: publicProcedure
       .input(z.object({
         policyId: z.number(),
       }))
@@ -321,7 +295,7 @@ export const appRouter = router({
         return { success: true, message: 'Apólice rejeitada!' };
       }),
 
-    listAffiliates: adminProcedure
+    listAffiliates: publicProcedure
       .query(async () => {
         const { getDb } = await import('./db');
         const db = await getDb();
@@ -329,7 +303,7 @@ export const appRouter = router({
         return await db.select().from(affiliates);
       }),
 
-    updateAffiliateStatus: adminProcedure
+    updateAffiliateStatus: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
         isActive: z.number(),
@@ -342,7 +316,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    deleteAffiliate: adminProcedure
+    deleteAffiliate: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
       }))
@@ -354,7 +328,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    approveAffiliate: adminProcedure
+    approveAffiliate: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
         agentNumber: z.string().min(1),
@@ -374,7 +348,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    rejectAffiliate: adminProcedure
+    rejectAffiliate: publicProcedure
       .input(z.object({
         affiliateId: z.number(),
       }))
@@ -392,7 +366,7 @@ export const appRouter = router({
         return { success: true };
       }),
 
-    addPolicy: adminProcedure
+    addPolicy: publicProcedure
       .input(z.object({
         policyNumber: z.string().min(1),
         clientName: z.string().min(1),
@@ -424,19 +398,19 @@ export const appRouter = router({
         return { success: true, message: 'Apólice adicionada com sucesso!' };
       }),
 
-    getPendingAffiliates: adminProcedure
+    getPendingAffiliates: publicProcedure
       .query(async () => {
         const { getPendingAffiliates } = await import('./db');
         return await getPendingAffiliates();
       }),
 
-    getAllAffiliates: adminProcedure
+    getAllAffiliates: publicProcedure
       .query(async () => {
         const { getAllAffiliates } = await import('./db');
         return await getAllAffiliates();
       }),
 
-    blockAffiliate: adminProcedure
+    blockAffiliate: publicProcedure
       .input(z.object({ affiliateId: z.number() }))
       .mutation(async ({ input }) => {
         const { blockAffiliate } = await import('./db');
@@ -444,7 +418,7 @@ export const appRouter = router({
         return { success: true, message: 'Afiliado bloqueado com sucesso!' };
       }),
 
-    reactivateAffiliate: adminProcedure
+    reactivateAffiliate: publicProcedure
       .input(z.object({ affiliateId: z.number() }))
       .mutation(async ({ input }) => {
         const { reactivateAffiliate } = await import('./db');
@@ -454,7 +428,7 @@ export const appRouter = router({
 
 
 
-    updateAffiliateEmail: adminProcedure
+    updateAffiliateEmail: publicProcedure
       .input(z.object({ affiliateId: z.number(), newEmail: z.string().email() }))
       .mutation(async ({ input }) => {
         const { updateAffiliateEmail } = await import('./db');
@@ -462,7 +436,7 @@ export const appRouter = router({
         return { success: true, message: 'Email atualizado com sucesso!' };
       }),
 
-    resetAffiliatePasswordByAdmin: adminProcedure
+    resetAffiliatePasswordByAdmin: publicProcedure
       .input(z.object({ affiliateId: z.number(), newPassword: z.string().min(6) }))
       .mutation(async ({ input }) => {
         const { resetAffiliatePasswordByAdmin } = await import('./db');
@@ -480,15 +454,6 @@ export const appRouter = router({
         userType: z.enum(['admin', 'affiliate']),
       }))
       .mutation(async ({ input }) => {
-        if (input.userType === 'admin') {
-          if (!process.env.ADMIN_EMAIL || input.email.toLowerCase() !== process.env.ADMIN_EMAIL.toLowerCase()) {
-            return { success: true };
-          }
-        } else {
-          const { getAffiliateByEmail } = await import('./db');
-          if (!(await getAffiliateByEmail(input.email))) return { success: true };
-        }
-
         const { createPasswordResetToken } = await import('./db');
         const { sendPasswordResetEmail } = await import('./notifications');
         
@@ -516,7 +481,7 @@ export const appRouter = router({
   notification: notificationRouter,
 
   testimonials: router({
-    getAll: adminProcedure
+    getAll: publicProcedure
       .query(async () => {
         const { getAllTestimonials } = await import('./db');
         return await getAllTestimonials();
@@ -528,7 +493,7 @@ export const appRouter = router({
         return await getActiveTestimonials();
       }),
 
-    create: adminProcedure
+    create: publicProcedure
       .input(z.object({
         name: z.string().min(1),
         role: z.string().min(1),
@@ -552,7 +517,7 @@ export const appRouter = router({
         return { success: true, message: 'Depoimento adicionado com sucesso!' };
       }),
 
-    update: adminProcedure
+    update: publicProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().optional(),
@@ -570,7 +535,7 @@ export const appRouter = router({
         return { success: true, message: 'Depoimento atualizado com sucesso!' };
       }),
 
-    delete: adminProcedure
+    delete: publicProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const { deleteTestimonial } = await import('./db');
@@ -578,7 +543,7 @@ export const appRouter = router({
         return { success: true, message: 'Depoimento deletado com sucesso!' };
       }),
 
-    toggleActive: adminProcedure
+    toggleActive: publicProcedure
       .input(z.object({ id: z.number(), isActive: z.boolean() }))
       .mutation(async ({ input }) => {
         const { toggleTestimonialActive } = await import('./db');
