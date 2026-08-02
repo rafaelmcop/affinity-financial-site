@@ -230,11 +230,17 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const adminEmail = process.env.ADMIN_EMAIL;
         const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
-        if (!adminEmail || !adminPasswordHash) {
+        const temporaryAdminPassword = process.env.ADMIN_PASSWORD;
+        if (!adminEmail || (!adminPasswordHash && !temporaryAdminPassword)) {
           throw new Error('Login administrativo não configurado');
         }
-        const { compare } = await import('bcryptjs');
-        if (input.email.toLowerCase() !== adminEmail.toLowerCase() || !(await compare(input.password, adminPasswordHash))) {
+        const hashMatches = adminPasswordHash
+          ? await (await import('bcryptjs')).compare(input.password, adminPasswordHash)
+          : false;
+        const temporaryPasswordMatches = temporaryAdminPassword
+          ? input.password === temporaryAdminPassword
+          : false;
+        if (input.email.toLowerCase() !== adminEmail.toLowerCase() || (!hashMatches && !temporaryPasswordMatches)) {
           throw new Error('Credenciais inválidas');
         }
 
