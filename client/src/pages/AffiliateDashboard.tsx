@@ -28,6 +28,7 @@ export default function AffiliateDashboard() {
     clientPhone: '',
     policyType: 'Seguro de Vida',
   });
+  const logoutMutation = trpc.auth.logout.useMutation();
 
   const dashboardQuery = trpc.affiliate.getDashboard.useQuery(
     session ? { affiliateId: session.id } : { affiliateId: 0 },
@@ -52,7 +53,8 @@ export default function AffiliateDashboard() {
     }
   }, [setLocation]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await logoutMutation.mutateAsync();
     localStorage.removeItem('affiliateSession');
     toast.success('Logout realizado');
     setLocation('/afiliados');

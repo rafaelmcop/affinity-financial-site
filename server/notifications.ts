@@ -143,6 +143,11 @@ export async function sendCommissionCreditEmail(email: string, name: string, amo
 }
 
 export async function sendAdminNotificationEmail(policyNumber: string, clientName: string, affiliateName: string): Promise<boolean> {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (!adminEmail) {
+    console.error('[Email] ADMIN_EMAIL is not configured');
+    return false;
+  }
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #d4af37;">Nova Apólice Pendente de Aprovação</h2>
@@ -161,7 +166,7 @@ export async function sendAdminNotificationEmail(policyNumber: string, clientNam
   `;
 
   return sendEmail({
-    to: process.env.ADMIN_EMAIL || 'us.rafael@icloud.com',
+    to: adminEmail,
     subject: `Nova Apólice Pendente: ${policyNumber}`,
     html,
   });
