@@ -9,7 +9,7 @@ import { FloatingWhatsApp } from '@/components/FloatingWhatsApp';
 
 export default function Home() {
   return (
-    <div className="min-h-screen bg-black text-white">
+    <div className="public-light min-h-screen bg-black text-white">
       <Navigation />
       <HeroSection />
       <ServicesSection />

@@ -260,6 +260,93 @@
   border-color: rgba(212, 175, 55, 0.6);
 }
 
+/* Public website light palette. Admin and affiliate panels remain unchanged. */
+.public-light {
+  background: #faf8f2 !important;
+  color: #14233b !important;
+}
+
+.public-light [class~="bg-black"],
+.public-light [class~="bg-black/95"] {
+  background-color: rgba(255, 255, 255, 0.96) !important;
+}
+
+.public-light section[class*="from-black"],
+.public-light section[class*="from-gray-900"],
+.public-light [class*="from-gray-900"][class*="to-black"] {
+  background-color: #f5f1e8 !important;
+  background-image: linear-gradient(145deg, #ffffff, #f4efe4) !important;
+}
+
+.public-light [class~="text-white"] {
+  color: #14233b !important;
+}
+
+.public-light [class~="text-gray-200"],
+.public-light [class~="text-gray-300"],
+.public-light [class~="text-gray-400"],
+.public-light [class~="text-gray-500"] {
+  color: #5d6878 !important;
+}
+
+.public-light .text-gold {
+  color: #8c6718 !important;
+}
+
+.public-light .border-gold,
+.public-light [class~="border-gold/20"],
+.public-light [class~="border-gold/30"],
+.public-light [class~="border-gold/60"] {
+  border-color: rgba(157, 116, 29, 0.35) !important;
+}
+
+.public-light [class~="bg-gold"] {
+  background-color: #d4a93f !important;
+}
+
+.public-light [class~="bg-gold/10"],
+.public-light [class~="bg-gold/20"] {
+  background-color: rgba(212, 169, 63, 0.14) !important;
+}
+
+.public-light nav {
+  box-shadow: 0 8px 30px rgba(20, 35, 59, 0.08);
+}
+
+.public-light section:not(#home) [class*="border-gold"] {
+  box-shadow: 0 16px 45px rgba(20, 35, 59, 0.07);
+}
+
+.public-light #home [class~="text-white"] {
+  color: #ffffff !important;
+  text-shadow: 0 2px 22px rgba(0, 0, 0, 0.35);
+}
+
+.public-light #home [class~="text-gray-200"] {
+  color: #f4f6f8 !important;
+}
+
+.public-light #home [class~="bg-black/50"] {
+  background-color: rgba(10, 29, 51, 0.48) !important;
+}
+
+.public-light footer[class~="bg-black"] {
+  background-color: #10233f !important;
+}
+
+.public-light footer [class~="text-white"] {
+  color: #ffffff !important;
+}
+
+.public-light footer [class~="text-gray-400"],
+.public-light footer [class~="text-gray-500"] {
+  color: #c9d1dc !important;
+}
+
+.public-light footer .text-gold {
+  color: #e2bd62 !important;
+}
+
 .shadow-gold\/20 {
   --tw-shadow-color: rgba(212, 175, 55, 0.2);
 }
