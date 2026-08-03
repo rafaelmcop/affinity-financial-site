@@ -17,6 +17,7 @@ import SmtpConfig from "./pages/SmtpConfig";
 import ResetPassword from "./pages/ResetPassword";
 import AdminAffiliatesManagement from './pages/AdminAffiliatesManagement';
 import AdminTestimonials from './pages/AdminTestimonials';
+import AdminAdministrators from './pages/AdminAdministrators';
 
 function Router() {
   return (
@@ -33,6 +34,7 @@ function Router() {
         <Route path="/admin/smtp-config" component={SmtpConfig} />
         <Route path="/admin/affiliates" component={AdminAffiliatesManagement} />
       <Route path="/admin/testimonials" component={AdminTestimonials} />
+      <Route path="/admin/administradores" component={AdminAdministrators} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

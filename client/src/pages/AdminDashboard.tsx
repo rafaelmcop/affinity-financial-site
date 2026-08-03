@@ -192,6 +192,13 @@ export default function AdminDashboard() {
           <div></div>
           <div className="flex gap-3">
             <Button
+              onClick={() => setLocation('/admin/administradores')}
+              variant="outline"
+              className="flex items-center gap-2 bg-gold/10 hover:bg-gold/20 border-gold/30 text-gold"
+            >
+              🔐 Administradores
+            </Button>
+            <Button
               onClick={() => setLocation('/admin/affiliates')}
               variant="outline"
               className="flex items-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border-purple-600/30 text-purple-400"

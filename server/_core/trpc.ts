@@ -42,8 +42,9 @@ export const adminProcedure = t.procedure.use(
   t.middleware(async opts => {
     const { ctx, next } = opts;
 
-    const { hasAdminSession } = await import("../sessionAuth");
-    const hasLocalAdminSession = await hasAdminSession(ctx.req);
+    const { getAdminSessionEmail } = await import("../sessionAuth");
+    const localAdminEmail = await getAdminSessionEmail(ctx.req);
+    const hasLocalAdminSession = localAdminEmail !== null;
     if ((!ctx.user || ctx.user.role !== 'admin') && !hasLocalAdminSession) {
       throw new TRPCError({ code: "FORBIDDEN", message: NOT_ADMIN_ERR_MSG });
     }
@@ -52,6 +53,7 @@ export const adminProcedure = t.procedure.use(
       ctx: {
         ...ctx,
         user: ctx.user,
+        adminEmail: localAdminEmail ?? ctx.user?.email ?? "",
       },
     });
   }),

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { adminProcedure, affiliateProcedure, publicProcedure, router } from './_core/trpc';
-import { affiliates } from '../drizzle/schema';
+import { adminAccounts, affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 
@@ -228,6 +228,25 @@ export const appRouter = router({
         password: z.string().min(6),
       }))
       .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        const normalizedEmail = input.email.toLowerCase();
+        if (db) {
+          const [account] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, normalizedEmail)).limit(1);
+          if (account) {
+            if (!account.isActive || !(await (await import('bcryptjs')).compare(input.password, account.passwordHash))) {
+              throw new Error('Credenciais inválidas');
+            }
+            const { createAdminSession, ADMIN_SESSION_COOKIE } = await import('./sessionAuth');
+            const sessionToken = await createAdminSession(account.email);
+            ctx.res.cookie(ADMIN_SESSION_COOKIE, sessionToken, {
+              ...getSessionCookieOptions(ctx.req),
+              maxAge: 8 * 60 * 60 * 1000,
+            });
+            return { id: account.id, email: account.email, name: account.name, role: 'admin' as const };
+          }
+        }
+
         const adminEmail = process.env.ADMIN_EMAIL;
         const adminPasswordHash = process.env.ADMIN_PASSWORD_HASH;
         const temporaryAdminPassword = process.env.ADMIN_PASSWORD;
@@ -240,7 +259,7 @@ export const appRouter = router({
         const temporaryPasswordMatches = temporaryAdminPassword
           ? input.password === temporaryAdminPassword
           : false;
-        if (input.email.toLowerCase() !== adminEmail.toLowerCase() || (!hashMatches && !temporaryPasswordMatches)) {
+        if (normalizedEmail !== adminEmail.toLowerCase() || (!hashMatches && !temporaryPasswordMatches)) {
           throw new Error('Credenciais inválidas');
         }
 
@@ -474,6 +493,67 @@ export const appRouter = router({
         const { resetAffiliatePasswordByAdmin } = await import('./db');
         await resetAffiliatePasswordByAdmin(input.affiliateId, input.newPassword);
         return { success: true, message: 'Senha redefinida com sucesso!' };
+      }),
+
+    listAdmins: adminProcedure.query(async () => {
+      const { getDb } = await import('./db');
+      const db = await getDb();
+      if (!db) throw new Error('Database not available');
+      return db.select({
+        id: adminAccounts.id,
+        email: adminAccounts.email,
+        name: adminAccounts.name,
+        isActive: adminAccounts.isActive,
+        createdAt: adminAccounts.createdAt,
+      }).from(adminAccounts);
+    }),
+
+    createAdmin: adminProcedure
+      .input(z.object({ email: z.string().email(), name: z.string().min(1), password: z.string().min(12) }))
+      .mutation(async ({ input }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        const passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
+        await db.insert(adminAccounts).values({
+          email: input.email.toLowerCase(), name: input.name, passwordHash, isActive: 1,
+        });
+        return { success: true };
+      }),
+
+    changeMyPassword: adminProcedure
+      .input(z.object({ currentPassword: z.string().min(6), newPassword: z.string().min(12) }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        const email = ctx.adminEmail.toLowerCase();
+        const [account] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, email)).limit(1);
+        const bcrypt = await import('bcryptjs');
+        const envPasswordMatches = email === process.env.ADMIN_EMAIL?.toLowerCase() &&
+          (input.currentPassword === process.env.ADMIN_PASSWORD ||
+            (!!process.env.ADMIN_PASSWORD_HASH && await bcrypt.compare(input.currentPassword, process.env.ADMIN_PASSWORD_HASH)));
+        const accountPasswordMatches = account && await bcrypt.compare(input.currentPassword, account.passwordHash);
+        if (!envPasswordMatches && !accountPasswordMatches) throw new Error('Senha atual inválida');
+        const passwordHash = await bcrypt.hash(input.newPassword, 12);
+        if (account) {
+          await db.update(adminAccounts).set({ passwordHash, isActive: 1 }).where(eq(adminAccounts.id, account.id));
+        } else {
+          await db.insert(adminAccounts).values({ email, name: 'Administrador', passwordHash, isActive: 1 });
+        }
+        return { success: true };
+      }),
+
+    setAdminActive: adminProcedure
+      .input(z.object({ id: z.number(), isActive: z.boolean() }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        const [target] = await db.select().from(adminAccounts).where(eq(adminAccounts.id, input.id)).limit(1);
+        if (target?.email === ctx.adminEmail) throw new Error('Você não pode bloquear sua própria conta');
+        await db.update(adminAccounts).set({ isActive: input.isActive ? 1 : 0 }).where(eq(adminAccounts.id, input.id));
+        return { success: true };
       }),
 
 

@@ -57,6 +57,13 @@
       "when": 1785708185063,
       "tag": "0007_numerous_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "5",
+      "when": 1785714000000,
+      "tag": "0008_admin_accounts",
+      "breakpoints": true
     }
   ]
 }

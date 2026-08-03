@@ -37,15 +37,21 @@ export async function createAffiliateSession(affiliateId: number) {
     .sign(getSigningKey());
 }
 
-export async function hasAdminSession(req: Request) {
+export async function getAdminSessionEmail(req: Request) {
   const token = readCookie(req, ADMIN_SESSION_COOKIE);
-  if (!token) return false;
+  if (!token) return null;
   try {
     const { payload } = await jwtVerify(token, getSigningKey());
-    return payload.role === "admin";
+    return payload.role === "admin" && typeof payload.email === "string"
+      ? payload.email
+      : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function hasAdminSession(req: Request) {
+  return (await getAdminSessionEmail(req)) !== null;
 }
 
 export async function getAffiliateSessionId(req: Request) {
