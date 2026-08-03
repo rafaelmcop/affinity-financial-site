@@ -66,7 +66,7 @@ async function startServer() {
   ]);
   const upload = multer({
     storage: multer.memoryStorage(),
-    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+    limits: { files: 1 },
     fileFilter: (_req, file, callback) => {
       const allowed = allowedUploadTypes.has(file.mimetype);
       if (allowed) callback(null, true);
