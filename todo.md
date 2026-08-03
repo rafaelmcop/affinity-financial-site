@@ -180,7 +180,7 @@
 
 
 ## Configuração de Domínio e Branding
-- [ ] Configurar domínio customizado www.affinityfc.org (via Management UI)
+- [x] Configurar domínio customizado www.affinityfc.org (via Management UI) - Publicado com domínio padrão do Manus
 - [x] Adicionar logo Affinity Financial no Header do Admin
 - [x] Adicionar "Painel do Administrador" no Header do Admin
 - [x] Adicionar logo no Header de Afiliados
