@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import Header from '@/components/Header';
 import { toast } from 'sonner';
+import AdminSidebar from '@/components/AdminSidebar';
 
 export default function AdminAdministrators() {
   const [, setLocation] = useLocation();
@@ -42,8 +43,8 @@ export default function AdminAdministrators() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <Header title="Administradores" userType="admin" />
+    <div className="min-h-screen bg-black text-white lg:pl-64">
+      <AdminSidebar />
       <main className="max-w-5xl mx-auto px-4 py-8 space-y-6">
         <Button variant="outline" onClick={() => setLocation('/admin/dashboard')}>Voltar ao painel</Button>
 

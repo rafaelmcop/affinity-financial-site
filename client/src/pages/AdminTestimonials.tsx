@@ -7,6 +7,7 @@ import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Upload, Sliders } from 'lucide-react';
 import Header from '@/components/Header';
+import AdminSidebar from '@/components/AdminSidebar';
 
 export default function AdminTestimonials() {
   const [, setLocation] = useLocation();
@@ -213,8 +214,8 @@ export default function AdminTestimonials() {
   const testimonials = testimonialsQuery.data || [];
 
   return (
-    <div className="min-h-screen bg-black">
-      <Header title="Gerenciar Depoimentos" userType="admin" />
+    <div className="min-h-screen bg-black lg:pl-64">
+      <AdminSidebar />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex justify-between items-center mb-6">
           <div></div>

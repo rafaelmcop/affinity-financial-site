@@ -307,6 +307,44 @@ export const appRouter = router({
         };
       }),
 
+    getEmailConfig: adminProcedure.query(async () => {
+      const { getSmtpConfig } = await import('./db');
+      const config = await getSmtpConfig();
+      if (!config) return null;
+      return {
+        host: config.host,
+        port: config.port,
+        secure: config.secure === 1,
+        user: config.user,
+        fromEmail: config.fromEmail,
+        fromName: config.fromName || 'Affinity Financial',
+        passwordConfigured: Boolean(config.password),
+      };
+    }),
+
+    saveEmailConfig: adminProcedure
+      .input(z.object({
+        host: z.string().min(1), port: z.number().int().min(1).max(65535), secure: z.boolean(),
+        user: z.string().email(), password: z.string().optional(), fromEmail: z.string().email(), fromName: z.string().min(1),
+      }))
+      .mutation(async ({ input }) => {
+        const { getSmtpConfig, updateSmtpConfig } = await import('./db');
+        const { encryptSecret } = await import('./secretStorage');
+        const current = await getSmtpConfig();
+        const password = input.password ? encryptSecret(input.password.replace(/\s/g, '')) : current?.password;
+        if (!password) throw new Error('Informe a senha específica de aplicativo');
+        await updateSmtpConfig({ ...input, password });
+        return { success: true };
+      }),
+
+    testEmailConfig: adminProcedure
+      .input(z.object({ email: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const { sendTestEmail } = await import('./notifications');
+        if (!(await sendTestEmail(input.email))) throw new Error('Não foi possível enviar. Verifique o e-mail e a senha de app.');
+        return { success: true };
+      }),
+
     getPoliciesPending: adminProcedure
       .query(async () => {
         const { getPoliciesByStatus } = await import('./db');

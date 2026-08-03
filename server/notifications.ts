@@ -1,16 +1,24 @@
 import nodemailer from 'nodemailer';
+import { getSmtpConfig } from './db';
+import { decryptSecret } from './secretStorage';
 
-// Configure your email service here
-// For production, use environment variables for credentials
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: process.env.SMTP_SECURE === 'true',
-  auth: {
-    user: process.env.SMTP_USER || 'your-email@gmail.com',
-    pass: process.env.SMTP_PASSWORD || 'your-app-password',
-  },
-});
+async function emailConnection() {
+  const saved = await getSmtpConfig();
+  const host = saved?.host || process.env.SMTP_HOST;
+  const user = saved?.user || process.env.SMTP_USER;
+  const password = saved?.password ? decryptSecret(saved.password) : process.env.SMTP_PASSWORD;
+  if (!host || !user || !password) throw new Error('Configuração de e-mail incompleta');
+  return {
+    transporter: nodemailer.createTransport({
+      host,
+      port: saved?.port || parseInt(process.env.SMTP_PORT || '587'),
+      secure: saved ? saved.secure === 1 : process.env.SMTP_SECURE === 'true',
+      auth: { user, pass: password },
+      requireTLS: (saved?.port || parseInt(process.env.SMTP_PORT || '587')) === 587,
+    }),
+    from: saved ? `"${saved.fromName || 'Affinity Financial'}" <${saved.fromEmail}>` : (process.env.SMTP_FROM || user),
+  };
+}
 
 interface EmailOptions {
   to: string;
@@ -20,8 +28,9 @@ interface EmailOptions {
 
 async function sendEmail(options: EmailOptions): Promise<boolean> {
   try {
+    const { transporter, from } = await emailConnection();
     await transporter.sendMail({
-      from: process.env.SMTP_FROM || 'info@affinityfc.org',
+      from,
       ...options,
     });
     console.log(`[Email] Sent to ${options.to}: ${options.subject}`);
@@ -30,6 +39,10 @@ async function sendEmail(options: EmailOptions): Promise<boolean> {
     console.error(`[Email] Failed to send to ${options.to}:`, error);
     return false;
   }
+}
+
+export async function sendTestEmail(to: string) {
+  return sendEmail({ to, subject: 'Teste de e-mail - Affinity Financial', html: '<h2>Configuração concluída</h2><p>O serviço de e-mail da Affinity Financial está funcionando corretamente.</p>' });
 }
 
 // Email Templates

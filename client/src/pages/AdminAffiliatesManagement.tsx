@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Edit2, Trash2, Lock, Unlock } from 'lucide-react';
 import Header from '@/components/Header';
+import AdminSidebar from '@/components/AdminSidebar';
 
 export default function AdminAffiliatesManagement() {
   const [, setLocation] = useLocation();
@@ -108,8 +109,8 @@ export default function AdminAffiliatesManagement() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <Header title="Gerenciamento de Afiliados" userType="admin" />
+    <div className="min-h-screen bg-black text-white lg:pl-64">
+      <AdminSidebar />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
       <Card className="bg-black border-gold/20 overflow-hidden">

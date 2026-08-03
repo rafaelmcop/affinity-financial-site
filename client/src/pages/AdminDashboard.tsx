@@ -9,13 +9,14 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { LogOut, CheckCircle, Clock, XCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 import Header from '@/components/Header';
+import AdminSidebar from '@/components/AdminSidebar';
 
 export default function AdminDashboard() {
   // All state declarations first
   const [, setLocation] = useLocation();
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'overview');
   const [selectedPeriod, setSelectedPeriod] = useState<'7' | '30' | '90'>('30');
   
   // Form states for adding policy
@@ -184,51 +185,10 @@ export default function AdminDashboard() {
   ];
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      <Header title="Painel de Administração" userType="admin" showBackButton={false} />
+    <div className="min-h-screen bg-black text-white lg:pl-64">
+      <AdminSidebar onLogout={handleLogout} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header Actions */}
-        <div className="flex justify-between items-center mb-8">
-          <div></div>
-          <div className="flex gap-3">
-            <Button
-              onClick={() => setLocation('/admin/administradores')}
-              variant="outline"
-              className="flex items-center gap-2 bg-gold/10 hover:bg-gold/20 border-gold/30 text-gold"
-            >
-              🔐 Administradores
-            </Button>
-            <Button
-              onClick={() => setLocation('/admin/affiliates')}
-              variant="outline"
-              className="flex items-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border-purple-600/30 text-purple-400"
-            >
-              👥 Gerenciar Afiliados
-            </Button>
-            <Button
-              onClick={() => setLocation('/admin/smtp-config')}
-              variant="outline"
-              className="flex items-center gap-2 bg-blue-600/20 hover:bg-blue-600/30 border-blue-600/30 text-blue-400"
-            >
-              ⚙️ SMTP
-            </Button>
-            <Button
-              onClick={() => setLocation('/admin/testimonials')}
-              variant="outline"
-              className="flex items-center gap-2 bg-purple-600/20 hover:bg-purple-600/30 border-purple-600/30 text-purple-400"
-            >
-              💬 Depoimentos
-            </Button>
-            <Button
-              onClick={handleLogout}
-              variant="outline"
-              className="flex items-center gap-2"
-            >
-              <LogOut size={18} />
-              Logout
-            </Button>
-          </div>
-        </div>
+        <div className="mb-8"><h1 className="text-3xl font-bold text-gold">Painel de Administração</h1><p className="text-gray-400 mt-1">Acompanhe e gerencie a operação da Affinity.</p></div>
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
