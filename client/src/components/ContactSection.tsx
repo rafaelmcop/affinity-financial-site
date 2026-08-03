@@ -91,8 +91,7 @@ export function ContactSection() {
           <a href={whatsappUrl} target="_blank" rel="noopener noreferrer">
             <Button
               size="lg"
-              variant="outline"
-              className="border-gold text-gold hover:bg-gold/10 font-bold px-8 py-6 text-lg flex items-center gap-2"
+              className="whatsapp-solid bg-green-600 hover:bg-green-700 border border-green-700 text-white font-bold px-8 py-6 text-lg flex items-center gap-2 shadow-lg shadow-green-950/20"
             >
               <MessageCircle size={20} />
               WhatsApp

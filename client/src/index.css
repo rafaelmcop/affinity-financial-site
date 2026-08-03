@@ -359,6 +359,17 @@
   color: #ffffff !important;
 }
 
+.public-light .whatsapp-solid {
+  background-color: #16a34a !important;
+  border-color: #15803d !important;
+  color: #ffffff !important;
+}
+
+.public-light .whatsapp-solid:hover {
+  background-color: #15803d !important;
+  color: #ffffff !important;
+}
+
 .shadow-gold\/20 {
   --tw-shadow-color: rgba(212, 175, 55, 0.2);
 }
