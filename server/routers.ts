@@ -4,6 +4,7 @@ import { adminProcedure, affiliateProcedure, publicProcedure, router } from './_
 import { adminAccounts, affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
+import { enforceRateLimit } from './rateLimit';
 
 const strongPassword = z.string()
   .min(6, 'A senha deve ter no mínimo 6 caracteres')
@@ -119,6 +120,7 @@ export const appRouter = router({
         password: z.string().min(6),
       }))
       .mutation(async ({ input, ctx }) => {
+        enforceRateLimit(ctx.req, 'affiliate-login', input.email, 8, 15 * 60 * 1000);
         const { getAffiliateByEmail } = await import('./db');
         const { verifyPassword } = await import('./auth');
 
@@ -235,6 +237,7 @@ export const appRouter = router({
         password: z.string().min(6),
       }))
       .mutation(async ({ input, ctx }) => {
+        enforceRateLimit(ctx.req, 'admin-login', input.email, 6, 15 * 60 * 1000);
         const { getDb } = await import('./db');
         const db = await getDb();
         const normalizedEmail = input.email.toLowerCase();
@@ -572,7 +575,8 @@ export const appRouter = router({
         email: z.string().email(),
         userType: z.enum(['admin', 'affiliate']),
       }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ input, ctx }) => {
+        enforceRateLimit(ctx.req, 'password-reset', input.email, 3, 60 * 60 * 1000);
         if (input.userType === 'admin') {
           if (!process.env.ADMIN_EMAIL || input.email.toLowerCase() !== process.env.ADMIN_EMAIL.toLowerCase()) {
             return { success: true };

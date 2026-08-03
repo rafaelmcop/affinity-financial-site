@@ -9,9 +9,9 @@ export const AFFILIATE_SESSION_COOKIE = "affinity_affiliate_session";
 const encoder = new TextEncoder();
 
 function getSigningKey() {
-  const secret = process.env.JWT_SECRET || process.env.ADMIN_PASSWORD;
-  if (!secret || secret.length < 12) {
-    throw new Error("JWT_SECRET or ADMIN_PASSWORD must be configured");
+  const secret = process.env.JWT_SECRET;
+  if (!secret || secret.length < 32) {
+    throw new Error("JWT_SECRET must be configured with at least 32 characters");
   }
   return createHash("sha256").update(encoder.encode(secret)).digest();
 }
