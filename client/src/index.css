@@ -347,6 +347,18 @@
   color: #e2bd62 !important;
 }
 
+.public-light a[aria-label="Contact us on WhatsApp"] {
+  background-color: #16a34a !important;
+  color: #ffffff !important;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 30px rgba(22, 163, 74, 0.32);
+}
+
+.public-light a[aria-label="Contact us on WhatsApp"]:hover {
+  background-color: #15803d !important;
+  color: #ffffff !important;
+}
+
 .shadow-gold\/20 {
   --tw-shadow-color: rgba(212, 175, 55, 0.2);
 }
