@@ -282,6 +282,7 @@
   color: #14233b !important;
 }
 
+.public-light [class~="text-gray-100"],
 .public-light [class~="text-gray-200"],
 .public-light [class~="text-gray-300"],
 .public-light [class~="text-gray-400"],
