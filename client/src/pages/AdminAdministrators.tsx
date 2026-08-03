@@ -51,8 +51,8 @@ export default function AdminAdministrators() {
           <h2 className="text-xl font-bold text-gold mb-4">Trocar minha senha</h2>
           <form onSubmit={handlePasswordChange} className="grid md:grid-cols-3 gap-3">
             <Input type="password" placeholder="Senha atual" value={passwords.currentPassword} onChange={e => setPasswords({ ...passwords, currentPassword: e.target.value })} required />
-            <Input type="password" placeholder="Nova senha (mínimo 12 caracteres)" value={passwords.newPassword} onChange={e => setPasswords({ ...passwords, newPassword: e.target.value })} minLength={12} required />
-            <Input type="password" placeholder="Confirmar nova senha" value={passwords.confirmation} onChange={e => setPasswords({ ...passwords, confirmation: e.target.value })} minLength={12} required />
+            <Input type="password" placeholder="Nova senha forte (mínimo 6)" value={passwords.newPassword} onChange={e => setPasswords({ ...passwords, newPassword: e.target.value })} minLength={6} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{6,}" title="Inclua maiúscula, minúscula, número e caractere especial" required />
+            <Input type="password" placeholder="Confirmar nova senha" value={passwords.confirmation} onChange={e => setPasswords({ ...passwords, confirmation: e.target.value })} minLength={6} required />
             <Button type="submit" className="bg-gold text-black md:col-span-3">Salvar nova senha</Button>
           </form>
         </Card>
@@ -62,7 +62,7 @@ export default function AdminAdministrators() {
           <form onSubmit={handleCreateAdmin} className="grid md:grid-cols-3 gap-3">
             <Input placeholder="Nome" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} required />
             <Input type="email" placeholder="E-mail" value={newAdmin.email} onChange={e => setNewAdmin({ ...newAdmin, email: e.target.value })} required />
-            <Input type="password" placeholder="Senha (mínimo 12 caracteres)" value={newAdmin.password} onChange={e => setNewAdmin({ ...newAdmin, password: e.target.value })} minLength={12} required />
+            <Input type="password" placeholder="Senha forte (mínimo 6)" value={newAdmin.password} onChange={e => setNewAdmin({ ...newAdmin, password: e.target.value })} minLength={6} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{6,}" title="Inclua maiúscula, minúscula, número e caractere especial" required />
             <Button type="submit" className="bg-gold text-black md:col-span-3">Criar administrador</Button>
           </form>
         </Card>

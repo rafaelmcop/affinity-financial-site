@@ -27,8 +27,8 @@ export default function AffiliateRegister() {
       return;
     }
 
-    if (formData.password.length < 6) {
-      toast.error('A senha deve ter no mínimo 6 caracteres');
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,}$/.test(formData.password)) {
+      toast.error('Use 6 ou mais caracteres, com maiúscula, minúscula, número e caractere especial');
       return;
     }
 
@@ -119,6 +119,9 @@ export default function AffiliateRegister() {
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="••••••••"
+                minLength={6}
+                pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{6,}"
+                title="Mínimo 6 caracteres, incluindo maiúscula, minúscula, número e caractere especial"
                 className="bg-black border-gold/30 text-white placeholder-gray-500"
                 required
               />
@@ -133,6 +136,7 @@ export default function AffiliateRegister() {
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                 placeholder="••••••••"
+                minLength={6}
                 className="bg-black border-gold/30 text-white placeholder-gray-500"
                 required
               />

@@ -5,6 +5,13 @@ import { adminAccounts, affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 
+const strongPassword = z.string()
+  .min(6, 'A senha deve ter no mínimo 6 caracteres')
+  .regex(/[A-Z]/, 'A senha deve conter uma letra maiúscula')
+  .regex(/[a-z]/, 'A senha deve conter uma letra minúscula')
+  .regex(/[0-9]/, 'A senha deve conter um número')
+  .regex(/[^A-Za-z0-9]/, 'A senha deve conter um caractere especial');
+
 // Notification routes (internal use)
 const notificationRouter = router({
   sendAffiliateRegistrationEmail: adminProcedure
@@ -71,7 +78,7 @@ export const appRouter = router({
     register: publicProcedure
       .input(z.object({
         email: z.string().email(),
-        password: z.string().min(6),
+        password: strongPassword,
         name: z.string().min(1),
         company: z.string().optional(),
         phone: z.string().optional(),
@@ -488,7 +495,7 @@ export const appRouter = router({
       }),
 
     resetAffiliatePasswordByAdmin: adminProcedure
-      .input(z.object({ affiliateId: z.number(), newPassword: z.string().min(6) }))
+      .input(z.object({ affiliateId: z.number(), newPassword: strongPassword }))
       .mutation(async ({ input }) => {
         const { resetAffiliatePasswordByAdmin } = await import('./db');
         await resetAffiliatePasswordByAdmin(input.affiliateId, input.newPassword);
@@ -509,7 +516,7 @@ export const appRouter = router({
     }),
 
     createAdmin: adminProcedure
-      .input(z.object({ email: z.string().email(), name: z.string().min(1), password: z.string().min(12) }))
+      .input(z.object({ email: z.string().email(), name: z.string().min(1), password: strongPassword }))
       .mutation(async ({ input }) => {
         const { getDb } = await import('./db');
         const db = await getDb();
@@ -522,7 +529,7 @@ export const appRouter = router({
       }),
 
     changeMyPassword: adminProcedure
-      .input(z.object({ currentPassword: z.string().min(6), newPassword: z.string().min(12) }))
+      .input(z.object({ currentPassword: z.string().min(6), newPassword: strongPassword }))
       .mutation(async ({ input, ctx }) => {
         const { getDb } = await import('./db');
         const db = await getDb();

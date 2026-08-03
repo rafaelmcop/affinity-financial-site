@@ -80,6 +80,10 @@ export default function AdminAffiliatesManagement() {
 
   const handleResetPassword = async () => {
     if (!selectedAffiliate || !newPassword) return;
+    if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,}$/.test(newPassword)) {
+      toast.error('Use 6 ou mais caracteres, com maiúscula, minúscula, número e caractere especial');
+      return;
+    }
     try {
       await resetPasswordMutation.mutateAsync({ 
         affiliateId: selectedAffiliate.id, 
@@ -209,6 +213,8 @@ export default function AdminAffiliatesManagement() {
                           <Input
                             type="password"
                             placeholder="Nova senha (mínimo 6 caracteres)"
+                            minLength={6}
+                            pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{6,}"
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
                             className="bg-black border-gold/30 text-white"
