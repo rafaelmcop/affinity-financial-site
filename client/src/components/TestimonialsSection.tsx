@@ -336,7 +336,10 @@ export function TestimonialsSection() {
 
                       {/* Content */}
                       <div className="md:w-2/3">
-                        <blockquote className="text-lg sm:text-xl text-gray-100 italic mb-6 leading-relaxed">
+                        <blockquote
+                          className="testimonial-quote text-lg sm:text-xl italic mb-6 leading-relaxed"
+                          style={{ color: '#14233b' }}
+                        >
                           "{testimonial.quote}"
                         </blockquote>
                         <div>

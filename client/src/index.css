@@ -405,3 +405,9 @@ html {
 ::-webkit-scrollbar-thumb:hover {
   background: #e6c547;
 }
+
+/* Keep testimonial quotes readable on the public light theme. */
+.public-light #testimonials .testimonial-quote {
+  color: #14233b !important;
+  opacity: 1 !important;
+}
