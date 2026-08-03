@@ -616,9 +616,12 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         enforceRateLimit(ctx.req, 'password-reset', input.email, 3, 60 * 60 * 1000);
         if (input.userType === 'admin') {
-          if (!process.env.ADMIN_EMAIL || input.email.toLowerCase() !== process.env.ADMIN_EMAIL.toLowerCase()) {
-            return { success: true };
-          }
+          const { getDb } = await import('./db');
+          const db = await getDb();
+          const normalizedEmail = input.email.toLowerCase();
+          const [account] = db ? await db.select().from(adminAccounts).where(eq(adminAccounts.email, normalizedEmail)).limit(1) : [];
+          const isEnvironmentAdmin = process.env.ADMIN_EMAIL?.toLowerCase() === normalizedEmail;
+          if (!account && !isEnvironmentAdmin) return { success: true };
         } else {
           const { getAffiliateByEmail } = await import('./db');
           if (!(await getAffiliateByEmail(input.email))) return { success: true };
@@ -645,6 +648,29 @@ export const appRouter = router({
         const { validatePasswordResetToken } = await import('./db');
         const result = await validatePasswordResetToken(input.token);
         return { valid: result !== null, userType: result?.userType };
+      }),
+
+    resetPassword: publicProcedure
+      .input(z.object({ token: z.string().min(32), newPassword: strongPassword }))
+      .mutation(async ({ input, ctx }) => {
+        enforceRateLimit(ctx.req, 'password-reset-submit', input.token.slice(0, 16), 5, 60 * 60 * 1000);
+        const { validatePasswordResetToken, markPasswordResetTokenAsUsed, updateAffiliatePassword, getDb } = await import('./db');
+        const tokenData = await validatePasswordResetToken(input.token);
+        if (!tokenData) throw new Error('Link inválido, expirado ou já utilizado');
+        const bcrypt = await import('bcryptjs');
+        const passwordHash = await bcrypt.hash(input.newPassword, 12);
+        if (tokenData.userType === 'affiliate') {
+          await updateAffiliatePassword(tokenData.email, passwordHash);
+        } else {
+          const db = await getDb();
+          if (!db) throw new Error('Database not available');
+          const email = tokenData.email.toLowerCase();
+          const [account] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, email)).limit(1);
+          if (account) await db.update(adminAccounts).set({ passwordHash, isActive: 1 }).where(eq(adminAccounts.id, account.id));
+          else await db.insert(adminAccounts).values({ email, name: 'Administrador', passwordHash, isActive: 1 });
+        }
+        await markPasswordResetTokenAsUsed(input.token);
+        return { success: true, userType: tokenData.userType };
       }),
   }),
 

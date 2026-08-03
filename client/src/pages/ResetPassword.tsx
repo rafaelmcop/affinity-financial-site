@@ -16,7 +16,8 @@ export default function ResetPassword() {
   const [tokenValid, setTokenValid] = useState(false);
   const [userType, setUserType] = useState<'admin' | 'affiliate' | null>(null);
 
-  const validateTokenQuery = trpc.passwordReset.validateToken.useQuery({ token }, { enabled: false });
+  const utils = trpc.useUtils();
+  const resetPasswordMutation = trpc.passwordReset.resetPassword.useMutation();
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -51,20 +52,14 @@ export default function ResetPassword() {
   const validateToken = async (tokenValue: string) => {
     setIsValidating(true);
     try {
-      // TODO: Implementar chamada ao backend para validar token
-      // const result = await trpc.passwordReset.validateToken.query({ token: tokenValue });
-      // if (result.valid) {
-      //   setTokenValid(true);
-      //   setUserType(result.userType);
-      // } else {
-      //   toast.error('Token inválido ou expirado');
-      //   setTimeout(() => setLocation('/admin/login'), 2000);
-      // }
-      
-      // Simulação para teste
+      const result = await utils.passwordReset.validateToken.fetch({ token: tokenValue });
+      if (!result.valid || !result.userType) {
+        setTokenValid(false);
+        toast.error('Link inválido ou expirado');
+        return;
+      }
       setTokenValid(true);
-      setUserType('affiliate');
-      toast.success('Token validado com sucesso');
+      setUserType(result.userType);
     } catch (error) {
       toast.error('Erro ao validar token');
       setTimeout(() => setLocation('/admin/login'), 2000);
@@ -152,16 +147,10 @@ export default function ResetPassword() {
 
     setIsSubmitting(true);
     try {
-      // TODO: Implementar chamada ao backend para redefinir senha
-      // const result = await trpc.passwordReset.resetPassword.mutate({
-      //   token,
-      //   newPassword: formData.password,
-      // });
-      
-      // Simulação para teste
+      const result = await resetPasswordMutation.mutateAsync({ token, newPassword: formData.password });
       toast.success('Senha redefinida com sucesso!');
       setTimeout(() => {
-        if (userType === 'admin') {
+        if (result.userType === 'admin') {
           setLocation('/admin/login');
         } else {
           setLocation('/afiliados/login');
