@@ -104,7 +104,8 @@ export default function AffiliateLogin() {
                   required
                 />
                 <button type="button" className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer" onClick={() => setShowForgotPassword(true)}>
-                  Esqueceu a senha?`n                </button>
+                  Esqueceu a senha?
+                </button>
               </div>
 
               <Button
