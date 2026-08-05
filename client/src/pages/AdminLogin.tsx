@@ -62,11 +62,15 @@ export default function AdminLogin() {
           <h1 className="text-3xl font-bold text-gold mb-2">Bem-vindo</h1>
           <p className="text-gray-400 mb-6">Faça login para acessar o painel</p>
 
-          <form onSubmit={handleLogin} className="space-y-4">
+          <form method="post" onSubmit={handleLogin} className="space-y-4">
             <div>
               <label className="block text-gold text-sm font-semibold mb-2">Email</label>
               <Input
+                id="admin-email"
+                name="email"
                 type="email"
+                autoComplete="username"
+                aria-label="Email"
                 placeholder="seu@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -78,24 +82,19 @@ export default function AdminLogin() {
             <div>
               <label className="block text-gold text-sm font-semibold mb-2">Senha</label>
               <Input
+                id="admin-password"
+                name="password"
                 type="password"
-                placeholder="••••••••"
+                autoComplete="current-password"
+                aria-label="Senha"
+                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleLogin(e as any);
-                  }
-                }}
                 className="bg-black border-gold/30 text-white"
                 required
               />
-              <p 
-                className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
-                onClick={() => setShowForgotPassword(true)}
-              >
-                Esqueceu a senha?
-              </p>
+              <button type="button" className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer" onClick={() => setShowForgotPassword(true)}>
+                Esqueceu a senha?`n              </button>
             </div>
 
             <Button
@@ -142,11 +141,15 @@ export default function AdminLogin() {
               } catch (error) {
                 toast.error(error instanceof Error ? error.message : 'Erro ao enviar email de recuperação');
               }
-            }} className="space-y-4">
+            }} method="post" className="space-y-4">
               <div>
                 <label className="block text-gold text-sm font-semibold mb-2">Email</label>
                 <Input
+                  id="admin-reset-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
+                  aria-label="Email"
                   placeholder="seu@email.com"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}
