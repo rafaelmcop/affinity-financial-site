@@ -55,13 +55,17 @@ export default function AffiliateRegister() {
           <h1 className="text-3xl font-bold text-gold mb-2">Affinity Financial</h1>
           <p className="text-gray-400 text-sm mb-8">Criar Conta de Afiliado</p>
 
-          <form onSubmit={handleRegister} className="space-y-4">
+          <form method="post" onSubmit={handleRegister} className="space-y-4">
             <div>
               <label className="block text-white text-sm font-medium mb-2">
                 Email *
               </label>
               <Input
+                id="register-email"
+                name="email"
                 type="email"
+                autoComplete="email"
+                aria-label="Email"
                 value={formData.email}
                 onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                 placeholder="seu@email.com"
@@ -75,7 +79,11 @@ export default function AffiliateRegister() {
                 Nome Completo *
               </label>
               <Input
+                id="register-name"
+                name="name"
                 type="text"
+                autoComplete="name"
+                aria-label="Nome completo"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 placeholder="Seu Nome"
@@ -89,7 +97,11 @@ export default function AffiliateRegister() {
                 Empresa
               </label>
               <Input
+                id="register-company"
+                name="organization"
                 type="text"
+                autoComplete="organization"
+                aria-label="Empresa"
                 value={formData.company}
                 onChange={(e) => setFormData({ ...formData, company: e.target.value })}
                 placeholder="Sua Empresa"
@@ -102,7 +114,11 @@ export default function AffiliateRegister() {
                 Telefone
               </label>
               <Input
+                id="register-phone"
+                name="phone"
                 type="tel"
+                autoComplete="tel"
+                aria-label="Telefone"
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 placeholder="(857) 421-8325"
@@ -115,7 +131,11 @@ export default function AffiliateRegister() {
                 Senha *
               </label>
               <Input
+                id="register-password"
+                name="password"
                 type="password"
+                autoComplete="new-password"
+                aria-label="Senha"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 placeholder="••••••••"
@@ -132,7 +152,11 @@ export default function AffiliateRegister() {
                 Confirmar Senha *
               </label>
               <Input
+                id="register-confirm-password"
+                name="confirmPassword"
                 type="password"
+                autoComplete="new-password"
+                aria-label="Confirmar senha"
                 value={formData.confirmPassword}
                 onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                 placeholder="••••••••"
