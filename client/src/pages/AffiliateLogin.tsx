@@ -68,13 +68,17 @@ export default function AffiliateLogin() {
             <h1 className="text-3xl font-bold text-gold mb-2">Bem-vindo</h1>
             <p className="text-gray-400 text-sm mb-8">Faça login para acessar o painel</p>
 
-            <form onSubmit={handleLogin} className="space-y-6">
+            <form method="post" onSubmit={handleLogin} className="space-y-6">
               <div>
                 <label className="block text-white text-sm font-medium mb-2">
                   Email
                 </label>
                 <Input
+                  id="affiliate-email"
+                  name="email"
                   type="email"
+                  autoComplete="username"
+                  aria-label="Email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="seu@email.com"
@@ -88,24 +92,20 @@ export default function AffiliateLogin() {
                   Senha
                 </label>
                 <Input
+                  id="affiliate-password"
+                  name="password"
                   type="password"
+                  autoComplete="current-password"
+                  aria-label="Senha"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      handleLogin(e as any);
-                    }
-                  }}
                   placeholder="••••••••"
                   className="bg-black border-gold/30 text-white placeholder-gray-500"
                   required
                 />
-                <p 
-                  className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer"
-                  onClick={() => setShowForgotPassword(true)}
-                >
+                <button type="button" className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer" onClick={() => setShowForgotPassword(true)}>
                   Esqueceu a senha?
-                </p>
+                </button>
               </div>
 
               <Button
@@ -156,11 +156,15 @@ export default function AffiliateLogin() {
               } catch (error) {
                 toast.error(error instanceof Error ? error.message : 'Erro ao enviar email de recuperação');
               }
-            }} className="space-y-4">
+            }} method="post" className="space-y-4">
               <div>
                 <label className="block text-gold text-sm font-semibold mb-2">Email</label>
                 <Input
+                  id="affiliate-reset-email"
+                  name="email"
                   type="email"
+                  autoComplete="email"
+                  aria-label="Email"
                   placeholder="seu@email.com"
                   value={forgotEmail}
                   onChange={(e) => setForgotEmail(e.target.value)}

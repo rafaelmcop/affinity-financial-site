@@ -12,7 +12,6 @@ const LanguageContext = createContext<LanguageContextType | undefined>(undefined
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
   const [language, setLanguage] = useState<Language>('pt');
-  const [isLoaded, setIsLoaded] = useState(true);
 
   useEffect(() => {
     // Load language from localStorage on mount
@@ -21,6 +20,15 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
       setLanguage(savedLanguage);
     }
   }, []);
+
+  useEffect(() => {
+    const documentLanguages: Record<Language, string> = {
+      pt: 'pt-BR',
+      en: 'en',
+      es: 'es',
+    };
+    document.documentElement.lang = documentLanguages[language];
+  }, [language]);
 
   const changeLanguage = (lang: Language) => {
     setLanguage(lang);
