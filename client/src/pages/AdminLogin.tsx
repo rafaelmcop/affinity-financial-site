@@ -87,14 +87,15 @@ export default function AdminLogin() {
                 type="password"
                 autoComplete="current-password"
                 aria-label="Senha"
-                placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                placeholder="Sua senha"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="bg-black border-gold/30 text-white"
                 required
               />
               <button type="button" className="text-gold text-xs mt-2 hover:text-gold/80 cursor-pointer" onClick={() => setShowForgotPassword(true)}>
-                Esqueceu a senha?`n              </button>
+                Esqueceu a senha?
+              </button>
             </div>
 
             <Button
