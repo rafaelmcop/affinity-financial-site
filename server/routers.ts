@@ -238,7 +238,9 @@ export const appRouter = router({
       }))
       .mutation(async ({ input, ctx }) => {
         enforceRateLimit(ctx.req, 'admin-login', input.email, 6, 15 * 60 * 1000);
-        if (process.env.NODE_ENV !== 'production' && input.email.toLowerCase() === 'admin@affinityfc.org' && input.password === 'Preview#2026') {
+        const previewAdminEmail = process.env.PREVIEW_ADMIN_EMAIL;
+        const previewAdminPassword = process.env.PREVIEW_ADMIN_PASSWORD;
+        if (process.env.NODE_ENV !== 'production' && previewAdminEmail && previewAdminPassword && input.email.toLowerCase() === previewAdminEmail.toLowerCase() && input.password === previewAdminPassword) {
           const { createAdminSession, ADMIN_SESSION_COOKIE } = await import('./sessionAuth');
           const sessionToken = await createAdminSession(input.email.toLowerCase());
           ctx.res.cookie(ADMIN_SESSION_COOKIE, sessionToken, {
