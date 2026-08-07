@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Maximize2, Star, PenLine } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { trpc } from '@/lib/trpc';
 
 export function TestimonialsSection() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const reviewLinkLabel = { pt: 'Deixe sua avaliação', en: 'Leave your review', es: 'Deja tu reseña' }[language];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -336,6 +337,9 @@ export function TestimonialsSection() {
 
                       {/* Content */}
                       <div className="md:w-2/3">
+                        <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating || 5} de 5 estrelas`}>
+                          {[1, 2, 3, 4, 5].map(star => <Star key={star} size={18} className={star <= (testimonial.rating || 5) ? 'fill-gold text-gold' : 'text-gray-500'} />)}
+                        </div>
                         <blockquote
                           className="testimonial-quote text-lg sm:text-xl italic mb-6 leading-relaxed"
                           style={{ color: '#14233b' }}
@@ -381,6 +385,12 @@ export function TestimonialsSection() {
                 aria-label={`Ir para depoimento ${index + 1}`}
               />
             ))}
+          </div>
+          <div className="text-center mt-10">
+            <a href="/avaliar" className="inline-flex items-center gap-2 rounded-full border border-gold/40 px-6 py-3 text-gold hover:bg-gold hover:text-black transition-colors font-semibold">
+              <PenLine size={18} />
+              {reviewLinkLabel}
+            </a>
           </div>
         </div>
       </div>

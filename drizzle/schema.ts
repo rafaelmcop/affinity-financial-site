@@ -148,6 +148,8 @@ export const testimonials = mysqlTable("testimonials", {
   name: varchar("name", { length: 255 }).notNull(),
   role: varchar("role", { length: 255 }).notNull(),
   quote: text("quote").notNull(),
+  email: varchar("email", { length: 320 }),
+  rating: int("rating").default(5).notNull(),
   mediaUrl: varchar("mediaUrl", { length: 500 }),
   mediaType: mysqlEnum("mediaType", ["image", "video"]).default("image"),
   thumbnailUrl: text("thumbnailUrl"),

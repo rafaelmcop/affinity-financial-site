@@ -25,6 +25,8 @@ export default function AdminTestimonials() {
     name: '',
     role: '',
     quote: '',
+    email: '',
+    rating: 5,
     mediaUrl: '',
     mediaType: 'image' as 'image' | 'video',
     language: 'pt' as 'pt' | 'en' | 'es',
@@ -118,6 +120,8 @@ export default function AdminTestimonials() {
           name: formData.name,
           role: formData.role,
           quote: formData.quote,
+          email: formData.email || undefined,
+          rating: formData.rating,
           mediaUrl: formData.mediaUrl || undefined,
           mediaType: formData.mediaType,
           language: formData.language,
@@ -130,6 +134,8 @@ export default function AdminTestimonials() {
           name: formData.name,
           role: formData.role,
           quote: formData.quote,
+          email: formData.email || undefined,
+          rating: formData.rating,
           mediaUrl: formData.mediaUrl || undefined,
           mediaType: formData.mediaType,
           language: formData.language,
@@ -142,6 +148,8 @@ export default function AdminTestimonials() {
         name: '',
         role: '',
         quote: '',
+        email: '',
+        rating: 5,
         mediaUrl: '',
         mediaType: 'image',
         language: 'pt',
@@ -163,6 +171,8 @@ export default function AdminTestimonials() {
       name: testimonial.name,
       role: testimonial.role,
       quote: testimonial.quote,
+      email: testimonial.email || '',
+      rating: testimonial.rating || 5,
       mediaUrl: testimonial.mediaUrl || '',
       mediaType: testimonial.mediaType || 'image',
       language: testimonial.language || 'pt',
@@ -199,6 +209,8 @@ export default function AdminTestimonials() {
       name: '',
       role: '',
       quote: '',
+      email: '',
+      rating: 5,
       mediaUrl: '',
       mediaType: 'image',
       language: 'pt',
@@ -260,6 +272,19 @@ export default function AdminTestimonials() {
                   className="bg-black border-gold/30 text-white"
                   required
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  type="email"
+                  placeholder="E-mail do cliente (privado)"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="bg-black border-gold/30 text-white"
+                />
+                <select value={formData.rating} onChange={(e) => setFormData({ ...formData, rating: Number(e.target.value) })} className="bg-black border border-gold/30 text-white px-4 py-2 rounded">
+                  {[5, 4, 3, 2, 1].map(value => <option key={value} value={value}>{value} estrela{value > 1 ? 's' : ''}</option>)}
+                </select>
               </div>
 
               <textarea
@@ -417,6 +442,7 @@ export default function AdminTestimonials() {
                 <tr className="border-b border-gold/20">
                   <th className="px-4 py-3 text-left text-gold font-semibold">Nome</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Cargo</th>
+                  <th className="px-4 py-3 text-left text-gold font-semibold">Nota</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Idioma</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Tipo</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Status</th>
@@ -426,7 +452,7 @@ export default function AdminTestimonials() {
               <tbody>
                 {testimonials.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
                       Nenhum depoimento encontrado
                     </td>
                   </tr>
@@ -435,6 +461,7 @@ export default function AdminTestimonials() {
                     <tr key={testimonial.id} className="border-b border-gold/10 hover:bg-gold/5">
                       <td className="px-4 py-3 text-white">{testimonial.name}</td>
                       <td className="px-4 py-3 text-white text-sm">{testimonial.role}</td>
+                      <td className="px-4 py-3 text-gold text-sm">{'★'.repeat(testimonial.rating || 5)}</td>
                       <td className="px-4 py-3 text-white text-sm">
                         <span className="px-2 py-1 rounded text-xs font-semibold bg-gold/20 text-gold">
                           {testimonial.language.toUpperCase()}
@@ -455,7 +482,7 @@ export default function AdminTestimonials() {
                             ? 'bg-green-600/20 text-green-400'
                             : 'bg-gray-600/20 text-gray-400'
                         }`}>
-                          {testimonial.isActive === 1 ? 'Ativo' : 'Inativo'}
+                          {testimonial.isActive === 1 ? 'Aprovado' : 'Aguardando aprovação'}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -474,7 +501,7 @@ export default function AdminTestimonials() {
                                 ? 'text-yellow-400 hover:text-yellow-300'
                                 : 'text-gray-400 hover:text-gray-300'
                             }`}
-                            title={testimonial.isActive === 1 ? 'Desativar' : 'Ativar'}
+                            title={testimonial.isActive === 1 ? 'Retirar do site' : 'Aprovar e publicar'}
                           >
                             {testimonial.isActive === 1 ? (
                               <Eye className="w-4 h-4" />

@@ -12,7 +12,7 @@ export function Logo({ size = 'medium' }: LogoProps) {
   return (
     <div className="flex items-center gap-3">
       <img
-        src="/manus-storage/ColorLOGO_SemFundo_9629c7aa.PNG"
+        src="/affinity-logo.png"
         alt="Affinity Financial Consulting Inc."
         className={sizeClasses[size]}
       />

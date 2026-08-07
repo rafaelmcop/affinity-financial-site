@@ -18,11 +18,13 @@ import ResetPassword from "./pages/ResetPassword";
 import AdminAffiliatesManagement from './pages/AdminAffiliatesManagement';
 import AdminTestimonials from './pages/AdminTestimonials';
 import AdminAdministrators from './pages/AdminAdministrators';
+import ReviewPage from './pages/ReviewPage';
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
+      <Route path="/avaliar" component={ReviewPage} />
       <Route path="/afiliados" component={AffiliateLogin} />
       <Route path="/afiliados/login" component={AffiliateLogin} />
       <Route path="/afiliados/registrar" component={AffiliateRegister} />

@@ -64,7 +64,7 @@ export function AboutSection() {
         {/* Hero Image */}
         <div className="mt-12">
           <img
-            src="/manus-storage/consulting_6e3f2f09.png"
+            src="/consulting.jpg"
             alt="Affinity Financial Consulting"
             className="w-full h-96 object-cover rounded-lg border-2 border-gold/30 shadow-lg shadow-gold/20"
           />

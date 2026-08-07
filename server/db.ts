@@ -7,6 +7,45 @@ import bcryptjs from 'bcryptjs';
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
+// Local preview fallback. Production always uses DATABASE_URL.
+let previewTestimonialId = 3;
+let previewTestimonials: any[] = [
+  {
+    id: 1,
+    name: 'Mariana S.',
+    role: 'Stoughton, MA',
+    quote: 'A equipe explicou cada detalhe com muita clareza e encontrou uma proteção que realmente cabe no orçamento da nossa família.',
+    email: null,
+    rating: 5,
+    mediaUrl: null,
+    mediaType: 'image',
+    thumbnailUrl: null,
+    isActive: 1,
+    language: 'pt',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 2,
+    name: 'Carlos R.',
+    role: 'Brockton, MA',
+    quote: 'Atendimento humano, transparente e em português. Hoje me sinto muito mais tranquilo sabendo que minha família está protegida.',
+    email: null,
+    rating: 5,
+    mediaUrl: null,
+    mediaType: 'image',
+    thumbnailUrl: null,
+    isActive: 1,
+    language: 'pt',
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+];
+
+function usePreviewData() {
+  return process.env.NODE_ENV !== 'production' && !process.env.DATABASE_URL;
+}
+
 // Lazily create the drizzle instance so local tooling can run without a DB.
 export async function getDb() {
   if (!_db && process.env.DATABASE_URL) {
@@ -500,20 +539,35 @@ export async function resetAffiliatePasswordByAdmin(affiliateId: number, newPass
 // Testimonials Functions
 export async function getAllTestimonials() {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return usePreviewData() ? [...previewTestimonials] : [];
   
   return await db.select().from(testimonials);
 }
 
 export async function getActiveTestimonials() {
   const db = await getDb();
-  if (!db) return [];
+  if (!db) return usePreviewData() ? previewTestimonials.filter(item => item.isActive === 1) : [];
   
   return await db.select().from(testimonials).where(eq(testimonials.isActive, 1));
 }
 
 export async function createTestimonial(data: InsertTestimonial): Promise<void> {
   const db = await getDb();
+  if (!db && usePreviewData()) {
+    previewTestimonials.push({
+      id: previewTestimonialId++,
+      mediaUrl: null,
+      thumbnailUrl: null,
+      mediaType: 'image',
+      isActive: 1,
+      rating: 5,
+      language: 'pt',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...data,
+    });
+    return;
+  }
   if (!db) throw new Error('Database not available');
   
   await db.insert(testimonials).values(data);
@@ -521,6 +575,10 @@ export async function createTestimonial(data: InsertTestimonial): Promise<void> 
 
 export async function updateTestimonial(id: number, data: Partial<InsertTestimonial>): Promise<void> {
   const db = await getDb();
+  if (!db && usePreviewData()) {
+    previewTestimonials = previewTestimonials.map(item => item.id === id ? { ...item, ...data, updatedAt: new Date() } : item);
+    return;
+  }
   if (!db) throw new Error('Database not available');
   
   await db.update(testimonials)
@@ -530,6 +588,10 @@ export async function updateTestimonial(id: number, data: Partial<InsertTestimon
 
 export async function deleteTestimonial(id: number): Promise<void> {
   const db = await getDb();
+  if (!db && usePreviewData()) {
+    previewTestimonials = previewTestimonials.filter(item => item.id !== id);
+    return;
+  }
   if (!db) throw new Error('Database not available');
   
   await db.delete(testimonials)
@@ -538,6 +600,10 @@ export async function deleteTestimonial(id: number): Promise<void> {
 
 export async function toggleTestimonialActive(id: number, isActive: boolean): Promise<void> {
   const db = await getDb();
+  if (!db && usePreviewData()) {
+    previewTestimonials = previewTestimonials.map(item => item.id === id ? { ...item, isActive: isActive ? 1 : 0, updatedAt: new Date() } : item);
+    return;
+  }
   if (!db) throw new Error('Database not available');
   
   await db.update(testimonials)
