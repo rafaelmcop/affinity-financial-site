@@ -5,6 +5,7 @@ import { adminAccounts, affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 import { enforceRateLimit } from './rateLimit';
+import { isValidMediaUrl } from '../shared/videoUrl';
 
 const strongPassword = z.string()
   .min(6, 'A senha deve ter no mínimo 6 caracteres')
@@ -738,6 +739,10 @@ export const appRouter = router({
         thumbnailUrl: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
+        const mediaType = input.mediaType || 'image';
+        if (!isValidMediaUrl(input.mediaUrl || '', mediaType)) {
+          throw new Error('O endereço da mídia não é válido.');
+        }
         const { createTestimonial } = await import('./db');
         await createTestimonial({
           name: input.name,
@@ -746,7 +751,7 @@ export const appRouter = router({
           email: input.email,
           rating: input.rating || 5,
           mediaUrl: input.mediaUrl,
-          mediaType: (input.mediaType || 'image') as 'image' | 'video',
+          mediaType,
           language: input.language,
           thumbnailUrl: input.thumbnailUrl,
         });
@@ -767,6 +772,9 @@ export const appRouter = router({
         thumbnailUrl: z.string().optional(),
       }))
       .mutation(async ({ input }) => {
+        if (input.mediaUrl !== undefined && input.mediaType && !isValidMediaUrl(input.mediaUrl, input.mediaType)) {
+          throw new Error('O endereço da mídia não é válido.');
+        }
         const { updateTestimonial } = await import('./db');
         const { id, ...data } = input;
         await updateTestimonial(id, data);

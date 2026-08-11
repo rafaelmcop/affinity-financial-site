@@ -1,3 +1,5 @@
+import { isValidMediaUrl } from "../shared/videoUrl";
+
 const SESSION_COOKIE = "affinity_admin_session";
 
 type JsonRecord = Record<string, unknown>;
@@ -165,8 +167,11 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
   }
 
   if (name === "testimonials.create") {
+    const mediaType = String(input.mediaType ?? "image") === "video" ? "video" : "image";
+    const mediaUrl = String(input.mediaUrl ?? "").trim();
+    if (!isValidMediaUrl(mediaUrl, mediaType)) return trpcError("O endereço da mídia não é válido.");
     await env.DB.prepare("INSERT INTO testimonials (name, role, quote, email, rating, mediaUrl, mediaType, language, thumbnailUrl, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)")
-      .bind(String(input.name), String(input.role), String(input.quote), input.email ?? null, Number(input.rating ?? 5), input.mediaUrl ?? null, String(input.mediaType ?? "image"), String(input.language ?? "pt"), input.thumbnailUrl ?? null).run();
+      .bind(String(input.name), String(input.role), String(input.quote), input.email ?? null, Number(input.rating ?? 5), mediaUrl || null, mediaType, String(input.language ?? "pt"), input.thumbnailUrl ?? null).run();
     return trpcResult({ success: true, message: "Depoimento adicionado com sucesso!" });
   }
 
@@ -174,8 +179,11 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const id = Number(input.id);
     const current = await env.DB.prepare("SELECT * FROM testimonials WHERE id = ?").bind(id).first<JsonRecord>();
     if (!current) return trpcError("Avaliação não encontrada", "NOT_FOUND", 404);
+    const mediaType = String(input.mediaType ?? current.mediaType) === "video" ? "video" : "image";
+    const mediaUrl = String(input.mediaUrl ?? current.mediaUrl ?? "").trim();
+    if (!isValidMediaUrl(mediaUrl, mediaType)) return trpcError("O endereço da mídia não é válido.");
     await env.DB.prepare("UPDATE testimonials SET name=?, role=?, quote=?, email=?, rating=?, mediaUrl=?, mediaType=?, language=?, thumbnailUrl=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?")
-      .bind(input.name ?? current.name, input.role ?? current.role, input.quote ?? current.quote, input.email ?? current.email, input.rating ?? current.rating, input.mediaUrl ?? current.mediaUrl, input.mediaType ?? current.mediaType, input.language ?? current.language, input.thumbnailUrl ?? current.thumbnailUrl, id).run();
+      .bind(input.name ?? current.name, input.role ?? current.role, input.quote ?? current.quote, input.email ?? current.email, input.rating ?? current.rating, mediaUrl || null, mediaType, input.language ?? current.language, input.thumbnailUrl ?? current.thumbnailUrl, id).run();
     return trpcResult({ success: true, message: "Depoimento atualizado com sucesso!" });
   }
 

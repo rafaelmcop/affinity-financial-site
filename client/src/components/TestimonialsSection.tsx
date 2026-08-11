@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Maximize2, Star, PenLine } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { trpc } from '@/lib/trpc';
+import { getVideoSource } from '@shared/videoUrl';
 
 export function TestimonialsSection() {
   const { t, language } = useLanguage();
@@ -100,6 +101,7 @@ export function TestimonialsSection() {
       if (
         testimonial.mediaType === 'video' &&
         testimonial.mediaUrl &&
+        getVideoSource(testimonial.mediaUrl)?.kind === 'file' &&
         !processedIndices.has(index) &&
         !loadedThumbnails.has(index)
       ) {
@@ -124,7 +126,7 @@ export function TestimonialsSection() {
       setTestimonials(shuffled);
       
       // Load only the first testimonial thumbnail initially (lazy loading)
-      if (shuffled.length > 0 && shuffled[0].mediaType === 'video' && shuffled[0].mediaUrl) {
+      if (shuffled.length > 0 && shuffled[0].mediaType === 'video' && shuffled[0].mediaUrl && getVideoSource(shuffled[0].mediaUrl)?.kind === 'file') {
         setIsLoadingThumbnails(true);
         extractVideoThumbnail(shuffled[0].mediaUrl, 0, () => {
           setIsLoadingThumbnails(false);
@@ -288,35 +290,45 @@ export function TestimonialsSection() {
                           <div className="absolute inset-0 bg-gradient-to-r from-gray-800 via-gray-700 to-gray-800 rounded-lg border-2 border-gold/30 animate-pulse z-10" />
                         )}
                         
-                        {testimonial.mediaType === 'video' && testimonial.mediaUrl ? (
-                          <div className={`relative transition-opacity duration-500 ${isThumbnailLoading ? 'opacity-50' : 'opacity-100'}`}>
-                            <video
-                              ref={(el) => {
-                                if (el) videoRefs.current[index] = el;
-                              }}
-                              controls
-                              className="w-full h-64 object-cover rounded-lg border-2 border-gold/30 bg-black"
-                              poster={currentThumbnail || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23000%22 width=%22100%22 height=%22100%22/%3E%3Cpolygon fill=%22%23d4af37%22 points=%2235,25 35,75 75,50%22/%3E%3C/svg%3E'}
-                              controlsList="nodownload"
-                              onError={(e) => {
-                                console.error('Erro ao carregar vídeo:', testimonial.mediaUrl, e);
-                              }}
-                            >
-                              <source src={encodeURI(testimonial.mediaUrl)} type="video/mp4" />
-                              <source src={encodeURI(testimonial.mediaUrl.replace(/\.mp4$/i, '.webm'))} type="video/webm" />
-                              <source src={encodeURI(testimonial.mediaUrl.replace(/\.mp4$/i, '.ogv'))} type="video/ogg" />
-                              Seu navegador não suporta a tag de vídeo. Por favor, atualize seu navegador.
-                            </video>
-                            
-                            {/* Fullscreen Button */}
-                            <button
-                              onClick={() => toggleFullscreen(index)}
-                              className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-gold/70 text-gold rounded-lg transition-all duration-300 opacity-0 group-hover:opacity-100"
-                              title="Tela inteira"
-                            >
-                              <Maximize2 size={20} />
-                            </button>
-                          </div>
+                        {testimonial.mediaType === 'video' && testimonial.mediaUrl && getVideoSource(testimonial.mediaUrl) ? (
+                          (() => {
+                            const source = getVideoSource(testimonial.mediaUrl)!;
+                            return (
+                              <div className={`relative transition-opacity duration-500 ${isThumbnailLoading && source.kind === 'file' ? 'opacity-50' : 'opacity-100'}`}>
+                                {source.kind === 'file' ? (
+                                  <>
+                                    <video
+                                      ref={(el) => { if (el) videoRefs.current[index] = el; }}
+                                      controls
+                                      playsInline
+                                      preload="metadata"
+                                      className="w-full h-64 object-cover rounded-lg border-2 border-gold/30 bg-black"
+                                      poster={currentThumbnail || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23000%22 width=%22100%22 height=%22100%22/%3E%3Cpolygon fill=%22%23d4af37%22 points=%2235,25 35,75 75,50%22/%3E%3C/svg%3E'}
+                                      controlsList="nodownload"
+                                      src={source.url}
+                                    />
+                                    <button
+                                      onClick={() => toggleFullscreen(index)}
+                                      className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-gold/70 text-gold rounded-lg transition-all duration-300 opacity-0 group-hover:opacity-100"
+                                      title="Tela inteira"
+                                    >
+                                      <Maximize2 size={20} />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <iframe
+                                    src={source.embedUrl}
+                                    title={`Vídeo de ${testimonial.name}`}
+                                    className="w-full h-64 rounded-lg border-2 border-gold/30 bg-black"
+                                    loading="lazy"
+                                    allow="autoplay; fullscreen; picture-in-picture"
+                                    allowFullScreen
+                                    referrerPolicy="strict-origin-when-cross-origin"
+                                  />
+                                )}
+                              </div>
+                            );
+                          })()
                         ) : testimonial.mediaUrl ? (
                           <img
                             src={encodeURI(testimonial.mediaUrl)}

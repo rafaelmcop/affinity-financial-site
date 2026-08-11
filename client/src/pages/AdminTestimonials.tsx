@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { Plus, Trash2, Edit2, Eye, EyeOff, Upload, Sliders } from 'lucide-react';
 import Header from '@/components/Header';
 import AdminSidebar from '@/components/AdminSidebar';
+import { getVideoSource, isValidMediaUrl } from '@shared/videoUrl';
 
 export default function AdminTestimonials() {
   const [, setLocation] = useLocation();
@@ -112,6 +113,12 @@ export default function AdminTestimonials() {
 
   const handleAddOrUpdateTestimonial = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isValidMediaUrl(formData.mediaUrl, formData.mediaType)) {
+      toast.error(formData.mediaType === 'video'
+        ? 'Use um link HTTPS do Vimeo, YouTube ou de um arquivo MP4/WebM.'
+        : 'Use um endereço HTTPS válido para a imagem.');
+      return;
+    }
     try {
       if (editingId) {
         // Update existing
@@ -224,6 +231,8 @@ export default function AdminTestimonials() {
   };
 
   const testimonials = testimonialsQuery.data || [];
+  const videoSource = formData.mediaType === 'video' ? getVideoSource(formData.mediaUrl) : null;
+  const isEmbeddedVideo = videoSource?.kind === 'vimeo' || videoSource?.kind === 'youtube';
 
   return (
     <div className="min-h-screen bg-black lg:pl-64">
@@ -296,6 +305,29 @@ export default function AdminTestimonials() {
                 required
               />
 
+              <div className="space-y-2">
+                <label htmlFor="testimonial-media-url" className="block text-sm font-semibold text-gold">
+                  Link da imagem ou do vídeo
+                </label>
+                <Input
+                  id="testimonial-media-url"
+                  type="url"
+                  inputMode="url"
+                  placeholder="Ex.: https://vimeo.com/123456789"
+                  value={formData.mediaUrl}
+                  onChange={(e) => {
+                    const mediaUrl = e.target.value;
+                    const detectedVideo = getVideoSource(mediaUrl);
+                    setFormData({ ...formData, mediaUrl, mediaType: detectedVideo ? 'video' : formData.mediaType });
+                    if (detectedVideo) setSelectedThumbnail(null);
+                  }}
+                  className="bg-black border-gold/30 text-white placeholder:text-gray-500"
+                />
+                <p className="text-sm text-gray-300">
+                  Aceita Vimeo, YouTube, MP4, WebM ou uma imagem hospedada em endereço HTTPS.
+                </p>
+              </div>
+
               {/* File Upload Section */}
               <div className="border-2 border-dashed border-gold/30 rounded-lg p-6 text-center">
                 <div className="flex flex-col items-center gap-3">
@@ -332,18 +364,32 @@ export default function AdminTestimonials() {
                   <p className="text-gold text-sm font-semibold mb-2">Mídia Selecionada:</p>
                   <p className="text-gray-300 text-sm break-all">{formData.mediaUrl}</p>
                   
-                  {formData.mediaType === 'video' && (
+                  {formData.mediaType === 'video' && videoSource && (
                     <div className="mt-4 space-y-4">
-                      <video
-                        ref={videoPreviewRef}
-                        src={formData.mediaUrl}
-                        onLoadedMetadata={handleVideoLoadedMetadata}
-                        onSeeked={handleVideoSeeked}
-                        className="w-full h-40 rounded bg-black"
-                      />
+                      {isEmbeddedVideo ? (
+                        <iframe
+                          src={videoSource.embedUrl}
+                          title="Prévia do vídeo do depoimento"
+                          className="w-full h-64 rounded bg-black border border-gold/20"
+                          allow="autoplay; fullscreen; picture-in-picture"
+                          allowFullScreen
+                          referrerPolicy="strict-origin-when-cross-origin"
+                        />
+                      ) : (
+                        <video
+                          ref={videoPreviewRef}
+                          src={videoSource.url}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          onLoadedMetadata={handleVideoLoadedMetadata}
+                          onSeeked={handleVideoSeeked}
+                          className="w-full h-40 rounded bg-black"
+                        />
+                      )}
                       
                       {/* Frame Selector */}
-                      <div className="bg-black border border-gold/20 rounded p-4">
+                      {!isEmbeddedVideo && <div className="bg-black border border-gold/20 rounded p-4">
                         <div className="flex items-center gap-2 mb-3">
                           <Sliders className="w-4 h-4 text-gold" />
                           <p className="text-gold font-semibold text-sm">Selecionar Quadro para Capa</p>
@@ -376,7 +422,7 @@ export default function AdminTestimonials() {
                             />
                           </div>
                         )}
-                      </div>
+                      </div>}
 
                       {/* Hidden Canvas for Thumbnail Extraction */}
                       <canvas
@@ -386,6 +432,12 @@ export default function AdminTestimonials() {
                         height={180}
                       />
                     </div>
+                  )}
+
+                  {formData.mediaType === 'video' && !videoSource && (
+                    <p className="mt-3 text-sm text-red-300">
+                      Link não reconhecido. Cole um link HTTPS do Vimeo, YouTube ou de um arquivo MP4/WebM.
+                    </p>
                   )}
                   
                   {formData.mediaType === 'image' && (
