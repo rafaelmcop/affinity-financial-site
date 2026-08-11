@@ -733,6 +733,7 @@ export const appRouter = router({
         quote: z.string().min(1),
         email: z.string().email().optional(),
         rating: z.number().int().min(1).max(5).optional(),
+        amountReceived: z.number().min(0).max(9999999999.99).default(0),
         mediaUrl: z.string().optional(),
         mediaType: z.enum(['image', 'video']).optional(),
         language: z.enum(['pt', 'en', 'es']).default('pt'),
@@ -750,6 +751,7 @@ export const appRouter = router({
           quote: input.quote,
           email: input.email,
           rating: input.rating || 5,
+          amountReceived: input.amountReceived.toFixed(2),
           mediaUrl: input.mediaUrl,
           mediaType,
           language: input.language,
@@ -766,6 +768,7 @@ export const appRouter = router({
         quote: z.string().optional(),
         email: z.string().email().optional(),
         rating: z.number().int().min(1).max(5).optional(),
+        amountReceived: z.number().min(0).max(9999999999.99).optional(),
         mediaUrl: z.string().optional(),
         mediaType: z.enum(['image', 'video']).optional(),
         language: z.enum(['pt', 'en', 'es']).optional(),
@@ -776,8 +779,9 @@ export const appRouter = router({
           throw new Error('O endereço da mídia não é válido.');
         }
         const { updateTestimonial } = await import('./db');
-        const { id, ...data } = input;
-        await updateTestimonial(id, data);
+        const { id, amountReceived, ...data } = input;
+        const updateData = amountReceived === undefined ? data : { ...data, amountReceived: amountReceived.toFixed(2) };
+        await updateTestimonial(id, updateData);
         return { success: true, message: 'Depoimento atualizado com sucesso!' };
       }),
 

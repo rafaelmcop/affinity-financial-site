@@ -28,6 +28,7 @@ export default function AdminTestimonials() {
     quote: '',
     email: '',
     rating: 5,
+    amountReceived: 0,
     mediaUrl: '',
     mediaType: 'image' as 'image' | 'video',
     language: 'pt' as 'pt' | 'en' | 'es',
@@ -129,6 +130,7 @@ export default function AdminTestimonials() {
           quote: formData.quote,
           email: formData.email || undefined,
           rating: formData.rating,
+          amountReceived: formData.amountReceived,
           mediaUrl: formData.mediaUrl || undefined,
           mediaType: formData.mediaType,
           language: formData.language,
@@ -143,6 +145,7 @@ export default function AdminTestimonials() {
           quote: formData.quote,
           email: formData.email || undefined,
           rating: formData.rating,
+          amountReceived: formData.amountReceived,
           mediaUrl: formData.mediaUrl || undefined,
           mediaType: formData.mediaType,
           language: formData.language,
@@ -157,6 +160,7 @@ export default function AdminTestimonials() {
         quote: '',
         email: '',
         rating: 5,
+        amountReceived: 0,
         mediaUrl: '',
         mediaType: 'image',
         language: 'pt',
@@ -180,6 +184,7 @@ export default function AdminTestimonials() {
       quote: testimonial.quote,
       email: testimonial.email || '',
       rating: testimonial.rating || 5,
+      amountReceived: Number(testimonial.amountReceived) || 0,
       mediaUrl: testimonial.mediaUrl || '',
       mediaType: testimonial.mediaType || 'image',
       language: testimonial.language || 'pt',
@@ -218,6 +223,7 @@ export default function AdminTestimonials() {
       quote: '',
       email: '',
       rating: 5,
+      amountReceived: 0,
       mediaUrl: '',
       mediaType: 'image',
       language: 'pt',
@@ -281,6 +287,25 @@ export default function AdminTestimonials() {
                   className="bg-black border-gold/30 text-white"
                   required
                 />
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="testimonial-amount-received" className="block text-sm font-semibold text-gold">
+                  Valor recebido pelo beneficiário (US$)
+                </label>
+                <Input
+                  id="testimonial-amount-received"
+                  type="number"
+                  min="0"
+                  max="9999999999.99"
+                  step="0.01"
+                  value={formData.amountReceived}
+                  onChange={(e) => setFormData({ ...formData, amountReceived: Math.max(0, Number(e.target.value) || 0) })}
+                  className="bg-black border-gold/30 text-white"
+                />
+                <p className="text-sm text-gray-300">
+                  Digite 0 para não mostrar essa informação no depoimento público.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -495,6 +520,7 @@ export default function AdminTestimonials() {
                   <th className="px-4 py-3 text-left text-gold font-semibold">Nome</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Cargo</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Nota</th>
+                  <th className="px-4 py-3 text-left text-gold font-semibold">Valor recebido</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Idioma</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Tipo</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Status</th>
@@ -504,7 +530,7 @@ export default function AdminTestimonials() {
               <tbody>
                 {testimonials.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
                       Nenhum depoimento encontrado
                     </td>
                   </tr>
@@ -514,6 +540,11 @@ export default function AdminTestimonials() {
                       <td className="px-4 py-3 text-white">{testimonial.name}</td>
                       <td className="px-4 py-3 text-white text-sm">{testimonial.role}</td>
                       <td className="px-4 py-3 text-gold text-sm">{'★'.repeat(testimonial.rating || 5)}</td>
+                      <td className="px-4 py-3 text-white text-sm">
+                        {Number(testimonial.amountReceived) > 0
+                          ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(testimonial.amountReceived))
+                          : 'Oculto'}
+                      </td>
                       <td className="px-4 py-3 text-white text-sm">
                         <span className="px-2 py-1 rounded text-xs font-semibold bg-gold/20 text-gold">
                           {testimonial.language.toUpperCase()}

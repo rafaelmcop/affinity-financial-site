@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS testimonials (
   quote TEXT NOT NULL,
   email TEXT,
   rating INTEGER NOT NULL DEFAULT 5 CHECK (rating BETWEEN 1 AND 5),
+  amountReceived REAL NOT NULL DEFAULT 0 CHECK (amountReceived >= 0),
   mediaUrl TEXT,
   mediaType TEXT NOT NULL DEFAULT 'image' CHECK (mediaType IN ('image', 'video')),
   thumbnailUrl TEXT,

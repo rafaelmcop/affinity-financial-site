@@ -7,6 +7,8 @@ import { getVideoSource } from '@shared/videoUrl';
 export function TestimonialsSection() {
   const { t, language } = useLanguage();
   const reviewLinkLabel = { pt: 'Deixe sua avaliação', en: 'Leave your review', es: 'Deja tu reseña' }[language];
+  const amountLabel = { pt: 'Valor recebido pelo beneficiário', en: 'Benefit received', es: 'Valor recibido por el beneficiario' }[language];
+  const amountLocale = { pt: 'pt-BR', en: 'en-US', es: 'es-US' }[language];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -365,6 +367,14 @@ export function TestimonialsSection() {
                           <p className="text-sm text-gray-400">
                             {testimonial.role}
                           </p>
+                          {Number(testimonial.amountReceived) > 0 && (
+                            <div className="mt-4 inline-flex flex-col rounded-lg border border-gold/30 bg-gold/10 px-4 py-3">
+                              <span className="text-xs uppercase tracking-wide text-gray-300">{amountLabel}</span>
+                              <span className="text-xl font-bold text-gold">
+                                {new Intl.NumberFormat(amountLocale, { style: 'currency', currency: 'USD' }).format(Number(testimonial.amountReceived))}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
