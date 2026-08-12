@@ -16,8 +16,8 @@ export default function Home() {
       <ServicesSection />
       <TestimonialsSection />
       <AboutSection />
-      <ContactSection />
       <ReviewsBanner />
+      <ContactSection />
       <Footer />
       <FloatingWhatsApp />
     </div>
