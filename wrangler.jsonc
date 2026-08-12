@@ -19,10 +19,20 @@
   ],
   "vars": {
     "ADMIN_EMAIL": "preview@affinityfc.org",
-    "VITE_FRONTEND_URL": "https://affinity-financial-staging.us-rafael.workers.dev"
+    "VITE_FRONTEND_URL": "https://www.affinityfc.org"
   },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
-  }
+  },
+  "routes": [
+    {
+      "pattern": "www.affinityfc.org/*",
+      "zone_name": "affinityfc.org"
+    },
+    {
+      "pattern": "affinityfc.org/*",
+      "zone_name": "affinityfc.org"
+    }
+  ]
 }

@@ -455,6 +455,10 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
 export default {
   async fetch(request, env): Promise<Response> {
     const url = new URL(request.url);
+    if (url.hostname === "affinityfc.org") {
+      url.hostname = "www.affinityfc.org";
+      return Response.redirect(url.toString(), 301);
+    }
     if (!url.pathname.startsWith("/api/trpc/")) return env.ASSETS.fetch(request);
 
     try {
