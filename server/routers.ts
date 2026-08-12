@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { adminProcedure, affiliateProcedure, publicProcedure, router } from './_core/trpc';
 import { adminAccounts, affiliates } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
@@ -265,7 +265,7 @@ export const appRouter = router({
               ...getSessionCookieOptions(ctx.req),
               maxAge: 8 * 60 * 60 * 1000,
             });
-            return { id: account.id, email: account.email, name: account.name, role: 'admin' as const };
+            return { id: account.id, email: account.email, name: account.name, phone: account.phone, adminRole: account.adminRole, role: 'admin' as const };
           }
         }
 
@@ -296,6 +296,7 @@ export const appRouter = router({
           id: 1,
           email: adminEmail,
           name: 'Administrador',
+          adminRole: 'master' as const,
           role: 'admin',
         };
       }),
@@ -555,30 +556,72 @@ export const appRouter = router({
         return { success: true, message: 'Senha redefinida com sucesso!' };
       }),
 
-    listAdmins: adminProcedure.query(async () => {
+    listAdmins: adminProcedure.query(async ({ ctx }) => {
       const { getDb } = await import('./db');
       const db = await getDb();
       if (!db) throw new Error('Database not available');
-      return db.select({
+      const currentEmail = ctx.adminEmail.toLowerCase();
+      const [currentAccount] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, currentEmail)).limit(1);
+      const currentRole = currentAccount?.adminRole ?? (currentEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
+      const admins = await db.select({
         id: adminAccounts.id,
         email: adminAccounts.email,
         name: adminAccounts.name,
+        phone: adminAccounts.phone,
+        adminRole: adminAccounts.adminRole,
         isActive: adminAccounts.isActive,
         createdAt: adminAccounts.createdAt,
       }).from(adminAccounts);
+      return { admins, currentEmail, currentRole };
     }),
 
     createAdmin: adminProcedure
-      .input(z.object({ email: z.string().email(), name: z.string().min(1), password: strongPassword }))
-      .mutation(async ({ input }) => {
+      .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
+      .mutation(async ({ input, ctx }) => {
         const { getDb } = await import('./db');
         const db = await getDb();
         if (!db) throw new Error('Database not available');
+        const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase())).limit(1);
+        const actorRole = actor?.adminRole ?? (ctx.adminEmail.toLowerCase() === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
+        if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode criar administradores');
         const passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
         await db.insert(adminAccounts).values({
-          email: input.email.toLowerCase(), name: input.name, passwordHash, isActive: 1,
+          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, adminRole: input.adminRole, passwordHash, isActive: 1,
         });
         return { success: true };
+      }),
+
+    updateAdmin: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        email: z.string().email(),
+        name: z.string().min(1),
+        phone: z.string().max(30).optional(),
+        adminRole: z.enum(['master', 'standard']),
+        password: z.union([strongPassword, z.literal('')]).optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db');
+        const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, actorEmail)).limit(1);
+        const actorRole = actor?.adminRole ?? (actorEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
+        const [target] = await db.select().from(adminAccounts).where(eq(adminAccounts.id, input.id)).limit(1);
+        if (!target) throw new Error('Administrador não encontrado');
+        const isSelf = target.email.toLowerCase() === actorEmail;
+        if (actorRole !== 'master' && !isSelf) throw new Error('Administrador padrão só pode alterar a própria conta');
+        if (actorRole !== 'master' && input.adminRole !== target.adminRole) throw new Error('Somente um administrador mestre pode alterar níveis de acesso');
+        if (target.adminRole === 'master' && input.adminRole !== 'master') {
+          const masters = await db.select({ id: adminAccounts.id }).from(adminAccounts).where(and(eq(adminAccounts.adminRole, 'master'), eq(adminAccounts.isActive, 1)));
+          if (masters.length <= 1) throw new Error('Não é possível rebaixar o último administrador mestre');
+        }
+        const changes: Partial<typeof adminAccounts.$inferInsert> = {
+          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, adminRole: input.adminRole,
+        };
+        if (input.password) changes.passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
+        await db.update(adminAccounts).set(changes).where(eq(adminAccounts.id, input.id));
+        return { success: true, emailChanged: isSelf && target.email.toLowerCase() !== input.email.toLowerCase() };
       }),
 
     changeMyPassword: adminProcedure
@@ -610,8 +653,16 @@ export const appRouter = router({
         const { getDb } = await import('./db');
         const db = await getDb();
         if (!db) throw new Error('Database not available');
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, actorEmail)).limit(1);
+        const actorRole = actor?.adminRole ?? (actorEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
+        if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode bloquear ou ativar administradores');
         const [target] = await db.select().from(adminAccounts).where(eq(adminAccounts.id, input.id)).limit(1);
         if (target?.email === ctx.adminEmail) throw new Error('Você não pode bloquear sua própria conta');
+        if (target?.adminRole === 'master' && !input.isActive) {
+          const activeMasters = await db.select({ id: adminAccounts.id }).from(adminAccounts).where(and(eq(adminAccounts.adminRole, 'master'), eq(adminAccounts.isActive, 1)));
+          if (activeMasters.length <= 1) throw new Error('Não é possível bloquear o último administrador mestre');
+        }
         await db.update(adminAccounts).set({ isActive: input.isActive ? 1 : 0 }).where(eq(adminAccounts.id, input.id));
         return { success: true };
       }),

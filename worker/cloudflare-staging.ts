@@ -90,6 +90,14 @@ async function getAdminEmail(request: Request, env: Env) {
   return session?.type === "admin" && typeof session.email === "string" ? session.email : null;
 }
 
+async function getAdminAccess(email: string, env: Env) {
+  const account = await env.DB.prepare("SELECT id,email,name,phone,adminRole,isActive FROM adminAccounts WHERE lower(email)=?").bind(email.toLowerCase()).first<JsonRecord>();
+  return {
+    account,
+    role: String(account?.adminRole ?? (email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "master" : "standard")),
+  };
+}
+
 async function getAffiliateId(request: Request, env: Env) {
   const session = await getSession(request, env, AFFILIATE_COOKIE);
   return session?.type === "affiliate" ? Number(session.affiliateId) : null;
@@ -137,7 +145,9 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
 
   if (name === "auth.me") {
     const email = await getAdminEmail(request, env);
-    return trpcResult(email ? { id: 1, email, name: "Administrador", role: "admin" } : null);
+    if (!email) return trpcResult(null);
+    const access = await getAdminAccess(email, env);
+    return trpcResult({ id: Number(access.account?.id || 0), email, name: access.account?.name || "Administrador", phone: access.account?.phone || null, adminRole: access.role, role: "admin" });
   }
 
   if (name === "auth.logout") {
@@ -164,7 +174,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     }
     const session = await createSession({ type: "admin", email }, env, 28800);
     return {
-      body: trpcResult({ id: Number(account?.id || 0), email, name: account?.name || "Administrador", role: "admin" }),
+      body: trpcResult({ id: Number(account?.id || 0), email, name: account?.name || "Administrador", phone: account?.phone || null, adminRole: account?.adminRole || (email === env.ADMIN_EMAIL.toLowerCase() ? "master" : "standard"), role: "admin" }),
       cookies: [`${ADMIN_COOKIE}=${session}; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`],
     };
   }
@@ -280,6 +290,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
 
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail) return trpcError("Acesso administrativo necessário", "UNAUTHORIZED", 401);
+  const adminAccess = await getAdminAccess(adminEmail, env);
 
   if (name === "admin.getStats") {
     const affiliates = await env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending FROM affiliates").first<JsonRecord>();
@@ -355,21 +366,56 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
   }
 
   if (name === "admin.listAdmins") {
-    const rows = await env.DB.prepare("SELECT id,email,name,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC").all<JsonRecord>();
-    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), isActive: Number(row.isActive) })));
+    const rows = await env.DB.prepare("SELECT id,email,name,phone,adminRole,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC").all<JsonRecord>();
+    return trpcResult({
+      admins: rows.results.map(row => ({ ...row, id: Number(row.id), isActive: Number(row.isActive) })),
+      currentEmail: adminEmail.toLowerCase(),
+      currentRole: adminAccess.role,
+    });
   }
 
   if (name === "admin.createAdmin") {
+    if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode criar administradores", "FORBIDDEN", 403);
     const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? "");
-    if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password)) return trpcError("Revise os dados do administrador");
-    try { await env.DB.prepare("INSERT INTO adminAccounts (email,name,passwordHash,isActive) VALUES (?,?,?,1)").bind(email, String(input.name), await bcrypt.hash(password, 12)).run(); }
+    const role = String(input.adminRole ?? "standard");
+    if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password) || !["master", "standard"].includes(role)) return trpcError("Revise os dados do administrador");
+    try { await env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,1)").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, role, await bcrypt.hash(password, 12)).run(); }
     catch { return trpcError("Este email já está cadastrado"); }
     return trpcResult({ success: true });
   }
 
+  if (name === "admin.updateAdmin") {
+    const id = Number(input.id);
+    const target = await env.DB.prepare("SELECT * FROM adminAccounts WHERE id=?").bind(id).first<JsonRecord>();
+    if (!target) return trpcError("Administrador não encontrado", "NOT_FOUND", 404);
+    const isSelf = String(target.email).toLowerCase() === adminEmail.toLowerCase();
+    if (adminAccess.role !== "master" && !isSelf) return trpcError("Administrador padrão só pode alterar a própria conta", "FORBIDDEN", 403);
+    const email = String(input.email ?? "").trim().toLowerCase();
+    const adminRole = String(input.adminRole ?? target.adminRole);
+    const password = String(input.password ?? "");
+    if (!validEmail(email) || !String(input.name ?? "").trim() || !["master", "standard"].includes(adminRole)) return trpcError("Revise os dados do administrador");
+    if (adminAccess.role !== "master" && adminRole !== String(target.adminRole)) return trpcError("Somente um administrador mestre pode alterar níveis de acesso", "FORBIDDEN", 403);
+    if (String(target.adminRole) === "master" && adminRole !== "master") {
+      const masters = await env.DB.prepare("SELECT COUNT(*) total FROM adminAccounts WHERE adminRole='master' AND isActive=1").first<JsonRecord>();
+      if (Number(masters?.total || 0) <= 1) return trpcError("Não é possível rebaixar o último administrador mestre");
+    }
+    if (password && !validStrongPassword(password)) return trpcError("A nova senha não atende aos requisitos de segurança");
+    try {
+      if (password) await env.DB.prepare("UPDATE adminAccounts SET email=?,name=?,phone=?,adminRole=?,passwordHash=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, adminRole, await bcrypt.hash(password, 12), id).run();
+      else await env.DB.prepare("UPDATE adminAccounts SET email=?,name=?,phone=?,adminRole=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, adminRole, id).run();
+    } catch { return trpcError("Este email já está cadastrado"); }
+    return trpcResult({ success: true, emailChanged: isSelf && email !== String(target.email).toLowerCase() });
+  }
+
   if (name === "admin.setAdminActive") {
+    if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode bloquear ou ativar administradores", "FORBIDDEN", 403);
     const target = await env.DB.prepare("SELECT email FROM adminAccounts WHERE id=?").bind(Number(input.id)).first<JsonRecord>();
     if (String(target?.email).toLowerCase() === adminEmail.toLowerCase()) return trpcError("Você não pode bloquear sua própria conta");
+    const targetFull = await env.DB.prepare("SELECT adminRole FROM adminAccounts WHERE id=?").bind(Number(input.id)).first<JsonRecord>();
+    if (String(targetFull?.adminRole) === "master" && !input.isActive) {
+      const masters = await env.DB.prepare("SELECT COUNT(*) total FROM adminAccounts WHERE adminRole='master' AND isActive=1").first<JsonRecord>();
+      if (Number(masters?.total || 0) <= 1) return trpcError("Não é possível bloquear o último administrador mestre");
+    }
     await env.DB.prepare("UPDATE adminAccounts SET isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(input.isActive ? 1 : 0, Number(input.id)).run();
     return trpcResult({ success: true });
   }

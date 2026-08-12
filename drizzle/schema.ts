@@ -30,6 +30,8 @@ export const adminAccounts = mysqlTable("adminAccounts", {
   id: int("id").autoincrement().primaryKey(),
   email: varchar("email", { length: 320 }).notNull().unique(),
   name: varchar("name", { length: 255 }).notNull(),
+  phone: varchar("phone", { length: 30 }),
+  adminRole: mysqlEnum("adminRole", ["master", "standard"]).default("standard").notNull(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
   isActive: int("isActive").default(1).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
