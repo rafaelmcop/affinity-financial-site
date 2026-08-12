@@ -48,6 +48,7 @@ export default function AdminUsers() {
   const [editingAffiliate, setEditingAffiliate] = useState<{ id: number; name: string; email: string; accountType: AccessSelection; accessAffiliate: boolean; adminRole: AdminRole } | null>(null);
   const data = admins.data;
   const isMaster = data?.currentRole === 'master';
+  const matchedInternal = data?.admins.find(user => user.email.toLowerCase() === newUser.email.trim().toLowerCase());
 
   const users = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -63,6 +64,15 @@ export default function AdminUsers() {
   const saveNew = async (event: React.FormEvent) => {
     event.preventDefault();
     try {
+      if (matchedInternal && !newUser.accessAffiliate) {
+        const alreadyAdmin = matchedInternal.accountType === 'admin' || matchedInternal.accountType === 'both';
+        const alreadyAgent = matchedInternal.accountType === 'agent' || matchedInternal.accountType === 'both';
+        const accessAdmin = alreadyAdmin || newUser.accountType === 'admin' || newUser.accountType === 'both';
+        const accessAgent = alreadyAgent || newUser.accountType === 'agent' || newUser.accountType === 'both';
+        await updateUser.mutateAsync({ id: matchedInternal.id, name: matchedInternal.name, email: matchedInternal.email, phone: matchedInternal.phone || '', contactEmail: matchedInternal.contactEmail || '', whatsapp: matchedInternal.whatsapp || '', accountType: accessAdmin && accessAgent ? 'both' : accessAdmin ? 'admin' : 'agent', adminRole: matchedInternal.adminRole, password: '' });
+        setNewUser(emptyUser); setCreating(false); await admins.refetch(); toast.success('Novo acesso adicionado à conta existente');
+        return;
+      }
       const result = await createUser.mutateAsync({ ...newUser, accessAdmin: newUser.accountType === 'admin' || newUser.accountType === 'both', accessAgent: newUser.accountType === 'agent' || newUser.accountType === 'both', accessAffiliate: newUser.accessAffiliate });
       setNewUser(emptyUser); setCreating(false); await Promise.all([admins.refetch(), affiliates.refetch()]); toast.success(result.updatedExisting ? 'Novos acessos adicionados à conta existente' : 'Usuário criado com os acessos selecionados');
     }
@@ -92,7 +102,8 @@ export default function AdminUsers() {
       {creating && <Card className="border-gold/30 bg-[#101b2b] p-6"><FormTitle title="Novo usuário interno" close={() => setCreating(false)} /><form onSubmit={saveNew} className="grid gap-4 md:grid-cols-2">
         <Input placeholder="Nome" value={newUser.name} onChange={e => setNewUser({ ...newUser, name: e.target.value })} required /><Input type="email" placeholder="E-mail de login" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required />
         <Input placeholder="Telefone" value={newUser.phone} onChange={e => setNewUser({ ...newUser, phone: e.target.value })} /><Input type="email" placeholder="E-mail pessoal" value={newUser.contactEmail} onChange={e => setNewUser({ ...newUser, contactEmail: e.target.value })} />
-        <Input placeholder="WhatsApp" value={newUser.whatsapp} onChange={e => setNewUser({ ...newUser, whatsapp: e.target.value })} /><Input type="password" placeholder="Senha forte (ignorada se a conta já existir)" value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required />
+        <Input placeholder="WhatsApp" value={newUser.whatsapp} onChange={e => setNewUser({ ...newUser, whatsapp: e.target.value })} /><Input type="password" placeholder={matchedInternal && !newUser.accessAffiliate ? 'A senha atual será mantida' : 'Senha forte'} value={newUser.password} onChange={e => setNewUser({ ...newUser, password: e.target.value })} required={!matchedInternal || newUser.accessAffiliate} disabled={Boolean(matchedInternal && !newUser.accessAffiliate)} />
+        {matchedInternal && !newUser.accessAffiliate && <div className="rounded-lg border border-green-500/25 bg-green-500/10 px-4 py-3 text-sm text-green-300 md:col-span-2">Conta existente encontrada: <strong>{matchedInternal.name}</strong>. O sistema apenas acrescentará os novos acessos, mantendo a senha atual.</div>}
         <div className="md:col-span-2"><AccessPicker value={newUser.accountType} affiliate={newUser.accessAffiliate} onAffiliateChange={accessAffiliate => setNewUser({ ...newUser, accessAffiliate })} onChange={accountType => setNewUser({ ...newUser, accountType, adminRole: accountType === 'agent' ? 'standard' : newUser.adminRole })} /></div>
         {(newUser.accountType === 'admin' || newUser.accountType === 'both') && <RoleSelect value={newUser.adminRole} onChange={adminRole => setNewUser({ ...newUser, adminRole })} />}
         <Button className="bg-gold text-black md:col-span-2">Criar usuário</Button>
