@@ -158,7 +158,8 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const passwordHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password)));
     const expectedHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.ADMIN_PASSWORD)));
     const environmentMatches = email === env.ADMIN_EMAIL.toLowerCase() && constantTimeEqual(passwordHash, expectedHash);
-    if (!accountMatches && !environmentMatches) {
+    const authorized = account ? accountMatches : environmentMatches;
+    if (!authorized) {
       return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
     }
     const session = await createSession({ type: "admin", email }, env, 28800);
