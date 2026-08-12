@@ -574,24 +574,33 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const accessAdmin = Boolean(input.accessAdmin), accessAgent = Boolean(input.accessAgent), accessAffiliate = Boolean(input.accessAffiliate);
     const adminRole = String(input.adminRole ?? "standard"), contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
     if (!validEmail(email) || !nameValue || !validStrongPassword(password) || (!accessAdmin && !accessAgent && !accessAffiliate) || !["master", "standard"].includes(adminRole) || (contactEmail && !validEmail(contactEmail))) return trpcError("Revise os dados do usuário");
-    const internal = await env.DB.prepare("SELECT id FROM adminAccounts WHERE lower(email)=?").bind(email).first();
-    const affiliate = await env.DB.prepare("SELECT id FROM affiliates WHERE lower(email)=?").bind(email).first();
-    if (internal || affiliate) return trpcError("Este e-mail já pertence a um usuário");
+    const internal = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=?").bind(email).first<JsonRecord>();
+    const affiliate = await env.DB.prepare("SELECT * FROM affiliates WHERE lower(email)=?").bind(email).first<JsonRecord>();
     const passwordHash = await bcrypt.hash(password, 12), statements = [];
-    if (accessAdmin || accessAgent) statements.push(env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,contactEmail,whatsapp,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,?,?,1)").bind(email, nameValue, String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accessAdmin && accessAgent ? "both" : accessAdmin ? "admin" : "agent", accessAdmin ? adminRole : "standard", passwordHash));
-    if (accessAffiliate) { const code = `AFF${Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`; statements.push(env.DB.prepare("INSERT INTO affiliates (email,passwordHash,name,phone,commissionRate,affiliateCode,isActive,status) VALUES (?,?,?,?,'10.00',?,1,'approved')").bind(email, passwordHash, nameValue, String(input.phone ?? "").trim() || null, code)); }
+    if (accessAdmin || accessAgent) {
+      const alreadyAdmin = ["admin", "both"].includes(String(internal?.accountType)), alreadyAgent = ["agent", "both"].includes(String(internal?.accountType));
+      const finalAdmin = accessAdmin || alreadyAdmin, finalAgent = accessAgent || alreadyAgent, accountTypeValue = finalAdmin && finalAgent ? "both" : finalAdmin ? "admin" : "agent";
+      if (internal) statements.push(env.DB.prepare("UPDATE adminAccounts SET accountType=?,adminRole=?,isActive=1,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(accountTypeValue, String(internal.adminRole) === "master" ? "master" : finalAdmin ? adminRole : "standard", Number(internal.id)));
+      else statements.push(env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,contactEmail,whatsapp,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,?,?,1)").bind(email, nameValue, String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accountTypeValue, accessAdmin ? adminRole : "standard", affiliate?.passwordHash || passwordHash));
+    }
+    if (accessAffiliate) {
+      if (affiliate) statements.push(env.DB.prepare("UPDATE affiliates SET isActive=1,status='approved',updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(Number(affiliate.id)));
+      else { const code = `AFF${Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`; statements.push(env.DB.prepare("INSERT INTO affiliates (email,passwordHash,name,phone,commissionRate,affiliateCode,isActive,status) VALUES (?,?,?,?,'10.00',?,1,'approved')").bind(email, internal?.passwordHash || passwordHash, nameValue, String(input.phone ?? "").trim() || null, code)); }
+    }
     try { await env.DB.batch(statements); } catch { return trpcError("Não foi possível criar o usuário"); }
-    return trpcResult({ success: true });
+    return trpcResult({ success: true, updatedExisting: Boolean(internal || affiliate) });
   }
 
   if (name === "admin.updateAffiliateCategories") {
     if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode alterar categorias", "FORBIDDEN", 403);
     const affiliate = await env.DB.prepare("SELECT * FROM affiliates WHERE id=?").bind(Number(input.affiliateId)).first<JsonRecord>();
     if (!affiliate) return trpcError("Afiliado não encontrado", "NOT_FOUND", 404);
-    const accessAdmin = Boolean(input.accessAdmin), accessAgent = Boolean(input.accessAgent), adminRole = accessAdmin ? String(input.adminRole ?? "standard") : "standard";
+    const accessAdmin = Boolean(input.accessAdmin), accessAgent = Boolean(input.accessAgent), accessAffiliate = Boolean(input.accessAffiliate), adminRole = accessAdmin ? String(input.adminRole ?? "standard") : "standard";
+    if (!accessAdmin && !accessAgent && !accessAffiliate) return trpcError("Escolha pelo menos uma categoria");
     if (!["master", "standard"].includes(adminRole)) return trpcError("Nível administrativo inválido");
     const email = String(affiliate.email).toLowerCase();
     const internal = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=?").bind(email).first<JsonRecord>();
+    await env.DB.prepare("UPDATE affiliates SET isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(accessAffiliate ? 1 : 0, Number(affiliate.id)).run();
     if (!accessAdmin && !accessAgent) {
       if (email === adminEmail.toLowerCase()) return trpcError("Você não pode remover seu próprio acesso");
       if (internal) await env.DB.prepare("UPDATE adminAccounts SET isActive=0,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(Number(internal.id)).run();

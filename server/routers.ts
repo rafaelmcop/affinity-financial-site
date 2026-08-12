@@ -595,26 +595,35 @@ export const appRouter = router({
         const actorRole = actor?.adminRole ?? (actorEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
         if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode criar usuários');
         const email = input.email.toLowerCase();
-        const [existingInternal] = await db.select({ id: adminAccounts.id }).from(adminAccounts).where(eq(adminAccounts.email, email)).limit(1);
-        const [existingAffiliate] = await db.select({ id: affiliates.id }).from(affiliates).where(eq(affiliates.email, email)).limit(1);
-        if (existingInternal || existingAffiliate) throw new Error('Este e-mail já pertence a um usuário');
+        const [existingInternal] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, email)).limit(1);
+        const [existingAffiliate] = await db.select().from(affiliates).where(eq(affiliates.email, email)).limit(1);
         const passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
         await db.transaction(async tx => {
-          if (input.accessAdmin || input.accessAgent) await tx.insert(adminAccounts).values({
-            email, name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null,
-            whatsapp: input.whatsapp || null, accountType: input.accessAdmin && input.accessAgent ? 'both' : input.accessAdmin ? 'admin' : 'agent',
-            adminRole: input.accessAdmin ? input.adminRole : 'standard', passwordHash, isActive: 1,
-          });
+          if (input.accessAdmin || input.accessAgent) {
+            const alreadyAdmin = existingInternal?.accountType === 'admin' || existingInternal?.accountType === 'both';
+            const alreadyAgent = existingInternal?.accountType === 'agent' || existingInternal?.accountType === 'both';
+            const accessAdmin = input.accessAdmin || alreadyAdmin, accessAgent = input.accessAgent || alreadyAgent;
+            const accountType = accessAdmin && accessAgent ? 'both' : accessAdmin ? 'admin' : 'agent';
+            if (existingInternal) await tx.update(adminAccounts).set({ accountType, adminRole: existingInternal.adminRole === 'master' ? 'master' : (accessAdmin ? input.adminRole : 'standard'), isActive: 1 }).where(eq(adminAccounts.id, existingInternal.id));
+            else await tx.insert(adminAccounts).values({
+              email, name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null,
+              whatsapp: input.whatsapp || null, accountType, adminRole: input.accessAdmin ? input.adminRole : 'standard',
+              passwordHash: existingAffiliate?.passwordHash || passwordHash, isActive: 1,
+            });
+          }
           if (input.accessAffiliate) {
-            const { generateAffiliateCode } = await import('./auth');
-            await tx.insert(affiliates).values({ email, name: input.name, phone: input.phone || null, passwordHash, affiliateCode: generateAffiliateCode(), status: 'approved', isActive: 1 });
+            if (existingAffiliate) await tx.update(affiliates).set({ isActive: 1, status: 'approved' }).where(eq(affiliates.id, existingAffiliate.id));
+            else {
+              const { generateAffiliateCode } = await import('./auth');
+              await tx.insert(affiliates).values({ email, name: input.name, phone: input.phone || null, passwordHash: existingInternal?.passwordHash || passwordHash, affiliateCode: generateAffiliateCode(), status: 'approved', isActive: 1 });
+            }
           }
         });
-        return { success: true };
+        return { success: true, updatedExisting: Boolean(existingInternal || existingAffiliate) };
       }),
 
     updateAffiliateCategories: adminProcedure
-      .input(z.object({ affiliateId: z.number(), accessAdmin: z.boolean(), accessAgent: z.boolean(), adminRole: z.enum(['master', 'standard']) }))
+      .input(z.object({ affiliateId: z.number(), accessAdmin: z.boolean(), accessAgent: z.boolean(), accessAffiliate: z.boolean(), adminRole: z.enum(['master', 'standard']) }).refine(value => value.accessAdmin || value.accessAgent || value.accessAffiliate, { message: 'Escolha pelo menos uma categoria' }))
       .mutation(async ({ input, ctx }) => {
         const { getDb } = await import('./db'); const db = await getDb();
         if (!db) throw new Error('Database not available');
@@ -625,6 +634,7 @@ export const appRouter = router({
         const [affiliate] = await db.select().from(affiliates).where(eq(affiliates.id, input.affiliateId)).limit(1);
         if (!affiliate) throw new Error('Afiliado não encontrado');
         const [internal] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, affiliate.email.toLowerCase())).limit(1);
+        await db.update(affiliates).set({ isActive: input.accessAffiliate ? 1 : 0 }).where(eq(affiliates.id, affiliate.id));
         if (!input.accessAdmin && !input.accessAgent) {
           if (internal?.email.toLowerCase() === actorEmail) throw new Error('Você não pode remover seu próprio acesso');
           if (internal) await db.update(adminAccounts).set({ isActive: 0 }).where(eq(adminAccounts.id, internal.id));
