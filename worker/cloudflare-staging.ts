@@ -563,9 +563,16 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password) || !["master", "standard"].includes(role) || !["admin", "agent", "both"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
     const contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
     if (contactEmail && !validEmail(contactEmail)) return trpcError("E-mail de acompanhamento inválido");
+    const existing = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=?").bind(email).first<JsonRecord>();
+    if (existing) {
+      const admin = ["admin", "both"].includes(String(existing.accountType)) || ["admin", "both"].includes(accountTypeValue);
+      const agent = ["agent", "both"].includes(String(existing.accountType)) || ["agent", "both"].includes(accountTypeValue);
+      await env.DB.prepare("UPDATE adminAccounts SET accountType=?,isActive=1,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(admin && agent ? "both" : admin ? "admin" : "agent", Number(existing.id)).run();
+      return trpcResult({ success: true, updatedExisting: true });
+    }
     try { await env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,contactEmail,whatsapp,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,?,?,1)").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accountTypeValue, role, await bcrypt.hash(password, 12)).run(); }
     catch { return trpcError("Este email já está cadastrado"); }
-    return trpcResult({ success: true });
+    return trpcResult({ success: true, updatedExisting: false });
   }
 
   if (name === "admin.createUnifiedUser") {

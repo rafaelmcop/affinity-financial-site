@@ -656,11 +656,17 @@ export const appRouter = router({
         const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase())).limit(1);
         const actorRole = actor?.adminRole ?? (ctx.adminEmail.toLowerCase() === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
         if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode criar administradores');
+        const email = input.email.toLowerCase();
+        const [existing] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, email)).limit(1);
+        if (existing) {
+          const admin = ['admin', 'both'].includes(existing.accountType) || ['admin', 'both'].includes(input.accountType);
+          const agent = ['agent', 'both'].includes(existing.accountType) || ['agent', 'both'].includes(input.accountType);
+          await db.update(adminAccounts).set({ accountType: admin && agent ? 'both' : admin ? 'admin' : 'agent', isActive: 1 }).where(eq(adminAccounts.id, existing.id));
+          return { success: true, updatedExisting: true };
+        }
         const passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
-        await db.insert(adminAccounts).values({
-          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null, whatsapp: input.whatsapp || null, accountType: input.accountType, adminRole: input.adminRole, passwordHash, isActive: 1,
-        });
-        return { success: true };
+        await db.insert(adminAccounts).values({ email, name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null, whatsapp: input.whatsapp || null, accountType: input.accountType, adminRole: input.adminRole, passwordHash, isActive: 1 });
+        return { success: true, updatedExisting: false };
       }),
 
     updateAdmin: adminProcedure
