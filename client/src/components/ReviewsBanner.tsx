@@ -15,7 +15,7 @@ const copy = {
 export function ReviewsBanner() {
   const { language } = useLanguage();
   const text = copy[language];
-  const reviewsQuery = trpc.testimonials.getActive.useQuery();
+  const reviewsQuery = trpc.testimonials.getLocalized.useQuery({ language });
   const [currentIndex, setCurrentIndex] = useState(0);
 
   const reviews = useMemo(() => {

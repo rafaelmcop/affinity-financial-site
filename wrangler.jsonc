@@ -17,6 +17,9 @@
       "database_id": "aa4b6291-383d-4237-8a4b-edff1eb7f60b"
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "vars": {
     "ADMIN_EMAIL": "preview@affinityfc.org",
     "VITE_FRONTEND_URL": "https://www.affinityfc.org"

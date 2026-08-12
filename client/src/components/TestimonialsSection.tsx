@@ -28,7 +28,7 @@ export function TestimonialsSection() {
   const [processedIndices, setProcessedIndices] = useState<Set<number>>(new Set());
 
   // Get active testimonials from database
-  const testimonialsQuery = trpc.testimonials.getActive.useQuery();
+  const testimonialsQuery = trpc.testimonials.getLocalized.useQuery({ language });
 
   // Shuffle array function
   const shuffleArray = (array: any[]) => {
@@ -291,7 +291,7 @@ export function TestimonialsSection() {
                   <div className="bg-gradient-to-br from-gray-900 to-black border border-gold/30 p-8 sm:p-12 rounded-lg">
                     <div className="flex flex-col md:flex-row gap-8 items-center">
                       {/* Media (Image or Video) */}
-                      <div className="flex-shrink-0 md:w-1/3 relative group">
+                      <div className="relative w-full flex-shrink-0 md:w-[45%] group">
                         {/* Loading Skeleton */}
                         {isThumbnailLoading && (
                           <div className="absolute inset-0 bg-gradient-to-r from-gray-800 via-gray-700 to-gray-800 rounded-lg border-2 border-gold/30 animate-pulse z-10" />
@@ -301,7 +301,7 @@ export function TestimonialsSection() {
                           (() => {
                             const source = getVideoSource(testimonial.mediaUrl)!;
                             return (
-                              <div className={`relative transition-opacity duration-500 ${isThumbnailLoading && source.kind === 'file' ? 'opacity-50' : 'opacity-100'}`}>
+                              <div className={`relative aspect-video w-full overflow-hidden rounded-lg bg-black transition-opacity duration-500 ${isThumbnailLoading && source.kind === 'file' ? 'opacity-50' : 'opacity-100'}`}>
                                 {source.kind === 'file' ? (
                                   <>
                                     <video
@@ -309,7 +309,7 @@ export function TestimonialsSection() {
                                       controls
                                       playsInline
                                       preload="metadata"
-                                      className="max-h-[28rem] w-full rounded-lg border-2 border-gold/30 bg-black object-contain"
+                                      className="h-full w-full rounded-lg border-2 border-gold/30 bg-black object-contain"
                                       poster={currentThumbnail || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23000%22 width=%22100%22 height=%22100%22/%3E%3Cpolygon fill=%22%23d4af37%22 points=%2235,25 35,75 75,50%22/%3E%3C/svg%3E'}
                                       controlsList="nodownload"
                                       src={source.url}
@@ -326,7 +326,7 @@ export function TestimonialsSection() {
                                   <iframe
                                     src={source.embedUrl}
                                     title={`Vídeo de ${testimonial.name}`}
-                                    className="aspect-video w-full rounded-lg border-2 border-gold/30 bg-black"
+                                    className="h-full w-full rounded-lg border-2 border-gold/30 bg-black"
                                     loading="lazy"
                                     allow="autoplay; fullscreen; picture-in-picture"
                                     allowFullScreen
@@ -355,7 +355,7 @@ export function TestimonialsSection() {
                       </div>
 
                       {/* Content */}
-                      <div className="md:w-2/3">
+                      <div className="w-full md:w-[55%]">
                         {testimonial.source === 'client' && (
                           <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating} ${interfaceText.stars}`}>
                             {[1, 2, 3, 4, 5].map(star => (

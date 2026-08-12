@@ -805,6 +805,15 @@ export const appRouter = router({
         return await getActiveTestimonials();
       }),
 
+    getLocalized: publicProcedure
+      .input(z.object({ language: z.enum(['pt', 'en', 'es']) }))
+      .query(async () => {
+        // The Cloudflare Worker translates and caches this content in production.
+        // The Node development server returns the originals for the client fallback.
+        const { getActiveTestimonials } = await import('./db');
+        return await getActiveTestimonials();
+      }),
+
     create: adminProcedure
       .input(z.object({
         name: z.string().min(1),
