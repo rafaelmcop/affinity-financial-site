@@ -1,5 +1,5 @@
 import { useLocation } from 'wouter';
-import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ShieldCheck, ExternalLink, LogOut } from 'lucide-react';
+import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ShieldCheck, ExternalLink, LogOut, Star } from 'lucide-react';
 
 type Props = { onLogout?: () => void };
 
@@ -9,7 +9,10 @@ const groups = [
     { label: 'Apólices', href: '/admin/dashboard?tab=policies', icon: FileText },
     { label: 'Afiliados', href: '/admin/affiliates', icon: Users },
   ] },
-  { title: 'Conteúdo', items: [{ label: 'Depoimentos', href: '/admin/testimonials', icon: MessageSquareQuote }] },
+  { title: 'Conteúdo', items: [
+    { label: 'Depoimentos', href: '/admin/testimonials', icon: MessageSquareQuote },
+    { label: 'Avaliações', href: '/admin/avaliacoes', icon: Star },
+  ] },
   { title: 'Configurações', items: [
     { label: 'E-mail e iCloud', href: '/admin/smtp-config', icon: Mail },
     { label: 'Administradores', href: '/admin/administradores', icon: ShieldCheck },

@@ -411,3 +411,24 @@ html {
   color: #14233b !important;
   opacity: 1 !important;
 }
+
+/* The reviews banner intentionally keeps its dark background in the public light theme. */
+.public-light #reviews .reviews-title,
+.public-light #reviews .review-quote {
+  color: #f8fafc !important;
+  opacity: 1 !important;
+}
+
+.public-light #reviews .reviews-subtitle,
+.public-light #reviews .review-role {
+  color: #d1d9e5 !important;
+  opacity: 1 !important;
+}
+
+.public-light #reviews .text-gold {
+  color: #e7c866 !important;
+}
+@keyframes review-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}

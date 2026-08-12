@@ -244,7 +244,7 @@ export default function AdminTestimonials() {
     setFrameTime(1);
   };
 
-  const testimonials = testimonialsQuery.data || [];
+  const testimonials = (testimonialsQuery.data || []).filter((testimonial: any) => testimonial.source !== 'client');
   const videoSource = formData.mediaType === 'video' ? getVideoSource(formData.mediaUrl) : null;
   const isEmbeddedVideo = videoSource?.kind === 'vimeo' || videoSource?.kind === 'youtube';
 

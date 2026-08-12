@@ -118,10 +118,11 @@ export function TestimonialsSection() {
       
       // Filter by current language
       const currentLang = localStorage.getItem('language') || 'pt';
-      const filtered = testimonialsQuery.data.filter((t: any) => t.language === currentLang);
+      const manualTestimonials = testimonialsQuery.data.filter((t: any) => t.source !== 'client');
+      const filtered = manualTestimonials.filter((t: any) => t.language === currentLang);
       
       // If no testimonials for current language, show Portuguese ones
-      const toShow = filtered.length > 0 ? filtered : testimonialsQuery.data.filter((t: any) => t.language === 'pt');
+      const toShow = filtered.length > 0 ? filtered : manualTestimonials.filter((t: any) => t.language === 'pt');
       
       // Shuffle testimonials for random display
       const shuffled = shuffleArray(toShow);
@@ -353,7 +354,15 @@ export function TestimonialsSection() {
                       <div className="md:w-2/3">
                         {testimonial.source === 'client' && (
                           <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating} de 5 estrelas`}>
-                            {[1, 2, 3, 4, 5].map(star => <Star key={star} size={18} className={star <= testimonial.rating ? 'fill-gold text-gold' : 'fill-transparent text-gray-500'} />)}
+                            {[1, 2, 3, 4, 5].map(star => (
+                              <Star
+                                key={star}
+                                size={18}
+                                strokeWidth={star <= testimonial.rating ? 0 : 2}
+                                className={star <= testimonial.rating ? 'text-gold' : 'fill-transparent text-gray-500'}
+                                style={star <= testimonial.rating ? { fill: '#d4af37' } : undefined}
+                              />
+                            ))}
                           </div>
                         )}
                         <blockquote

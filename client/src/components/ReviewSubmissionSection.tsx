@@ -51,7 +51,12 @@ export function ReviewSubmissionSection() {
             <div className="flex gap-2" role="radiogroup" aria-label={text.rating}>
               {[1, 2, 3, 4, 5].map(star => (
                 <button type="button" role="radio" aria-checked={rating === star} key={star} onClick={() => setRating(star)} className="rounded p-1 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold" aria-label={`${star} estrelas`}>
-                  <Star size={32} className={star <= rating ? 'fill-gold text-gold' : 'fill-transparent text-gray-400'} />
+                  <Star
+                    size={32}
+                    strokeWidth={star <= rating ? 0 : 2}
+                    className={star <= rating ? 'text-gold' : 'fill-transparent text-gray-400'}
+                    style={star <= rating ? { fill: '#d4af37' } : undefined}
+                  />
                 </button>
               ))}
             </div>
