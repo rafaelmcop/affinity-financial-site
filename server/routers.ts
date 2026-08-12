@@ -205,7 +205,7 @@ export const appRouter = router({
     login: publicProcedure.input(z.object({ email: z.string().email(), password: z.string().min(6) })).mutation(async ({ input, ctx }) => {
       const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available');
       const [account] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, input.email.toLowerCase())).limit(1);
-      if (!account || account.accountType !== 'agent' || !account.isActive || !(await (await import('bcryptjs')).compare(input.password, account.passwordHash))) throw new Error('Credenciais inválidas');
+      if (!account || !['agent', 'both'].includes(account.accountType) || !account.isActive || !(await (await import('bcryptjs')).compare(input.password, account.passwordHash))) throw new Error('Credenciais inválidas');
       const token = await (await import('./sessionAuth')).createAdminSession(account.email); ctx.res.cookie((await import('./sessionAuth')).ADMIN_SESSION_COOKIE, token, { ...getSessionCookieOptions(ctx.req), maxAge: 8 * 60 * 60 * 1000 });
       return { id: account.id, email: account.email, name: account.name, role: 'agent' as const, accountType: 'agent' as const };
     }),
@@ -221,7 +221,7 @@ export const appRouter = router({
     saveEmailSettings: adminProcedure.input(z.object({host:z.string().min(1),port:z.number().min(1),secure:z.boolean(),user:z.string().email(),password:z.string().optional(),fromEmail:z.string().email(),fromName:z.string().min(1)})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');const owner=ctx.adminEmail.toLowerCase(),[current]=await db.select().from(agentEmailSettings).where(eq(agentEmailSettings.agentEmail,owner)).limit(1);const clear=(input.password||'').replace(/\s/g,'');const password=clear?await (await import('../worker/cloudflare-email')).encryptSmtpPassword(clear,process.env.JWT_SECRET||'local-preview-secret'):current?.password;if(!password)throw new Error('Informe a senha específica de aplicativo');const values={...input,agentEmail:owner,secure:input.secure?1:0,password};if(current)await db.update(agentEmailSettings).set(values).where(eq(agentEmailSettings.id,current.id));else await db.insert(agentEmailSettings).values(values);await db.update(adminAccounts).set({contactEmail:input.fromEmail}).where(eq(adminAccounts.email,owner));return{success:true};}),
     testEmailSettings: adminProcedure.input(z.object({email:z.string().email()})).mutation(async()=>({success:true})),
     getProfile: adminProcedure.query(async({ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');const[row]=await db.select({email:adminAccounts.email,name:adminAccounts.name,phone:adminAccounts.phone,contactEmail:adminAccounts.contactEmail,whatsapp:adminAccounts.whatsapp,address:adminAccounts.address}).from(adminAccounts).where(eq(adminAccounts.email,ctx.adminEmail.toLowerCase())).limit(1);return row||null;}),
-    updateProfile: adminProcedure.input(z.object({name:z.string().min(1),phone:z.string().optional(),contactEmail:z.string().email().optional().or(z.literal('')),whatsapp:z.string().optional(),address:z.string().optional()})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');await db.update(adminAccounts).set({...input,contactEmail:input.contactEmail||null}).where(and(eq(adminAccounts.email,ctx.adminEmail.toLowerCase()),eq(adminAccounts.accountType,'agent')));return{success:true};}),
+    updateProfile: adminProcedure.input(z.object({name:z.string().min(1),phone:z.string().optional(),contactEmail:z.string().email().optional().or(z.literal('')),whatsapp:z.string().optional(),address:z.string().optional()})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');await db.update(adminAccounts).set({...input,contactEmail:input.contactEmail||null}).where(eq(adminAccounts.email,ctx.adminEmail.toLowerCase()));return{success:true};}),
   }),
 
   admin: router({
@@ -249,7 +249,7 @@ export const appRouter = router({
         if (db) {
           const [account] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, normalizedEmail)).limit(1);
           if (account) {
-            if (!account.isActive || !(await (await import('bcryptjs')).compare(input.password, account.passwordHash))) {
+            if (!account.isActive || !['admin', 'both'].includes(account.accountType) || !(await (await import('bcryptjs')).compare(input.password, account.passwordHash))) {
               throw new Error('Credenciais inválidas');
             }
             const { createAdminSession, ADMIN_SESSION_COOKIE } = await import('./sessionAuth');
@@ -564,7 +564,7 @@ export const appRouter = router({
       if (!db) throw new Error('Database not available');
       const currentEmail = ctx.adminEmail.toLowerCase();
       const [currentAccount] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, currentEmail)).limit(1);
-      const currentRole = currentAccount?.adminRole ?? (currentEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
+      const currentRole = currentEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : (currentAccount?.adminRole ?? 'standard');
       const admins = await db.select({
         id: adminAccounts.id,
         email: adminAccounts.email,
@@ -580,8 +580,41 @@ export const appRouter = router({
       return { admins, currentEmail, currentRole };
     }),
 
+    createUnifiedUser: adminProcedure
+      .input(z.object({
+        email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(),
+        contactEmail: z.string().email().optional().or(z.literal('')), whatsapp: z.string().max(30).optional(),
+        accessAdmin: z.boolean(), accessAgent: z.boolean(), accessAffiliate: z.boolean(),
+        adminRole: z.enum(['master', 'standard']), password: strongPassword,
+      }).refine(value => value.accessAdmin || value.accessAgent || value.accessAffiliate, { message: 'Escolha pelo menos uma categoria' }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db'); const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, actorEmail)).limit(1);
+        const actorRole = actor?.adminRole ?? (actorEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : 'standard');
+        if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode criar usuários');
+        const email = input.email.toLowerCase();
+        const [existingInternal] = await db.select({ id: adminAccounts.id }).from(adminAccounts).where(eq(adminAccounts.email, email)).limit(1);
+        const [existingAffiliate] = await db.select({ id: affiliates.id }).from(affiliates).where(eq(affiliates.email, email)).limit(1);
+        if (existingInternal || existingAffiliate) throw new Error('Este e-mail já pertence a um usuário');
+        const passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
+        await db.transaction(async tx => {
+          if (input.accessAdmin || input.accessAgent) await tx.insert(adminAccounts).values({
+            email, name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null,
+            whatsapp: input.whatsapp || null, accountType: input.accessAdmin && input.accessAgent ? 'both' : input.accessAdmin ? 'admin' : 'agent',
+            adminRole: input.accessAdmin ? input.adminRole : 'standard', passwordHash, isActive: 1,
+          });
+          if (input.accessAffiliate) {
+            const { generateAffiliateCode } = await import('./auth');
+            await tx.insert(affiliates).values({ email, name: input.name, phone: input.phone || null, passwordHash, affiliateCode: generateAffiliateCode(), status: 'approved', isActive: 1 });
+          }
+        });
+        return { success: true };
+      }),
+
     createAdmin: adminProcedure
-      .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), contactEmail: z.string().email().optional().or(z.literal('')), whatsapp: z.string().max(30).optional(), accountType: z.enum(['admin', 'agent']), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
+      .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), contactEmail: z.string().email().optional().or(z.literal('')), whatsapp: z.string().max(30).optional(), accountType: z.enum(['admin', 'agent', 'both']), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
       .mutation(async ({ input, ctx }) => {
         const { getDb } = await import('./db');
         const db = await getDb();
@@ -604,7 +637,7 @@ export const appRouter = router({
         phone: z.string().max(30).optional(),
         contactEmail: z.string().email().optional().or(z.literal('')),
         whatsapp: z.string().max(30).optional(),
-        accountType: z.enum(['admin', 'agent']),
+        accountType: z.enum(['admin', 'agent', 'both']),
         adminRole: z.enum(['master', 'standard']),
         password: z.union([strongPassword, z.literal('')]).optional(),
       }))

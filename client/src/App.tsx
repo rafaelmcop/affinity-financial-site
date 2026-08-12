@@ -9,14 +9,11 @@ import Home from "./pages/Home";
 import AffiliateLogin from "./pages/AffiliateLogin";
 import AffiliateRegister from "./pages/AffiliateRegister";
 import AffiliateDashboard from "./pages/AffiliateDashboard";
-import AdminAffiliates from "./pages/AdminAffiliates";
 import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import SmtpConfig from "./pages/SmtpConfig";
 import ResetPassword from "./pages/ResetPassword";
-import AdminAffiliatesManagement from './pages/AdminAffiliatesManagement';
 import AdminTestimonials from './pages/AdminTestimonials';
-import AdminAdministrators from './pages/AdminAdministrators';
 import AdminCrm from './pages/AdminCrm';
 import ReviewPage from './pages/ReviewPage';
 import AdminReviews from './pages/AdminReviews';
@@ -28,6 +25,7 @@ import AgentTasks from './pages/AgentTasks';
 import AgentMessages from './pages/AgentMessages';
 import AgentClients from './pages/AgentClients';
 import AgentSettings from './pages/AgentSettings';
+import AdminUsers from './pages/AdminUsers';
 
 function Router() {
   return (
@@ -40,12 +38,13 @@ function Router() {
       <Route path="/afiliados/dashboard" component={AffiliateDashboard} />
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin/dashboard" component={AdminDashboard} />
-      <Route path="/admin/afiliados" component={AdminAffiliates} />
+      <Route path="/admin/afiliados" component={AdminUsers} />
         <Route path="/admin/smtp-config" component={SmtpConfig} />
-        <Route path="/admin/affiliates" component={AdminAffiliatesManagement} />
+        <Route path="/admin/affiliates" component={AdminUsers} />
       <Route path="/admin/testimonials" component={AdminTestimonials} />
       <Route path="/admin/avaliacoes" component={AdminReviews} />
-      <Route path="/admin/administradores" component={AdminAdministrators} />
+      <Route path="/admin/administradores" component={AdminUsers} />
+      <Route path="/admin/usuarios" component={AdminUsers} />
       <Route path="/admin/crm">{() => <AdminCrm />}</Route>
       <Route path="/admin/leads-afiliados" component={AdminAffiliateLeads} />
       <Route path="/agentes" component={AgentLogin} />

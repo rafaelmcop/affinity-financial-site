@@ -94,7 +94,7 @@ async function getAdminAccess(email: string, env: Env) {
   const account = await env.DB.prepare("SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,isActive FROM adminAccounts WHERE lower(email)=?").bind(email.toLowerCase()).first<JsonRecord>();
   return {
     account,
-    role: String(account?.adminRole ?? (email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "master" : "standard")),
+    role: email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "master" : String(account?.adminRole ?? "standard"),
   };
 }
 
@@ -269,7 +269,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const passwordHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password)));
     const expectedHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.ADMIN_PASSWORD)));
     const environmentMatches = email === env.ADMIN_EMAIL.toLowerCase() && constantTimeEqual(passwordHash, expectedHash);
-    const authorized = account ? (accountMatches && String(account.accountType || "admin") === "admin") : environmentMatches;
+    const authorized = account ? (accountMatches && ["admin", "both"].includes(String(account.accountType || "admin"))) : environmentMatches;
     if (!authorized) {
       return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
     }
@@ -282,7 +282,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
 
   if (name === "agent.login") {
     const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? "");
-    const account = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=? AND accountType='agent'").bind(email).first<JsonRecord>();
+    const account = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both')").bind(email).first<JsonRecord>();
     if (!account || Number(account.isActive) !== 1 || !(await bcrypt.compare(password, String(account.passwordHash)))) return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
     const session = await createSession({ type: "admin", email }, env, 28800);
     return { body: trpcResult({ id: Number(account.id), email, name: account.name, phone: account.phone || null, contactEmail: account.contactEmail || null, whatsapp: account.whatsapp || null, accountType: "agent", role: "agent" }), cookies: [`${ADMIN_COOKIE}=${session}; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`] };
@@ -411,8 +411,8 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
   if (!adminEmail) return trpcError("Acesso administrativo necessário", "UNAUTHORIZED", 401);
   const adminAccess = await getAdminAccess(adminEmail, env);
   const accountType = String(adminAccess.account?.accountType || "admin");
-  if (name.startsWith("agent.") && accountType !== "agent") return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
-  if (name.startsWith("admin.") && accountType !== "admin") return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+  if (name.startsWith("agent.") && !["agent", "both"].includes(accountType)) return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
+  if (name.startsWith("admin.") && !["admin", "both"].includes(accountType)) return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
 
   if (name === "agent.dashboard") {
     const policies = (await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(adminEmail.toLowerCase()).all<JsonRecord>()).results;
@@ -460,7 +460,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
   if(name==="agent.saveEmailSettings"){const owner=adminEmail.toLowerCase(),current=await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first<JsonRecord>(),clear=String(input.password??"").replace(/\s/g,""),password=clear?await encryptSmtpPassword(clear,env.JWT_SECRET):String(current?.password??"");if(!String(input.host??"").trim()||!validEmail(String(input.user??""))||!validEmail(String(input.fromEmail??""))||!password.startsWith("v1."))return trpcError("Informe todos os dados e uma senha específica de aplicativo");await env.DB.prepare("INSERT INTO agentEmailSettings (agentEmail,host,port,secure,user,password,fromEmail,fromName) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(agentEmail) DO UPDATE SET host=excluded.host,port=excluded.port,secure=excluded.secure,user=excluded.user,password=excluded.password,fromEmail=excluded.fromEmail,fromName=excluded.fromName,updatedAt=CURRENT_TIMESTAMP").bind(owner,String(input.host),Number(input.port),input.secure?1:0,String(input.user),password,String(input.fromEmail),String(input.fromName||"Affinity Financial")).run();await env.DB.prepare("UPDATE adminAccounts SET contactEmail=? WHERE lower(email)=?").bind(String(input.fromEmail),owner).run();return trpcResult({success:true});}
   if(name==="agent.testEmailSettings"){const email=String(input.email??"");if(!validEmail(email))return trpcError("E-mail inválido");try{await sendAgentEmail(env,adminEmail,{to:email,subject:"Teste de e-mail - Affinity Financial",html:emailHtml("Configuração concluída","<p>Seu e-mail pessoal está conectado ao Portal do Agente.</p>")});}catch{return trpcError("Não foi possível enviar. Verifique o e-mail e a senha de aplicativo.");}return trpcResult({success:true});}
   if(name==="agent.getProfile"){const row=await env.DB.prepare("SELECT email,name,phone,contactEmail,whatsapp,address FROM adminAccounts WHERE lower(email)=?").bind(adminEmail.toLowerCase()).first<JsonRecord>();return trpcResult(row||null);}
-  if(name==="agent.updateProfile"){const profileName=String(input.name??"").trim(),contactEmail=String(input.contactEmail??"").trim().toLowerCase();if(!profileName||(contactEmail&&!validEmail(contactEmail)))return trpcError("Revise os dados do perfil");await env.DB.prepare("UPDATE adminAccounts SET name=?,phone=?,contactEmail=?,whatsapp=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND accountType='agent'").bind(profileName,String(input.phone??"").trim()||null,contactEmail||null,String(input.whatsapp??"").trim()||null,String(input.address??"").trim()||null,adminEmail.toLowerCase()).run();return trpcResult({success:true});}
+  if(name==="agent.updateProfile"){const profileName=String(input.name??"").trim(),contactEmail=String(input.contactEmail??"").trim().toLowerCase();if(!profileName||(contactEmail&&!validEmail(contactEmail)))return trpcError("Revise os dados do perfil");await env.DB.prepare("UPDATE adminAccounts SET name=?,phone=?,contactEmail=?,whatsapp=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(profileName,String(input.phone??"").trim()||null,contactEmail||null,String(input.whatsapp??"").trim()||null,String(input.address??"").trim()||null,adminEmail.toLowerCase()).run();return trpcResult({success:true});}
 
   if (name === "admin.getStats") {
     const affiliates = await env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending FROM affiliates").first<JsonRecord>();
@@ -560,11 +560,27 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode criar administradores", "FORBIDDEN", 403);
     const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? "");
     const role = String(input.adminRole ?? "standard"), accountTypeValue = String(input.accountType ?? "admin");
-    if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password) || !["master", "standard"].includes(role) || !["admin", "agent"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
+    if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password) || !["master", "standard"].includes(role) || !["admin", "agent", "both"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
     const contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
     if (contactEmail && !validEmail(contactEmail)) return trpcError("E-mail de acompanhamento inválido");
     try { await env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,contactEmail,whatsapp,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,?,?,1)").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accountTypeValue, role, await bcrypt.hash(password, 12)).run(); }
     catch { return trpcError("Este email já está cadastrado"); }
+    return trpcResult({ success: true });
+  }
+
+  if (name === "admin.createUnifiedUser") {
+    if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode criar usuários", "FORBIDDEN", 403);
+    const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? ""), nameValue = String(input.name ?? "").trim();
+    const accessAdmin = Boolean(input.accessAdmin), accessAgent = Boolean(input.accessAgent), accessAffiliate = Boolean(input.accessAffiliate);
+    const adminRole = String(input.adminRole ?? "standard"), contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
+    if (!validEmail(email) || !nameValue || !validStrongPassword(password) || (!accessAdmin && !accessAgent && !accessAffiliate) || !["master", "standard"].includes(adminRole) || (contactEmail && !validEmail(contactEmail))) return trpcError("Revise os dados do usuário");
+    const internal = await env.DB.prepare("SELECT id FROM adminAccounts WHERE lower(email)=?").bind(email).first();
+    const affiliate = await env.DB.prepare("SELECT id FROM affiliates WHERE lower(email)=?").bind(email).first();
+    if (internal || affiliate) return trpcError("Este e-mail já pertence a um usuário");
+    const passwordHash = await bcrypt.hash(password, 12), statements = [];
+    if (accessAdmin || accessAgent) statements.push(env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,contactEmail,whatsapp,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,?,?,1)").bind(email, nameValue, String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accessAdmin && accessAgent ? "both" : accessAdmin ? "admin" : "agent", accessAdmin ? adminRole : "standard", passwordHash));
+    if (accessAffiliate) { const code = `AFF${Array.from(crypto.getRandomValues(new Uint8Array(8)), byte => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`; statements.push(env.DB.prepare("INSERT INTO affiliates (email,passwordHash,name,phone,commissionRate,affiliateCode,isActive,status) VALUES (?,?,?,?,'10.00',?,1,'approved')").bind(email, passwordHash, nameValue, String(input.phone ?? "").trim() || null, code)); }
+    try { await env.DB.batch(statements); } catch { return trpcError("Não foi possível criar o usuário"); }
     return trpcResult({ success: true });
   }
 
@@ -579,7 +595,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const accountTypeValue = String(input.accountType ?? target.accountType ?? "admin");
     const password = String(input.password ?? "");
     const contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
-    if (!validEmail(email) || !String(input.name ?? "").trim() || !["master", "standard"].includes(adminRole) || !["admin", "agent"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
+    if (!validEmail(email) || !String(input.name ?? "").trim() || !["master", "standard"].includes(adminRole) || !["admin", "agent", "both"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
     if (contactEmail && !validEmail(contactEmail)) return trpcError("E-mail de acompanhamento inválido");
     if (adminAccess.role !== "master" && adminRole !== String(target.adminRole)) return trpcError("Somente um administrador mestre pode alterar níveis de acesso", "FORBIDDEN", 403);
     if (String(target.adminRole) === "master" && adminRole !== "master") {

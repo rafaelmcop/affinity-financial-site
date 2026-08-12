@@ -34,7 +34,7 @@ export const adminAccounts = mysqlTable("adminAccounts", {
   contactEmail: varchar("contactEmail", { length: 320 }),
   whatsapp: varchar("whatsapp", { length: 30 }),
   address: text("address"),
-  accountType: mysqlEnum("accountType", ["admin", "agent"]).default("admin").notNull(),
+  accountType: mysqlEnum("accountType", ["admin", "agent", "both"]).default("admin").notNull(),
   adminRole: mysqlEnum("adminRole", ["master", "standard"]).default("standard").notNull(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
   isActive: int("isActive").default(1).notNull(),

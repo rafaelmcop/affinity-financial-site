@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import AdminSidebar from '@/components/AdminSidebar';
 
 type AdminRole = 'master' | 'standard';
-type AccountType = 'admin' | 'agent';
+type AccountType = 'admin' | 'agent' | 'both';
 type AdminForm = { id: number; name: string; email: string; phone: string; contactEmail: string; whatsapp: string; accountType: AccountType; adminRole: AdminRole; password: string };
 
 const emptyAdmin = { name: '', email: '', phone: '', contactEmail: '', whatsapp: '', accountType: 'agent' as AccountType, adminRole: 'standard' as AdminRole, password: '' };
@@ -126,8 +126,8 @@ export default function AdminAdministrators() {
               <Input type="tel" placeholder="Telefone" value={newAdmin.phone} onChange={e => setNewAdmin({ ...newAdmin, phone: e.target.value })} />
               <Input type="email" placeholder="E-mail pessoal para acompanhamento" value={newAdmin.contactEmail} onChange={e => setNewAdmin({ ...newAdmin, contactEmail: e.target.value })} />
               <Input type="tel" placeholder="WhatsApp pessoal (com código do país)" value={newAdmin.whatsapp} onChange={e => setNewAdmin({ ...newAdmin, whatsapp: e.target.value })} />
-              <select value={newAdmin.accountType} onChange={e => setNewAdmin({ ...newAdmin, accountType: e.target.value as AccountType, adminRole: e.target.value === 'agent' ? 'standard' : newAdmin.adminRole })} className="h-10 rounded-md border border-gold/30 bg-black px-3 text-white"><option value="agent">Portal de agente</option><option value="admin">Painel administrativo</option></select>
-              {newAdmin.accountType === 'admin' && <RoleSelect value={newAdmin.adminRole} onChange={adminRole => setNewAdmin({ ...newAdmin, adminRole })} />}
+              <select value={newAdmin.accountType} onChange={e => setNewAdmin({ ...newAdmin, accountType: e.target.value as AccountType, adminRole: e.target.value === 'agent' ? 'standard' : newAdmin.adminRole })} className="h-10 rounded-md border border-gold/30 bg-black px-3 text-white"><option value="agent">Portal de agente</option><option value="admin">Painel administrativo</option><option value="both">Ambos os portais</option></select>
+              {newAdmin.accountType !== 'agent' && <RoleSelect value={newAdmin.adminRole} onChange={adminRole => setNewAdmin({ ...newAdmin, adminRole })} />}
               <Input className="md:col-span-2" type="password" placeholder="Senha forte" value={newAdmin.password} onChange={e => setNewAdmin({ ...newAdmin, password: e.target.value })} minLength={6} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{6,}" title="Inclua maiúscula, minúscula, número e caractere especial" required />
               <Button type="submit" className="bg-gold text-black md:col-span-2">Criar administrador</Button>
             </form>
