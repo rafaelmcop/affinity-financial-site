@@ -2079,6 +2079,7 @@ async function runProcedure(
       email || null,
       String(input.phone ?? "").trim() || null,
       String(input.whatsapp ?? "").trim() || null,
+      String(input.birthDate ?? "").trim() || null,
       status,
       String(input.source ?? "").trim() || null,
       assignedEmail,
@@ -2087,7 +2088,7 @@ async function runProcedure(
     ];
     if (name === "crm.create") {
       const result = await env.DB.prepare(
-        "INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail,nextFollowUpAt,notes) VALUES (?,?,?,?,?,?,?,?,?)"
+        "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail,nextFollowUpAt,notes) VALUES (?,?,?,?,?,?,?,?,?,?)"
       )
         .bind(...values)
         .run();
@@ -2095,8 +2096,16 @@ async function runProcedure(
     }
     const id = Number(input.id);
     if (!id) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    if (accountType === "agent") {
+      const owned = await env.DB.prepare(
+        "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+      )
+        .bind(id, adminEmail.toLowerCase())
+        .first();
+      if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    }
     await env.DB.prepare(
-      "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
+      "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
     )
       .bind(...values, id)
       .run();

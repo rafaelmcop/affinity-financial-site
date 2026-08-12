@@ -27,6 +27,7 @@ type ClientForm = {
   email: string;
   phone: string;
   whatsapp: string;
+  birthDate: string;
   status: Status;
   source: string;
   assignedAdminEmail: string;
@@ -38,6 +39,7 @@ const emptyClient: ClientForm = {
   email: "",
   phone: "",
   whatsapp: "",
+  birthDate: "",
   status: "new",
   source: "",
   assignedAdminEmail: "",
@@ -94,6 +96,19 @@ function displayDate(value: unknown) {
         timeStyle: "short",
       })
     : "Não agendado";
+}
+function displayBirthDate(value: unknown) {
+  if (!value) return "Não informado";
+  const iso = String(value).slice(0, 10);
+  const match = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[2]}/${match[3]}/${match[1]}` : String(value);
+}
+function birthDateForStorage(value: string) {
+  if (!value) return "";
+  const match = value.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  return match
+    ? `${match[3]}-${match[1].padStart(2, "0")}-${match[2].padStart(2, "0")}`
+    : value;
 }
 
 export default function AdminCrm({
@@ -171,6 +186,7 @@ export default function AdminCrm({
     event.preventDefault();
     const payload = {
       ...form,
+      birthDate: birthDateForStorage(form.birthDate),
       nextFollowUpAt: form.nextFollowUpAt
         ? new Date(form.nextFollowUpAt).toISOString()
         : "",
@@ -198,6 +214,10 @@ export default function AdminCrm({
       email: client.email || "",
       phone: client.phone || "",
       whatsapp: client.whatsapp || "",
+      birthDate:
+        displayBirthDate(client.birthDate) === "Não informado"
+          ? ""
+          : displayBirthDate(client.birthDate),
       status: client.status,
       source: client.source || "",
       assignedAdminEmail: client.assignedAdminEmail || "",
@@ -308,48 +328,83 @@ export default function AdminCrm({
               onSubmit={save}
               className="grid gap-4 md:grid-cols-2 lg:grid-cols-3"
             >
-              <Input
-                placeholder="Nome do cliente"
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                required
-              />
-              <Input
-                type="email"
-                placeholder="E-mail"
-                value={form.email}
-                onChange={e => setForm({ ...form, email: e.target.value })}
-              />
-              <Input
-                type="tel"
-                placeholder="Telefone / SMS"
-                value={form.phone}
-                onChange={e => setForm({ ...form, phone: e.target.value })}
-              />
-              <Input
-                type="tel"
-                placeholder="WhatsApp"
-                value={form.whatsapp}
-                onChange={e => setForm({ ...form, whatsapp: e.target.value })}
-              />
-              <Input
-                placeholder="Origem do contato"
-                value={form.source}
-                onChange={e => setForm({ ...form, source: e.target.value })}
-              />
-              <select
-                value={form.status}
-                onChange={e =>
-                  setForm({ ...form, status: e.target.value as Status })
-                }
-                className="h-10 rounded-md border border-white/20 bg-black px-3"
-              >
-                {statuses.map(status => (
-                  <option key={status.value} value={status.value}>
-                    {status.label}
-                  </option>
-                ))}
-              </select>
+              <label className="text-sm text-gray-300">
+                Nome completo
+                <Input
+                  className="mt-2"
+                  placeholder="Nome do cliente"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  required
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                E-mail
+                <Input
+                  className="mt-2"
+                  type="email"
+                  placeholder="cliente@email.com"
+                  value={form.email}
+                  onChange={e => setForm({ ...form, email: e.target.value })}
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                Telefone / SMS
+                <Input
+                  className="mt-2"
+                  type="tel"
+                  placeholder="Número do telefone"
+                  value={form.phone}
+                  onChange={e => setForm({ ...form, phone: e.target.value })}
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                WhatsApp
+                <Input
+                  className="mt-2"
+                  type="tel"
+                  placeholder="Número do WhatsApp"
+                  value={form.whatsapp}
+                  onChange={e => setForm({ ...form, whatsapp: e.target.value })}
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                Data de nascimento (MM/DD/AAAA)
+                <Input
+                  className="mt-2"
+                  inputMode="numeric"
+                  placeholder="MM/DD/AAAA"
+                  value={form.birthDate}
+                  onChange={e =>
+                    setForm({ ...form, birthDate: e.target.value })
+                  }
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                Origem do contato
+                <Input
+                  className="mt-2"
+                  placeholder="Ex.: PC Sheet, indicação"
+                  value={form.source}
+                  onChange={e => setForm({ ...form, source: e.target.value })}
+                />
+              </label>
+              <label className="text-sm text-gray-300">
+                Etapa do atendimento
+                <select
+                  value={form.status}
+                  onChange={e =>
+                    setForm({ ...form, status: e.target.value as Status })
+                  }
+                  className="mt-2 h-10 w-full rounded-md border border-white/20 bg-black px-3"
+                >
+                  {statuses.map(status => (
+                    <option key={status.value} value={status.value}>
+                      {status.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {!agentMode && (
                 <select
                   value={form.assignedAdminEmail}
@@ -368,19 +423,26 @@ export default function AdminCrm({
                     ))}
                 </select>
               )}
-              <Input
-                type="datetime-local"
-                value={form.nextFollowUpAt}
-                onChange={e =>
-                  setForm({ ...form, nextFollowUpAt: e.target.value })
-                }
-              />
-              <textarea
-                placeholder="Observações gerais"
-                value={form.notes}
-                onChange={e => setForm({ ...form, notes: e.target.value })}
-                className="min-h-24 rounded-md border border-white/20 bg-black p-3 text-sm lg:col-span-3"
-              />
+              <label className="text-sm text-gray-300">
+                Próximo acompanhamento (data e hora)
+                <Input
+                  className="mt-2"
+                  type="datetime-local"
+                  value={form.nextFollowUpAt}
+                  onChange={e =>
+                    setForm({ ...form, nextFollowUpAt: e.target.value })
+                  }
+                />
+              </label>
+              <label className="text-sm text-gray-300 lg:col-span-3">
+                Observações gerais
+                <textarea
+                  placeholder="Informações importantes para o acompanhamento"
+                  value={form.notes}
+                  onChange={e => setForm({ ...form, notes: e.target.value })}
+                  className="mt-2 min-h-24 w-full rounded-md border border-white/20 bg-black p-3 text-sm"
+                />
+              </label>
               <div className="flex gap-3 lg:col-span-3">
                 <Button type="submit" className="bg-gold text-black">
                   <Save size={16} className="mr-2" />
@@ -448,6 +510,7 @@ export default function AdminCrm({
                       className={`flex items-center gap-1 rounded-full px-3 py-1 text-xs ${overdue ? "bg-red-500/15 text-red-300" : "bg-white/5 text-gray-300"}`}
                     >
                       <CalendarClock size={13} />
+                      Próximo acompanhamento:{" "}
                       {displayDate(client.nextFollowUpAt)}
                     </span>
                     {!agentMode && (
@@ -473,6 +536,52 @@ export default function AdminCrm({
                 <p className="mt-1 text-sm text-gray-400">
                   Cadastro, apólice, automações e histórico em um só lugar
                 </p>
+                <div className="mt-4 grid gap-2 rounded-xl border border-white/10 bg-black/30 p-4 text-sm">
+                  <p>
+                    <span className="text-gray-500">E-mail:</span>{" "}
+                    <strong>{selected.email || "Não informado"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Telefone / SMS:</span>{" "}
+                    <strong>{selected.phone || "Não informado"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">WhatsApp:</span>{" "}
+                    <strong>{selected.whatsapp || "Não informado"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Data de nascimento:</span>{" "}
+                    <strong>{displayBirthDate(selected.birthDate)}</strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Origem do contato:</span>{" "}
+                    <strong>{selected.source || "Não informada"}</strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Etapa do atendimento:</span>{" "}
+                    <strong>
+                      {statuses.find(item => item.value === selected.status)
+                        ?.label || selected.status}
+                    </strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">
+                      Próximo acompanhamento:
+                    </span>{" "}
+                    <strong>{displayDate(selected.nextFollowUpAt)}</strong>
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Observações:</span>{" "}
+                    <strong>{selected.notes || "Nenhuma observação"}</strong>
+                  </p>
+                </div>
+                <Button
+                  className="mt-3 w-full bg-gold text-black"
+                  onClick={() => edit(selected)}
+                >
+                  <Edit2 size={16} className="mr-2" />
+                  Editar informações do cliente
+                </Button>
                 {agentMode && (
                   <>
                     <div className="mt-5 space-y-2">

@@ -748,6 +748,7 @@ export const appRouter = router({
           phone: z.string().optional(),
           contactEmail: z.string().email().optional().or(z.literal("")),
           whatsapp: z.string().optional(),
+          birthDate: z.string().optional(),
           address: z.string().optional(),
         })
       )
@@ -1794,6 +1795,7 @@ export const appRouter = router({
           email: z.string().email().optional().or(z.literal("")),
           phone: z.string().optional(),
           whatsapp: z.string().optional(),
+          birthDate: z.string().optional(),
           status: z.enum([
             "new",
             "contacted",
@@ -1814,6 +1816,9 @@ export const appRouter = router({
         await db.insert(crmClients).values({
           ...input,
           email: input.email || null,
+          birthDate: input.birthDate
+            ? new Date(`${input.birthDate}T12:00:00Z`)
+            : null,
           nextFollowUpAt: input.nextFollowUpAt
             ? new Date(input.nextFollowUpAt)
             : null,
@@ -1828,6 +1833,7 @@ export const appRouter = router({
           email: z.string().email().optional().or(z.literal("")),
           phone: z.string().optional(),
           whatsapp: z.string().optional(),
+          birthDate: z.string().optional(),
           status: z.enum([
             "new",
             "contacted",
@@ -1851,6 +1857,9 @@ export const appRouter = router({
           .set({
             ...data,
             email: data.email || null,
+            birthDate: data.birthDate
+              ? new Date(`${data.birthDate}T12:00:00Z`)
+              : null,
             nextFollowUpAt: data.nextFollowUpAt
               ? new Date(data.nextFollowUpAt)
               : null,

@@ -39,47 +39,90 @@ async function readPcSheet(file: File) {
   ).toString();
   const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() })
     .promise;
-  const pageItems: string[][] = [];
+  const pageLines: string[][] = [];
   for (let i = 1; i <= Math.min(pdf.numPages, 12); i++) {
     const page = await pdf.getPage(i),
       content = await page.getTextContent();
-    pageItems.push(
-      content.items
-        .map(item => ("str" in item ? item.str.trim() : ""))
-        .filter(Boolean)
+    const rows = new Map<number, { x: number; text: string }[]>();
+    for (const item of content.items) {
+      if (!("str" in item) || !item.str.trim() || !("transform" in item))
+        continue;
+      const y = Math.round(item.transform[5]);
+      const row = rows.get(y) || [];
+      row.push({ x: item.transform[4], text: item.str.trim() });
+      rows.set(y, row);
+    }
+    pageLines.push(
+      Array.from(rows.entries())
+        .sort((a, b) => b[0] - a[0])
+        .map(([, row]) =>
+          row
+            .sort((a, b) => a.x - b.x)
+            .map(item => item.text)
+            .join(" | ")
+        )
     );
   }
-  const pages = pageItems.map(items => items.join(" ")),
-    all = pages.join(" ").replace(/\s+/g, " "),
-    cover = pageItems[0] || [];
+  const pages = pageLines.map(lines => lines.join("\n")),
+    all = pages.join("\n").replace(/[ \t]+/g, " "),
+    cover = pageLines[0] || [];
   const find = (text: string, re: RegExp) => text.match(re)?.[1]?.trim() || "";
-  const coverValues = cover.slice(
-    Math.max(0, cover.indexOf("INSTRUCTIONS:") + 1)
-  );
+  const afterLine = (lines: string[], label: RegExp) => {
+    const index = lines.findIndex(line => label.test(line));
+    return index >= 0 ? (lines[index + 1] || "").split("|")[0].trim() : "";
+  };
   const email = find(all, /([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/);
   const dob =
-    coverValues.find(value => /^\d{2}\/\d{2}\/\d{4}$/.test(value)) ||
-    find(all, /Date of Birth\D{0,80}(\d{2}\/\d{2}\/\d{4})/);
+    cover.find(line => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(line.trim()))?.trim() ||
+    find(
+      all,
+      /Date of Birth[^\n]*\n([^\n]*?\b\d{1,2}\/\d{1,2}\/\d{4}\b)/
+    ).match(/\d{1,2}\/\d{1,2}\/\d{4}/)?.[0] ||
+    "";
   const policy =
-    coverValues.find(value => /^LS\d{6,}$/i.test(value)) ||
-    find(all, /\b(LS\d{6,})\b/);
+    afterLine(cover, /Transaction ID/i) || find(all, /\b(LS\d{6,})\b/i);
   const product =
-    coverValues.find(value => /^(?:LSW|NLIC)\s*[A-Z0-9-]+$/i.test(value)) || "";
+    afterLine(cover, /^Product:/i) ||
+    find(all, /Product Name:[^\n]*\n([^|\n]+)/i);
   const coverage =
-    coverValues.find(value => /^\$[\d,]+$/.test(value)) ||
-    find(all, /Face Amount\D{0,80}(\$[\d,]+)/);
+    afterLine(cover, /Face Amount/i) ||
+    find(all, /Face Amount:[^\n]*\n([^|\n]*\$[\d,]+)/i);
   const name =
-    coverValues.find(
-      value =>
-        /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{5,}$/.test(value) &&
-        !/(National|Rafael|reviewed|application)/i.test(value)
-    ) || "";
-  const phone = (all.match(/\(\d{3}\)\s*\d{3}-\d{4}/g) || [])[0] || "";
-  const premium = (pages[4]?.match(/\$\d[\d,]*\.\d{2}/g) || []).at(-1) || "";
-  const beneficiary = find(
-    all,
-    /Primary:\s*(?:The beneficiary.*?\))?\s*([A-Z][A-Za-zÀ-ÿ' -]{4,}?)\s+Relationship to Insured:/
-  );
+    afterLine(cover, /Proposed Insured:.*Agent:/i) ||
+    find(all, /Name \(print first, middle, last\)[^\n]*\n([^|\n]+)/i);
+  const contactLine =
+    pageLines.flat().find(line => line.includes(email) && /\d/.test(line)) ||
+    "";
+  const phoneDigits = contactLine
+    .replace(email, "")
+    .replace(/\D/g, "")
+    .slice(0, 10);
+  const phone =
+    phoneDigits.length === 10
+      ? `(${phoneDigits.slice(0, 3)}) ${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`
+      : "";
+  const premiumLine =
+    pageLines
+      .flat()
+      .find(line => /Planned Periodic\/Modal Premium/i.test(line)) || "";
+  const premium = (premiumLine.match(/\$[\d,]+\.\d{2}/g) || []).at(-1) || "";
+  const flatLines = pageLines.flat();
+  const primaryIndex = flatLines.findIndex(line => /^Primary:/i.test(line));
+  const primaryLine =
+    primaryIndex >= 0 ? flatLines[primaryIndex + 1] || "" : "";
+  const beneficiaryLines = [
+    ...flatLines.filter(line => /Relationship to Insured:/i.test(line)),
+    primaryLine,
+  ];
+  const beneficiaries = beneficiaryLines
+    .map(line =>
+      line
+        .split("Relationship to Insured:")[0]
+        .replace(/^.*Primary:\s*/i, "")
+        .replace(/\s*\|\s*/g, " ")
+        .trim()
+    )
+    .filter(value => /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{3,}$/.test(value));
   const dobParts = dob.split("/");
   return {
     clientName: name,
@@ -98,7 +141,7 @@ async function readPcSheet(file: File) {
         ? "Anual"
         : "",
     coverageAmount: money(coverage),
-    beneficiaries: beneficiary,
+    beneficiaries: Array.from(new Set(beneficiaries)).join(", "),
   };
 }
 export function PcSheetUpload() {
@@ -124,8 +167,19 @@ export function PcSheetUpload() {
             if (!file) return;
             setLoading(true);
             try {
-              setForm(await readPcSheet(file));
-              toast.success("Campos extraídos. Confira antes de salvar.");
+              const extracted = await readPcSheet(file);
+              setForm(extracted);
+              const filled = Object.values(extracted).filter(
+                value => value !== "" && value !== 0
+              ).length;
+              if (!extracted.clientName && !extracted.policyNumber)
+                toast.error(
+                  "O PDF não possui texto legível. Tente baixar o PC Sheet original novamente."
+                );
+              else
+                toast.success(
+                  `${filled} campos extraídos. Confira antes de salvar.`
+                );
             } catch {
               toast.error("Não foi possível ler este PDF");
             } finally {
@@ -138,24 +192,38 @@ export function PcSheetUpload() {
         )}
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <Input
-          placeholder="Nome"
-          value={form.clientName}
-          onChange={e => setForm({ ...form, clientName: e.target.value })}
-        />
-        <Input
-          type="email"
-          placeholder="E-mail"
-          value={form.clientEmail}
-          onChange={e => setForm({ ...form, clientEmail: e.target.value })}
-        />
-        <Input
-          placeholder="Telefone"
-          value={form.clientPhone}
-          onChange={e => setForm({ ...form, clientPhone: e.target.value })}
-        />
-        <div>
+        <label className="text-sm text-gray-300">
+          Nome completo
           <Input
+            className="mt-2"
+            placeholder="Nome do cliente"
+            value={form.clientName}
+            onChange={e => setForm({ ...form, clientName: e.target.value })}
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          E-mail
+          <Input
+            className="mt-2"
+            type="email"
+            placeholder="E-mail do cliente"
+            value={form.clientEmail}
+            onChange={e => setForm({ ...form, clientEmail: e.target.value })}
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Telefone
+          <Input
+            className="mt-2"
+            placeholder="Telefone do cliente"
+            value={form.clientPhone}
+            onChange={e => setForm({ ...form, clientPhone: e.target.value })}
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Data de nascimento
+          <Input
+            className="mt-2"
             inputMode="numeric"
             placeholder="MM/DD/AAAA"
             value={form.birthDate}
@@ -164,45 +232,71 @@ export function PcSheetUpload() {
           <p className="mt-1 text-xs text-gray-500">
             Aniversário · mensagem programada para 08:30 AM
           </p>
-        </div>
-        <Input
-          placeholder="Número da apólice / transação"
-          value={form.policyNumber}
-          onChange={e => setForm({ ...form, policyNumber: e.target.value })}
-        />
-        <Input
-          placeholder="Produto"
-          value={form.product}
-          onChange={e => setForm({ ...form, product: e.target.value })}
-        />
-        <Input
-          type="number"
-          step=".01"
-          placeholder="Premium"
-          value={form.premiumAmount || ""}
-          onChange={e =>
-            setForm({ ...form, premiumAmount: Number(e.target.value) })
-          }
-        />
-        <Input
-          placeholder="Frequência"
-          value={form.premiumFrequency}
-          onChange={e => setForm({ ...form, premiumFrequency: e.target.value })}
-        />
-        <Input
-          type="number"
-          step=".01"
-          placeholder="Valor da cobertura"
-          value={form.coverageAmount || ""}
-          onChange={e =>
-            setForm({ ...form, coverageAmount: Number(e.target.value) })
-          }
-        />
-        <Input
-          placeholder="Beneficiários"
-          value={form.beneficiaries}
-          onChange={e => setForm({ ...form, beneficiaries: e.target.value })}
-        />
+        </label>
+        <label className="text-sm text-gray-300">
+          Número da apólice / transação
+          <Input
+            className="mt-2"
+            placeholder="Ex.: LS810380300"
+            value={form.policyNumber}
+            onChange={e => setForm({ ...form, policyNumber: e.target.value })}
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Produto
+          <Input
+            className="mt-2"
+            placeholder="Nome do produto"
+            value={form.product}
+            onChange={e => setForm({ ...form, product: e.target.value })}
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Valor do premium
+          <Input
+            className="mt-2"
+            type="number"
+            step=".01"
+            placeholder="Premium"
+            value={form.premiumAmount || ""}
+            onChange={e =>
+              setForm({ ...form, premiumAmount: Number(e.target.value) })
+            }
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Frequência do premium
+          <Input
+            className="mt-2"
+            placeholder="Ex.: Mensal"
+            value={form.premiumFrequency}
+            onChange={e =>
+              setForm({ ...form, premiumFrequency: e.target.value })
+            }
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Valor da cobertura
+          <Input
+            className="mt-2"
+            type="number"
+            step=".01"
+            placeholder="Valor da cobertura"
+            value={form.coverageAmount || ""}
+            onChange={e =>
+              setForm({ ...form, coverageAmount: Number(e.target.value) })
+            }
+          />
+        </label>
+        <label className="text-sm text-gray-300">
+          Beneficiários
+          <Input
+            className="mt-2"
+            placeholder="Nomes dos beneficiários"
+            value={form.beneficiaries}
+            onChange={e => setForm({ ...form, beneficiaries: e.target.value })}
+          />
+        </label>
         <Button
           className="bg-gold text-black md:col-span-2"
           disabled={!form.clientName || !form.policyNumber || save.isPending}

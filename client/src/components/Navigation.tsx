@@ -104,7 +104,7 @@ export function Navigation() {
                 type="button"
                 onClick={() => setLoginOpen(value => !value)}
                 aria-expanded={loginOpen}
-                className="flex items-center gap-2 rounded-full border border-gold/70 bg-gradient-to-r from-gold to-[#f1d47a] px-4 py-2 text-sm font-bold text-black shadow-[0_0_22px_rgba(212,175,55,.2)] transition hover:-translate-y-0.5 hover:shadow-[0_8px_28px_rgba(212,175,55,.3)]"
+                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${loginOpen ? "border-gold bg-gold text-black shadow-[0_0_24px_rgba(212,175,55,.25)]" : "border-gold/45 bg-[#0f1f36] text-gold hover:border-gold hover:bg-[#172c49]"}`}
               >
                 <LockKeyhole size={17} />
                 {loginCopy.login}
@@ -114,8 +114,8 @@ export function Navigation() {
                 />
               </button>
               {loginOpen && (
-                <div className="absolute right-0 top-full mt-3 w-72 overflow-hidden rounded-2xl border border-gold/40 bg-gradient-to-b from-[#fffaf0] to-[#f4ead2] p-3 text-[#14233a] shadow-[0_22px_70px_rgba(0,0,0,.45)]">
-                  <div className="mb-2 rounded-xl bg-[#14233a] px-4 py-3 text-white">
+                <div className="absolute right-0 top-full mt-3 w-72 overflow-hidden rounded-2xl border border-gold/35 bg-[#0b1728] p-3 text-white shadow-[0_22px_70px_rgba(0,0,0,.6)] ring-1 ring-white/5">
+                  <div className="mb-2 border-b border-gold/20 px-3 pb-3 pt-1">
                     <p className="text-xs font-bold uppercase tracking-[.18em] text-gold">
                       Área segura
                     </p>
@@ -169,8 +169,8 @@ export function Navigation() {
                 {item.label}
               </button>
             ))}
-            <div className="mt-3 rounded-2xl border border-gold/30 bg-gradient-to-b from-[#fffaf0] to-[#f4ead2] p-2 shadow-xl">
-              <p className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-[#8b6b13]">
+            <div className="mt-3 rounded-2xl border border-gold/30 bg-[#0b1728] p-2 shadow-xl ring-1 ring-white/5">
+              <p className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gold">
                 {loginCopy.login}
               </p>
               <PortalButton
@@ -217,14 +217,14 @@ function PortalButton({
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      className="group flex w-full items-center gap-3 rounded-xl px-4 py-3 text-left text-sm font-semibold text-[#14233a] transition enabled:hover:bg-white enabled:hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-45"
+      className="group flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm font-semibold text-gray-200 transition enabled:hover:border-gold/35 enabled:hover:bg-gold/10 enabled:hover:text-gold enabled:focus-visible:border-gold enabled:focus-visible:bg-gold/15 enabled:focus-visible:text-gold disabled:cursor-not-allowed disabled:opacity-40"
     >
-      <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#14233a] text-gold transition group-enabled:group-hover:bg-gold group-enabled:group-hover:text-black">
+      <span className="grid h-9 w-9 place-items-center rounded-lg border border-gold/25 bg-[#14233a] text-gold transition group-enabled:group-hover:border-gold group-enabled:group-hover:bg-gold group-enabled:group-hover:text-black">
         <Icon size={18} />
       </span>
       <span className="flex-1">{label}</span>
       {soon && (
-        <span className="rounded-full bg-[#14233a]/10 px-2 py-1 text-[9px] font-bold uppercase text-[#14233a]/65">
+        <span className="rounded-full bg-white/5 px-2 py-1 text-[9px] font-bold uppercase text-gray-500">
           {soon}
         </span>
       )}
