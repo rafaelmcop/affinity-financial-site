@@ -9,9 +9,10 @@ import { toast } from 'sonner';
 import AdminSidebar from '@/components/AdminSidebar';
 
 type AdminRole = 'master' | 'standard';
-type AdminForm = { id: number; name: string; email: string; phone: string; adminRole: AdminRole; password: string };
+type AccountType = 'admin' | 'agent';
+type AdminForm = { id: number; name: string; email: string; phone: string; contactEmail: string; whatsapp: string; accountType: AccountType; adminRole: AdminRole; password: string };
 
-const emptyAdmin = { name: '', email: '', phone: '', adminRole: 'standard' as AdminRole, password: '' };
+const emptyAdmin = { name: '', email: '', phone: '', contactEmail: '', whatsapp: '', accountType: 'agent' as AccountType, adminRole: 'standard' as AdminRole, password: '' };
 
 function RoleSelect({ value, onChange, disabled = false }: { value: AdminRole; onChange: (value: AdminRole) => void; disabled?: boolean }) {
   return (
@@ -105,7 +106,10 @@ export default function AdminAdministrators() {
               <Input placeholder="Nome" value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} required />
               <Input type="email" placeholder="E-mail" value={editing.email} onChange={e => setEditing({ ...editing, email: e.target.value })} required />
               <Input type="tel" placeholder="Telefone" value={editing.phone} onChange={e => setEditing({ ...editing, phone: e.target.value })} />
-              <RoleSelect value={editing.adminRole} onChange={adminRole => setEditing({ ...editing, adminRole })} disabled={!isMaster} />
+              <Input type="email" placeholder="E-mail pessoal para acompanhamento" value={editing.contactEmail} onChange={e => setEditing({ ...editing, contactEmail: e.target.value })} />
+              <Input type="tel" placeholder="WhatsApp pessoal (com código do país)" value={editing.whatsapp} onChange={e => setEditing({ ...editing, whatsapp: e.target.value })} />
+              <select value={editing.accountType} onChange={e => setEditing({ ...editing, accountType: e.target.value as AccountType, adminRole: e.target.value === 'agent' ? 'standard' : editing.adminRole })} disabled={!isMaster} className="h-10 rounded-md border border-gold/30 bg-black px-3 text-white"><option value="agent">Portal de agente</option><option value="admin">Painel administrativo</option></select>
+              {editing.accountType === 'admin' && <RoleSelect value={editing.adminRole} onChange={adminRole => setEditing({ ...editing, adminRole })} disabled={!isMaster} />}
               <Input className="md:col-span-2" type="password" placeholder={isMaster ? 'Nova senha (deixe vazio para manter)' : 'Use “Trocar minha senha” acima'} value={editing.password} onChange={e => setEditing({ ...editing, password: e.target.value })} disabled={!isMaster} minLength={editing.password ? 6 : undefined} />
               <div className="flex gap-3 md:col-span-2"><Button type="submit" className="bg-gold text-black">Salvar alterações</Button><Button type="button" variant="outline" onClick={() => setEditing(null)}>Cancelar</Button></div>
             </form>
@@ -120,7 +124,10 @@ export default function AdminAdministrators() {
               <Input placeholder="Nome" value={newAdmin.name} onChange={e => setNewAdmin({ ...newAdmin, name: e.target.value })} required />
               <Input type="email" placeholder="E-mail" value={newAdmin.email} onChange={e => setNewAdmin({ ...newAdmin, email: e.target.value })} required />
               <Input type="tel" placeholder="Telefone" value={newAdmin.phone} onChange={e => setNewAdmin({ ...newAdmin, phone: e.target.value })} />
-              <RoleSelect value={newAdmin.adminRole} onChange={adminRole => setNewAdmin({ ...newAdmin, adminRole })} />
+              <Input type="email" placeholder="E-mail pessoal para acompanhamento" value={newAdmin.contactEmail} onChange={e => setNewAdmin({ ...newAdmin, contactEmail: e.target.value })} />
+              <Input type="tel" placeholder="WhatsApp pessoal (com código do país)" value={newAdmin.whatsapp} onChange={e => setNewAdmin({ ...newAdmin, whatsapp: e.target.value })} />
+              <select value={newAdmin.accountType} onChange={e => setNewAdmin({ ...newAdmin, accountType: e.target.value as AccountType, adminRole: e.target.value === 'agent' ? 'standard' : newAdmin.adminRole })} className="h-10 rounded-md border border-gold/30 bg-black px-3 text-white"><option value="agent">Portal de agente</option><option value="admin">Painel administrativo</option></select>
+              {newAdmin.accountType === 'admin' && <RoleSelect value={newAdmin.adminRole} onChange={adminRole => setNewAdmin({ ...newAdmin, adminRole })} />}
               <Input className="md:col-span-2" type="password" placeholder="Senha forte" value={newAdmin.password} onChange={e => setNewAdmin({ ...newAdmin, password: e.target.value })} minLength={6} pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*[0-9])(?=.*[^A-Za-z0-9]).{6,}" title="Inclua maiúscula, minúscula, número e caractere especial" required />
               <Button type="submit" className="bg-gold text-black md:col-span-2">Criar administrador</Button>
             </form>
@@ -134,11 +141,11 @@ export default function AdminAdministrators() {
               <Card key={admin.id} className="border-gold/20 bg-[#0b1524] p-5">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <div className="flex flex-wrap items-center gap-3"><p className="text-lg font-bold">{admin.name}</p><span className={`rounded-full px-3 py-1 text-xs font-bold ${admin.adminRole === 'master' ? 'bg-gold/15 text-gold' : 'bg-blue-500/15 text-blue-300'}`}>{admin.adminRole === 'master' ? 'Mestre' : 'Padrão'}</span><span className={`rounded-full px-3 py-1 text-xs ${admin.isActive ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>{admin.isActive ? 'Ativo' : 'Bloqueado'}</span></div>
-                    <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400"><span>{admin.email}</span><span>{admin.phone || 'Telefone não informado'}</span></div>
+                    <div className="flex flex-wrap items-center gap-3"><p className="text-lg font-bold">{admin.name}</p><span className="rounded-full bg-purple-500/15 px-3 py-1 text-xs font-bold text-purple-300">{admin.accountType === 'agent' ? 'Agente' : 'Administrador'}</span>{admin.accountType === 'admin' && <span className={`rounded-full px-3 py-1 text-xs font-bold ${admin.adminRole === 'master' ? 'bg-gold/15 text-gold' : 'bg-blue-500/15 text-blue-300'}`}>{admin.adminRole === 'master' ? 'Mestre' : 'Padrão'}</span>}<span className={`rounded-full px-3 py-1 text-xs ${admin.isActive ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>{admin.isActive ? 'Ativo' : 'Bloqueado'}</span></div>
+                    <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400"><span>{admin.email}</span><span>{admin.phone || 'Telefone não informado'}</span><span>Acompanhamento: {admin.contactEmail || 'não informado'}</span><span>WhatsApp: {admin.whatsapp || 'não informado'}</span></div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {canEdit && <Button variant="outline" onClick={() => setEditing({ id: admin.id, name: admin.name, email: admin.email, phone: admin.phone || '', adminRole: admin.adminRole, password: '' })}><Edit2 size={16} className="mr-2" />Editar</Button>}
+                    {canEdit && <Button variant="outline" onClick={() => setEditing({ id: admin.id, name: admin.name, email: admin.email, phone: admin.phone || '', contactEmail: admin.contactEmail || '', whatsapp: admin.whatsapp || '', accountType: admin.accountType || 'admin', adminRole: admin.adminRole, password: '' })}><Edit2 size={16} className="mr-2" />Editar</Button>}
                     {isMaster && admin.email.toLowerCase() !== data?.currentEmail.toLowerCase() && <Button variant="outline" onClick={async () => { try { await setActiveMutation.mutateAsync({ id: admin.id, isActive: !admin.isActive }); await adminsQuery.refetch(); toast.success(admin.isActive ? 'Administrador bloqueado' : 'Administrador ativado'); } catch (error) { toast.error(error instanceof Error ? error.message : 'Erro'); } }}>{admin.isActive ? 'Bloquear' : 'Ativar'}</Button>}
                   </div>
                 </div>

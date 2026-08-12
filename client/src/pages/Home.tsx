@@ -7,6 +7,7 @@ import { ContactSection } from '@/components/ContactSection';
 import { Footer } from '@/components/Footer';
 import { FloatingWhatsApp } from '@/components/FloatingWhatsApp';
 import { ReviewsBanner } from '@/components/ReviewsBanner';
+import { PortalAccessSection } from '@/components/PortalAccessSection';
 
 export default function Home() {
   return (
@@ -18,6 +19,7 @@ export default function Home() {
       <AboutSection />
       <ReviewsBanner />
       <ContactSection />
+      <PortalAccessSection />
       <Footer />
       <FloatingWhatsApp />
     </div>

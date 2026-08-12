@@ -100,6 +100,7 @@ export function Footer() {
                       Painel Admin
                     </a>
                   </li>
+                  <li><a href="/agentes" className="text-gray-400 hover:text-gold transition-colors text-sm">Portal de Agentes</a></li>
                 </ul>
               </div>
             </div>

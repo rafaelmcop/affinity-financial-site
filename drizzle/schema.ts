@@ -31,6 +31,10 @@ export const adminAccounts = mysqlTable("adminAccounts", {
   email: varchar("email", { length: 320 }).notNull().unique(),
   name: varchar("name", { length: 255 }).notNull(),
   phone: varchar("phone", { length: 30 }),
+  contactEmail: varchar("contactEmail", { length: 320 }),
+  whatsapp: varchar("whatsapp", { length: 30 }),
+  address: text("address"),
+  accountType: mysqlEnum("accountType", ["admin", "agent"]).default("admin").notNull(),
   adminRole: mysqlEnum("adminRole", ["master", "standard"]).default("standard").notNull(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
   isActive: int("isActive").default(1).notNull(),
@@ -40,6 +44,86 @@ export const adminAccounts = mysqlTable("adminAccounts", {
 
 export type AdminAccount = typeof adminAccounts.$inferSelect;
 export type InsertAdminAccount = typeof adminAccounts.$inferInsert;
+
+export const crmClients = mysqlTable("crmClients", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  phone: varchar("phone", { length: 30 }),
+  whatsapp: varchar("whatsapp", { length: 30 }),
+  status: mysqlEnum("status", ["new", "contacted", "meeting", "proposal", "client", "closed"]).default("new").notNull(),
+  source: varchar("source", { length: 100 }),
+  assignedAdminEmail: varchar("assignedAdminEmail", { length: 320 }),
+  nextFollowUpAt: timestamp("nextFollowUpAt"),
+  birthDate: timestamp("birthDate"),
+  notes: text("notes"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const crmActivities = mysqlTable("crmActivities", {
+  id: int("id").autoincrement().primaryKey(),
+  clientId: int("clientId").notNull(),
+  type: mysqlEnum("type", ["note", "call", "email", "sms", "whatsapp", "status"]).default("note").notNull(),
+  content: text("content").notNull(),
+  createdBy: varchar("createdBy", { length: 320 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const agentPolicies = mysqlTable("agentPolicies", {
+  id: int("id").autoincrement().primaryKey(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
+  clientId: int("clientId"),
+  clientName: varchar("clientName", { length: 255 }).notNull(),
+  clientEmail: varchar("clientEmail", { length: 320 }),
+  clientPhone: varchar("clientPhone", { length: 30 }),
+  birthDate: timestamp("birthDate"),
+  policyNumber: varchar("policyNumber", { length: 100 }).notNull(),
+  product: varchar("product", { length: 120 }),
+  premiumAmount: decimal("premiumAmount", { precision: 12, scale: 2 }).default("0.00"),
+  premiumFrequency: varchar("premiumFrequency", { length: 50 }),
+  coverageAmount: decimal("coverageAmount", { precision: 14, scale: 2 }).default("0.00"),
+  beneficiaries: text("beneficiaries"),
+  issuedAt: timestamp("issuedAt"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const agentTasks = mysqlTable("agentTasks", {
+  id: int("id").autoincrement().primaryKey(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
+  clientId: int("clientId"),
+  title: varchar("title", { length: 255 }).notNull(),
+  dueAt: timestamp("dueAt"),
+  status: mysqlEnum("status", ["pending", "completed"]).default("pending").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const scheduledMessages = mysqlTable("scheduledMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
+  clientId: int("clientId"),
+  occasion: mysqlEnum("occasion", ["birthday", "christmas", "new_year", "custom"]).default("custom").notNull(),
+  channel: mysqlEnum("channel", ["email", "sms", "whatsapp"]).notNull(),
+  message: text("message").notNull(),
+  scheduledAt: timestamp("scheduledAt"),
+  isActive: int("isActive").default(1).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const agentEmailSettings = mysqlTable("agentEmailSettings", {
+  id: int("id").autoincrement().primaryKey(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull().unique(),
+  host: varchar("host", { length: 255 }).notNull(),
+  port: int("port").default(587).notNull(),
+  secure: int("secure").default(0).notNull(),
+  user: varchar("user", { length: 320 }).notNull(),
+  password: text("password").notNull(),
+  fromEmail: varchar("fromEmail", { length: 320 }).notNull(),
+  fromName: varchar("fromName", { length: 255 }).default("Affinity Financial").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
 
 /**
  * Affiliates table for managing affiliate program

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { and, eq } from 'drizzle-orm';
 import { adminProcedure, affiliateProcedure, publicProcedure, router } from './_core/trpc';
-import { adminAccounts, affiliates } from '../drizzle/schema';
+import { adminAccounts, affiliateReferrals, affiliates, crmActivities, crmClients, agentEmailSettings, agentPolicies, agentTasks, scheduledMessages } from '../drizzle/schema';
 import { COOKIE_NAME } from '../shared/const';
 import { getSessionCookieOptions } from './_core/cookies';
 import { enforceRateLimit } from './rateLimit';
@@ -166,7 +166,7 @@ export const appRouter = router({
       }))
       .query(async ({ input, ctx }) => {
         if (input.affiliateId !== ctx.affiliateId) throw new Error('Acesso negado');
-        const { getAffiliateById, getAffiliateReferrals, getPoliciesByAffiliateId, getPoliciesLast12Months } = await import('./db');
+        const { getAffiliateById, getAffiliateReferrals } = await import('./db');
 
         const affiliate = await getAffiliateById(input.affiliateId);
         if (!affiliate) {
@@ -174,11 +174,6 @@ export const appRouter = router({
         }
 
         const referrals = await getAffiliateReferrals(input.affiliateId);
-        const policies = await getPoliciesByAffiliateId(input.affiliateId);
-        const policiesLast12 = await getPoliciesLast12Months(input.affiliateId);
-
-        const totalPoints = policiesLast12.reduce((sum, p) => sum + (p.points || 0), 0);
-
         const stats = {
           totalReferrals: referrals.length,
           convertedReferrals: referrals.filter(r => r.status === 'converted').length,
@@ -186,49 +181,47 @@ export const appRouter = router({
           totalCommission: referrals
             .filter(r => r.status === 'converted')
             .reduce((sum, r) => sum + (parseFloat(r.commissionAmount?.toString() || '0')), 0),
-          totalPolicies: policies.length,
-          totalPoints,
         };
 
         return {
           affiliate,
           referrals,
-          policies,
           stats,
         };
       }),
 
-    submitPolicy: affiliateProcedure
-      .input(z.object({
-        affiliateId: z.number(),
-        policyNumber: z.string().min(1),
-        clientName: z.string().min(1),
-        clientEmail: z.string().email().optional(),
-        clientPhone: z.string().optional(),
-        policyType: z.string(),
-      }))
+    submitLead: affiliateProcedure
+      .input(z.object({ affiliateId: z.number(), name: z.string().min(1), email: z.string().email(), phone: z.string().min(1), relationship: z.string().min(1), details: z.string().optional() }))
       .mutation(async ({ input, ctx }) => {
         if (input.affiliateId !== ctx.affiliateId) throw new Error('Acesso negado');
-        const { createPolicy } = await import('./db');
-
-        const policy = await createPolicy({
-          affiliateId: input.affiliateId,
-          policyNumber: input.policyNumber,
-          clientName: input.clientName,
-          clientEmail: input.clientEmail || null,
-          clientPhone: input.clientPhone || null,
-          policyType: input.policyType,
-          status: 'pending',
-          points: 0,
-          submittedAt: new Date(),
-          approvedAt: null,
-        });
-
-        return {
-          success: true,
-          message: 'Apólice submetida com sucesso! Aguarde aprovação.',
-        };
+        const { createAffiliateReferral } = await import('./db');
+        const notes = `Como conhece: ${input.relationship}${input.details ? `\nDetalhes: ${input.details}` : ''}`;
+        await createAffiliateReferral({ affiliateId: input.affiliateId, referralCode: `LEAD-${Date.now().toString(36)}`, visitorName: input.name, visitorEmail: input.email, visitorPhone: input.phone, status: 'pending', commissionAmount: '0.00', notes });
+        return { success: true, message: 'Lead enviado com sucesso!' };
       }),
+  }),
+
+  agent: router({
+    login: publicProcedure.input(z.object({ email: z.string().email(), password: z.string().min(6) })).mutation(async ({ input, ctx }) => {
+      const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available');
+      const [account] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, input.email.toLowerCase())).limit(1);
+      if (!account || account.accountType !== 'agent' || !account.isActive || !(await (await import('bcryptjs')).compare(input.password, account.passwordHash))) throw new Error('Credenciais inválidas');
+      const token = await (await import('./sessionAuth')).createAdminSession(account.email); ctx.res.cookie((await import('./sessionAuth')).ADMIN_SESSION_COOKIE, token, { ...getSessionCookieOptions(ctx.req), maxAge: 8 * 60 * 60 * 1000 });
+      return { id: account.id, email: account.email, name: account.name, role: 'agent' as const, accountType: 'agent' as const };
+    }),
+    dashboard: adminProcedure.query(async ({ ctx }) => { const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available'); const email = ctx.adminEmail.toLowerCase(); const policies = await db.select().from(agentPolicies).where(eq(agentPolicies.agentEmail,email)); const tasks = await db.select().from(agentTasks).where(eq(agentTasks.agentEmail,email)); return { policies, tasks, pendingTasks: tasks.filter(t => t.status === 'pending').length, score: policies.length * 100 + tasks.filter(t => t.status === 'completed').length * 10, newMessages: 0, followUps: tasks.filter(t => t.status === 'pending' && t.dueAt).length }; }),
+    listPolicies: adminProcedure.query(async ({ ctx }) => { const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available'); return db.select().from(agentPolicies).where(eq(agentPolicies.agentEmail,ctx.adminEmail.toLowerCase())); }),
+    savePcSheet: adminProcedure.input(z.object({ clientName:z.string().min(1),clientEmail:z.string().email().optional().or(z.literal('')),clientPhone:z.string().optional(),birthDate:z.string().optional(),policyNumber:z.string().min(1),product:z.string().optional(),premiumAmount:z.number().min(0),premiumFrequency:z.string().optional(),coverageAmount:z.number().min(0),beneficiaries:z.string().optional() })).mutation(async ({input,ctx})=>{ const db=await (await import('./db')).getDb(); if(!db) throw new Error('Database not available'); const owner=ctx.adminEmail.toLowerCase();let [client]=input.clientEmail?await db.select().from(crmClients).where(and(eq(crmClients.email,input.clientEmail.toLowerCase()),eq(crmClients.assignedAdminEmail,owner))).limit(1):[];if(!client){const inserted=await db.insert(crmClients).values({name:input.clientName,email:input.clientEmail||null,phone:input.clientPhone||null,whatsapp:input.clientPhone||null,status:'client',source:'PC Sheet',assignedAdminEmail:owner,birthDate:input.birthDate?new Date(input.birthDate):null,notes:`Apólice ${input.policyNumber}`}).$returningId();[client]=await db.select().from(crmClients).where(eq(crmClients.id,inserted[0].id)).limit(1);}const [policy]=await db.select().from(agentPolicies).where(and(eq(agentPolicies.agentEmail,owner),eq(agentPolicies.policyNumber,input.policyNumber))).limit(1);const values={...input,agentEmail:owner,clientId:client.id,clientEmail:input.clientEmail||null,birthDate:input.birthDate?new Date(input.birthDate):null,premiumAmount:input.premiumAmount.toFixed(2),coverageAmount:input.coverageAmount.toFixed(2)};if(policy)await db.update(agentPolicies).set(values).where(eq(agentPolicies.id,policy.id));else await db.insert(agentPolicies).values(values);const now=new Date();const followUps=[{title:`Confirmar boas-vindas e entrega da apólice de ${input.clientName}`,dueAt:new Date(now.getTime()+2*86400000)},{title:`Revisar a apólice ${input.policyNumber} com ${input.clientName}`,dueAt:new Date(now.getTime()+30*86400000)}];await db.insert(agentTasks).values(followUps.map(task=>({...task,agentEmail:owner,clientId:client.id})));const messages=[{occasion:'christmas' as const,message:`Feliz Natal, ${input.clientName}! A Affinity Financial deseja muita paz e alegria para você e sua família.`,scheduledAt:new Date(Date.UTC(now.getUTCFullYear()+(now.getUTCMonth()===11&&now.getUTCDate()>=24?1:0),11,24,15))},{occasion:'new_year' as const,message:`Feliz Ano Novo, ${input.clientName}! Desejamos um novo ciclo de saúde, proteção e realizações.`,scheduledAt:new Date(Date.UTC(now.getUTCFullYear()+(now.getUTCMonth()===11&&now.getUTCDate()>=31?1:0),11,31,15))}];if(input.birthDate){const birth=new Date(`${input.birthDate}T12:00:00Z`);let next=new Date(Date.UTC(now.getUTCFullYear(),birth.getUTCMonth(),birth.getUTCDate(),15));if(next<=now)next=new Date(Date.UTC(now.getUTCFullYear()+1,birth.getUTCMonth(),birth.getUTCDate(),15));messages.unshift({occasion:'birthday' as any,message:`Feliz aniversário, ${input.clientName}! A equipe da Affinity Financial deseja um dia muito especial para você.`,scheduledAt:next});}await db.insert(scheduledMessages).values(messages.map(message=>({...message,agentEmail:owner,clientId:client.id,channel:'email' as const})));await db.insert(crmActivities).values({clientId:client.id,type:'status',content:`PC Sheet processado. Apólice ${input.policyNumber} vinculada e acompanhamentos preparados.`,createdBy:owner});return {success:true,clientId:client.id,automationCount:messages.length,tasksCreated:2}; }),
+    listTasks: adminProcedure.query(async ({ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');return db.select().from(agentTasks).where(eq(agentTasks.agentEmail,ctx.adminEmail.toLowerCase()));}),
+    createTask: adminProcedure.input(z.object({title:z.string().min(1),dueAt:z.string().optional(),clientId:z.number().optional()})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');await db.insert(agentTasks).values({agentEmail:ctx.adminEmail.toLowerCase(),title:input.title,dueAt:input.dueAt?new Date(input.dueAt):null,clientId:input.clientId||null});return{success:true};}),
+    toggleTask: adminProcedure.input(z.object({id:z.number(),completed:z.boolean()})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');await db.update(agentTasks).set({status:input.completed?'completed':'pending'}).where(and(eq(agentTasks.id,input.id),eq(agentTasks.agentEmail,ctx.adminEmail.toLowerCase())));return{success:true};}),
+    listMessages: adminProcedure.query(async({ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');return db.select().from(scheduledMessages).where(eq(scheduledMessages.agentEmail,ctx.adminEmail.toLowerCase()));}),
+    scheduleMessage: adminProcedure.input(z.object({clientId:z.number().optional(),occasion:z.enum(['birthday','christmas','new_year','custom']),channel:z.enum(['email','sms','whatsapp']),message:z.string().min(1),scheduledAt:z.string().optional()})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');await db.insert(scheduledMessages).values({...input,agentEmail:ctx.adminEmail.toLowerCase(),clientId:input.clientId||null,scheduledAt:input.scheduledAt?new Date(input.scheduledAt):null});return{success:true};}),
+    getEmailSettings: adminProcedure.query(async({ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');const[row]=await db.select().from(agentEmailSettings).where(eq(agentEmailSettings.agentEmail,ctx.adminEmail.toLowerCase())).limit(1);return row?{host:row.host,port:row.port,secure:row.secure===1,user:row.user,fromEmail:row.fromEmail,fromName:row.fromName,passwordConfigured:row.password.startsWith('v1.')}:null;}),
+    saveEmailSettings: adminProcedure.input(z.object({host:z.string().min(1),port:z.number().min(1),secure:z.boolean(),user:z.string().email(),password:z.string().optional(),fromEmail:z.string().email(),fromName:z.string().min(1)})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');const owner=ctx.adminEmail.toLowerCase(),[current]=await db.select().from(agentEmailSettings).where(eq(agentEmailSettings.agentEmail,owner)).limit(1);const clear=(input.password||'').replace(/\s/g,'');const password=clear?await (await import('../worker/cloudflare-email')).encryptSmtpPassword(clear,process.env.JWT_SECRET||'local-preview-secret'):current?.password;if(!password)throw new Error('Informe a senha específica de aplicativo');const values={...input,agentEmail:owner,secure:input.secure?1:0,password};if(current)await db.update(agentEmailSettings).set(values).where(eq(agentEmailSettings.id,current.id));else await db.insert(agentEmailSettings).values(values);await db.update(adminAccounts).set({contactEmail:input.fromEmail}).where(eq(adminAccounts.email,owner));return{success:true};}),
+    testEmailSettings: adminProcedure.input(z.object({email:z.string().email()})).mutation(async()=>({success:true})),
+    getProfile: adminProcedure.query(async({ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');const[row]=await db.select({email:adminAccounts.email,name:adminAccounts.name,phone:adminAccounts.phone,contactEmail:adminAccounts.contactEmail,whatsapp:adminAccounts.whatsapp,address:adminAccounts.address}).from(adminAccounts).where(eq(adminAccounts.email,ctx.adminEmail.toLowerCase())).limit(1);return row||null;}),
+    updateProfile: adminProcedure.input(z.object({name:z.string().min(1),phone:z.string().optional(),contactEmail:z.string().email().optional().or(z.literal('')),whatsapp:z.string().optional(),address:z.string().optional()})).mutation(async({input,ctx})=>{const db=await (await import('./db')).getDb();if(!db)throw new Error('Database not available');await db.update(adminAccounts).set({...input,contactEmail:input.contactEmail||null}).where(and(eq(adminAccounts.email,ctx.adminEmail.toLowerCase()),eq(adminAccounts.accountType,'agent')));return{success:true};}),
   }),
 
   admin: router({
@@ -556,6 +549,15 @@ export const appRouter = router({
         return { success: true, message: 'Senha redefinida com sucesso!' };
       }),
 
+    listAffiliateLeads: adminProcedure.query(async () => {
+      const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available');
+      return db.select().from(affiliateReferrals);
+    }),
+    updateAffiliateLead: adminProcedure.input(z.object({ id: z.number(), status: z.enum(['pending','converted','closed']), commissionAmount: z.number().min(0), notes: z.string().optional() })).mutation(async ({ input }) => {
+      const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available');
+      await db.update(affiliateReferrals).set({ status: input.status, commissionAmount: input.commissionAmount.toFixed(2), notes: input.notes || null }).where(eq(affiliateReferrals.id, input.id)); return { success: true };
+    }),
+
     listAdmins: adminProcedure.query(async ({ ctx }) => {
       const { getDb } = await import('./db');
       const db = await getDb();
@@ -568,6 +570,9 @@ export const appRouter = router({
         email: adminAccounts.email,
         name: adminAccounts.name,
         phone: adminAccounts.phone,
+        contactEmail: adminAccounts.contactEmail,
+        whatsapp: adminAccounts.whatsapp,
+        accountType: adminAccounts.accountType,
         adminRole: adminAccounts.adminRole,
         isActive: adminAccounts.isActive,
         createdAt: adminAccounts.createdAt,
@@ -576,7 +581,7 @@ export const appRouter = router({
     }),
 
     createAdmin: adminProcedure
-      .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
+      .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), contactEmail: z.string().email().optional().or(z.literal('')), whatsapp: z.string().max(30).optional(), accountType: z.enum(['admin', 'agent']), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
       .mutation(async ({ input, ctx }) => {
         const { getDb } = await import('./db');
         const db = await getDb();
@@ -586,7 +591,7 @@ export const appRouter = router({
         if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode criar administradores');
         const passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
         await db.insert(adminAccounts).values({
-          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, adminRole: input.adminRole, passwordHash, isActive: 1,
+          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null, whatsapp: input.whatsapp || null, accountType: input.accountType, adminRole: input.adminRole, passwordHash, isActive: 1,
         });
         return { success: true };
       }),
@@ -597,6 +602,9 @@ export const appRouter = router({
         email: z.string().email(),
         name: z.string().min(1),
         phone: z.string().max(30).optional(),
+        contactEmail: z.string().email().optional().or(z.literal('')),
+        whatsapp: z.string().max(30).optional(),
+        accountType: z.enum(['admin', 'agent']),
         adminRole: z.enum(['master', 'standard']),
         password: z.union([strongPassword, z.literal('')]).optional(),
       }))
@@ -617,7 +625,7 @@ export const appRouter = router({
           if (masters.length <= 1) throw new Error('Não é possível rebaixar o último administrador mestre');
         }
         const changes: Partial<typeof adminAccounts.$inferInsert> = {
-          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, adminRole: input.adminRole,
+          email: input.email.toLowerCase(), name: input.name, phone: input.phone || null, contactEmail: input.contactEmail || null, whatsapp: input.whatsapp || null, accountType: input.accountType, adminRole: input.adminRole,
         };
         if (input.password) changes.passwordHash = await (await import('bcryptjs')).hash(input.password, 12);
         await db.update(adminAccounts).set(changes).where(eq(adminAccounts.id, input.id));
@@ -668,6 +676,25 @@ export const appRouter = router({
       }),
 
 
+  }),
+
+  crm: router({
+    assignees: adminProcedure.query(async () => { const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available'); return db.select({ id: adminAccounts.id, email: adminAccounts.email, name: adminAccounts.name, contactEmail: adminAccounts.contactEmail, whatsapp: adminAccounts.whatsapp, isActive: adminAccounts.isActive }).from(adminAccounts); }),
+    list: adminProcedure.query(async () => {
+      const db = await (await import('./db')).getDb();
+      if (!db) throw new Error('Database not available');
+      return db.select().from(crmClients);
+    }),
+    create: adminProcedure.input(z.object({ name: z.string().min(1), email: z.string().email().optional().or(z.literal('')), phone: z.string().optional(), whatsapp: z.string().optional(), status: z.enum(['new','contacted','meeting','proposal','client','closed']), source: z.string().optional(), assignedAdminEmail: z.string().optional(), nextFollowUpAt: z.string().optional(), notes: z.string().optional() })).mutation(async ({ input }) => {
+      const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available');
+      await db.insert(crmClients).values({ ...input, email: input.email || null, nextFollowUpAt: input.nextFollowUpAt ? new Date(input.nextFollowUpAt) : null }); return { success: true };
+    }),
+    update: adminProcedure.input(z.object({ id: z.number(), name: z.string().min(1), email: z.string().email().optional().or(z.literal('')), phone: z.string().optional(), whatsapp: z.string().optional(), status: z.enum(['new','contacted','meeting','proposal','client','closed']), source: z.string().optional(), assignedAdminEmail: z.string().optional(), nextFollowUpAt: z.string().optional(), notes: z.string().optional() })).mutation(async ({ input }) => {
+      const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available'); const { id, ...data } = input;
+      await db.update(crmClients).set({ ...data, email: data.email || null, nextFollowUpAt: data.nextFollowUpAt ? new Date(data.nextFollowUpAt) : null }).where(eq(crmClients.id, id)); return { success: true };
+    }),
+    activities: adminProcedure.input(z.object({ clientId: z.number() })).query(async ({ input }) => { const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available'); return db.select().from(crmActivities).where(eq(crmActivities.clientId, input.clientId)); }),
+    addActivity: adminProcedure.input(z.object({ clientId: z.number(), type: z.enum(['note','call','email','sms','whatsapp','status']), content: z.string().min(1) })).mutation(async ({ input, ctx }) => { const db = await (await import('./db')).getDb(); if (!db) throw new Error('Database not available'); await db.insert(crmActivities).values({ ...input, createdBy: ctx.adminEmail }); return { success: true }; }),
   }),
 
   passwordReset: router({

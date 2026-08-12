@@ -1,6 +1,6 @@
 import { isValidMediaUrl } from "../shared/videoUrl";
 import bcrypt from "bcryptjs";
-import { emailHtml, encryptSmtpPassword, sendEmail } from "./cloudflare-email";
+import { emailHtml, encryptSmtpPassword, sendAgentEmail, sendEmail } from "./cloudflare-email";
 
 const ADMIN_COOKIE = "affinity_admin_session";
 const AFFILIATE_COOKIE = "affinity_affiliate_session";
@@ -91,7 +91,7 @@ async function getAdminEmail(request: Request, env: Env) {
 }
 
 async function getAdminAccess(email: string, env: Env) {
-  const account = await env.DB.prepare("SELECT id,email,name,phone,adminRole,isActive FROM adminAccounts WHERE lower(email)=?").bind(email.toLowerCase()).first<JsonRecord>();
+  const account = await env.DB.prepare("SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,isActive FROM adminAccounts WHERE lower(email)=?").bind(email.toLowerCase()).first<JsonRecord>();
   return {
     account,
     role: String(account?.adminRole ?? (email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "master" : "standard")),
@@ -147,7 +147,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const email = await getAdminEmail(request, env);
     if (!email) return trpcResult(null);
     const access = await getAdminAccess(email, env);
-    return trpcResult({ id: Number(access.account?.id || 0), email, name: access.account?.name || "Administrador", phone: access.account?.phone || null, adminRole: access.role, role: "admin" });
+    return trpcResult({ id: Number(access.account?.id || 0), email, name: access.account?.name || "Usuário", phone: access.account?.phone || null, contactEmail: access.account?.contactEmail || null, whatsapp: access.account?.whatsapp || null, accountType: access.account?.accountType || "admin", adminRole: access.role, role: "admin" });
   }
 
   if (name === "auth.logout") {
@@ -168,15 +168,23 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const passwordHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password)));
     const expectedHash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.ADMIN_PASSWORD)));
     const environmentMatches = email === env.ADMIN_EMAIL.toLowerCase() && constantTimeEqual(passwordHash, expectedHash);
-    const authorized = account ? accountMatches : environmentMatches;
+    const authorized = account ? (accountMatches && String(account.accountType || "admin") === "admin") : environmentMatches;
     if (!authorized) {
       return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
     }
     const session = await createSession({ type: "admin", email }, env, 28800);
     return {
-      body: trpcResult({ id: Number(account?.id || 0), email, name: account?.name || "Administrador", phone: account?.phone || null, adminRole: account?.adminRole || (email === env.ADMIN_EMAIL.toLowerCase() ? "master" : "standard"), role: "admin" }),
+      body: trpcResult({ id: Number(account?.id || 0), email, name: account?.name || "Administrador", phone: account?.phone || null, contactEmail: account?.contactEmail || null, whatsapp: account?.whatsapp || null, accountType: "admin", adminRole: account?.adminRole || (email === env.ADMIN_EMAIL.toLowerCase() ? "master" : "standard"), role: "admin" }),
       cookies: [`${ADMIN_COOKIE}=${session}; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`],
     };
+  }
+
+  if (name === "agent.login") {
+    const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? "");
+    const account = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=? AND accountType='agent'").bind(email).first<JsonRecord>();
+    if (!account || Number(account.isActive) !== 1 || !(await bcrypt.compare(password, String(account.passwordHash)))) return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
+    const session = await createSession({ type: "admin", email }, env, 28800);
+    return { body: trpcResult({ id: Number(account.id), email, name: account.name, phone: account.phone || null, contactEmail: account.contactEmail || null, whatsapp: account.whatsapp || null, accountType: "agent", role: "agent" }), cookies: [`${ADMIN_COOKIE}=${session}; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`] };
   }
 
   if (name === "testimonials.getActive") {
@@ -235,24 +243,27 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     return { body: trpcResult({ id: Number(row.id), email: row.email, name: row.name, affiliateCode: row.affiliateCode, commissionRate: String(row.commissionRate) }), cookies: [`${AFFILIATE_COOKIE}=${session}; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax`] };
   }
 
-  if (name === "affiliate.getDashboard" || name === "affiliate.submitPolicy") {
+  if (name === "affiliate.getDashboard" || name === "affiliate.submitLead") {
     const affiliateId = await getAffiliateId(request, env);
     if (!affiliateId || affiliateId !== Number(input.affiliateId)) return trpcError("Acesso negado", "UNAUTHORIZED", 401);
     if (name === "affiliate.getDashboard") {
       const affiliate = await env.DB.prepare("SELECT * FROM affiliates WHERE id=?").bind(affiliateId).first<JsonRecord>();
       if (!affiliate) return trpcError("Afiliado não encontrado", "NOT_FOUND", 404);
       const referrals = (await env.DB.prepare("SELECT * FROM affiliateReferrals WHERE affiliateId=? ORDER BY createdAt DESC").bind(affiliateId).all<JsonRecord>()).results;
-      const policies = (await env.DB.prepare("SELECT * FROM policies WHERE affiliateId=? ORDER BY submittedAt DESC").bind(affiliateId).all<JsonRecord>()).results.map(normalizePolicy);
-      const totalPoints = policies.filter(policy => !policy.submittedAt || new Date(String(policy.submittedAt)).getTime() >= Date.now() - 365 * 86400000).reduce((sum, policy) => sum + Number(policy.points || 0), 0);
-      return trpcResult({ affiliate: normalizeAffiliate(affiliate), referrals, policies, stats: { totalReferrals: referrals.length, convertedReferrals: referrals.filter(row => row.status === "converted").length, pendingReferrals: referrals.filter(row => row.status === "pending").length, totalCommission: referrals.filter(row => row.status === "converted").reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0), totalPolicies: policies.length, totalPoints } });
+      return trpcResult({ affiliate: normalizeAffiliate(affiliate), referrals, stats: { totalReferrals: referrals.length, convertedReferrals: referrals.filter(row => row.status === "converted").length, pendingReferrals: referrals.filter(row => row.status === "pending").length, totalCommission: referrals.filter(row => row.status === "converted").reduce((sum, row) => sum + Number(row.commissionAmount || 0), 0) } });
     }
-    const policyNumber = String(input.policyNumber ?? "").trim();
-    const clientName = String(input.clientName ?? "").trim();
-    if (!policyNumber || !clientName || !String(input.policyType ?? "").trim()) return trpcError("Preencha os campos obrigatórios");
-    if (await env.DB.prepare("SELECT id FROM policies WHERE policyNumber=?").bind(policyNumber).first()) return trpcError("Número de apólice já existe");
-    await env.DB.prepare("INSERT INTO policies (affiliateId,policyNumber,clientName,clientEmail,clientPhone,policyType,status,points,submittedAt) VALUES (?,?,?,?,?,?,'pending',0,CURRENT_TIMESTAMP)")
-      .bind(affiliateId, policyNumber, clientName, input.clientEmail || null, input.clientPhone || null, String(input.policyType)).run();
-    return trpcResult({ success: true, message: "Apólice submetida com sucesso! Aguarde aprovação." });
+    if (name === "affiliate.submitLead") {
+      const affiliate = await env.DB.prepare("SELECT affiliateCode FROM affiliates WHERE id=?").bind(affiliateId).first<JsonRecord>();
+      if (!affiliate) return trpcError("Afiliado não encontrado", "NOT_FOUND", 404);
+      const visitorName = String(input.name ?? "").trim(), visitorEmail = String(input.email ?? "").trim().toLowerCase(), visitorPhone = String(input.phone ?? "").trim();
+      if (!visitorName || !validEmail(visitorEmail) || !visitorPhone) return trpcError("Informe nome, e-mail e telefone do lead");
+      const referralCode = `${String(affiliate.affiliateCode)}-${Date.now().toString(36)}`;
+      const relationship = String(input.relationship ?? "").trim(), details = String(input.details ?? "").trim();
+      if (!relationship) return trpcError("Informe como você conhece este contato");
+      const notes = `Como conhece: ${relationship}${details ? `\nDetalhes: ${details}` : ""}`;
+      await env.DB.prepare("INSERT INTO affiliateReferrals (affiliateId,referralCode,visitorEmail,visitorName,visitorPhone,status,commissionAmount,notes) VALUES (?,?,?,?,?,'pending',0,?)").bind(affiliateId, referralCode, visitorEmail, visitorName, visitorPhone, notes).run();
+      return trpcResult({ success: true, message: "Lead enviado com sucesso!" });
+    }
   }
 
   if (name === "passwordReset.requestReset") {
@@ -291,6 +302,57 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail) return trpcError("Acesso administrativo necessário", "UNAUTHORIZED", 401);
   const adminAccess = await getAdminAccess(adminEmail, env);
+  const accountType = String(adminAccess.account?.accountType || "admin");
+  if (name.startsWith("agent.") && accountType !== "agent") return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
+  if (name.startsWith("admin.") && accountType !== "admin") return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+
+  if (name === "agent.dashboard") {
+    const policies = (await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(adminEmail.toLowerCase()).all<JsonRecord>()).results;
+    const tasks = (await env.DB.prepare("SELECT * FROM agentTasks WHERE lower(agentEmail)=? ORDER BY dueAt").bind(adminEmail.toLowerCase()).all<JsonRecord>()).results;
+    return trpcResult({ policies, tasks, pendingTasks: tasks.filter(row => row.status === "pending").length, score: policies.length * 100 + tasks.filter(row => row.status === "completed").length * 10, newMessages: 0, followUps: tasks.filter(row => row.status === "pending" && row.dueAt).length });
+  }
+  if (name === "agent.listPolicies") { const rows = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(adminEmail.toLowerCase()).all<JsonRecord>(); return trpcResult(rows.results.map(row=>({...row,id:Number(row.id),premiumAmount:Number(row.premiumAmount||0),coverageAmount:Number(row.coverageAmount||0)}))); }
+  if (name === "agent.savePcSheet") {
+    const owner=adminEmail.toLowerCase(),policyNumber=String(input.policyNumber??"").trim(),clientName=String(input.clientName??"").trim(),clientEmail=String(input.clientEmail??"").trim().toLowerCase(),clientPhone=String(input.clientPhone??"").trim(),birthDate=String(input.birthDate??"").trim();
+    if(!policyNumber||!clientName)return trpcError("Revise os dados extraídos");
+    let client=clientEmail?await env.DB.prepare("SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?").bind(clientEmail,owner).first<JsonRecord>():null;
+    if(!client&&clientPhone)client=await env.DB.prepare("SELECT id FROM crmClients WHERE phone=? AND lower(assignedAdminEmail)=?").bind(clientPhone,owner).first<JsonRecord>();
+    let clientId=Number(client?.id||0);
+    if(clientId){
+      await env.DB.prepare("UPDATE crmClients SET name=?,email=COALESCE(?,email),phone=COALESCE(?,phone),whatsapp=COALESCE(?,whatsapp),status='client',source='PC Sheet',birthDate=COALESCE(?,birthDate),notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientName,clientEmail||null,clientPhone||null,clientPhone||null,birthDate||null,`Apólice ${policyNumber}`,clientId,owner).run();
+    }else{
+      const inserted=await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail,birthDate,notes) VALUES (?,?,?,?,'client','PC Sheet',?,?,?)").bind(clientName,clientEmail||null,clientPhone||null,clientPhone||null,owner,birthDate||null,`Apólice ${policyNumber}`).run();
+      clientId=Number(inserted.meta.last_row_id);
+    }
+    const policy=await env.DB.prepare("SELECT id FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=?").bind(owner,policyNumber).first<JsonRecord>();
+    const policyValues=[clientId,clientName,clientEmail||null,clientPhone||null,birthDate||null,String(input.product??"").trim()||null,Number(input.premiumAmount||0),String(input.premiumFrequency??"").trim()||null,Number(input.coverageAmount||0),String(input.beneficiaries??"").trim()||null];
+    if(policy)await env.DB.prepare("UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,product=?,premiumAmount=?,premiumFrequency=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(...policyValues,Number(policy.id),owner).run();
+    else await env.DB.prepare("INSERT INTO agentPolicies (clientId,clientName,clientEmail,clientPhone,birthDate,product,premiumAmount,premiumFrequency,coverageAmount,beneficiaries,agentEmail,policyNumber) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)").bind(...policyValues,owner,policyNumber).run();
+    const now=new Date(),year=now.getUTCFullYear();
+    const future=(month:number,day:number)=>{let date=new Date(Date.UTC(year,month-1,day,15,0,0));if(date<=now)date=new Date(Date.UTC(year+1,month-1,day,15,0,0));return date.toISOString();};
+    const birthday=birthDate?birthDate.split('-').map(Number):[];
+    const automations:Array<[string,string,string,string]>=[
+      ['christmas','email',`Feliz Natal, ${clientName}! A Affinity Financial deseja muita paz e alegria para você e sua família.`,future(12,24)],
+      ['new_year','email',`Feliz Ano Novo, ${clientName}! Desejamos um novo ciclo de saúde, proteção e realizações.`,future(12,31)],
+    ];
+    if(birthday.length===3&&birthday[1]&&birthday[2])automations.unshift(['birthday',clientEmail?'email':'sms',`Feliz aniversário, ${clientName}! A equipe da Affinity Financial deseja um dia muito especial para você.`,future(birthday[1],birthday[2])]);
+    let automationCount=0;
+    for(const [occasion,channel,message,scheduledAt] of automations){const exists=await env.DB.prepare("SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND clientId=? AND occasion=? AND isActive=1").bind(owner,clientId,occasion).first();if(!exists){await env.DB.prepare("INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,message,scheduledAt) VALUES (?,?,?,?,?,?)").bind(owner,clientId,occasion,channel,message,scheduledAt).run();automationCount++;}}
+    const followUps:Array<[string,string]>=[[`Confirmar boas-vindas e entrega da apólice de ${clientName}`,new Date(now.getTime()+2*86400000).toISOString()],[`Revisar a apólice ${policyNumber} com ${clientName}`,new Date(now.getTime()+30*86400000).toISOString()]];
+    for(const [title,dueAt] of followUps){const exists=await env.DB.prepare("SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? AND status='pending'").bind(owner,clientId,title).first();if(!exists)await env.DB.prepare("INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,?)").bind(owner,clientId,title,dueAt).run();}
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'status',?,?)").bind(clientId,`PC Sheet processado. Apólice ${policyNumber} vinculada e acompanhamentos preparados.`,owner).run();
+    return trpcResult({success:true,clientId,automationCount,tasksCreated:2});
+  }
+  if(name==="agent.listTasks"){const rows=await env.DB.prepare("SELECT * FROM agentTasks WHERE lower(agentEmail)=? ORDER BY status,dueAt").bind(adminEmail.toLowerCase()).all<JsonRecord>();return trpcResult(rows.results.map(row=>({...row,id:Number(row.id)})));}
+  if(name==="agent.createTask"){await env.DB.prepare("INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,?)").bind(adminEmail.toLowerCase(),input.clientId||null,String(input.title??"").trim(),input.dueAt||null).run();return trpcResult({success:true});}
+  if(name==="agent.toggleTask"){await env.DB.prepare("UPDATE agentTasks SET status=? WHERE id=? AND lower(agentEmail)=?").bind(input.completed?"completed":"pending",Number(input.id),adminEmail.toLowerCase()).run();return trpcResult({success:true});}
+  if(name==="agent.listMessages"){const rows=await env.DB.prepare("SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? ORDER BY scheduledAt").bind(adminEmail.toLowerCase()).all<JsonRecord>();return trpcResult(rows.results.map(row=>({...row,id:Number(row.id)})));}
+  if(name==="agent.scheduleMessage"){await env.DB.prepare("INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,message,scheduledAt) VALUES (?,?,?,?,?,?)").bind(adminEmail.toLowerCase(),input.clientId||null,String(input.occasion),String(input.channel),String(input.message??"").trim(),input.scheduledAt||null).run();return trpcResult({success:true,pendingIntegration:true});}
+  if(name==="agent.getEmailSettings"){const row=await env.DB.prepare("SELECT host,port,secure,user,fromEmail,fromName,password FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(adminEmail.toLowerCase()).first<JsonRecord>();return trpcResult(row?{host:row.host,port:Number(row.port),secure:Number(row.secure)===1,user:row.user,fromEmail:row.fromEmail,fromName:row.fromName,passwordConfigured:String(row.password||"").startsWith("v1.")}:null);}
+  if(name==="agent.saveEmailSettings"){const owner=adminEmail.toLowerCase(),current=await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first<JsonRecord>(),clear=String(input.password??"").replace(/\s/g,""),password=clear?await encryptSmtpPassword(clear,env.JWT_SECRET):String(current?.password??"");if(!String(input.host??"").trim()||!validEmail(String(input.user??""))||!validEmail(String(input.fromEmail??""))||!password.startsWith("v1."))return trpcError("Informe todos os dados e uma senha específica de aplicativo");await env.DB.prepare("INSERT INTO agentEmailSettings (agentEmail,host,port,secure,user,password,fromEmail,fromName) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(agentEmail) DO UPDATE SET host=excluded.host,port=excluded.port,secure=excluded.secure,user=excluded.user,password=excluded.password,fromEmail=excluded.fromEmail,fromName=excluded.fromName,updatedAt=CURRENT_TIMESTAMP").bind(owner,String(input.host),Number(input.port),input.secure?1:0,String(input.user),password,String(input.fromEmail),String(input.fromName||"Affinity Financial")).run();await env.DB.prepare("UPDATE adminAccounts SET contactEmail=? WHERE lower(email)=?").bind(String(input.fromEmail),owner).run();return trpcResult({success:true});}
+  if(name==="agent.testEmailSettings"){const email=String(input.email??"");if(!validEmail(email))return trpcError("E-mail inválido");try{await sendAgentEmail(env,adminEmail,{to:email,subject:"Teste de e-mail - Affinity Financial",html:emailHtml("Configuração concluída","<p>Seu e-mail pessoal está conectado ao Portal do Agente.</p>")});}catch{return trpcError("Não foi possível enviar. Verifique o e-mail e a senha de aplicativo.");}return trpcResult({success:true});}
+  if(name==="agent.getProfile"){const row=await env.DB.prepare("SELECT email,name,phone,contactEmail,whatsapp,address FROM adminAccounts WHERE lower(email)=?").bind(adminEmail.toLowerCase()).first<JsonRecord>();return trpcResult(row||null);}
+  if(name==="agent.updateProfile"){const profileName=String(input.name??"").trim(),contactEmail=String(input.contactEmail??"").trim().toLowerCase();if(!profileName||(contactEmail&&!validEmail(contactEmail)))return trpcError("Revise os dados do perfil");await env.DB.prepare("UPDATE adminAccounts SET name=?,phone=?,contactEmail=?,whatsapp=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND accountType='agent'").bind(profileName,String(input.phone??"").trim()||null,contactEmail||null,String(input.whatsapp??"").trim()||null,String(input.address??"").trim()||null,adminEmail.toLowerCase()).run();return trpcResult({success:true});}
 
   if (name === "admin.getStats") {
     const affiliates = await env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending FROM affiliates").first<JsonRecord>();
@@ -365,8 +427,20 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     return trpcResult({ success: true });
   }
 
+  if (name === "admin.listAffiliateLeads") {
+    const rows = await env.DB.prepare("SELECT r.*,a.name affiliateName,a.email affiliateEmail FROM affiliateReferrals r JOIN affiliates a ON a.id=r.affiliateId ORDER BY r.createdAt DESC").all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), affiliateId: Number(row.affiliateId), commissionAmount: Number(row.commissionAmount || 0) })));
+  }
+
+  if (name === "admin.updateAffiliateLead") {
+    const id = Number(input.id), status = String(input.status ?? "pending"), amount = Number(input.commissionAmount ?? 0);
+    if (!id || !["pending", "converted", "closed"].includes(status) || !Number.isFinite(amount) || amount < 0) return trpcError("Revise o status e o valor do lead");
+    await env.DB.prepare("UPDATE affiliateReferrals SET status=?,commissionAmount=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(status, amount, String(input.notes ?? "").trim() || null, id).run();
+    return trpcResult({ success: true });
+  }
+
   if (name === "admin.listAdmins") {
-    const rows = await env.DB.prepare("SELECT id,email,name,phone,adminRole,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC").all<JsonRecord>();
+    const rows = await env.DB.prepare("SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC").all<JsonRecord>();
     return trpcResult({
       admins: rows.results.map(row => ({ ...row, id: Number(row.id), isActive: Number(row.isActive) })),
       currentEmail: adminEmail.toLowerCase(),
@@ -377,9 +451,11 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
   if (name === "admin.createAdmin") {
     if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode criar administradores", "FORBIDDEN", 403);
     const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? "");
-    const role = String(input.adminRole ?? "standard");
-    if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password) || !["master", "standard"].includes(role)) return trpcError("Revise os dados do administrador");
-    try { await env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,1)").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, role, await bcrypt.hash(password, 12)).run(); }
+    const role = String(input.adminRole ?? "standard"), accountTypeValue = String(input.accountType ?? "admin");
+    if (!validEmail(email) || !String(input.name ?? "").trim() || !validStrongPassword(password) || !["master", "standard"].includes(role) || !["admin", "agent"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
+    const contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
+    if (contactEmail && !validEmail(contactEmail)) return trpcError("E-mail de acompanhamento inválido");
+    try { await env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,contactEmail,whatsapp,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,?,?,1)").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accountTypeValue, role, await bcrypt.hash(password, 12)).run(); }
     catch { return trpcError("Este email já está cadastrado"); }
     return trpcResult({ success: true });
   }
@@ -392,8 +468,11 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     if (adminAccess.role !== "master" && !isSelf) return trpcError("Administrador padrão só pode alterar a própria conta", "FORBIDDEN", 403);
     const email = String(input.email ?? "").trim().toLowerCase();
     const adminRole = String(input.adminRole ?? target.adminRole);
+    const accountTypeValue = String(input.accountType ?? target.accountType ?? "admin");
     const password = String(input.password ?? "");
-    if (!validEmail(email) || !String(input.name ?? "").trim() || !["master", "standard"].includes(adminRole)) return trpcError("Revise os dados do administrador");
+    const contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
+    if (!validEmail(email) || !String(input.name ?? "").trim() || !["master", "standard"].includes(adminRole) || !["admin", "agent"].includes(accountTypeValue)) return trpcError("Revise os dados do usuário");
+    if (contactEmail && !validEmail(contactEmail)) return trpcError("E-mail de acompanhamento inválido");
     if (adminAccess.role !== "master" && adminRole !== String(target.adminRole)) return trpcError("Somente um administrador mestre pode alterar níveis de acesso", "FORBIDDEN", 403);
     if (String(target.adminRole) === "master" && adminRole !== "master") {
       const masters = await env.DB.prepare("SELECT COUNT(*) total FROM adminAccounts WHERE adminRole='master' AND isActive=1").first<JsonRecord>();
@@ -401,8 +480,8 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     }
     if (password && !validStrongPassword(password)) return trpcError("A nova senha não atende aos requisitos de segurança");
     try {
-      if (password) await env.DB.prepare("UPDATE adminAccounts SET email=?,name=?,phone=?,adminRole=?,passwordHash=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, adminRole, await bcrypt.hash(password, 12), id).run();
-      else await env.DB.prepare("UPDATE adminAccounts SET email=?,name=?,phone=?,adminRole=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, adminRole, id).run();
+      if (password) await env.DB.prepare("UPDATE adminAccounts SET email=?,name=?,phone=?,contactEmail=?,whatsapp=?,accountType=?,adminRole=?,passwordHash=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accountTypeValue, adminRole, await bcrypt.hash(password, 12), id).run();
+      else await env.DB.prepare("UPDATE adminAccounts SET email=?,name=?,phone=?,contactEmail=?,whatsapp=?,accountType=?,adminRole=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(email, String(input.name).trim(), String(input.phone ?? "").trim() || null, contactEmail || null, String(input.whatsapp ?? "").trim() || null, accountTypeValue, adminRole, id).run();
     } catch { return trpcError("Este email já está cadastrado"); }
     return trpcResult({ success: true, emailChanged: isSelf && email !== String(target.email).toLowerCase() });
   }
@@ -428,6 +507,47 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     if (!accountMatches && !envMatches) return trpcError("Senha atual inválida");
     if (!validStrongPassword(next)) return trpcError("A nova senha não atende aos requisitos de segurança");
     await env.DB.prepare("INSERT INTO adminAccounts (email,name,passwordHash,isActive) VALUES (?,'Administrador',?,1) ON CONFLICT(email) DO UPDATE SET passwordHash=excluded.passwordHash,isActive=1,updatedAt=CURRENT_TIMESTAMP").bind(adminEmail.toLowerCase(), await bcrypt.hash(next, 12)).run();
+    return trpcResult({ success: true });
+  }
+
+  if (name === "crm.list") {
+    const rows = accountType === "agent" ? await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY CASE WHEN nextFollowUpAt IS NULL THEN 1 ELSE 0 END, nextFollowUpAt ASC, updatedAt DESC").bind(adminEmail.toLowerCase()).all<JsonRecord>() : await env.DB.prepare("SELECT * FROM crmClients ORDER BY CASE WHEN nextFollowUpAt IS NULL THEN 1 ELSE 0 END, nextFollowUpAt ASC, updatedAt DESC").all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+  }
+
+  if (name === "crm.assignees") {
+    const rows = await env.DB.prepare("SELECT id,email,name,contactEmail,whatsapp,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name").all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), isActive: Number(row.isActive) })));
+  }
+
+  if (name === "crm.create" || name === "crm.update") {
+    const clientName = String(input.name ?? "").trim();
+    const email = String(input.email ?? "").trim().toLowerCase();
+    const status = String(input.status ?? "new");
+    if (!clientName || (email && !validEmail(email)) || !["new", "contacted", "meeting", "proposal", "client", "closed"].includes(status)) return trpcError("Revise os dados do cliente");
+    const assignedEmail = accountType === "agent" ? adminEmail.toLowerCase() : String(input.assignedAdminEmail ?? "").trim().toLowerCase() || null;
+    const values = [clientName, email || null, String(input.phone ?? "").trim() || null, String(input.whatsapp ?? "").trim() || null, status, String(input.source ?? "").trim() || null, assignedEmail, String(input.nextFollowUpAt ?? "").trim() || null, String(input.notes ?? "").trim() || null];
+    if (name === "crm.create") {
+      const result = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail,nextFollowUpAt,notes) VALUES (?,?,?,?,?,?,?,?,?)").bind(...values).run();
+      return trpcResult({ success: true, id: Number(result.meta.last_row_id) });
+    }
+    const id = Number(input.id);
+    if (!id) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    await env.DB.prepare("UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(...values, id).run();
+    return trpcResult({ success: true });
+  }
+
+  if (name === "crm.activities") {
+    if(accountType==="agent"){const owned=await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(input.clientId),adminEmail.toLowerCase()).first();if(!owned)return trpcError("Cliente não encontrado","NOT_FOUND",404);}
+    const rows = await env.DB.prepare("SELECT * FROM crmActivities WHERE clientId=? ORDER BY createdAt DESC, id DESC").bind(Number(input.clientId)).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })));
+  }
+
+  if (name === "crm.addActivity") {
+    const type = String(input.type ?? "note"), content = String(input.content ?? "").trim();
+    if (!Number(input.clientId) || !content || !["note", "call", "email", "sms", "whatsapp", "status"].includes(type)) return trpcError("Revise o registro de acompanhamento");
+    if(accountType==="agent"){const owned=await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(input.clientId),adminEmail.toLowerCase()).first();if(!owned)return trpcError("Cliente não encontrado","NOT_FOUND",404);}
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(Number(input.clientId), type, content, adminEmail.toLowerCase()).run();
     return trpcResult({ success: true });
   }
 

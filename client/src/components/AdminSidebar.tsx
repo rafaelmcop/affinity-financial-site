@@ -1,5 +1,5 @@
 import { useLocation } from 'wouter';
-import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ShieldCheck, ExternalLink, LogOut, Star } from 'lucide-react';
+import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ShieldCheck, ExternalLink, LogOut, Star, Contact } from 'lucide-react';
 
 type Props = { onLogout?: () => void };
 
@@ -8,6 +8,8 @@ const groups = [
   { title: 'Operação', items: [
     { label: 'Apólices', href: '/admin/dashboard?tab=policies', icon: FileText },
     { label: 'Afiliados', href: '/admin/affiliates', icon: Users },
+    { label: 'CRM de clientes', href: '/admin/crm', icon: Contact },
+    { label: 'Leads de afiliados', href: '/admin/leads-afiliados', icon: Users },
   ] },
   { title: 'Conteúdo', items: [
     { label: 'Depoimentos', href: '/admin/testimonials', icon: MessageSquareQuote },

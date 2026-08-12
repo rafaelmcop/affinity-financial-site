@@ -11,15 +11,23 @@ import AffiliateRegister from "./pages/AffiliateRegister";
 import AffiliateDashboard from "./pages/AffiliateDashboard";
 import AdminAffiliates from "./pages/AdminAffiliates";
 import AdminLogin from "./pages/AdminLogin";
-import SubmitPolicy from "./pages/SubmitPolicy";
 import AdminDashboard from "./pages/AdminDashboard";
 import SmtpConfig from "./pages/SmtpConfig";
 import ResetPassword from "./pages/ResetPassword";
 import AdminAffiliatesManagement from './pages/AdminAffiliatesManagement';
 import AdminTestimonials from './pages/AdminTestimonials';
 import AdminAdministrators from './pages/AdminAdministrators';
+import AdminCrm from './pages/AdminCrm';
 import ReviewPage from './pages/ReviewPage';
 import AdminReviews from './pages/AdminReviews';
+import AgentLogin from './pages/AgentLogin';
+import AdminAffiliateLeads from './pages/AdminAffiliateLeads';
+import AgentDashboard from './pages/AgentDashboard';
+import AgentPolicies from './pages/AgentPolicies';
+import AgentTasks from './pages/AgentTasks';
+import AgentMessages from './pages/AgentMessages';
+import AgentClients from './pages/AgentClients';
+import AgentSettings from './pages/AgentSettings';
 
 function Router() {
   return (
@@ -30,7 +38,6 @@ function Router() {
       <Route path="/afiliados/login" component={AffiliateLogin} />
       <Route path="/afiliados/registrar" component={AffiliateRegister} />
       <Route path="/afiliados/dashboard" component={AffiliateDashboard} />
-      <Route path="/afiliados/submeter-apolice" component={SubmitPolicy} />
       <Route path="/admin/login" component={AdminLogin} />
       <Route path="/admin/dashboard" component={AdminDashboard} />
       <Route path="/admin/afiliados" component={AdminAffiliates} />
@@ -39,6 +46,18 @@ function Router() {
       <Route path="/admin/testimonials" component={AdminTestimonials} />
       <Route path="/admin/avaliacoes" component={AdminReviews} />
       <Route path="/admin/administradores" component={AdminAdministrators} />
+      <Route path="/admin/crm">{() => <AdminCrm />}</Route>
+      <Route path="/admin/leads-afiliados" component={AdminAffiliateLeads} />
+      <Route path="/agentes" component={AgentLogin} />
+      <Route path="/agentes/login" component={AgentLogin} />
+      <Route path="/agentes/crm">{() => <AdminCrm agentMode />}</Route>
+      <Route path="/agentes/dashboard" component={AgentDashboard} />
+      <Route path="/agentes/clientes" component={AgentClients} />
+      <Route path="/agentes/apolices">{() => <AgentPolicies />}</Route>
+      <Route path="/agentes/pcsheet">{() => <AgentPolicies uploadOnly />}</Route>
+      <Route path="/agentes/tarefas" component={AgentTasks} />
+      <Route path="/agentes/mensagens" component={AgentMessages} />
+      <Route path="/agentes/configuracoes" component={AgentSettings} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />

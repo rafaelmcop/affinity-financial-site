@@ -1,10 +1,11 @@
 import nodemailer from "nodemailer";
 
 type Row = Record<string, unknown>;
+type Env = { DB: { prepare(query: string): { first<T>(): Promise<T | null>; bind(...values: unknown[]): { first<T>(): Promise<T | null> } } }; JWT_SECRET: string };
 
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
   return btoa(binary);
 }
 
@@ -28,7 +29,7 @@ export async function encryptSmtpPassword(password: string, secret: string) {
   return `v1.${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(encrypted))}`;
 }
 
-async function decryptSmtpPassword(value: string, secret: string) {
+export async function decryptSmtpPassword(value: string, secret: string) {
   if (!value.startsWith("v1.")) throw new Error("A senha de e-mail precisa ser informada novamente");
   const [, iv, encrypted] = value.split(".");
   const clear = await crypto.subtle.decrypt(
@@ -55,6 +56,15 @@ export async function sendEmail(env: Env, options: { to: string; subject: string
     from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
     ...options,
   });
+}
+
+export async function sendAgentEmail(env: Env, agentEmail: string, options: { to: string; subject: string; html: string }) {
+  const config = await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first<Row>();
+  if (!config) throw new Error("Configuração de e-mail do agente incompleta");
+  const password = await decryptSmtpPassword(String(config.password), env.JWT_SECRET);
+  const port = Number(config.port);
+  const transporter = nodemailer.createTransport({ host: String(config.host), port, secure: Number(config.secure) === 1, auth: { user: String(config.user), pass: password }, requireTLS: port === 587 });
+  await transporter.sendMail({ from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`, ...options });
 }
 
 export function emailHtml(title: string, content: string) {
