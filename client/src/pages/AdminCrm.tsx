@@ -17,14 +17,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { ScheduledMessagesPanel } from "./AgentMessages";
 
 type Status =
-  | "new"
-  | "contacted"
-  | "meeting"
-  | "proposal"
-  | "client"
-  | "closed";
+  "new" | "contacted" | "meeting" | "proposal" | "client" | "closed";
 type ClientForm = {
   id?: number;
   name: string;
@@ -354,22 +350,24 @@ export default function AdminCrm({
                   </option>
                 ))}
               </select>
-              <select
-                value={form.assignedAdminEmail}
-                onChange={e =>
-                  setForm({ ...form, assignedAdminEmail: e.target.value })
-                }
-                className="h-10 rounded-md border border-white/20 bg-black px-3"
-              >
-                <option value="">Sem responsável</option>
-                {(assigneesQuery.data || [])
-                  .filter(admin => admin.isActive)
-                  .map(admin => (
-                    <option key={admin.id} value={admin.email}>
-                      {admin.name}
-                    </option>
-                  ))}
-              </select>
+              {!agentMode && (
+                <select
+                  value={form.assignedAdminEmail}
+                  onChange={e =>
+                    setForm({ ...form, assignedAdminEmail: e.target.value })
+                  }
+                  className="h-10 rounded-md border border-white/20 bg-black px-3"
+                >
+                  <option value="">Sem responsável</option>
+                  {(assigneesQuery.data || [])
+                    .filter(admin => admin.isActive)
+                    .map(admin => (
+                      <option key={admin.id} value={admin.email}>
+                        {admin.name}
+                      </option>
+                    ))}
+                </select>
+              )}
               <Input
                 type="datetime-local"
                 value={form.nextFollowUpAt}
@@ -452,10 +450,12 @@ export default function AdminCrm({
                       <CalendarClock size={13} />
                       {displayDate(client.nextFollowUpAt)}
                     </span>
-                    <span className="flex items-center gap-1 text-xs text-gray-400">
-                      <UserRound size={13} />
-                      {client.assignedAdminEmail || "Sem responsável"}
-                    </span>
+                    {!agentMode && (
+                      <span className="flex items-center gap-1 text-xs text-gray-400">
+                        <UserRound size={13} />
+                        {client.assignedAdminEmail || "Sem responsável"}
+                      </span>
+                    )}
                   </div>
                 </Card>
               );
@@ -555,9 +555,9 @@ export default function AdminCrm({
                         <option value="sms">SMS</option>
                         <option value="email">E-mail</option>
                       </select>
-                  <span className="flex items-center text-xs text-green-300">
-                    A ação será salva no histórico
-                  </span>
+                      <span className="flex items-center text-xs text-green-300">
+                        A ação será salva no histórico
+                      </span>
                     </div>
                     <textarea
                       value={communication}
@@ -621,6 +621,7 @@ export default function AdminCrm({
             )}
           </Card>
         </div>
+        {agentMode && <ScheduledMessagesPanel />}
       </main>
     </div>
   );
