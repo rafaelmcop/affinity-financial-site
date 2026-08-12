@@ -647,6 +647,21 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    setInternalPortalAccess: adminProcedure
+      .input(z.object({ id: z.number(), accessAdmin: z.boolean(), accessAgent: z.boolean() }).refine(value => value.accessAdmin || value.accessAgent, { message: 'Escolha pelo menos um portal' }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db'); const db = await getDb(); if (!db) throw new Error('Database not available');
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, actorEmail)).limit(1);
+        const actorRole = actorEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : (actor?.adminRole ?? 'standard');
+        if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode alterar acessos');
+        const [target] = await db.select().from(adminAccounts).where(eq(adminAccounts.id, input.id)).limit(1);
+        if (!target) throw new Error('Usuário não encontrado');
+        const accountType = input.accessAdmin && input.accessAgent ? 'both' : input.accessAdmin ? 'admin' : 'agent';
+        await db.update(adminAccounts).set({ accountType, adminRole: input.accessAdmin ? target.adminRole : 'standard', isActive: 1 }).where(eq(adminAccounts.id, target.id));
+        return { success: true };
+      }),
+
     createAdmin: adminProcedure
       .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), contactEmail: z.string().email().optional().or(z.literal('')), whatsapp: z.string().max(30).optional(), accountType: z.enum(['admin', 'agent', 'both']), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
       .mutation(async ({ input, ctx }) => {

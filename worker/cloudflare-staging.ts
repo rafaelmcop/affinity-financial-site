@@ -619,6 +619,17 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     return trpcResult({ success: true });
   }
 
+  if (name === "admin.setInternalPortalAccess") {
+    if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode alterar acessos", "FORBIDDEN", 403);
+    const target = await env.DB.prepare("SELECT * FROM adminAccounts WHERE id=?").bind(Number(input.id)).first<JsonRecord>();
+    if (!target) return trpcError("Usuário não encontrado", "NOT_FOUND", 404);
+    const accessAdmin = Boolean(input.accessAdmin), accessAgent = Boolean(input.accessAgent);
+    if (!accessAdmin && !accessAgent) return trpcError("Escolha pelo menos um portal");
+    const accountTypeValue = accessAdmin && accessAgent ? "both" : accessAdmin ? "admin" : "agent";
+    await env.DB.prepare("UPDATE adminAccounts SET accountType=?,adminRole=?,isActive=1,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(accountTypeValue, accessAdmin ? String(target.adminRole) : "standard", Number(target.id)).run();
+    return trpcResult({ success: true });
+  }
+
   if (name === "admin.updateAdmin") {
     const id = Number(input.id);
     const target = await env.DB.prepare("SELECT * FROM adminAccounts WHERE id=?").bind(id).first<JsonRecord>();
