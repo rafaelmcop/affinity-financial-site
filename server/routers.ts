@@ -613,6 +613,30 @@ export const appRouter = router({
         return { success: true };
       }),
 
+    updateAffiliateCategories: adminProcedure
+      .input(z.object({ affiliateId: z.number(), accessAdmin: z.boolean(), accessAgent: z.boolean(), adminRole: z.enum(['master', 'standard']) }))
+      .mutation(async ({ input, ctx }) => {
+        const { getDb } = await import('./db'); const db = await getDb();
+        if (!db) throw new Error('Database not available');
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, actorEmail)).limit(1);
+        const actorRole = actorEmail === process.env.ADMIN_EMAIL?.toLowerCase() ? 'master' : (actor?.adminRole ?? 'standard');
+        if (actorRole !== 'master') throw new Error('Somente um administrador mestre pode alterar categorias');
+        const [affiliate] = await db.select().from(affiliates).where(eq(affiliates.id, input.affiliateId)).limit(1);
+        if (!affiliate) throw new Error('Afiliado não encontrado');
+        const [internal] = await db.select().from(adminAccounts).where(eq(adminAccounts.email, affiliate.email.toLowerCase())).limit(1);
+        if (!input.accessAdmin && !input.accessAgent) {
+          if (internal?.email.toLowerCase() === actorEmail) throw new Error('Você não pode remover seu próprio acesso');
+          if (internal) await db.update(adminAccounts).set({ isActive: 0 }).where(eq(adminAccounts.id, internal.id));
+          return { success: true };
+        }
+        const accountType = input.accessAdmin && input.accessAgent ? 'both' : input.accessAdmin ? 'admin' : 'agent';
+        const adminRole = input.accessAdmin ? input.adminRole : 'standard';
+        if (internal) await db.update(adminAccounts).set({ name: affiliate.name, phone: affiliate.phone, accountType, adminRole, isActive: 1 }).where(eq(adminAccounts.id, internal.id));
+        else await db.insert(adminAccounts).values({ email: affiliate.email.toLowerCase(), name: affiliate.name, phone: affiliate.phone, accountType, adminRole, passwordHash: affiliate.passwordHash, isActive: 1 });
+        return { success: true };
+      }),
+
     createAdmin: adminProcedure
       .input(z.object({ email: z.string().email(), name: z.string().min(1), phone: z.string().max(30).optional(), contactEmail: z.string().email().optional().or(z.literal('')), whatsapp: z.string().max(30).optional(), accountType: z.enum(['admin', 'agent', 'both']), adminRole: z.enum(['master', 'standard']), password: strongPassword }))
       .mutation(async ({ input, ctx }) => {

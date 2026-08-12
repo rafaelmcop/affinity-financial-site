@@ -584,6 +584,25 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     return trpcResult({ success: true });
   }
 
+  if (name === "admin.updateAffiliateCategories") {
+    if (adminAccess.role !== "master") return trpcError("Somente um administrador mestre pode alterar categorias", "FORBIDDEN", 403);
+    const affiliate = await env.DB.prepare("SELECT * FROM affiliates WHERE id=?").bind(Number(input.affiliateId)).first<JsonRecord>();
+    if (!affiliate) return trpcError("Afiliado não encontrado", "NOT_FOUND", 404);
+    const accessAdmin = Boolean(input.accessAdmin), accessAgent = Boolean(input.accessAgent), adminRole = accessAdmin ? String(input.adminRole ?? "standard") : "standard";
+    if (!["master", "standard"].includes(adminRole)) return trpcError("Nível administrativo inválido");
+    const email = String(affiliate.email).toLowerCase();
+    const internal = await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=?").bind(email).first<JsonRecord>();
+    if (!accessAdmin && !accessAgent) {
+      if (email === adminEmail.toLowerCase()) return trpcError("Você não pode remover seu próprio acesso");
+      if (internal) await env.DB.prepare("UPDATE adminAccounts SET isActive=0,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(Number(internal.id)).run();
+      return trpcResult({ success: true });
+    }
+    const accountTypeValue = accessAdmin && accessAgent ? "both" : accessAdmin ? "admin" : "agent";
+    if (internal) await env.DB.prepare("UPDATE adminAccounts SET name=?,phone=?,accountType=?,adminRole=?,isActive=1,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(String(affiliate.name), affiliate.phone || null, accountTypeValue, adminRole, Number(internal.id)).run();
+    else await env.DB.prepare("INSERT INTO adminAccounts (email,name,phone,accountType,adminRole,passwordHash,isActive) VALUES (?,?,?,?,?,?,1)").bind(email, String(affiliate.name), affiliate.phone || null, accountTypeValue, adminRole, String(affiliate.passwordHash)).run();
+    return trpcResult({ success: true });
+  }
+
   if (name === "admin.updateAdmin") {
     const id = Number(input.id);
     const target = await env.DB.prepare("SELECT * FROM adminAccounts WHERE id=?").bind(id).first<JsonRecord>();

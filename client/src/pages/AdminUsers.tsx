@@ -36,14 +36,16 @@ export default function AdminUsers() {
   const affiliates = trpc.admin.getAllAffiliates.useQuery();
   const createUser = trpc.admin.createUnifiedUser.useMutation();
   const updateUser = trpc.admin.updateAdmin.useMutation();
+  const updateAffiliateCategories = trpc.admin.updateAffiliateCategories.useMutation();
   const setActive = trpc.admin.setAdminActive.useMutation();
   const blockAffiliate = trpc.admin.blockAffiliate.useMutation();
   const reactivateAffiliate = trpc.admin.reactivateAffiliate.useMutation();
-  const [filter, setFilter] = useState<'all' | 'admin' | 'agent' | 'affiliate'>('all');
+  const [filter, setFilter] = useState<'all' | 'admin' | 'agent' | 'affiliate'>('agent');
   const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [newUser, setNewUser] = useState(emptyUser);
   const [editing, setEditing] = useState<UserForm | null>(null);
+  const [editingAffiliate, setEditingAffiliate] = useState<{ id: number; name: string; email: string; accountType: AccessSelection; adminRole: AdminRole } | null>(null);
   const data = admins.data;
   const isMaster = data?.currentRole === 'master';
 
@@ -70,6 +72,13 @@ export default function AdminUsers() {
     event.preventDefault(); if (!editing) return;
     try { await updateUser.mutateAsync(editing); setEditing(null); await admins.refetch(); toast.success('Usuário atualizado'); }
     catch (error) { toast.error(error instanceof Error ? error.message : 'Não foi possível atualizar o usuário'); }
+  };
+  const saveAffiliateCategories = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!editingAffiliate) return;
+    try {
+      await updateAffiliateCategories.mutateAsync({ affiliateId: editingAffiliate.id, accessAdmin: editingAffiliate.accountType === 'admin' || editingAffiliate.accountType === 'both', accessAgent: editingAffiliate.accountType === 'agent' || editingAffiliate.accountType === 'both', adminRole: editingAffiliate.adminRole });
+      setEditingAffiliate(null); await Promise.all([admins.refetch(), affiliates.refetch()]); toast.success('Categorias do afiliado atualizadas');
+    } catch (error) { toast.error(error instanceof Error ? error.message : 'Não foi possível alterar as categorias'); }
   };
 
   return <div className="min-h-screen bg-black text-white lg:pl-64">
@@ -98,9 +107,16 @@ export default function AdminUsers() {
         <div className="flex gap-3 md:col-span-2"><Button className="bg-gold text-black">Salvar</Button><Button type="button" variant="outline" onClick={() => setEditing(null)}>Cancelar</Button></div>
       </form></Card>}
 
-      <Card className="border-gold/20 bg-[#0b1524] p-4"><div className="flex flex-col gap-3 md:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-3 h-4 w-4 text-gray-500" /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou e-mail" className="pl-9" /></div><div className="flex flex-wrap gap-2">{([['all','Todos'],['admin','Administradores'],['agent','Agentes'],['affiliate','Afiliados']] as const).map(([value,label]) => <Button key={value} type="button" variant={filter === value ? 'default' : 'outline'} onClick={() => setFilter(value)} className={filter === value ? 'bg-gold text-black' : ''}>{label}</Button>)}</div></div></Card>
+      {editingAffiliate && <Card className="border-gold/30 bg-[#101b2b] p-6"><FormTitle title={`Alterar categoria de ${editingAffiliate.name}`} close={() => setEditingAffiliate(null)} /><form onSubmit={saveAffiliateCategories} className="grid gap-4">
+        <p className="text-sm text-gray-400">O acesso de afiliado e todo o histórico de indicações serão preservados. Selecione os outros portais que essa pessoa poderá acessar usando o mesmo e-mail e senha.</p>
+        <AccessPicker value={editingAffiliate.accountType} affiliate onAffiliateChange={() => undefined} onChange={accountType => setEditingAffiliate({ ...editingAffiliate, accountType })} />
+        {(editingAffiliate.accountType === 'admin' || editingAffiliate.accountType === 'both') && <RoleSelect value={editingAffiliate.adminRole} onChange={adminRole => setEditingAffiliate({ ...editingAffiliate, adminRole })} />}
+        <div className="flex gap-3"><Button className="bg-gold text-black">Salvar categorias</Button><Button type="button" variant="outline" onClick={() => setEditingAffiliate(null)}>Cancelar</Button></div>
+      </form></Card>}
 
-      <div className="grid gap-4">{users.map((user: any) => <Card key={`${user.kind}-${user.id}`} className="border-gold/20 bg-[#0b1524] p-5"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-bold">{user.name}</p><Badges user={user} /><span className={`rounded-full px-3 py-1 text-xs ${user.isActive ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>{user.isActive ? 'Ativo' : 'Bloqueado'}</span></div><p className="mt-2 text-sm text-gray-400">{user.email}{user.phone ? ` · ${user.phone}` : ''}</p></div><div className="flex gap-2">{user.kind === 'internal' && (isMaster || user.email.toLowerCase() === data?.currentEmail.toLowerCase()) && <Button variant="outline" onClick={() => setEditing({ id: user.id, name: user.name, email: user.email, phone: user.phone || '', contactEmail: user.contactEmail || '', whatsapp: user.whatsapp || '', accountType: user.accountType || 'admin', adminRole: user.adminRole, password: '' })}><Edit2 className="mr-2 h-4 w-4" />Editar acessos</Button>}{isMaster && user.email.toLowerCase() !== data?.currentEmail.toLowerCase() && <Button variant="outline" onClick={async () => { try { if (user.kind === 'affiliate') user.isActive ? await blockAffiliate.mutateAsync({ affiliateId: user.id }) : await reactivateAffiliate.mutateAsync({ affiliateId: user.id }); else await setActive.mutateAsync({ id: user.id, isActive: !user.isActive }); await Promise.all([admins.refetch(), affiliates.refetch()]); toast.success(user.isActive ? 'Usuário bloqueado' : 'Usuário ativado'); } catch (error) { toast.error(error instanceof Error ? error.message : 'Erro ao alterar acesso'); } }}>{user.isActive ? 'Bloquear' : 'Ativar'}</Button>}</div></div></Card>)}{!users.length && <Card className="border-gold/20 bg-[#0b1524] p-10 text-center text-gray-400"><Users className="mx-auto mb-3 h-8 w-8 text-gold" />Nenhum usuário encontrado.</Card>}</div>
+      <Card className="border-gold/20 bg-[#0b1524] p-4"><div className="flex flex-col gap-3 md:flex-row"><div className="relative flex-1"><Search className="absolute left-3 top-3 h-4 w-4 text-gray-500" /><Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Buscar por nome ou e-mail" className="pl-9" /></div><div className="flex flex-wrap gap-2">{([['agent','Agentes'],['affiliate','Afiliados'],['admin','Administradores'],['all','Todos']] as const).map(([value,label]) => <Button key={value} type="button" variant={filter === value ? 'default' : 'outline'} onClick={() => setFilter(value)} className={filter === value ? 'bg-gold text-black' : ''}>{label}</Button>)}</div></div></Card>
+
+      <div className="grid gap-4">{users.map((user: any) => <Card key={`${user.kind}-${user.id}`} className="border-gold/20 bg-[#0b1524] p-5"><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><div className="flex flex-wrap items-center gap-2"><p className="text-lg font-bold">{user.name}</p><Badges user={user} /><span className={`rounded-full px-3 py-1 text-xs ${user.isActive ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>{user.isActive ? 'Ativo' : 'Bloqueado'}</span></div><p className="mt-2 text-sm text-gray-400">{user.email}{user.phone ? ` · ${user.phone}` : ''}</p></div><div className="flex flex-wrap gap-2">{user.kind === 'internal' && (isMaster || user.email.toLowerCase() === data?.currentEmail.toLowerCase()) && <Button variant="outline" onClick={() => setEditing({ id: user.id, name: user.name, email: user.email, phone: user.phone || '', contactEmail: user.contactEmail || '', whatsapp: user.whatsapp || '', accountType: user.accountType || 'admin', adminRole: user.adminRole, password: '' })}><Edit2 className="mr-2 h-4 w-4" />Editar acessos</Button>}{user.kind === 'affiliate' && isMaster && <Button variant="outline" onClick={() => { const internal = data?.admins.find(item => item.email.toLowerCase() === user.email.toLowerCase()); setEditingAffiliate({ id: user.id, name: user.name, email: user.email, accountType: internal?.isActive ? (internal.accountType || 'admin') : 'none', adminRole: internal?.adminRole || 'standard' }); }}><Edit2 className="mr-2 h-4 w-4" />Alterar categoria</Button>}{isMaster && user.email.toLowerCase() !== data?.currentEmail.toLowerCase() && <Button variant="outline" onClick={async () => { try { if (user.kind === 'affiliate') user.isActive ? await blockAffiliate.mutateAsync({ affiliateId: user.id }) : await reactivateAffiliate.mutateAsync({ affiliateId: user.id }); else await setActive.mutateAsync({ id: user.id, isActive: !user.isActive }); await Promise.all([admins.refetch(), affiliates.refetch()]); toast.success(user.isActive ? 'Usuário bloqueado' : 'Usuário ativado'); } catch (error) { toast.error(error instanceof Error ? error.message : 'Erro ao alterar acesso'); } }}>{user.isActive ? 'Bloquear' : 'Ativar'}</Button>}</div></div></Card>)}{!users.length && <Card className="border-gold/20 bg-[#0b1524] p-10 text-center text-gray-400"><Users className="mx-auto mb-3 h-8 w-8 text-gold" />Nenhum usuário encontrado.</Card>}</div>
     </main>
   </div>;
 }
