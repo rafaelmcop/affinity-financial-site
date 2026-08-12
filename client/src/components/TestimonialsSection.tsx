@@ -7,7 +7,7 @@ import { getVideoSource } from '@shared/videoUrl';
 export function TestimonialsSection() {
   const { t, language } = useLanguage();
   const reviewLinkLabel = { pt: 'Deixe sua avaliação', en: 'Leave your review', es: 'Deja tu reseña' }[language];
-  const amountLabel = { pt: 'Valor recebido pelo beneficiário', en: 'Benefit received', es: 'Valor recibido por el beneficiario' }[language];
+  const amountLabel = { pt: 'Valor recebido', en: 'Benefit received', es: 'Valor recibido' }[language];
   const amountLocale = { pt: 'pt-BR', en: 'en-US', es: 'es-US' }[language];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [testimonials, setTestimonials] = useState<any[]>([]);

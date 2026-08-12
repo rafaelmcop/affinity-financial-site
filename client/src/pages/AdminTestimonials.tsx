@@ -299,7 +299,7 @@ export default function AdminTestimonials() {
 
               <div className="space-y-2">
                 <label htmlFor="testimonial-amount-received" className="block text-sm font-semibold text-gold">
-                  Valor recebido pelo beneficiário (US$)
+                  Valor recebido (US$)
                 </label>
                 <Input
                   id="testimonial-amount-received"
