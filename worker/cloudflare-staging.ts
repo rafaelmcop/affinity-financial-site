@@ -19,6 +19,45 @@ function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
   });
 }
 
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self' 'unsafe-inline' https://forge.butterfly-effect.dev https://maps.googleapis.com https://maps.gstatic.com",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob: https:",
+  "connect-src 'self' https:",
+  "frame-src https://player.vimeo.com https://www.youtube.com https://www.youtube-nocookie.com https://maps.google.com https://www.google.com",
+  "upgrade-insecure-requests",
+].join("; ");
+
+function secureResponse(
+  response: Response,
+  options: { privateData?: boolean } = {}
+) {
+  const secured = new Response(response.body, response);
+  secured.headers.set("Strict-Transport-Security", "max-age=31536000");
+  secured.headers.set("Content-Security-Policy", contentSecurityPolicy);
+  secured.headers.set("X-Content-Type-Options", "nosniff");
+  secured.headers.set("X-Frame-Options", "DENY");
+  secured.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  secured.headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()"
+  );
+  secured.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  if (options.privateData) {
+    secured.headers.set("Cache-Control", "private, no-store, max-age=0");
+    secured.headers.set("Pragma", "no-cache");
+    secured.headers.set("Vary", "Cookie, Authorization");
+  }
+  return secured;
+}
+
 function trpcResult(data: unknown) {
   return { result: { data: { json: data } } };
 }
@@ -2333,10 +2372,16 @@ export default {
     const url = new URL(request.url);
     if (url.hostname === "affinityfc.org") {
       url.hostname = "www.affinityfc.org";
-      return Response.redirect(url.toString(), 301);
+      return secureResponse(Response.redirect(url.toString(), 301));
     }
-    if (!url.pathname.startsWith("/api/trpc/"))
-      return env.ASSETS.fetch(request);
+    if (!url.pathname.startsWith("/api/trpc/")) {
+      const privateShell = /^\/(admin|agentes|afiliados)(\/|$)/.test(
+        url.pathname
+      );
+      return secureResponse(await env.ASSETS.fetch(request), {
+        privateData: privateShell,
+      });
+    }
 
     try {
       const names = decodeURIComponent(
@@ -2359,11 +2404,14 @@ export default {
         "content-type": "application/json; charset=utf-8",
       });
       for (const cookie of cookies) headers.append("set-cookie", cookie);
-      return new Response(
-        JSON.stringify(
-          url.searchParams.get("batch") === "1" ? responses : responses[0]
+      return secureResponse(
+        new Response(
+          JSON.stringify(
+            url.searchParams.get("batch") === "1" ? responses : responses[0]
+          ),
+          { status: 200, headers }
         ),
-        { status: 200, headers }
+        { privateData: true }
       );
     } catch (error) {
       console.error(
@@ -2372,9 +2420,12 @@ export default {
           message: error instanceof Error ? error.message : String(error),
         })
       );
-      return jsonResponse(
-        [trpcError("Erro interno da prévia", "INTERNAL_SERVER_ERROR", 500)],
-        500
+      return secureResponse(
+        jsonResponse(
+          [trpcError("Erro interno da prévia", "INTERNAL_SERVER_ERROR", 500)],
+          500
+        ),
+        { privateData: true }
       );
     }
   },
