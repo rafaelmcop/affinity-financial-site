@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, Quote, Star } from 'lucide-react';
 import { trpc } from '@/lib/trpc';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { localizeTestimonial } from '@/lib/testimonialTranslations';
 
 const ROTATION_TIME = 10_000;
 
 const copy = {
-  pt: { eyebrow: 'AVALIAÇÕES DOS CLIENTES', title: 'Experiências compartilhadas', subtitle: 'Avaliações enviadas por nossos clientes e aprovadas pela Affinity.' },
-  en: { eyebrow: 'CLIENT REVIEWS', title: 'Shared experiences', subtitle: 'Reviews submitted by our clients and approved by Affinity.' },
-  es: { eyebrow: 'RESEÑAS DE CLIENTES', title: 'Experiencias compartidas', subtitle: 'Reseñas enviadas por nuestros clientes y aprobadas por Affinity.' },
+  pt: { eyebrow: 'AVALIAÇÕES DOS CLIENTES', title: 'Experiências compartilhadas', subtitle: 'Avaliações enviadas por nossos clientes e aprovadas pela Affinity.', previous: 'Avaliação anterior', next: 'Próxima avaliação', show: 'Mostrar avaliação', stars: 'de 5 estrelas' },
+  en: { eyebrow: 'CLIENT REVIEWS', title: 'Shared experiences', subtitle: 'Reviews submitted by our clients and approved by Affinity.', previous: 'Previous review', next: 'Next review', show: 'Show review', stars: 'out of 5 stars' },
+  es: { eyebrow: 'RESEÑAS DE CLIENTES', title: 'Experiencias compartidas', subtitle: 'Reseñas enviadas por nuestros clientes y aprobadas por Affinity.', previous: 'Reseña anterior', next: 'Siguiente reseña', show: 'Mostrar reseña', stars: 'de 5 estrellas' },
 };
 
 export function ReviewsBanner() {
@@ -19,8 +20,7 @@ export function ReviewsBanner() {
 
   const reviews = useMemo(() => {
     const clientReviews = (reviewsQuery.data || []).filter((item: any) => item.source === 'client');
-    const translated = clientReviews.filter((item: any) => item.language === language);
-    return translated.length > 0 ? translated : clientReviews;
+    return clientReviews.map((item: any) => localizeTestimonial(item, language));
   }, [reviewsQuery.data, language]);
 
   useEffect(() => {
@@ -51,13 +51,13 @@ export function ReviewsBanner() {
         </div>
 
         <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 sm:gap-6">
-          <button type="button" onClick={() => goTo(currentIndex - 1)} className="rounded-full border border-gold/30 bg-black/30 p-2 text-gold transition-colors hover:bg-gold hover:text-black sm:p-3" aria-label="Avaliação anterior">
+          <button type="button" onClick={() => goTo(currentIndex - 1)} className="rounded-full border border-gold/30 bg-black/30 p-2 text-gold transition-colors hover:bg-gold hover:text-black sm:p-3" aria-label={text.previous}>
             <ChevronLeft size={22} />
           </button>
 
           <article key={review.id} className="relative min-h-[270px] rounded-2xl border border-gold/25 bg-white/[.06] px-6 py-8 text-center shadow-2xl backdrop-blur sm:min-h-[250px] sm:px-12 sm:py-10">
             <Quote className="absolute left-5 top-5 text-gold/20" size={48} aria-hidden="true" />
-            <div className="mb-5 flex justify-center gap-1" aria-label={`${review.rating} de 5 estrelas`}>
+            <div className="mb-5 flex justify-center gap-1" aria-label={`${review.rating} ${text.stars}`}>
               {[1, 2, 3, 4, 5].map(star => (
                 <Star
                   key={star}
@@ -77,14 +77,14 @@ export function ReviewsBanner() {
             </div>
           </article>
 
-          <button type="button" onClick={() => goTo(currentIndex + 1)} className="rounded-full border border-gold/30 bg-black/30 p-2 text-gold transition-colors hover:bg-gold hover:text-black sm:p-3" aria-label="Próxima avaliação">
+          <button type="button" onClick={() => goTo(currentIndex + 1)} className="rounded-full border border-gold/30 bg-black/30 p-2 text-gold transition-colors hover:bg-gold hover:text-black sm:p-3" aria-label={text.next}>
             <ChevronRight size={22} />
           </button>
         </div>
 
         <div className="mx-auto mt-7 flex max-w-md justify-center gap-2">
           {reviews.map((item: any, index: number) => (
-            <button key={item.id} type="button" onClick={() => goTo(index)} aria-label={`Mostrar avaliação ${index + 1}`} className={`h-2 rounded-full transition-all ${index === currentIndex ? 'w-9 bg-gold' : 'w-2 bg-gold/30 hover:bg-gold/60'}`} />
+            <button key={item.id} type="button" onClick={() => goTo(index)} aria-label={`${text.show} ${index + 1}`} className={`h-2 rounded-full transition-all ${index === currentIndex ? 'w-9 bg-gold' : 'w-2 bg-gold/30 hover:bg-gold/60'}`} />
           ))}
         </div>
         {reviews.length > 1 && <div key={`progress-${currentIndex}`} className="mx-auto mt-4 h-0.5 max-w-md overflow-hidden rounded bg-white/10"><div className="h-full origin-left animate-[review-progress_10s_linear_forwards] bg-gold" /></div>}

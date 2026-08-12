@@ -3,12 +3,18 @@ import { ChevronLeft, ChevronRight, Maximize2, Star, PenLine } from 'lucide-reac
 import { useLanguage } from '@/contexts/LanguageContext';
 import { trpc } from '@/lib/trpc';
 import { getVideoSource } from '@shared/videoUrl';
+import { localizeTestimonial } from '@/lib/testimonialTranslations';
 
 export function TestimonialsSection() {
   const { t, language } = useLanguage();
   const reviewLinkLabel = { pt: 'Deixe sua avaliação', en: 'Leave your review', es: 'Deja tu reseña' }[language];
   const amountLabel = { pt: 'Valor recebido', en: 'Benefit received', es: 'Valor recibido' }[language];
   const amountLocale = { pt: 'pt-BR', en: 'en-US', es: 'es-US' }[language];
+  const interfaceText = {
+    pt: { loading: 'Carregando depoimentos...', previous: 'Depoimento anterior', next: 'Próximo depoimento', stars: 'de 5 estrelas' },
+    en: { loading: 'Loading testimonials...', previous: 'Previous testimonial', next: 'Next testimonial', stars: 'out of 5 stars' },
+    es: { loading: 'Cargando testimonios...', previous: 'Testimonio anterior', next: 'Siguiente testimonio', stars: 'de 5 estrellas' },
+  }[language];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -116,13 +122,8 @@ export function TestimonialsSection() {
     if (testimonialsQuery.data) {
       setIsLoading(true);
       
-      // Filter by current language
-      const currentLang = localStorage.getItem('language') || 'pt';
       const manualTestimonials = testimonialsQuery.data.filter((t: any) => t.source !== 'client');
-      const filtered = manualTestimonials.filter((t: any) => t.language === currentLang);
-      
-      // If no testimonials for current language, show Portuguese ones
-      const toShow = filtered.length > 0 ? filtered : manualTestimonials.filter((t: any) => t.language === 'pt');
+      const toShow = manualTestimonials.map((item: any) => localizeTestimonial(item, language));
       
       // Shuffle testimonials for random display
       const shuffled = shuffleArray(toShow);
@@ -142,7 +143,7 @@ export function TestimonialsSection() {
         setShowLoadingOverlay(false);
       }, 300);
     }
-  }, [testimonialsQuery.data]);
+  }, [testimonialsQuery.data, language]);
 
   // Intersection Observer to pause video when out of view
   useEffect(() => {
@@ -230,7 +231,7 @@ export function TestimonialsSection() {
                 <div className="absolute inset-0 rounded-full border-4 border-gold/20" />
                 <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-gold animate-spin" />
               </div>
-              <p className="text-gray-400 text-sm animate-pulse">Carregando depoimentos...</p>
+              <p className="text-gray-400 text-sm animate-pulse">{interfaceText.loading}</p>
             </div>
           </div>
         </div>
@@ -273,7 +274,7 @@ export function TestimonialsSection() {
             <button
               onClick={prevTestimonial}
               className="flex-shrink-0 p-3 rounded-full bg-gold/20 hover:bg-gold/40 text-gold transition-all duration-300 transform hover:scale-110"
-              aria-label="Depoimento anterior"
+              aria-label={interfaceText.previous}
             >
               <ChevronLeft size={24} />
             </button>
@@ -356,7 +357,7 @@ export function TestimonialsSection() {
                       {/* Content */}
                       <div className="md:w-2/3">
                         {testimonial.source === 'client' && (
-                          <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating} de 5 estrelas`}>
+                          <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating} ${interfaceText.stars}`}>
                             {[1, 2, 3, 4, 5].map(star => (
                               <Star
                                 key={star}
@@ -401,7 +402,7 @@ export function TestimonialsSection() {
             <button
               onClick={nextTestimonial}
               className="flex-shrink-0 p-3 rounded-full bg-gold/20 hover:bg-gold/40 text-gold transition-all duration-300 transform hover:scale-110"
-              aria-label="Próximo depoimento"
+              aria-label={interfaceText.next}
             >
               <ChevronRight size={24} />
             </button>
