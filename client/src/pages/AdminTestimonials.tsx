@@ -14,6 +14,7 @@ export default function AdminTestimonials() {
   const [, setLocation] = useLocation();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [originalMediaUrl, setOriginalMediaUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [showFrameSelector, setShowFrameSelector] = useState(false);
   const [frameTime, setFrameTime] = useState(1);
@@ -114,7 +115,8 @@ export default function AdminTestimonials() {
 
   const handleAddOrUpdateTestimonial = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isValidMediaUrl(formData.mediaUrl, formData.mediaType)) {
+    const mediaUrlChanged = !editingId || formData.mediaUrl !== originalMediaUrl;
+    if (mediaUrlChanged && !isValidMediaUrl(formData.mediaUrl, formData.mediaType)) {
       toast.error(formData.mediaType === 'video'
         ? 'Use um link HTTPS do Vimeo, YouTube ou de um arquivo MP4/WebM.'
         : 'Use um endereço HTTPS válido para a imagem.');
@@ -123,6 +125,9 @@ export default function AdminTestimonials() {
     try {
       if (editingId) {
         // Update existing
+        const mediaUpdate = formData.mediaUrl !== originalMediaUrl
+          ? { mediaUrl: formData.mediaUrl || undefined }
+          : {};
         await updateMutation.mutateAsync({
           id: editingId,
           name: formData.name,
@@ -131,7 +136,7 @@ export default function AdminTestimonials() {
           email: formData.email || undefined,
           rating: formData.rating,
           amountReceived: formData.amountReceived,
-          mediaUrl: formData.mediaUrl || undefined,
+          ...mediaUpdate,
           mediaType: formData.mediaType,
           language: formData.language,
           thumbnailUrl: selectedThumbnail || undefined,
@@ -167,6 +172,7 @@ export default function AdminTestimonials() {
         thumbnailUrl: '',
       });
       setEditingId(null);
+      setOriginalMediaUrl('');
       setShowForm(false);
       setShowFrameSelector(false);
       setSelectedThumbnail(null);
@@ -191,6 +197,7 @@ export default function AdminTestimonials() {
       thumbnailUrl: testimonial.thumbnailUrl || '',
     });
     setSelectedThumbnail(testimonial.thumbnailUrl || null);
+    setOriginalMediaUrl(testimonial.mediaUrl || '');
     setEditingId(testimonial.id);
     setShowForm(true);
   };
@@ -230,6 +237,7 @@ export default function AdminTestimonials() {
       thumbnailUrl: '',
     });
     setEditingId(null);
+    setOriginalMediaUrl('');
     setShowForm(false);
     setShowFrameSelector(false);
     setSelectedThumbnail(null);
@@ -336,7 +344,7 @@ export default function AdminTestimonials() {
                 </label>
                 <Input
                   id="testimonial-media-url"
-                  type="url"
+                  type="text"
                   inputMode="url"
                   placeholder="Ex.: https://vimeo.com/123456789"
                   value={formData.mediaUrl}

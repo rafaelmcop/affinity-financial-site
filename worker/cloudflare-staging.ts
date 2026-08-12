@@ -183,9 +183,11 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     if (!current) return trpcError("Avaliação não encontrada", "NOT_FOUND", 404);
     const mediaType = String(input.mediaType ?? current.mediaType) === "video" ? "video" : "image";
     const mediaUrl = String(input.mediaUrl ?? current.mediaUrl ?? "").trim();
+    const previousMediaUrl = String(current.mediaUrl ?? "").trim();
+    const mediaUrlChanged = input.mediaUrl !== undefined && mediaUrl !== previousMediaUrl;
     const amountReceived = Number(input.amountReceived ?? current.amountReceived ?? 0);
     if (!Number.isFinite(amountReceived) || amountReceived < 0 || amountReceived > 9999999999.99) return trpcError("O valor recebido não é válido.");
-    if (!isValidMediaUrl(mediaUrl, mediaType)) return trpcError("O endereço da mídia não é válido.");
+    if (mediaUrlChanged && !isValidMediaUrl(mediaUrl, mediaType)) return trpcError("O endereço da mídia não é válido.");
     await env.DB.prepare("UPDATE testimonials SET name=?, role=?, quote=?, email=?, rating=?, amountReceived=?, mediaUrl=?, mediaType=?, language=?, thumbnailUrl=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?")
       .bind(input.name ?? current.name, input.role ?? current.role, input.quote ?? current.quote, input.email ?? current.email, input.rating ?? current.rating, amountReceived, mediaUrl || null, mediaType, input.language ?? current.language, input.thumbnailUrl ?? current.thumbnailUrl, id).run();
     return trpcResult({ success: true, message: "Depoimento atualizado com sucesso!" });
