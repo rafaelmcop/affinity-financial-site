@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
-import { Plus, Trash2, Edit2, Eye, EyeOff, Upload, Sliders } from 'lucide-react';
+import { Plus, Trash2, Edit2, Eye, EyeOff, Upload, Sliders, ImagePlus, X } from 'lucide-react';
 import Header from '@/components/Header';
 import AdminSidebar from '@/components/AdminSidebar';
 import { getVideoSource, isValidMediaUrl } from '@shared/videoUrl';
@@ -20,6 +20,7 @@ export default function AdminTestimonials() {
   const [frameTime, setFrameTime] = useState(1);
   const [videoDuration, setVideoDuration] = useState(0);
   const [selectedThumbnail, setSelectedThumbnail] = useState<string | null>(null);
+  const [thumbnailDirty, setThumbnailDirty] = useState(false);
   const videoPreviewRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -88,21 +89,65 @@ export default function AdminTestimonials() {
 
   const handleVideoLoadedMetadata = () => {
     if (videoPreviewRef.current) {
-      setVideoDuration(videoPreviewRef.current.duration);
-      // Auto-extract thumbnail at 1 second
-      videoPreviewRef.current.currentTime = 1;
+      const duration = Number.isFinite(videoPreviewRef.current.duration) ? videoPreviewRef.current.duration : 0;
+      const initialTime = Math.min(1, Math.max(0, duration - 0.1));
+      setVideoDuration(duration);
+      setFrameTime(initialTime);
+      videoPreviewRef.current.currentTime = initialTime;
     }
   };
 
-  const handleVideoSeeked = () => {
-    if (videoPreviewRef.current && canvasRef.current) {
-      const ctx = canvasRef.current.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(videoPreviewRef.current, 0, 0);
-        const thumbnail = canvasRef.current.toDataURL('image/jpeg', 0.85);
-        setSelectedThumbnail(thumbnail);
-      }
+  const captureCurrentFrame = () => {
+    const video = videoPreviewRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas || video.readyState < 2) {
+      toast.error('Aguarde o vídeo carregar para selecionar a capa.');
+      return;
     }
+    try {
+      const ratio = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+      canvas.width = 640;
+      canvas.height = Math.round(640 / ratio);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Não foi possível preparar a imagem.');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setSelectedThumbnail(canvas.toDataURL('image/jpeg', 0.82));
+      setThumbnailDirty(true);
+      toast.success('Este quadro foi selecionado como capa.');
+    } catch {
+      toast.error('Este servidor de vídeo não permite capturar o quadro. Envie uma imagem de capa abaixo.');
+    }
+  };
+
+  const handleThumbnailUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Selecione um arquivo de imagem.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => toast.error('Não foi possível ler a imagem selecionada.');
+    reader.onload = () => {
+      const image = new Image();
+      image.onerror = () => toast.error('Não foi possível abrir a imagem selecionada.');
+      image.onload = () => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const scale = Math.min(1, 640 / image.width, 360 / image.height);
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        setSelectedThumbnail(canvas.toDataURL('image/jpeg', 0.82));
+        setThumbnailDirty(true);
+        toast.success('Imagem de capa selecionada.');
+      };
+      image.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
   };
 
   const handleFrameTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -139,7 +184,7 @@ export default function AdminTestimonials() {
           ...mediaUpdate,
           mediaType: formData.mediaType,
           language: formData.language,
-          thumbnailUrl: selectedThumbnail || undefined,
+          thumbnailUrl: thumbnailDirty ? (selectedThumbnail || '') : undefined,
         });
         toast.success('Depoimento atualizado com sucesso!');
       } else {
@@ -176,6 +221,7 @@ export default function AdminTestimonials() {
       setShowForm(false);
       setShowFrameSelector(false);
       setSelectedThumbnail(null);
+      setThumbnailDirty(false);
       setFrameTime(1);
       await testimonialsQuery.refetch();
     } catch (error) {
@@ -197,6 +243,7 @@ export default function AdminTestimonials() {
       thumbnailUrl: testimonial.thumbnailUrl || '',
     });
     setSelectedThumbnail(testimonial.thumbnailUrl || null);
+    setThumbnailDirty(false);
     setOriginalMediaUrl(testimonial.mediaUrl || '');
     setEditingId(testimonial.id);
     setShowForm(true);
@@ -241,6 +288,7 @@ export default function AdminTestimonials() {
     setShowForm(false);
     setShowFrameSelector(false);
     setSelectedThumbnail(null);
+    setThumbnailDirty(false);
     setFrameTime(1);
   };
 
@@ -352,7 +400,6 @@ export default function AdminTestimonials() {
                     const mediaUrl = e.target.value;
                     const detectedVideo = getVideoSource(mediaUrl);
                     setFormData({ ...formData, mediaUrl, mediaType: detectedVideo ? 'video' : formData.mediaType });
-                    if (detectedVideo) setSelectedThumbnail(null);
                   }}
                   className="bg-black border-gold/30 text-white placeholder:text-gray-500"
                 />
@@ -403,7 +450,7 @@ export default function AdminTestimonials() {
                         <iframe
                           src={videoSource.embedUrl}
                           title="Prévia do vídeo do depoimento"
-                          className="w-full h-64 rounded bg-black border border-gold/20"
+                          className="aspect-video w-full rounded bg-black border border-gold/20"
                           allow="autoplay; fullscreen; picture-in-picture"
                           allowFullScreen
                           referrerPolicy="strict-origin-when-cross-origin"
@@ -415,9 +462,9 @@ export default function AdminTestimonials() {
                           controls
                           playsInline
                           preload="metadata"
+                          crossOrigin="anonymous"
                           onLoadedMetadata={handleVideoLoadedMetadata}
-                          onSeeked={handleVideoSeeked}
-                          className="w-full h-40 rounded bg-black"
+                          className="max-h-80 w-full rounded bg-black object-contain"
                         />
                       )}
                       
@@ -442,20 +489,33 @@ export default function AdminTestimonials() {
                             <span>{frameTime.toFixed(1)}s</span>
                             <span>{videoDuration.toFixed(1)}s</span>
                           </div>
+                          <Button type="button" onClick={captureCurrentFrame} className="w-full bg-gold text-black hover:bg-gold/90">
+                            Usar este quadro como capa
+                          </Button>
                         </div>
 
-                        {/* Thumbnail Preview */}
+                      </div>}
+
+                      <div className="rounded border border-gold/20 bg-black p-4">
+                        <div className="mb-3 flex items-center gap-2">
+                          <ImagePlus className="h-4 w-4 text-gold" />
+                          <p className="text-sm font-semibold text-gold">Enviar imagem de capa</p>
+                        </div>
+                        <p className="mb-3 text-xs text-gray-400">Funciona para MP4, Vimeo e YouTube. Recomendado: imagem horizontal.</p>
+                        <label className="inline-flex cursor-pointer items-center rounded border border-gold/30 bg-gold/10 px-4 py-2 text-sm font-semibold text-gold hover:bg-gold/20">
+                          Selecionar imagem
+                          <input type="file" accept="image/*" onChange={handleThumbnailUpload} className="hidden" />
+                        </label>
                         {selectedThumbnail && (
-                          <div className="mt-3">
-                            <p className="text-gray-300 text-xs mb-2">Capa Selecionada:</p>
-                            <img
-                              src={selectedThumbnail}
-                              alt="Thumbnail"
-                              className="w-full h-32 object-cover rounded border border-gold/20"
-                            />
+                          <div className="mt-4">
+                            <div className="mb-2 flex items-center justify-between">
+                              <p className="text-xs text-gray-300">Capa que será salva:</p>
+                              <button type="button" onClick={() => { setSelectedThumbnail(null); setThumbnailDirty(true); }} className="flex items-center gap-1 text-xs text-red-300 hover:text-red-200"><X size={14} />Remover</button>
+                            </div>
+                            <img src={selectedThumbnail} alt="Capa selecionada" className="h-36 w-full rounded border border-gold/20 object-cover" />
                           </div>
                         )}
-                      </div>}
+                      </div>
 
                       {/* Hidden Canvas for Thumbnail Extraction */}
                       <canvas

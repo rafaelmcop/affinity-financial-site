@@ -239,12 +239,15 @@ export function TestimonialsSection() {
   }
 
   const currentTestimonial = testimonials[currentIndex];
+  const currentVideoSource = currentTestimonial?.mediaType === 'video' && currentTestimonial.mediaUrl
+    ? getVideoSource(currentTestimonial.mediaUrl)
+    : null;
   // Use custom thumbnail if available, otherwise use extracted thumbnail
   const currentThumbnail = currentTestimonial?.thumbnailUrl || videoThumbnails[currentIndex];
-  const isThumbnailLoading = currentTestimonial?.mediaType === 'video' && !currentThumbnail && !loadedThumbnails.has(currentIndex);
+  const isThumbnailLoading = currentVideoSource?.kind === 'file' && !currentThumbnail && !loadedThumbnails.has(currentIndex);
   
   // Skip thumbnail extraction if custom thumbnail already exists
-  const shouldExtractThumbnail = currentTestimonial?.mediaType === 'video' && !currentTestimonial?.thumbnailUrl && !currentThumbnail && !loadedThumbnails.has(currentIndex);
+  const shouldExtractThumbnail = currentVideoSource?.kind === 'file' && !currentTestimonial?.thumbnailUrl && !currentThumbnail && !loadedThumbnails.has(currentIndex);
 
   return (
     <section
@@ -305,7 +308,7 @@ export function TestimonialsSection() {
                                       controls
                                       playsInline
                                       preload="metadata"
-                                      className="w-full h-64 object-cover rounded-lg border-2 border-gold/30 bg-black"
+                                      className="max-h-[28rem] w-full rounded-lg border-2 border-gold/30 bg-black object-contain"
                                       poster={currentThumbnail || 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect fill=%22%23000%22 width=%22100%22 height=%22100%22/%3E%3Cpolygon fill=%22%23d4af37%22 points=%2235,25 35,75 75,50%22/%3E%3C/svg%3E'}
                                       controlsList="nodownload"
                                       src={source.url}
@@ -322,7 +325,7 @@ export function TestimonialsSection() {
                                   <iframe
                                     src={source.embedUrl}
                                     title={`Vídeo de ${testimonial.name}`}
-                                    className="w-full h-64 rounded-lg border-2 border-gold/30 bg-black"
+                                    className="aspect-video w-full rounded-lg border-2 border-gold/30 bg-black"
                                     loading="lazy"
                                     allow="autoplay; fullscreen; picture-in-picture"
                                     allowFullScreen
