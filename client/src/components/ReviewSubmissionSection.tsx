@@ -8,24 +8,28 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
 const copy = {
-  pt: { eyebrow: 'SUA EXPERIÊNCIA IMPORTA', title: 'Conte como foi sua experiência', subtitle: 'Sua avaliação ajuda outras famílias a escolherem com mais confiança.', name: 'Seu nome', email: 'Seu e-mail (não será publicado)', role: 'Cidade e estado', review: 'Escreva sua avaliação', submit: 'Enviar avaliação', pending: 'Toda avaliação é revisada antes de ser publicada.', success: 'Obrigado! Sua avaliação foi enviada e aguarda aprovação.' },
-  en: { eyebrow: 'YOUR EXPERIENCE MATTERS', title: 'Tell us about your experience', subtitle: 'Your review helps other families make a confident choice.', name: 'Your name', email: 'Your email (will not be published)', role: 'City and state', review: 'Write your review', submit: 'Submit review', pending: 'Every review is checked before it is published.', success: 'Thank you! Your review was submitted for approval.' },
-  es: { eyebrow: 'TU EXPERIENCIA IMPORTA', title: 'Cuéntanos sobre tu experiencia', subtitle: 'Tu reseña ayuda a otras familias a elegir con confianza.', name: 'Tu nombre', email: 'Tu correo (no será publicado)', role: 'Ciudad y estado', review: 'Escribe tu reseña', submit: 'Enviar reseña', pending: 'Cada reseña se revisa antes de publicarse.', success: '¡Gracias! Tu reseña fue enviada para aprobación.' },
+  pt: { eyebrow: 'SUA EXPERIÊNCIA IMPORTA', title: 'Conte como foi sua experiência', subtitle: 'Sua avaliação ajuda outras famílias a escolherem com mais confiança.', rating: 'Escolha uma nota de 1 a 5 estrelas', ratingRequired: 'Escolha uma nota antes de enviar.', name: 'Seu nome', email: 'Seu e-mail (não será publicado)', role: 'Cidade e estado', review: 'Escreva sua avaliação', submit: 'Enviar avaliação', pending: 'Toda avaliação é revisada antes de ser publicada.', success: 'Obrigado! Sua avaliação foi enviada e aguarda aprovação.' },
+  en: { eyebrow: 'YOUR EXPERIENCE MATTERS', title: 'Tell us about your experience', subtitle: 'Your review helps other families make a confident choice.', rating: 'Choose a rating from 1 to 5 stars', ratingRequired: 'Choose a rating before submitting.', name: 'Your name', email: 'Your email (will not be published)', role: 'City and state', review: 'Write your review', submit: 'Submit review', pending: 'Every review is checked before it is published.', success: 'Thank you! Your review was submitted for approval.' },
+  es: { eyebrow: 'TU EXPERIENCIA IMPORTA', title: 'Cuéntanos sobre tu experiencia', subtitle: 'Tu reseña ayuda a otras familias a elegir con confianza.', rating: 'Elige una calificación de 1 a 5 estrellas', ratingRequired: 'Elige una calificación antes de enviar.', name: 'Tu nombre', email: 'Tu correo (no será publicado)', role: 'Ciudad y estado', review: 'Escribe tu reseña', submit: 'Enviar reseña', pending: 'Cada reseña se revisa antes de publicarse.', success: '¡Gracias! Tu reseña fue enviada para aprobación.' },
 };
 
 export function ReviewSubmissionSection() {
   const { language } = useLanguage();
   const text = copy[language];
   const mutation = trpc.testimonials.submitReview.useMutation();
-  const [rating, setRating] = useState(5);
+  const [rating, setRating] = useState(0);
   const [form, setForm] = useState({ name: '', email: '', role: '', quote: '' });
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (rating === 0) {
+      toast.error(text.ratingRequired);
+      return;
+    }
     try {
       await mutation.mutateAsync({ ...form, rating, language });
       setForm({ name: '', email: '', role: '', quote: '' });
-      setRating(5);
+      setRating(0);
       toast.success(text.success);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Não foi possível enviar sua avaliação.');
@@ -42,8 +46,15 @@ export function ReviewSubmissionSection() {
           <div className="flex items-center gap-3 text-sm text-gray-400"><ShieldCheck className="text-gold" size={22} /><span>{text.pending}</span></div>
         </div>
         <form onSubmit={submit} className="rounded-2xl border border-gold/25 bg-black/35 p-6 sm:p-8 shadow-2xl space-y-5">
-          <div className="flex gap-2" aria-label={`${rating} de 5 estrelas`}>
-            {[1, 2, 3, 4, 5].map(star => <button type="button" key={star} onClick={() => setRating(star)} className="p-1" aria-label={`${star} estrelas`}><Star size={30} className={star <= rating ? 'fill-gold text-gold' : 'text-gray-600'} /></button>)}
+          <div>
+            <p className="mb-2 text-sm font-semibold text-white">{text.rating}</p>
+            <div className="flex gap-2" role="radiogroup" aria-label={text.rating}>
+              {[1, 2, 3, 4, 5].map(star => (
+                <button type="button" role="radio" aria-checked={rating === star} key={star} onClick={() => setRating(star)} className="rounded p-1 transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold" aria-label={`${star} estrelas`}>
+                  <Star size={32} className={star <= rating ? 'fill-gold text-gold' : 'fill-transparent text-gray-400'} />
+                </button>
+              ))}
+            </div>
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             <Input required minLength={2} maxLength={120} placeholder={text.name} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-12 bg-white/5 border-white/15 text-white placeholder:text-gray-500" />

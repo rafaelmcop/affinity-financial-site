@@ -351,9 +351,11 @@ export function TestimonialsSection() {
 
                       {/* Content */}
                       <div className="md:w-2/3">
-                        <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating || 5} de 5 estrelas`}>
-                          {[1, 2, 3, 4, 5].map(star => <Star key={star} size={18} className={star <= (testimonial.rating || 5) ? 'fill-gold text-gold' : 'text-gray-500'} />)}
-                        </div>
+                        {testimonial.source === 'client' && (
+                          <div className="flex gap-1 mb-4" aria-label={`${testimonial.rating} de 5 estrelas`}>
+                            {[1, 2, 3, 4, 5].map(star => <Star key={star} size={18} className={star <= testimonial.rating ? 'fill-gold text-gold' : 'fill-transparent text-gray-500'} />)}
+                          </div>
+                        )}
                         <blockquote
                           className="testimonial-quote text-lg sm:text-xl italic mb-6 leading-relaxed"
                           style={{ color: '#14233b' }}

@@ -324,9 +324,9 @@ export default function AdminTestimonials() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="bg-black border-gold/30 text-white"
                 />
-                <select value={formData.rating} onChange={(e) => setFormData({ ...formData, rating: Number(e.target.value) })} className="bg-black border border-gold/30 text-white px-4 py-2 rounded">
-                  {[5, 4, 3, 2, 1].map(value => <option key={value} value={value}>{value} estrela{value > 1 ? 's' : ''}</option>)}
-                </select>
+                <div className="flex items-center rounded border border-gold/20 bg-gold/5 px-4 py-2 text-sm text-gray-300">
+                  Depoimentos manuais são publicados sem estrelas.
+                </div>
               </div>
 
               <textarea
@@ -547,7 +547,11 @@ export default function AdminTestimonials() {
                     <tr key={testimonial.id} className="border-b border-gold/10 hover:bg-gold/5">
                       <td className="px-4 py-3 text-white">{testimonial.name}</td>
                       <td className="px-4 py-3 text-white text-sm">{testimonial.role}</td>
-                      <td className="px-4 py-3 text-gold text-sm">{'★'.repeat(testimonial.rating || 5)}</td>
+                      <td className="px-4 py-3 text-gold text-sm">
+                        {testimonial.source === 'client'
+                          ? `${'★'.repeat(testimonial.rating)}${'☆'.repeat(5 - testimonial.rating)}`
+                          : 'Sem estrelas'}
+                      </td>
                       <td className="px-4 py-3 text-white text-sm">
                         {Number(testimonial.amountReceived) > 0
                           ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(testimonial.amountReceived))

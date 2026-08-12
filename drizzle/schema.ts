@@ -150,6 +150,7 @@ export const testimonials = mysqlTable("testimonials", {
   quote: text("quote").notNull(),
   email: varchar("email", { length: 320 }),
   rating: int("rating").default(5).notNull(),
+  source: mysqlEnum("source", ["manual", "client"]).default("manual").notNull(),
   amountReceived: decimal("amountReceived", { precision: 12, scale: 2 }).default("0.00").notNull(),
   mediaUrl: varchar("mediaUrl", { length: 500 }),
   mediaType: mysqlEnum("mediaType", ["image", "video"]).default("image"),

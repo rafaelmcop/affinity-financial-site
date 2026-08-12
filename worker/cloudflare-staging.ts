@@ -186,7 +186,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     }
     const recent = await env.DB.prepare("SELECT COUNT(*) AS total FROM testimonials WHERE email = ? AND createdAt >= datetime('now', '-1 day')").bind(email).first<{ total: number }>();
     if (Number(recent?.total ?? 0) >= 3) return trpcError("Limite diário de avaliações atingido.", "TOO_MANY_REQUESTS", 429);
-    await env.DB.prepare("INSERT INTO testimonials (name, email, role, quote, rating, language, mediaType, isActive) VALUES (?, ?, ?, ?, ?, ?, 'image', 0)")
+    await env.DB.prepare("INSERT INTO testimonials (name, email, role, quote, rating, source, language, mediaType, isActive) VALUES (?, ?, ?, ?, ?, 'client', ?, 'image', 0)")
       .bind(nameValue, email, role, quote, rating, language).run();
     return trpcResult({ success: true, message: "Avaliação enviada para aprovação." });
   }
@@ -419,7 +419,7 @@ async function runProcedure(name: string, input: JsonRecord, request: Request, e
     const amountReceived = Number(input.amountReceived ?? 0);
     if (!Number.isFinite(amountReceived) || amountReceived < 0 || amountReceived > 9999999999.99) return trpcError("O valor recebido não é válido.");
     if (!isValidMediaUrl(mediaUrl, mediaType)) return trpcError("O endereço da mídia não é válido.");
-    await env.DB.prepare("INSERT INTO testimonials (name, role, quote, email, rating, amountReceived, mediaUrl, mediaType, language, thumbnailUrl, isActive) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)")
+    await env.DB.prepare("INSERT INTO testimonials (name, role, quote, email, rating, source, amountReceived, mediaUrl, mediaType, language, thumbnailUrl, isActive) VALUES (?, ?, ?, ?, ?, 'manual', ?, ?, ?, ?, ?, 1)")
       .bind(String(input.name), String(input.role), String(input.quote), input.email ?? null, Number(input.rating ?? 5), amountReceived, mediaUrl || null, mediaType, String(input.language ?? "pt"), input.thumbnailUrl ?? null).run();
     return trpcResult({ success: true, message: "Depoimento adicionado com sucesso!" });
   }
