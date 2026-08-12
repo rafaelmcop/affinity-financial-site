@@ -1,16 +1,7 @@
 import { useLanguage } from "@/contexts/LanguageContext";
 import { Button } from "@/components/ui/button";
 import { LanguageSelector } from "./LanguageSelector";
-import {
-  BriefcaseBusiness,
-  ChevronDown,
-  Handshake,
-  LockKeyhole,
-  Menu,
-  ShieldCheck,
-  UserRound,
-  X,
-} from "lucide-react";
+import { ChevronDown, LockKeyhole, Menu, X } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 
@@ -104,7 +95,7 @@ export function Navigation() {
                 type="button"
                 onClick={() => setLoginOpen(value => !value)}
                 aria-expanded={loginOpen}
-                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${loginOpen ? "border-gold bg-gold text-black shadow-[0_0_24px_rgba(212,175,55,.25)]" : "border-gold/45 bg-[#0f1f36] text-gold hover:border-gold hover:bg-[#172c49]"}`}
+                className={`flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-semibold transition ${loginOpen ? "border-gold bg-[#dff2ff] text-[#123f68] shadow-[0_0_24px_rgba(94,177,224,.3)]" : "border-[#8fc8e8] bg-[#eaf7ff] text-[#174c76] hover:border-gold hover:bg-white hover:text-[#8a6600]"}`}
               >
                 <LockKeyhole size={17} />
                 {loginCopy.login}
@@ -114,32 +105,28 @@ export function Navigation() {
                 />
               </button>
               {loginOpen && (
-                <div className="absolute right-0 top-full mt-3 w-72 overflow-hidden rounded-2xl border border-gold/35 bg-[#0b1728] p-3 text-white shadow-[0_22px_70px_rgba(0,0,0,.6)] ring-1 ring-white/5">
-                  <div className="mb-2 border-b border-gold/20 px-3 pb-3 pt-1">
-                    <p className="text-xs font-bold uppercase tracking-[.18em] text-gold">
+                <div className="absolute right-0 top-full mt-3 w-72 overflow-hidden rounded-2xl border border-[#8fc8e8] bg-gradient-to-b from-[#eef9ff] to-[#d6efff] p-3 text-[#173f63] shadow-[0_22px_60px_rgba(18,63,99,.28)] ring-1 ring-white/80">
+                  <div className="mb-2 border-b border-[#9bc9e5] px-3 pb-3 pt-1">
+                    <p className="text-xs font-bold uppercase tracking-[.18em] text-[#17608f]">
                       Área segura
                     </p>
-                    <p className="mt-1 text-sm text-white/75">
+                    <p className="mt-1 text-sm text-[#35698d]">
                       Escolha seu portal de acesso
                     </p>
                   </div>
                   <PortalButton
-                    icon={UserRound}
                     label={loginCopy.client}
                     soon={loginCopy.soon}
                   />
                   <PortalButton
-                    icon={BriefcaseBusiness}
                     label={loginCopy.agent}
                     onClick={() => goToPortal("/agentes")}
                   />
                   <PortalButton
-                    icon={Handshake}
                     label={loginCopy.affiliate}
                     onClick={() => goToPortal("/afiliados")}
                   />
                   <PortalButton
-                    icon={ShieldCheck}
                     label={loginCopy.admin}
                     onClick={() => goToPortal("/admin/login")}
                   />
@@ -169,27 +156,20 @@ export function Navigation() {
                 {item.label}
               </button>
             ))}
-            <div className="mt-3 rounded-2xl border border-gold/30 bg-[#0b1728] p-2 shadow-xl ring-1 ring-white/5">
-              <p className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gold">
+            <div className="mt-3 rounded-2xl border border-[#8fc8e8] bg-gradient-to-b from-[#eef9ff] to-[#d6efff] p-2 shadow-xl ring-1 ring-white/80">
+              <p className="border-b border-[#9bc9e5] px-4 py-3 text-xs font-bold uppercase tracking-wider text-[#17608f]">
                 {loginCopy.login}
               </p>
+              <PortalButton label={loginCopy.client} soon={loginCopy.soon} />
               <PortalButton
-                icon={UserRound}
-                label={loginCopy.client}
-                soon={loginCopy.soon}
-              />
-              <PortalButton
-                icon={BriefcaseBusiness}
                 label={loginCopy.agent}
                 onClick={() => goToPortal("/agentes")}
               />
               <PortalButton
-                icon={Handshake}
                 label={loginCopy.affiliate}
                 onClick={() => goToPortal("/afiliados")}
               />
               <PortalButton
-                icon={ShieldCheck}
                 label={loginCopy.admin}
                 onClick={() => goToPortal("/admin/login")}
               />
@@ -202,12 +182,10 @@ export function Navigation() {
 }
 
 function PortalButton({
-  icon: Icon,
   label,
   soon,
   onClick,
 }: {
-  icon: typeof UserRound;
   label: string;
   soon?: string;
   onClick?: () => void;
@@ -217,14 +195,11 @@ function PortalButton({
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      className="group flex w-full items-center gap-3 rounded-xl border border-transparent px-3 py-3 text-left text-sm font-semibold text-gray-200 transition enabled:hover:border-gold/35 enabled:hover:bg-gold/10 enabled:hover:text-gold enabled:focus-visible:border-gold enabled:focus-visible:bg-gold/15 enabled:focus-visible:text-gold disabled:cursor-not-allowed disabled:opacity-40"
+      className="group flex w-full items-center gap-3 rounded-xl border border-transparent px-4 py-3 text-left text-sm font-semibold text-[#174c76] transition enabled:hover:border-gold enabled:hover:bg-white/85 enabled:hover:text-[#8a6600] enabled:hover:shadow-sm enabled:focus-visible:border-gold enabled:focus-visible:bg-white enabled:focus-visible:text-[#8a6600] disabled:cursor-not-allowed disabled:text-[#6c8da5]"
     >
-      <span className="grid h-9 w-9 place-items-center rounded-lg border border-gold/25 bg-[#14233a] text-gold transition group-enabled:group-hover:border-gold group-enabled:group-hover:bg-gold group-enabled:group-hover:text-black">
-        <Icon size={18} />
-      </span>
       <span className="flex-1">{label}</span>
       {soon && (
-        <span className="rounded-full bg-white/5 px-2 py-1 text-[9px] font-bold uppercase text-gray-500">
+        <span className="rounded-full border border-[#d7bd64] bg-[#fff8dc] px-2 py-1 text-[9px] font-bold uppercase text-[#806200]">
           {soon}
         </span>
       )}

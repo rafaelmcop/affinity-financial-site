@@ -31,22 +31,28 @@ const empty: PolicyForm = {
   beneficiaries: "",
 };
 const money = (v: string) => Number(v.replace(/[$,]/g, "")) || 0;
-async function readPcSheet(file: File) {
+export async function readPcSheet(file: File) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL(
     "pdfjs-dist/build/pdf.worker.min.mjs",
     import.meta.url
   ).toString();
-  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() })
-    .promise;
+  const pdf = await pdfjs.getDocument({
+    data: await file.arrayBuffer(),
+    password: "",
+    stopAtErrors: false,
+  }).promise;
   const pageLines: string[][] = [];
-  for (let i = 1; i <= Math.min(pdf.numPages, 12); i++) {
+  const rawPages: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i),
       content = await page.getTextContent();
     const rows = new Map<number, { x: number; text: string }[]>();
+    const rawItems: string[] = [];
     for (const item of content.items) {
       if (!("str" in item) || !item.str.trim() || !("transform" in item))
         continue;
+      rawItems.push(item.str.trim());
       const y = Math.round(item.transform[5]);
       const row = rows.get(y) || [];
       row.push({ x: item.transform[4], text: item.str.trim() });
@@ -62,10 +68,18 @@ async function readPcSheet(file: File) {
             .join(" | ")
         )
     );
+    rawPages.push(rawItems.join(" "));
   }
   const pages = pageLines.map(lines => lines.join("\n")),
-    all = pages.join("\n").replace(/[ \t]+/g, " "),
-    cover = pageLines[0] || [];
+    visualText = pages.join("\n").replace(/[ \t]+/g, " "),
+    rawText = rawPages.join("\n").replace(/[ \t]+/g, " "),
+    all = `${visualText}\n${rawText}`,
+    coverIndex = pages.findIndex(page =>
+      /Life Insurance Application Cover Sheet|Application Cover Sheet/i.test(
+        page
+      )
+    ),
+    cover = pageLines[Math.max(coverIndex, 0)] || [];
   const find = (text: string, re: RegExp) => text.match(re)?.[1]?.trim() || "";
   const afterLine = (lines: string[], label: RegExp) => {
     const index = lines.findIndex(line => label.test(line));
@@ -80,7 +94,8 @@ async function readPcSheet(file: File) {
     ).match(/\d{1,2}\/\d{1,2}\/\d{4}/)?.[0] ||
     "";
   let policy =
-    afterLine(cover, /Transaction ID/i) || find(all, /\b(LS\d{6,})\b/i);
+    afterLine(cover, /Transaction ID/i) ||
+    find(all, /\b(LS\s*\d{6,})\b/i).replace(/\s/g, "");
   let product =
     afterLine(cover, /^Product:/i) ||
     find(all, /Product Name:[^\n]*\n([^|\n]+)/i);
@@ -89,6 +104,7 @@ async function readPcSheet(file: File) {
     find(all, /Face Amount:[^\n]*\n([^|\n]*\$[\d,]+)/i);
   let name =
     afterLine(cover, /Proposed Insured:.*Agent:/i) ||
+    afterLine(cover, /^Proposed Insured:?$/i) ||
     find(all, /Name \(print first, middle, last\)[^\n]*\n([^|\n]+)/i);
   const contactLine =
     pageLines.flat().find(line => line.includes(email) && /\d/.test(line)) ||
@@ -123,6 +139,33 @@ async function readPcSheet(file: File) {
         .trim()
     )
     .filter(value => /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{3,}$/.test(value));
+  const nationalLife =
+    /National Life Insurance Company|Life Insurance Company of the Southwest|National Life Group/i.test(
+      all
+    );
+  if (nationalLife) {
+    const nationalCover = cover.join("\n");
+    name =
+      afterLine(cover, /Proposed Insured:.*Agent:/i)
+        .split("|")[0]
+        .trim() || name;
+    policy =
+      afterLine(cover, /Transaction ID/i)
+        .split("|")[0]
+        .replace(/\s/g, "") || policy;
+    product =
+      afterLine(cover, /^Product:/i)
+        .split("|")[0]
+        .trim() || product;
+    coverage =
+      afterLine(cover, /Face Amount/i)
+        .split("|")[0]
+        .trim() || coverage;
+    dob =
+      find(nationalCover, /Proposed Insured\s*\nDOB:\s*\n?([^\n|]+)/i).match(
+        /\d{1,2}\/\d{1,2}\/\d{4}/
+      )?.[0] || dob;
+  }
   const corebridge = /American General Life Insurance Company|Corebridge/i.test(
     all
   );
@@ -229,7 +272,7 @@ export function PcSheetUpload() {
               ).length;
               if (!extracted.clientName && !extracted.policyNumber)
                 toast.error(
-                  "O PDF não possui texto legível. Tente baixar o PC Sheet original novamente."
+                  "O texto foi lido, mas não foi possível identificar nome e número da apólice. Confira os campos abaixo ou tente o PDF original."
                 );
               else
                 toast.success(
