@@ -327,22 +327,32 @@ export default function AdminTestimonials() {
             </h3>
             <form onSubmit={handleAddOrUpdateTestimonial} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Input
-                  type="text"
-                  placeholder="Nome"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="bg-black border-gold/30 text-white"
-                  required
-                />
-                <Input
-                  type="text"
-                  placeholder="Cargo/Profissão"
-                  value={formData.role}
-                  onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                  className="bg-black border-gold/30 text-white"
-                  required
-                />
+                <div className="space-y-2">
+                  <label htmlFor="testimonial-name" className="block text-sm font-semibold text-gold">Nome</label>
+                  <Input
+                    id="testimonial-name"
+                    type="text"
+                    placeholder="Nome do beneficiário"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="bg-black border-gold/30 text-white"
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="testimonial-benefit-type" className="block text-sm font-semibold text-gold">
+                    Tipo de benefício
+                  </label>
+                  <Input
+                    id="testimonial-benefit-type"
+                    type="text"
+                    placeholder="Ex.: Parada cardíaca ou Câncer"
+                    value={formData.role}
+                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    className="bg-black border-gold/30 text-white"
+                    required
+                  />
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -586,7 +596,7 @@ export default function AdminTestimonials() {
               <thead>
                 <tr className="border-b border-gold/20">
                   <th className="px-4 py-3 text-left text-gold font-semibold">Nome</th>
-                  <th className="px-4 py-3 text-left text-gold font-semibold">Cargo</th>
+                  <th className="px-4 py-3 text-left text-gold font-semibold">Tipo de benefício</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Nota</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Valor recebido</th>
                   <th className="px-4 py-3 text-left text-gold font-semibold">Idioma</th>
