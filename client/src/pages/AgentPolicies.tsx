@@ -71,23 +71,23 @@ async function readPcSheet(file: File) {
     const index = lines.findIndex(line => label.test(line));
     return index >= 0 ? (lines[index + 1] || "").split("|")[0].trim() : "";
   };
-  const email = find(all, /([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/);
-  const dob =
+  let email = find(all, /([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/);
+  let dob =
     cover.find(line => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(line.trim()))?.trim() ||
     find(
       all,
       /Date of Birth[^\n]*\n([^\n]*?\b\d{1,2}\/\d{1,2}\/\d{4}\b)/
     ).match(/\d{1,2}\/\d{1,2}\/\d{4}/)?.[0] ||
     "";
-  const policy =
+  let policy =
     afterLine(cover, /Transaction ID/i) || find(all, /\b(LS\d{6,})\b/i);
-  const product =
+  let product =
     afterLine(cover, /^Product:/i) ||
     find(all, /Product Name:[^\n]*\n([^|\n]+)/i);
-  const coverage =
+  let coverage =
     afterLine(cover, /Face Amount/i) ||
     find(all, /Face Amount:[^\n]*\n([^|\n]*\$[\d,]+)/i);
-  const name =
+  let name =
     afterLine(cover, /Proposed Insured:.*Agent:/i) ||
     find(all, /Name \(print first, middle, last\)[^\n]*\n([^|\n]+)/i);
   const contactLine =
@@ -97,7 +97,7 @@ async function readPcSheet(file: File) {
     .replace(email, "")
     .replace(/\D/g, "")
     .slice(0, 10);
-  const phone =
+  let phone =
     phoneDigits.length === 10
       ? `(${phoneDigits.slice(0, 3)}) ${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`
       : "";
@@ -105,7 +105,7 @@ async function readPcSheet(file: File) {
     pageLines
       .flat()
       .find(line => /Planned Periodic\/Modal Premium/i.test(line)) || "";
-  const premium = (premiumLine.match(/\$[\d,]+\.\d{2}/g) || []).at(-1) || "";
+  let premium = (premiumLine.match(/\$[\d,]+\.\d{2}/g) || []).at(-1) || "";
   const flatLines = pageLines.flat();
   const primaryIndex = flatLines.findIndex(line => /^Primary:/i.test(line));
   const primaryLine =
@@ -123,6 +123,61 @@ async function readPcSheet(file: File) {
         .trim()
     )
     .filter(value => /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{3,}$/.test(value));
+  const corebridge = /American General Life Insurance Company|Corebridge/i.test(
+    all
+  );
+  if (corebridge) {
+    const clean = all
+      .replace(/\(cid:\d+\)/g, " ")
+      .replace(/_/g, "")
+      .replace(/\s+/g, " ");
+    const compact = clean
+      .replace(/(\d)\s+(?=[\d/.-])/g, "$1")
+      .replace(/([/.-])\s+(?=\d)/g, "$1");
+    const cleanLines = flatLines
+      .map(line =>
+        line
+          .replace(/_/g, "")
+          .replace(/\s*\|\s*/g, " ")
+          .trim()
+      )
+      .filter(line => line && !/\(cid:/i.test(line));
+    const applicationIndex = cleanLines.findIndex(line =>
+      /^\d{10}$/.test(line)
+    );
+    policy =
+      applicationIndex >= 0
+        ? cleanLines[applicationIndex]
+        : find(clean, /\b(\d{10})\b/);
+    name =
+      applicationIndex >= 0 ? cleanLines[applicationIndex + 1] || "" : name;
+    dob = find(compact, /\bDOB\s*(\d{1,2}\/\d{1,2}\/\d{4})/i) || dob;
+    email = find(clean, /([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/) || email;
+    const corePhone = find(
+      clean,
+      /Primary Phone\s*(\(?\d{3}\)?[\s-]*\d{3}[\s-]*\d{4})/i
+    ).replace(/\D/g, "");
+    if (corePhone.length === 10)
+      phone = `(${corePhone.slice(0, 3)}) ${corePhone.slice(3, 6)}-${corePhone.slice(6)}`;
+    product =
+      find(
+        clean,
+        /Plan Name.*?\b([A-Za-z][A-Za-z0-9 ()-]{4,}?)\s+Term Duration/i
+      ).trim() || product;
+    coverage =
+      find(
+        clean,
+        /Amount Applied For:\s*Base Coverage\s*\$?\s*(\$?[\d,]+\.\d{2})/i
+      ) || coverage;
+    premium =
+      find(clean, /Premium Payment\s+X?\s*Modal\s*\$?\s*(\$?[\d,]+\.\d{2})/i) ||
+      premium;
+    const coreBeneficiary = find(
+      clean,
+      /\b([A-Z][A-Za-z' -]{4,})\s+\d{1,2}\/\d{1,2}\/\d{4}.*?\b(?:Mother|Father|Sister|Brother|Son|Daughter|Spouse|Wife|Husband)\b/i
+    );
+    if (coreBeneficiary) beneficiaries.unshift(coreBeneficiary.trim());
+  }
   const dobParts = dob.split("/");
   return {
     clientName: name,
