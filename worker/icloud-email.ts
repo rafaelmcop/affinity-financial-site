@@ -1,4 +1,5 @@
 import { connect } from "cloudflare:sockets";
+import { Buffer } from "node:buffer";
 import { simpleParser } from "mailparser";
 import { decryptSmtpPassword } from "./cloudflare-email";
 
@@ -131,7 +132,7 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
       );
       const source = extractLiteral(fetched.bytes);
       if (!source) continue;
-      const parsed = await simpleParser(source);
+      const parsed = await simpleParser(Buffer.from(source));
         const from = cleanAddress(parsed.from?.text || "");
         if (!from) continue;
         const customer = await env.DB.prepare(
