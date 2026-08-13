@@ -40,7 +40,7 @@ const labels: Record<Occasion, string> = {
 
 export function ScheduledMessagesPanel() {
   const messages = trpc.agent.listMessages.useQuery(),
-    clients = trpc.crm.list.useQuery();
+    clients = trpc.agent.listClients.useQuery();
   const create = trpc.agent.scheduleMessage.useMutation(),
     update = trpc.agent.updateMessage.useMutation(),
     remove = trpc.agent.deleteMessage.useMutation();

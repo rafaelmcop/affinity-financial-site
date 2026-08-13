@@ -1002,6 +1002,86 @@ async function runProcedure(
       }))
     );
   }
+  if (name === "agent.listClients") {
+    const rows = await env.DB.prepare(
+      "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
+    )
+      .bind(adminEmail.toLowerCase())
+      .all<JsonRecord>();
+    return trpcResult(
+      rows.results.map(row => ({ ...row, id: Number(row.id) }))
+    );
+  }
+  if (name === "agent.saveClient") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const clientName = String(input.name ?? "").trim();
+    const email = String(input.email ?? "")
+      .trim()
+      .toLowerCase();
+    const status = String(input.status ?? "client");
+    if (
+      !clientName ||
+      (email && !validEmail(email)) ||
+      !["new", "contacted", "meeting", "proposal", "client", "closed"].includes(
+        status
+      )
+    )
+      return trpcError("Revise os dados do cliente");
+    const values = [
+      clientName,
+      email || null,
+      String(input.phone ?? "").trim() || null,
+      String(input.whatsapp ?? "").trim() || null,
+      String(input.birthDate ?? "").trim() || null,
+      status,
+      String(input.source ?? "").trim() || null,
+      owner,
+      String(input.notes ?? "").trim() || null,
+    ];
+    if (!id) {
+      const result = await env.DB.prepare(
+        "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?)"
+      )
+        .bind(...values)
+        .run();
+      return trpcResult({ success: true, id: Number(result.meta.last_row_id) });
+    }
+    const result = await env.DB.prepare(
+      "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(...values, id, owner)
+      .run();
+    if (!result.meta.changes)
+      return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.deleteClient") {
+    const id = Number(input.id);
+    const owner = adminEmail.toLowerCase();
+    const client = await env.DB.prepare(
+      "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(id, owner)
+      .first();
+    if (!client) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    const policy = await env.DB.prepare(
+      "SELECT id FROM agentPolicies WHERE clientId=? AND lower(agentEmail)=? LIMIT 1"
+    )
+      .bind(id, owner)
+      .first();
+    if (policy)
+      return trpcError(
+        "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
+      );
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(id),
+    ]);
+    return trpcResult({ success: true });
+  }
   if (name === "agent.savePcSheet") {
     const owner = adminEmail.toLowerCase(),
       policyNumber = String(input.policyNumber ?? "").trim(),

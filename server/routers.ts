@@ -451,6 +451,102 @@ export const appRouter = router({
         .from(agentPolicies)
         .where(eq(agentPolicies.agentEmail, ctx.adminEmail.toLowerCase()));
     }),
+    listClients: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db
+        .select()
+        .from(crmClients)
+        .where(eq(crmClients.assignedAdminEmail, ctx.adminEmail.toLowerCase()));
+    }),
+    saveClient: adminProcedure
+      .input(
+        z.object({
+          id: z.number().optional(),
+          name: z.string().min(1),
+          email: z.string().email().optional().or(z.literal("")),
+          phone: z.string().optional(),
+          whatsapp: z.string().optional(),
+          birthDate: z.string().optional(),
+          status: z.enum([
+            "new",
+            "contacted",
+            "meeting",
+            "proposal",
+            "client",
+            "closed",
+          ]),
+          source: z.string().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const { id, ...data } = input;
+        const owner = ctx.adminEmail.toLowerCase();
+        const values = {
+          ...data,
+          email: data.email || null,
+          assignedAdminEmail: owner,
+          birthDate: data.birthDate
+            ? new Date(`${data.birthDate}T12:00:00Z`)
+            : null,
+        };
+        if (id) {
+          const result = await db
+            .update(crmClients)
+            .set(values)
+            .where(
+              and(
+                eq(crmClients.id, id),
+                eq(crmClients.assignedAdminEmail, owner)
+              )
+            );
+          if (!result[0].affectedRows)
+            throw new Error("Cliente não encontrado");
+        } else await db.insert(crmClients).values(values);
+        return { success: true };
+      }),
+    deleteClient: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const owner = ctx.adminEmail.toLowerCase();
+        const [client] = await db
+          .select({ id: crmClients.id })
+          .from(crmClients)
+          .where(
+            and(
+              eq(crmClients.id, input.id),
+              eq(crmClients.assignedAdminEmail, owner)
+            )
+          );
+        if (!client) throw new Error("Cliente não encontrado");
+        const policies = await db
+          .select({ id: agentPolicies.id })
+          .from(agentPolicies)
+          .where(
+            and(
+              eq(agentPolicies.clientId, input.id),
+              eq(agentPolicies.agentEmail, owner)
+            )
+          );
+        if (policies.length)
+          throw new Error(
+            "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
+          );
+        await db
+          .delete(crmActivities)
+          .where(eq(crmActivities.clientId, input.id));
+        await db.delete(agentTasks).where(eq(agentTasks.clientId, input.id));
+        await db
+          .delete(scheduledMessages)
+          .where(eq(scheduledMessages.clientId, input.id));
+        await db.delete(crmClients).where(eq(crmClients.id, input.id));
+        return { success: true };
+      }),
     savePcSheet: adminProcedure
       .input(
         z.object({

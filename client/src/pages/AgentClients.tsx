@@ -40,11 +40,10 @@ const empty: Form = {
 const isoDate = (value: unknown) => (value ? String(value).slice(0, 10) : "");
 
 export default function AgentClients() {
-  const clients = trpc.crm.list.useQuery(),
+  const clients = trpc.agent.listClients.useQuery(),
     policies = trpc.agent.listPolicies.useQuery();
-  const create = trpc.crm.create.useMutation(),
-    update = trpc.crm.update.useMutation(),
-    remove = trpc.crm.delete.useMutation();
+  const saveClient = trpc.agent.saveClient.useMutation(),
+    remove = trpc.agent.deleteClient.useMutation();
   const [search, setSearch] = useState(""),
     [selectedId, setSelectedId] = useState<number | null>(null),
     [form, setForm] = useState<Form | null>(null);
@@ -75,10 +74,7 @@ export default function AgentClients() {
     event.preventDefault();
     if (!form) return;
     try {
-      const payload = { ...form, assignedAdminEmail: "", nextFollowUpAt: "" };
-      form.id
-        ? await update.mutateAsync({ ...payload, id: form.id })
-        : await create.mutateAsync(payload);
+      await saveClient.mutateAsync(form);
       await clients.refetch();
       setForm(null);
       toast.success(form.id ? "Cliente atualizado" : "Cliente adicionado");
