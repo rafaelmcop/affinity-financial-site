@@ -8,7 +8,13 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 type Occasion =
-  "birthday" | "christmas" | "new_year" | "policy_anniversary" | "custom";
+  | "birthday"
+  | "thanksgiving"
+  | "christmas"
+  | "new_year"
+  | "policy_anniversary"
+  | "monthly"
+  | "custom";
 type Audience = "individual" | "group" | "all";
 type DeliveryMode = "default" | "immediate" | "scheduled";
 type Form = {
@@ -23,6 +29,7 @@ type Form = {
   message: string;
   scheduledAt: string;
   deliveryMode: DeliveryMode;
+  monthNumber?: number;
   isActive: boolean;
 };
 const empty: Form = {
@@ -39,9 +46,11 @@ const empty: Form = {
 };
 const labels: Record<Occasion, string> = {
   birthday: "Aniversário",
+  thanksgiving: "Dia de Ação de Graças",
   christmas: "Natal",
   new_year: "Ano-Novo",
   policy_anniversary: "Aniversário da apólice",
+  monthly: "Início do mês",
   custom: "Data personalizada",
 };
 const nextDefaultTime = () => {
@@ -51,13 +60,36 @@ const nextDefaultTime = () => {
   return date.toISOString();
 };
 
-export function ScheduledMessagesPanel() {
+export function ScheduledMessagesPanel({
+  scope = "all",
+  clientId,
+}: {
+  scope?: "all" | "collective" | "client";
+  clientId?: number;
+}) {
   const messages = trpc.agent.listMessages.useQuery(),
     clients = trpc.agent.listClients.useQuery();
   const create = trpc.agent.scheduleMessage.useMutation(),
     update = trpc.agent.updateMessage.useMutation(),
     remove = trpc.agent.deleteMessage.useMutation();
   const [form, setForm] = useState<Form | null>(null);
+  const visibleMessages = (messages.data || []).filter(row => {
+    if (scope === "collective")
+      return (
+        ["birthday", "thanksgiving", "christmas", "new_year", "monthly"].includes(row.occasion) &&
+        row.audience !== "individual"
+      );
+    if (scope === "client")
+      return row.clientId === clientId || row.occasion === "policy_anniversary";
+    return true;
+  });
+  const newMessage = () =>
+    setForm({
+      ...empty,
+      audience: scope === "collective" ? "all" : "individual",
+      clientId: scope === "client" ? clientId : undefined,
+      occasion: scope === "collective" ? "birthday" : "custom",
+    });
   const save = async () => {
     if (!form?.title.trim() || !form.subject.trim() || !form.message.trim())
       return toast.error("Preencha título, assunto e mensagem");
@@ -131,6 +163,7 @@ export function ScheduledMessagesPanel() {
       scheduledAt: row.scheduledAt ? String(row.scheduledAt).slice(0, 16) : "",
       deliveryMode: "scheduled",
       isActive: Boolean(row.isActive),
+      monthNumber: row.monthNumber ? Number(row.monthNumber) : undefined,
     });
   return (
     <section className="space-y-5">
@@ -139,13 +172,15 @@ export function ScheduledMessagesPanel() {
           <p className="text-sm font-bold uppercase tracking-[.2em] text-gold">
             Automações do CRM
           </p>
-          <h1 className="mt-2 text-3xl font-bold">Mensagens automáticas</h1>
+          <h1 className="mt-2 text-3xl font-bold">
+            {scope === "collective" ? "Mensagens coletivas" : scope === "client" ? "Mensagens deste cliente" : "Mensagens automáticas"}
+          </h1>
           <p className="mt-2 text-sm text-gray-400">
             Enviadas às 8:30 AM pelo e-mail particular configurado no portal.
             Use <b>{"{nome}"}</b> para personalizar.
           </p>
         </div>
-        <Button className="bg-gold text-black" onClick={() => setForm(empty)}>
+        <Button className="bg-gold text-black" onClick={newMessage}>
           <Plus className="mr-2 h-4 w-4" />
           Nova automação
         </Button>
@@ -172,12 +207,29 @@ export function ScheduledMessagesPanel() {
               }
             >
               <option value="birthday">Aniversário</option>
+              <option value="thanksgiving">Dia de Ação de Graças</option>
               <option value="christmas">Natal</option>
               <option value="new_year">Ano-Novo</option>
               <option value="policy_anniversary">Aniversário da apólice</option>
+              <option value="monthly">Início do mês</option>
               <option value="custom">Data personalizada</option>
             </select>
           </label>
+          {form.occasion === "monthly" && (
+            <label className="text-sm text-gray-300">
+              Mês
+              <select
+                className="mt-2 h-10 w-full rounded-md border border-white/20 bg-black px-3"
+                value={form.monthNumber || 1}
+                onChange={e => setForm({ ...form, monthNumber: Number(e.target.value) })}
+              >
+                {[
+                  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+                ].map((month, index) => <option key={month} value={index + 1}>{month}</option>)}
+              </select>
+            </label>
+          )}
           <label className="text-sm text-gray-300">
             Destinatários
             <select
@@ -197,9 +249,9 @@ export function ScheduledMessagesPanel() {
                 });
               }}
             >
-              <option value="individual">Individual</option>
-              <option value="group">Grupo</option>
-              <option value="all">Coletiva — todos os clientes</option>
+              {scope !== "collective" && <option value="individual">Individual</option>}
+              {scope !== "client" && <option value="group">Grupo</option>}
+              {scope !== "client" && <option value="all">Coletiva — todos os clientes</option>}
             </select>
           </label>
           {form.audience === "individual" && (
@@ -376,7 +428,7 @@ export function ScheduledMessagesPanel() {
         </Card>
       )}
       <div className="grid gap-4 md:grid-cols-2">
-        {(messages.data || []).map(row => (
+        {visibleMessages.map(row => (
           <Card key={row.id} className="border-gold/20 bg-[#0b1524] p-5">
             <div className="flex justify-between gap-3">
               <div>

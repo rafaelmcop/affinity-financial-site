@@ -776,6 +776,11 @@ export default function AdminCrm({
             )}
           </Card>
         </div>
+        {agentMode && selected && (
+          <div className="mt-8">
+            <ScheduledMessagesPanel scope="client" clientId={selected.id} />
+          </div>
+        )}
         </div>
         {agentMode && crmView === "automations" && <ScheduledMessagesPanel />}
         {agentMode && crmView === "history" && (

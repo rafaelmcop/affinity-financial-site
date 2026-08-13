@@ -1309,6 +1309,12 @@ async function runProcedure(
         "Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.",
       ],
       [
+        "thanksgiving",
+        "Feliz Dia de Ação de Graças",
+        "Feliz Dia de Ação de Graças, {nome}!",
+        "Olá {nome}, neste Dia de Ação de Graças desejamos muita união, gratidão e bons momentos para você e sua família. Conte sempre conosco.",
+      ],
+      [
         "christmas",
         "Feliz Natal",
         "Feliz Natal, {nome}!",
@@ -1450,6 +1456,35 @@ async function runProcedure(
           .bind(owner, occasion, title, subject, message)
           .run();
     }
+    const monthly = [
+      [1, "Janeiro", "um novo ano de esperança, saúde e grandes realizações"],
+      [2, "Fevereiro", "um mês leve, próspero e cheio de boas oportunidades"],
+      [3, "Março", "um mês de renovação, equilíbrio e novas conquistas"],
+      [4, "Abril", "um mês de crescimento, serenidade e bons encontros"],
+      [5, "Maio", "um mês acolhedor, produtivo e repleto de alegrias"],
+      [6, "Junho", "um mês de união, energia e excelentes resultados"],
+      [7, "Julho", "um mês iluminado, tranquilo e cheio de bons momentos"],
+      [8, "Agosto", "um mês de coragem, progresso e novas possibilidades"],
+      [9, "Setembro", "um mês de renovação, florescimento e prosperidade"],
+      [10, "Outubro", "um mês de esperança, cuidado e muitas conquistas"],
+      [11, "Novembro", "um mês de gratidão, união e boas notícias"],
+      [12, "Dezembro", "um mês de celebração, paz e momentos especiais"],
+    ] as const;
+    for (const [monthNumber, monthName, wish] of monthly) {
+      const exists = await env.DB.prepare(
+        "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='monthly' AND monthNumber=? LIMIT 1"
+      ).bind(owner, monthNumber).first();
+      if (!exists)
+        await env.DB.prepare(
+          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,monthNumber,isActive) VALUES (?,'monthly','email',?,?, 'all',?,?,1)"
+        ).bind(
+          owner,
+          `Boas-vindas a ${monthName}`,
+          `${monthName} começou — conte conosco`,
+          `Olá {nome}, desejamos ${wish}. A Affinity Financial está à sua disposição sempre que precisar.`,
+          monthNumber
+        ).run();
+    }
     const rows = await env.DB.prepare(
       "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND (title IS NOT NULL OR occasion='custom') ORDER BY scheduledAt"
     )
@@ -1475,7 +1510,7 @@ async function runProcedure(
   }
   if (name === "agent.scheduleMessage") {
     await env.DB.prepare(
-      "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt) VALUES (?,?,?,'email',?,?,?,?,?,?,?)"
+      "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt,monthNumber) VALUES (?,?,?,'email',?,?,?,?,?,?,?,?)"
     )
       .bind(
         adminEmail.toLowerCase(),
@@ -1489,7 +1524,8 @@ async function runProcedure(
           ? JSON.stringify(input.selectedClientIds.map(Number))
           : null,
         String(input.message ?? "").trim(),
-        input.scheduledAt || null
+        input.scheduledAt || null,
+        Number(input.monthNumber || 0) || null
       )
       .run();
     if (input.deliveryMode === "immediate") await runMessageAutomations(env);
@@ -1497,7 +1533,7 @@ async function runProcedure(
   }
   if (name === "agent.updateMessage") {
     await env.DB.prepare(
-      "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
+      "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,monthNumber=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
     )
       .bind(
         input.clientId || null,
@@ -1511,6 +1547,7 @@ async function runProcedure(
           : null,
         String(input.message),
         input.scheduledAt || null,
+        Number(input.monthNumber || 0) || null,
         input.isActive ? 1 : 0,
         Number(input.id),
         adminEmail.toLowerCase()
@@ -2964,6 +3001,11 @@ async function runMessageAutomations(env: Env) {
   const month = Number(eastern.month),
     day = Number(eastern.day),
     year = eastern.year;
+  const isThanksgiving =
+    month === 11 &&
+    day >= 22 &&
+    day <= 28 &&
+    new Date(`${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`).getDay() === 4;
   if (isMorningRun)
     await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
@@ -3069,8 +3111,10 @@ async function runMessageAutomations(env: Env) {
     }
     const due =
       occasion === "birthday" ||
+      (occasion === "thanksgiving" && isThanksgiving) ||
       (occasion === "christmas" && month === 12 && day === 25) ||
       (occasion === "new_year" && month === 1 && day === 1) ||
+      (occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month) ||
       (occasion === "custom" &&
         automation.scheduledAt &&
         new Date(String(automation.scheduledAt)) <= now);
@@ -3109,7 +3153,11 @@ async function runMessageAutomations(env: Env) {
       .bind(...binds)
       .all<JsonRecord>();
     for (const client of clients.results) {
-      const sentKey = occasion === "custom" ? "once" : `${occasion}-${year}`;
+      const sentKey = occasion === "custom"
+        ? "once"
+        : occasion === "monthly"
+          ? `monthly-${year}-${month}`
+          : `${occasion}-${year}`;
       const sent = await env.DB.prepare(
         "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
       )

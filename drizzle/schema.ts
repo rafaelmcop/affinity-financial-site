@@ -164,9 +164,11 @@ export const scheduledMessages = mysqlTable("scheduledMessages", {
   clientId: int("clientId"),
   occasion: mysqlEnum("occasion", [
     "birthday",
+    "thanksgiving",
     "christmas",
     "new_year",
     "policy_anniversary",
+    "monthly",
     "custom",
   ])
     .default("custom")
@@ -179,6 +181,7 @@ export const scheduledMessages = mysqlTable("scheduledMessages", {
     .notNull(),
   recipientGroup: varchar("recipientGroup", { length: 50 }),
   selectedClientIds: text("selectedClientIds"),
+  monthNumber: int("monthNumber"),
   subject: varchar("subject", { length: 255 }),
   scheduledAt: timestamp("scheduledAt"),
   lastSentAt: timestamp("lastSentAt"),

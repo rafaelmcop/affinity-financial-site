@@ -815,9 +815,11 @@ export const appRouter = router({
           clientId: z.number().optional(),
           occasion: z.enum([
             "birthday",
+            "thanksgiving",
             "christmas",
             "new_year",
             "policy_anniversary",
+            "monthly",
             "custom",
           ]),
           channel: z.literal("email"),
@@ -829,6 +831,7 @@ export const appRouter = router({
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
           deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
+          monthNumber: z.number().int().min(1).max(12).optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -844,6 +847,7 @@ export const appRouter = router({
           audience: input.audience,
           recipientGroup: input.recipientGroup || null,
           message: input.message,
+          monthNumber: input.monthNumber || null,
           scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
           selectedClientIds: input.selectedClientIds
             ? JSON.stringify(input.selectedClientIds)
@@ -858,9 +862,11 @@ export const appRouter = router({
           clientId: z.number().optional(),
           occasion: z.enum([
             "birthday",
+            "thanksgiving",
             "christmas",
             "new_year",
             "policy_anniversary",
+            "monthly",
             "custom",
           ]),
           title: z.string().min(1),
@@ -871,6 +877,7 @@ export const appRouter = router({
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
           deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
+          monthNumber: z.number().int().min(1).max(12).optional(),
           isActive: z.boolean(),
         })
       )
