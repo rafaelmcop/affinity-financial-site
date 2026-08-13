@@ -348,6 +348,40 @@ export const appRouter = router({
   }),
 
   agent: router({
+    register: publicProcedure
+      .input(
+        z.object({
+          name: z.string().min(2),
+          email: z.string().email(),
+          phone: z.string().max(30).optional(),
+          password: strongPassword,
+        })
+      )
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const email = input.email.trim().toLowerCase();
+        const [existing] = await db
+          .select()
+          .from(adminAccounts)
+          .where(eq(adminAccounts.email, email))
+          .limit(1);
+        if (existing) throw new Error("Este e-mail já está cadastrado");
+        const passwordHash = await (
+          await import("bcryptjs")
+        ).hash(input.password, 12);
+        await db.insert(adminAccounts).values({
+          email,
+          name: input.name.trim(),
+          phone: input.phone?.trim() || null,
+          accountType: "agent",
+          adminRole: "standard",
+          passwordHash,
+          status: "pending",
+          isActive: 0,
+        });
+        return { success: true };
+      }),
     login: publicProcedure
       .input(
         z.object({ email: z.string().email(), password: z.string().min(6) })
@@ -363,6 +397,7 @@ export const appRouter = router({
         if (
           !account ||
           !["agent", "both"].includes(account.accountType) ||
+          account.status !== "approved" ||
           !account.isActive ||
           !(await (
             await import("bcryptjs")
@@ -816,6 +851,7 @@ export const appRouter = router({
           if (account) {
             if (
               !account.isActive ||
+              account.status !== "approved" ||
               !["admin", "both"].includes(account.accountType) ||
               !(await (
                 await import("bcryptjs")
@@ -1179,6 +1215,63 @@ export const appRouter = router({
         return { success: true, message: "Email atualizado com sucesso!" };
       }),
 
+    updateAffiliateUser: adminProcedure
+      .input(
+        z.object({
+          affiliateId: z.number(),
+          name: z.string().min(1),
+          email: z.string().email(),
+          phone: z.string().max(30).optional(),
+          password: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db
+          .select()
+          .from(adminAccounts)
+          .where(eq(adminAccounts.email, actorEmail))
+          .limit(1);
+        const role =
+          actorEmail === process.env.ADMIN_EMAIL?.toLowerCase()
+            ? "master"
+            : (actor?.adminRole ?? "standard");
+        if (role !== "master")
+          throw new Error(
+            "Somente o administrador mestre pode editar afiliados"
+          );
+        if (
+          input.password &&
+          !/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{6,}$/.test(
+            input.password
+          )
+        )
+          throw new Error(
+            "A nova senha não atende aos requisitos de segurança"
+          );
+        const values: {
+          name: string;
+          email: string;
+          phone: string | null;
+          passwordHash?: string;
+        } = {
+          name: input.name.trim(),
+          email: input.email.trim().toLowerCase(),
+          phone: input.phone?.trim() || null,
+        };
+        if (input.password)
+          values.passwordHash = await (
+            await import("bcryptjs")
+          ).hash(input.password, 12);
+        await db
+          .update(affiliates)
+          .set(values)
+          .where(eq(affiliates.id, input.affiliateId));
+        return { success: true };
+      }),
+
     resetAffiliatePasswordByAdmin: adminProcedure
       .input(z.object({ affiliateId: z.number(), newPassword: strongPassword }))
       .mutation(async ({ input }) => {
@@ -1243,6 +1336,7 @@ export const appRouter = router({
           accountType: adminAccounts.accountType,
           adminRole: adminAccounts.adminRole,
           isActive: adminAccounts.isActive,
+          status: adminAccounts.status,
           createdAt: adminAccounts.createdAt,
         })
         .from(adminAccounts);
@@ -1510,6 +1604,48 @@ export const appRouter = router({
             accountType,
             adminRole: input.accessAdmin ? target.adminRole : "standard",
             isActive: 1,
+          })
+          .where(eq(adminAccounts.id, target.id));
+        return { success: true };
+      }),
+
+    setInternalUserStatus: adminProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          status: z.enum(["pending", "approved", "rejected", "blocked"]),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const actorEmail = ctx.adminEmail.toLowerCase();
+        const [actor] = await db
+          .select()
+          .from(adminAccounts)
+          .where(eq(adminAccounts.email, actorEmail))
+          .limit(1);
+        const actorRole =
+          actorEmail === process.env.ADMIN_EMAIL?.toLowerCase()
+            ? "master"
+            : (actor?.adminRole ?? "standard");
+        if (actorRole !== "master")
+          throw new Error(
+            "Somente um administrador mestre pode alterar o status"
+          );
+        const [target] = await db
+          .select()
+          .from(adminAccounts)
+          .where(eq(adminAccounts.id, input.id))
+          .limit(1);
+        if (!target) throw new Error("Usuário não encontrado");
+        if (target.email.toLowerCase() === actorEmail)
+          throw new Error("Você não pode alterar o status da própria conta");
+        await db
+          .update(adminAccounts)
+          .set({
+            status: input.status,
+            isActive: input.status === "approved" ? 1 : 0,
           })
           .where(eq(adminAccounts.id, target.id));
         return { success: true };
@@ -1999,13 +2135,14 @@ export const appRouter = router({
           if (account)
             await db
               .update(adminAccounts)
-              .set({ passwordHash, isActive: 1 })
+              .set({ passwordHash })
               .where(eq(adminAccounts.id, account.id));
           else
             await db.insert(adminAccounts).values({
               email,
               name: "Administrador",
               passwordHash,
+              status: "approved",
               isActive: 1,
             });
         }

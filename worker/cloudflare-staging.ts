@@ -164,7 +164,7 @@ async function getAdminEmail(request: Request, env: Env) {
 
 async function getAdminAccess(email: string, env: Env) {
   const account = await env.DB.prepare(
-    "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,isActive FROM adminAccounts WHERE lower(email)=?"
+    "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive FROM adminAccounts WHERE lower(email)=?"
   )
     .bind(email.toLowerCase())
     .first<JsonRecord>();
@@ -489,7 +489,9 @@ async function runProcedure(
       .bind(email)
       .first<JsonRecord>();
     const accountMatches =
-      account && Number(account.isActive) === 1
+      account &&
+      String(account.status || "approved") === "approved" &&
+      Number(account.isActive) === 1
         ? await bcrypt.compare(password, String(account.passwordHash))
         : false;
     const passwordHash = new Uint8Array(
@@ -532,6 +534,47 @@ async function runProcedure(
     };
   }
 
+  if (name === "agent.register") {
+    const email = String(input.email ?? "")
+        .trim()
+        .toLowerCase(),
+      applicantName = String(input.name ?? "").trim(),
+      phone = String(input.phone ?? "").trim(),
+      password = String(input.password ?? "");
+    if (
+      !validEmail(email) ||
+      applicantName.length < 2 ||
+      !validStrongPassword(password)
+    )
+      return trpcError("Revise os dados e use uma senha forte");
+    const existing = await env.DB.prepare(
+      "SELECT id FROM adminAccounts WHERE lower(email)=?"
+    )
+      .bind(email)
+      .first();
+    if (existing)
+      return trpcError("Este e-mail já está cadastrado", "CONFLICT", 409);
+    await env.DB.prepare(
+      "INSERT INTO adminAccounts (email,name,phone,accountType,adminRole,passwordHash,status,isActive) VALUES (?,?,?,'agent','standard',?,'pending',0)"
+    )
+      .bind(
+        email,
+        applicantName,
+        phone || null,
+        await bcrypt.hash(password, 12)
+      )
+      .run();
+    await sendEmailIfConfigured(env, {
+      to: env.ADMIN_EMAIL,
+      subject: "Nova conta de agente aguardando aprovação",
+      html: emailHtml(
+        "Novo agente aguardando aprovação",
+        `<p><strong>${applicantName}</strong> (${email}) solicitou acesso ao Portal do Agente.</p><p>Acesse Usuários no painel administrativo para aprovar ou recusar.</p>`
+      ),
+    });
+    return trpcResult({ success: true });
+  }
+
   if (name === "agent.login") {
     const email = String(input.email ?? "")
         .trim()
@@ -542,11 +585,28 @@ async function runProcedure(
     )
       .bind(email)
       .first<JsonRecord>();
-    if (
-      !account ||
-      Number(account.isActive) !== 1 ||
-      !(await bcrypt.compare(password, String(account.passwordHash)))
-    )
+    if (!account)
+      return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
+    const status = String(account.status || "approved");
+    if (status === "pending")
+      return trpcError(
+        "Sua conta ainda está aguardando aprovação",
+        "FORBIDDEN",
+        403
+      );
+    if (status === "rejected")
+      return trpcError(
+        "Sua solicitação de acesso não foi aprovada",
+        "FORBIDDEN",
+        403
+      );
+    if (status === "blocked" || Number(account.isActive) !== 1)
+      return trpcError(
+        "Sua conta está bloqueada. Entre em contato com a Affinity.",
+        "FORBIDDEN",
+        403
+      );
+    if (!(await bcrypt.compare(password, String(account.passwordHash))))
       return trpcError("Credenciais inválidas", "UNAUTHORIZED", 401);
     const session = await createSession({ type: "admin", email }, env, 28800);
     return {
@@ -880,7 +940,7 @@ async function runProcedure(
         .run();
     else
       await env.DB.prepare(
-        "INSERT INTO adminAccounts (email,name,passwordHash,isActive) VALUES (?,'Administrador',?,1) ON CONFLICT(email) DO UPDATE SET passwordHash=excluded.passwordHash,isActive=1,updatedAt=CURRENT_TIMESTAMP"
+        "INSERT INTO adminAccounts (email,name,passwordHash,status,isActive) VALUES (?,'Administrador',?,'approved',1) ON CONFLICT(email) DO UPDATE SET passwordHash=excluded.passwordHash,updatedAt=CURRENT_TIMESTAMP"
       )
         .bind(String(row.email).toLowerCase(), hash)
         .run();
@@ -1495,6 +1555,49 @@ async function runProcedure(
     });
   }
 
+  if (name === "admin.updateAffiliateUser") {
+    if (adminAccess.role !== "master")
+      return trpcError(
+        "Somente o administrador mestre pode editar afiliados",
+        "FORBIDDEN",
+        403
+      );
+    const id = Number(input.affiliateId),
+      email = String(input.email ?? "")
+        .trim()
+        .toLowerCase(),
+      nameValue = String(input.name ?? "").trim(),
+      phone = String(input.phone ?? "").trim(),
+      password = String(input.password ?? "");
+    if (!id || !nameValue || !validEmail(email))
+      return trpcError("Revise os dados do afiliado");
+    if (password && !validStrongPassword(password))
+      return trpcError("A nova senha não atende aos requisitos de segurança");
+    try {
+      if (password)
+        await env.DB.prepare(
+          "UPDATE affiliates SET name=?,email=?,phone=?,passwordHash=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
+        )
+          .bind(
+            nameValue,
+            email,
+            phone || null,
+            await bcrypt.hash(password, 12),
+            id
+          )
+          .run();
+      else
+        await env.DB.prepare(
+          "UPDATE affiliates SET name=?,email=?,phone=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
+        )
+          .bind(nameValue, email, phone || null, id)
+          .run();
+    } catch {
+      return trpcError("Este e-mail já está cadastrado");
+    }
+    return trpcResult({ success: true });
+  }
+
   if (name === "admin.resetAffiliatePasswordByAdmin") {
     const password = String(input.newPassword ?? "");
     if (!validStrongPassword(password))
@@ -1560,7 +1663,7 @@ async function runProcedure(
 
   if (name === "admin.listAdmins") {
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC"
+      "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC"
     ).all<JsonRecord>();
     return trpcResult({
       admins: rows.results.map(row => ({
@@ -1865,6 +1968,64 @@ async function runProcedure(
         Number(target.id)
       )
       .run();
+    return trpcResult({ success: true });
+  }
+
+  if (name === "admin.setInternalUserStatus") {
+    if (adminAccess.role !== "master")
+      return trpcError(
+        "Somente um administrador mestre pode alterar o status",
+        "FORBIDDEN",
+        403
+      );
+    const id = Number(input.id),
+      status = String(input.status ?? "");
+    if (!id || !["pending", "approved", "rejected", "blocked"].includes(status))
+      return trpcError("Status inválido");
+    const target = await env.DB.prepare(
+      "SELECT email,name FROM adminAccounts WHERE id=?"
+    )
+      .bind(id)
+      .first<JsonRecord>();
+    if (!target) return trpcError("Usuário não encontrado", "NOT_FOUND", 404);
+    if (String(target.email).toLowerCase() === adminEmail.toLowerCase())
+      return trpcError("Você não pode alterar o status da própria conta");
+    await env.DB.prepare(
+      "UPDATE adminAccounts SET status=?,isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
+    )
+      .bind(status, status === "approved" ? 1 : 0, id)
+      .run();
+    const messages: Record<
+      string,
+      { subject: string; title: string; body: string }
+    > = {
+      approved: {
+        subject: "Conta de agente aprovada - Affinity Financial",
+        title: "Sua conta foi aprovada",
+        body: `<p>Olá ${String(target.name)},</p><p>Seu acesso ao Portal do Agente foi aprovado.</p><p><a href="${env.VITE_FRONTEND_URL}/agentes/login">Acessar o portal</a></p>`,
+      },
+      rejected: {
+        subject: "Atualização da solicitação - Affinity Financial",
+        title: "Atualização da sua solicitação",
+        body: `<p>Olá ${String(target.name)},</p><p>Sua solicitação de acesso não foi aprovada neste momento.</p>`,
+      },
+      blocked: {
+        subject: "Acesso bloqueado - Affinity Financial",
+        title: "Seu acesso foi bloqueado",
+        body: `<p>Olá ${String(target.name)},</p><p>Seu acesso ao portal foi bloqueado. Entre em contato com a Affinity para mais informações.</p>`,
+      },
+      pending: {
+        subject: "Conta em análise - Affinity Financial",
+        title: "Sua conta está em análise",
+        body: `<p>Olá ${String(target.name)},</p><p>Sua solicitação voltou para análise administrativa.</p>`,
+      },
+    };
+    const message = messages[status];
+    await sendEmailIfConfigured(env, {
+      to: String(target.email),
+      subject: message.subject,
+      html: emailHtml(message.title, message.body),
+    });
     return trpcResult({ success: true });
   }
 

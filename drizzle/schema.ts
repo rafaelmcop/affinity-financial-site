@@ -1,4 +1,12 @@
-import { int, mysqlEnum, mysqlTable, text, timestamp, varchar, decimal } from "drizzle-orm/mysql-core";
+import {
+  int,
+  mysqlEnum,
+  mysqlTable,
+  text,
+  timestamp,
+  varchar,
+  decimal,
+} from "drizzle-orm/mysql-core";
 
 /**
  * Core user table backing auth flow.
@@ -34,9 +42,16 @@ export const adminAccounts = mysqlTable("adminAccounts", {
   contactEmail: varchar("contactEmail", { length: 320 }),
   whatsapp: varchar("whatsapp", { length: 30 }),
   address: text("address"),
-  accountType: mysqlEnum("accountType", ["admin", "agent", "both"]).default("admin").notNull(),
-  adminRole: mysqlEnum("adminRole", ["master", "standard"]).default("standard").notNull(),
+  accountType: mysqlEnum("accountType", ["admin", "agent", "both"])
+    .default("admin")
+    .notNull(),
+  adminRole: mysqlEnum("adminRole", ["master", "standard"])
+    .default("standard")
+    .notNull(),
   passwordHash: varchar("passwordHash", { length: 255 }).notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "blocked"])
+    .default("approved")
+    .notNull(),
   isActive: int("isActive").default(1).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -51,7 +66,16 @@ export const crmClients = mysqlTable("crmClients", {
   email: varchar("email", { length: 320 }),
   phone: varchar("phone", { length: 30 }),
   whatsapp: varchar("whatsapp", { length: 30 }),
-  status: mysqlEnum("status", ["new", "contacted", "meeting", "proposal", "client", "closed"]).default("new").notNull(),
+  status: mysqlEnum("status", [
+    "new",
+    "contacted",
+    "meeting",
+    "proposal",
+    "client",
+    "closed",
+  ])
+    .default("new")
+    .notNull(),
   source: varchar("source", { length: 100 }),
   assignedAdminEmail: varchar("assignedAdminEmail", { length: 320 }),
   nextFollowUpAt: timestamp("nextFollowUpAt"),
@@ -64,7 +88,16 @@ export const crmClients = mysqlTable("crmClients", {
 export const crmActivities = mysqlTable("crmActivities", {
   id: int("id").autoincrement().primaryKey(),
   clientId: int("clientId").notNull(),
-  type: mysqlEnum("type", ["note", "call", "email", "sms", "whatsapp", "status"]).default("note").notNull(),
+  type: mysqlEnum("type", [
+    "note",
+    "call",
+    "email",
+    "sms",
+    "whatsapp",
+    "status",
+  ])
+    .default("note")
+    .notNull(),
   content: text("content").notNull(),
   createdBy: varchar("createdBy", { length: 320 }).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -80,9 +113,14 @@ export const agentPolicies = mysqlTable("agentPolicies", {
   birthDate: timestamp("birthDate"),
   policyNumber: varchar("policyNumber", { length: 100 }).notNull(),
   product: varchar("product", { length: 120 }),
-  premiumAmount: decimal("premiumAmount", { precision: 12, scale: 2 }).default("0.00"),
+  premiumAmount: decimal("premiumAmount", { precision: 12, scale: 2 }).default(
+    "0.00"
+  ),
   premiumFrequency: varchar("premiumFrequency", { length: 50 }),
-  coverageAmount: decimal("coverageAmount", { precision: 14, scale: 2 }).default("0.00"),
+  coverageAmount: decimal("coverageAmount", {
+    precision: 14,
+    scale: 2,
+  }).default("0.00"),
   beneficiaries: text("beneficiaries"),
   issuedAt: timestamp("issuedAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
@@ -95,7 +133,9 @@ export const agentTasks = mysqlTable("agentTasks", {
   clientId: int("clientId"),
   title: varchar("title", { length: 255 }).notNull(),
   dueAt: timestamp("dueAt"),
-  status: mysqlEnum("status", ["pending", "completed"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "completed"])
+    .default("pending")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -103,7 +143,14 @@ export const scheduledMessages = mysqlTable("scheduledMessages", {
   id: int("id").autoincrement().primaryKey(),
   agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
   clientId: int("clientId"),
-  occasion: mysqlEnum("occasion", ["birthday", "christmas", "new_year", "custom"]).default("custom").notNull(),
+  occasion: mysqlEnum("occasion", [
+    "birthday",
+    "christmas",
+    "new_year",
+    "custom",
+  ])
+    .default("custom")
+    .notNull(),
   channel: mysqlEnum("channel", ["email", "sms", "whatsapp"]).notNull(),
   message: text("message").notNull(),
   scheduledAt: timestamp("scheduledAt"),
@@ -120,7 +167,9 @@ export const agentEmailSettings = mysqlTable("agentEmailSettings", {
   user: varchar("user", { length: 320 }).notNull(),
   password: text("password").notNull(),
   fromEmail: varchar("fromEmail", { length: 320 }).notNull(),
-  fromName: varchar("fromName", { length: 255 }).default("Affinity Financial").notNull(),
+  fromName: varchar("fromName", { length: 255 })
+    .default("Affinity Financial")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -135,11 +184,15 @@ export const affiliates = mysqlTable("affiliates", {
   name: text("name").notNull(),
   company: text("company"),
   phone: varchar("phone", { length: 20 }),
-  commissionRate: decimal("commissionRate", { precision: 5, scale: 2 }).default("10.00").notNull(),
+  commissionRate: decimal("commissionRate", { precision: 5, scale: 2 })
+    .default("10.00")
+    .notNull(),
   affiliateCode: varchar("affiliateCode", { length: 50 }).notNull().unique(),
   agentNumber: varchar("agentNumber", { length: 50 }),
   isActive: int("isActive").default(1).notNull(),
-  status: mysqlEnum("status", ["pending", "approved", "rejected"]).default("pending").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -157,8 +210,13 @@ export const affiliateReferrals = mysqlTable("affiliateReferrals", {
   visitorEmail: varchar("visitorEmail", { length: 320 }),
   visitorName: text("visitorName"),
   visitorPhone: varchar("visitorPhone", { length: 20 }),
-  status: mysqlEnum("status", ["pending", "converted", "closed"]).default("pending").notNull(),
-  commissionAmount: decimal("commissionAmount", { precision: 10, scale: 2 }).default("0.00"),
+  status: mysqlEnum("status", ["pending", "converted", "closed"])
+    .default("pending")
+    .notNull(),
+  commissionAmount: decimal("commissionAmount", {
+    precision: 10,
+    scale: 2,
+  }).default("0.00"),
   notes: text("notes"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -178,7 +236,15 @@ export const policies = mysqlTable("policies", {
   clientEmail: varchar("clientEmail", { length: 320 }),
   clientPhone: varchar("clientPhone", { length: 20 }),
   policyType: varchar("policyType", { length: 100 }).notNull(),
-  status: mysqlEnum("status", ["pending", "approved", "rejected", "active", "cancelled"]).default("pending").notNull(),
+  status: mysqlEnum("status", [
+    "pending",
+    "approved",
+    "rejected",
+    "active",
+    "cancelled",
+  ])
+    .default("pending")
+    .notNull(),
   points: int("points").default(0).notNull(),
   submittedAt: timestamp("submittedAt").defaultNow().notNull(),
   approvedAt: timestamp("approvedAt"),
@@ -188,7 +254,6 @@ export const policies = mysqlTable("policies", {
 
 export type Policy = typeof policies.$inferSelect;
 export type InsertPolicy = typeof policies.$inferInsert;
-
 
 /**
  * Password reset tokens table for managing password recovery
@@ -225,7 +290,6 @@ export const smtpConfig = mysqlTable("smtpConfig", {
 export type SmtpConfig = typeof smtpConfig.$inferSelect;
 export type InsertSmtpConfig = typeof smtpConfig.$inferInsert;
 
-
 /**
  * Testimonials table for managing customer testimonials
  */
@@ -237,7 +301,9 @@ export const testimonials = mysqlTable("testimonials", {
   email: varchar("email", { length: 320 }),
   rating: int("rating").default(5).notNull(),
   source: mysqlEnum("source", ["manual", "client"]).default("manual").notNull(),
-  amountReceived: decimal("amountReceived", { precision: 12, scale: 2 }).default("0.00").notNull(),
+  amountReceived: decimal("amountReceived", { precision: 12, scale: 2 })
+    .default("0.00")
+    .notNull(),
   mediaUrl: varchar("mediaUrl", { length: 500 }),
   mediaType: mysqlEnum("mediaType", ["image", "video"]).default("image"),
   thumbnailUrl: text("thumbnailUrl"),
