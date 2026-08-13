@@ -153,7 +153,14 @@ export const scheduledMessages = mysqlTable("scheduledMessages", {
     .notNull(),
   channel: mysqlEnum("channel", ["email", "sms", "whatsapp"]).notNull(),
   message: text("message").notNull(),
+  title: varchar("title", { length: 255 }),
+  audience: mysqlEnum("audience", ["individual", "group", "all"])
+    .default("individual")
+    .notNull(),
+  recipientGroup: varchar("recipientGroup", { length: 50 }),
+  subject: varchar("subject", { length: 255 }),
   scheduledAt: timestamp("scheduledAt"),
+  lastSentAt: timestamp("lastSentAt"),
   isActive: int("isActive").default(1).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });

@@ -8,34 +8,37 @@
     "directory": "./dist/public",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "affinity-financial-staging-db",
-      "database_id": "aa4b6291-383d-4237-8a4b-edff1eb7f60b"
-    }
+      "database_id": "aa4b6291-383d-4237-8a4b-edff1eb7f60b",
+    },
   ],
   "ai": {
-    "binding": "AI"
+    "binding": "AI",
   },
   "vars": {
     "ADMIN_EMAIL": "preview@affinityfc.org",
-    "VITE_FRONTEND_URL": "https://www.affinityfc.org"
+    "VITE_FRONTEND_URL": "https://www.affinityfc.org",
   },
   "observability": {
     "enabled": true,
-    "head_sampling_rate": 1
+    "head_sampling_rate": 1,
+  },
+  "triggers": {
+    "crons": ["*/30 * * * *"],
   },
   "routes": [
     {
       "pattern": "www.affinityfc.org/*",
-      "zone_name": "affinityfc.org"
+      "zone_name": "affinityfc.org",
     },
     {
       "pattern": "affinityfc.org/*",
-      "zone_name": "affinityfc.org"
-    }
-  ]
+      "zone_name": "affinityfc.org",
+    },
+  ],
 }

@@ -1218,6 +1218,25 @@ async function runProcedure(
     return trpcResult({ success: true });
   }
   if (name === "agent.listMessages") {
+    const owner = adminEmail.toLowerCase();
+    const count = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM scheduledMessages WHERE lower(agentEmail)=?"
+    )
+      .bind(owner)
+      .first<JsonRecord>();
+    if (!Number(count?.total || 0)) {
+      await env.DB.batch([
+        env.DB.prepare(
+          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,'birthday','email','Feliz aniversário','Feliz aniversário, {nome}!','all','Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.',1)"
+        ).bind(owner),
+        env.DB.prepare(
+          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,'christmas','email','Feliz Natal','Feliz Natal, {nome}!','all','Olá {nome}, desejo a você e sua família um Natal repleto de paz, alegria e união.',1)"
+        ).bind(owner),
+        env.DB.prepare(
+          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,'new_year','email','Feliz Ano-Novo','Feliz Ano-Novo, {nome}!','all','Olá {nome}, desejo um novo ano de saúde, proteção, prosperidade e grandes realizações.',1)"
+        ).bind(owner),
+      ]);
+    }
     const rows = await env.DB.prepare(
       "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? ORDER BY scheduledAt"
     )
@@ -1229,18 +1248,49 @@ async function runProcedure(
   }
   if (name === "agent.scheduleMessage") {
     await env.DB.prepare(
-      "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,message,scheduledAt) VALUES (?,?,?,?,?,?)"
+      "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,message,scheduledAt) VALUES (?,?,?,'email',?,?,?,?,?,?)"
     )
       .bind(
         adminEmail.toLowerCase(),
         input.clientId || null,
         String(input.occasion),
-        String(input.channel),
+        String(input.title ?? "Automação"),
+        String(input.subject ?? "Mensagem da Affinity Financial"),
+        String(input.audience ?? "individual"),
+        String(input.recipientGroup ?? "") || null,
         String(input.message ?? "").trim(),
         input.scheduledAt || null
       )
       .run();
-    return trpcResult({ success: true, pendingIntegration: true });
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.updateMessage") {
+    await env.DB.prepare(
+      "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,message=?,scheduledAt=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        input.clientId || null,
+        String(input.occasion),
+        String(input.title),
+        String(input.subject),
+        String(input.audience),
+        String(input.recipientGroup ?? "") || null,
+        String(input.message),
+        input.scheduledAt || null,
+        input.isActive ? 1 : 0,
+        Number(input.id),
+        adminEmail.toLowerCase()
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.deleteMessage") {
+    await env.DB.prepare(
+      "DELETE FROM scheduledMessages WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(Number(input.id), adminEmail.toLowerCase())
+      .run();
+    return trpcResult({ success: true });
   }
   if (name === "agent.getEmailSettings") {
     const row = await env.DB.prepare(
@@ -2296,6 +2346,37 @@ async function runProcedure(
     );
   }
 
+  if (name === "crm.delete") {
+    const id = Number(input.id);
+    const owned =
+      accountType === "agent"
+        ? await env.DB.prepare(
+            "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+          )
+            .bind(id, adminEmail.toLowerCase())
+            .first()
+        : await env.DB.prepare("SELECT id FROM crmClients WHERE id=?")
+            .bind(id)
+            .first();
+    if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    const policy = await env.DB.prepare(
+      "SELECT id FROM agentPolicies WHERE clientId=? LIMIT 1"
+    )
+      .bind(id)
+      .first();
+    if (policy)
+      return trpcError(
+        "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
+      );
+    await env.DB.batch([
+      env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(id),
+    ]);
+    return trpcResult({ success: true });
+  }
+
   if (name === "crm.addActivity") {
     const type = String(input.type ?? "note"),
       content = String(input.content ?? "").trim();
@@ -2599,4 +2680,108 @@ export default {
       );
     }
   },
+  async scheduled(_controller, env, ctx): Promise<void> {
+    ctx.waitUntil(runMessageAutomations(env));
+  },
 } satisfies ExportedHandler<Env>;
+
+async function runMessageAutomations(env: Env) {
+  const now = new Date();
+  const eastern = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .formatToParts(now)
+    .reduce<Record<string, string>>((out, part) => {
+      if (part.type !== "literal") out[part.type] = part.value;
+      return out;
+    }, {});
+  if (eastern.hour !== "08" || eastern.minute !== "30") return;
+  const month = Number(eastern.month),
+    day = Number(eastern.day),
+    year = eastern.year;
+  const automations = await env.DB.prepare(
+    "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
+  ).all<JsonRecord>();
+  for (const automation of automations.results) {
+    const occasion = String(automation.occasion),
+      due =
+        occasion === "birthday" ||
+        (occasion === "christmas" && month === 12 && day === 25) ||
+        (occasion === "new_year" && month === 1 && day === 1) ||
+        (occasion === "custom" &&
+          automation.scheduledAt &&
+          new Date(String(automation.scheduledAt)) <= now);
+    if (!due) continue;
+    let sql =
+      "SELECT id,name,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND email<>''";
+    const binds: unknown[] = [String(automation.agentEmail).toLowerCase()];
+    if (occasion === "birthday") {
+      sql += " AND strftime('%m-%d',birthDate)=?";
+      binds.push(`${eastern.month}-${eastern.day}`);
+    }
+    if (String(automation.audience) === "individual") {
+      sql += " AND id=?";
+      binds.push(Number(automation.clientId));
+    }
+    if (String(automation.audience) === "group" && automation.recipientGroup) {
+      sql += " AND status=?";
+      binds.push(String(automation.recipientGroup));
+    }
+    const clients = await env.DB.prepare(sql)
+      .bind(...binds)
+      .all<JsonRecord>();
+    for (const client of clients.results) {
+      const sentKey = occasion === "custom" ? "once" : `${occasion}-${year}`;
+      const sent = await env.DB.prepare(
+        "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
+      )
+        .bind(Number(automation.id), Number(client.id), sentKey)
+        .first();
+      if (sent) continue;
+      const escapeHtml = (value: unknown) =>
+        String(value || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      const personalize = (value: unknown) =>
+        escapeHtml(value).replaceAll("{nome}", escapeHtml(client.name));
+      try {
+        await sendAgentEmail(env, String(automation.agentEmail), {
+          to: String(client.email),
+          subject: personalize(automation.subject || automation.title),
+          html: emailHtml(
+            personalize(automation.title || "Mensagem"),
+            `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
+          ),
+        });
+        await env.DB.batch([
+          env.DB.prepare(
+            "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
+          ).bind(Number(automation.id), Number(client.id), sentKey),
+          env.DB.prepare(
+            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+          ).bind(
+            Number(client.id),
+            `E-mail automático enviado: ${personalize(automation.title)}`,
+            String(automation.agentEmail)
+          ),
+        ]);
+      } catch (error) {
+        console.error(
+          "automation_email_failed",
+          automation.id,
+          client.id,
+          error
+        );
+      }
+    }
+  }
+}
