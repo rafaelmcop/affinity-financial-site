@@ -15,6 +15,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
+import FloatingInternalChat from "@/components/FloatingInternalChat";
 
 type Props = { onLogout?: () => void };
 
@@ -225,6 +226,7 @@ export default function AdminSidebar({ onLogout }: Props) {
           </div>
         </nav>
       </aside>
+      <FloatingInternalChat mode="admin" />
     </>
   );
 }

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
+import FloatingInternalChat from "@/components/FloatingInternalChat";
 
 const items = [
   ["Início", "/agentes/dashboard", BarChart3],
@@ -32,6 +33,7 @@ export default function AgentSidebar() {
   });
   const incompleteProfiles = dashboard.data?.profileAlerts?.length || 0;
   return (
+    <>
     <aside className="w-full border-r border-gold/20 bg-[#0f1f36] text-white lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:overflow-y-auto">
       <div className="border-b border-gold/20 p-5">
         <div className="text-lg font-bold text-gold">Affinity Financial</div>
@@ -80,5 +82,7 @@ export default function AgentSidebar() {
         </button>
       </nav>
     </aside>
+    <FloatingInternalChat mode="agent" />
+    </>
   );
 }
