@@ -1318,13 +1318,13 @@ async function runProcedure(
         "christmas",
         "Feliz Natal",
         "Feliz Natal, {nome}!",
-        "Olá {nome}, desejo a você e sua família um Natal repleto de paz, alegria e união.",
+        "Olá, {nome}! 🎄✨\n\nNeste Natal, desejamos a você e à sua família momentos de muita paz, alegria e união. Que seja um tempo especial para celebrar ao lado de quem realmente importa e renovar os sonhos e planos para o futuro.\n\nAgradecemos pela confiança e por nos permitir fazer parte da sua jornada. Conte sempre com a equipe da Affinity Financial Consulting.\n\nSe precisar de qualquer orientação ou quiser conversar conosco, estaremos à disposição.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nUm Feliz Natal para você e toda a sua família! ❤️🎄\n\n{agente_nome}\nAffinity Financial Consulting",
       ],
       [
         "new_year",
         "Feliz Ano-Novo",
         "Feliz Ano-Novo, {nome}!",
-        "Olá {nome}, desejo um novo ano de saúde, proteção, prosperidade e grandes realizações.",
+        "Olá, {nome}! ✨🥂\n\nQue este novo ano chegue trazendo novas oportunidades, conquistas, saúde e muitos momentos especiais para você e sua família.\n\nAgradecemos pela confiança em nosso trabalho e esperamos continuar fazendo parte da sua jornada, ajudando você a construir um futuro cada vez mais seguro e tranquilo.\n\nSempre que precisar de alguma orientação ou quiser conversar conosco, conte com a equipe da Affinity Financial Consulting.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nFeliz Ano Novo! Que seja um ano incrível para você e sua família! 🎆✨\n\n{agente_nome}\nAffinity Financial Consulting",
       ],
       [
         "policy_anniversary",
@@ -1457,20 +1457,20 @@ async function runProcedure(
           .run();
     }
     const monthly = [
-      [1, "Janeiro", "um novo ano de esperança, saúde e grandes realizações"],
-      [2, "Fevereiro", "um mês leve, próspero e cheio de boas oportunidades"],
-      [3, "Março", "um mês de renovação, equilíbrio e novas conquistas"],
-      [4, "Abril", "um mês de crescimento, serenidade e bons encontros"],
-      [5, "Maio", "um mês acolhedor, produtivo e repleto de alegrias"],
-      [6, "Junho", "um mês de união, energia e excelentes resultados"],
-      [7, "Julho", "um mês iluminado, tranquilo e cheio de bons momentos"],
-      [8, "Agosto", "um mês de coragem, progresso e novas possibilidades"],
-      [9, "Setembro", "um mês de renovação, florescimento e prosperidade"],
-      [10, "Outubro", "um mês de esperança, cuidado e muitas conquistas"],
-      [11, "Novembro", "um mês de gratidão, união e boas notícias"],
-      [12, "Dezembro", "um mês de celebração, paz e momentos especiais"],
+      [1, "Janeiro", "✨", "Um novo ano começa e, com ele, novas oportunidades para organizar os planos, definir objetivos e cuidar do futuro. Que janeiro seja o início de um ano de muitas conquistas, tranquilidade e bons momentos para você e sua família."],
+      [2, "Fevereiro", "💙", "Fevereiro chega lembrando que, mesmo sendo o mês mais curto do ano, pode ser cheio de grandes oportunidades. Que seja um período leve, próspero e repleto de bons momentos para você e sua família."],
+      [3, "Março", "🌱", "O ano já começou a ganhar ritmo e março chega como um bom momento para olhar para os planos feitos em janeiro e perguntar: estamos caminhando na direção certa? Pequenos ajustes podem fazer uma grande diferença no futuro."],
+      [4, "Abril", "🌷", "Abril chega trazendo renovação e a lembrança de que todo bom resultado começa com cuidado e planejamento. É um ótimo momento para rever prioridades e fortalecer a segurança de quem você ama."],
+      [5, "Maio", "💐", "Maio é um mês que nos convida a valorizar a família, o cuidado e tudo aquilo que construímos juntos. Que seja um período acolhedor, produtivo e cheio de motivos para celebrar."],
+      [6, "Junho", "☀️", "Chegamos à metade do ano. Junho é uma boa oportunidade para reconhecer as conquistas até aqui, ajustar os planos e seguir com confiança em direção aos seus objetivos."],
+      [7, "Julho", "🌞", "Julho traz a energia do verão, momentos em família e uma pausa importante para respirar. Que este mês seja leve, tranquilo e cheio de boas experiências, sem deixar de lado os planos para o futuro."],
+      [8, "Agosto", "🚀", "Agosto chega como um convite para retomar o ritmo com coragem e determinação. Que seja um mês de progresso, boas decisões e novas possibilidades para você e sua família."],
+      [9, "Setembro", "🍂", "Setembro marca uma mudança de estação e nos lembra que renovar também faz parte de crescer. Que este mês traga equilíbrio, prosperidade e boas oportunidades para seus projetos."],
+      [10, "Outubro", "🎃", "Outubro chega com novas cores e a reta final do ano se aproximando. É um bom momento para revisar objetivos e garantir que seus planos continuam protegendo o que realmente importa."],
+      [11, "Novembro", "🍁", "Novembro é um mês de gratidão e reflexão. Que possamos reconhecer as conquistas, valorizar quem caminha ao nosso lado e preparar com tranquilidade os próximos passos."],
+      [12, "Dezembro", "✨", "Dezembro chega com celebrações, reencontros e a oportunidade de olhar com carinho para tudo que vivemos. Que seja um mês de paz, união e momentos especiais ao lado de quem você ama."],
     ] as const;
-    for (const [monthNumber, monthName, wish] of monthly) {
+    for (const [monthNumber, monthName, emoji, reflection] of monthly) {
       const exists = await env.DB.prepare(
         "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='monthly' AND monthNumber=? LIMIT 1"
       ).bind(owner, monthNumber).first();
@@ -1481,7 +1481,7 @@ async function runProcedure(
           owner,
           `Boas-vindas a ${monthName}`,
           `${monthName} começou — conte conosco`,
-          `Olá {nome}, desejamos ${wish}. A Affinity Financial está à sua disposição sempre que precisar.`,
+          `Olá, {nome}! ${emoji} Seja bem-vindo(a) a ${monthName.toLowerCase()}!\n\n${reflection}\n\nSe quiser revisar seus planos, esclarecer alguma dúvida ou simplesmente conversar sobre seus objetivos financeiros, estamos à disposição.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nUm excelente mês de ${monthName.toLowerCase()}! 💙\n\n{agente_nome}\nAffinity Financial Consulting`,
           monthNumber
         ).run();
     }
@@ -2533,7 +2533,7 @@ async function runProcedure(
 
   if (name === "crm.assignees") {
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,contactEmail,whatsapp,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
+      "SELECT id,email,name,contactEmail,phone,whatsapp,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
     ).all<JsonRecord>();
     return trpcResult(
       rows.results.map(row => ({
@@ -3015,6 +3015,17 @@ async function runMessageAutomations(env: Env) {
   ).all<JsonRecord>();
   for (const automation of automations.results) {
     const occasion = String(automation.occasion);
+    const agentProfile = await env.DB.prepare(
+      "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
+    ).bind(String(automation.agentEmail).toLowerCase()).first<JsonRecord>();
+    const agentName = escapeAutomationHtml(agentProfile?.name || "Seu agente Affinity");
+    const agentPhone = escapeAutomationHtml(
+      agentProfile?.phone || agentProfile?.whatsapp || "(857) 421-8325"
+    );
+    const personalizeAgent = (value: unknown) =>
+      escapeAutomationHtml(value)
+        .replaceAll("{agente_nome}", agentName)
+        .replaceAll("{agente_telefone}", agentPhone);
     if (occasion !== "custom" && !isMorningRun) continue;
     if (occasion === "policy_anniversary") {
       let policySql =
@@ -3079,7 +3090,7 @@ async function runMessageAutomations(env: Env) {
         const safeName = escapeAutomationHtml(policy.name);
         const scheduleUrl =
           "https://calendly.com/affinityfc/consultoria-gratuita?hide_event_type_details=1&hide_gdpr_banner=1";
-        const body = escapeAutomationHtml(automation.message)
+        const body = personalizeAgent(automation.message)
           .replaceAll("{nome}", safeName)
           .replaceAll(
             "{agenda}",
@@ -3088,11 +3099,11 @@ async function runMessageAutomations(env: Env) {
         try {
           await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
-            subject: escapeAutomationHtml(
+            subject: personalizeAgent(
               automation.subject || automation.title
             ).replaceAll("{nome}", safeName),
             html: emailHtml(
-              escapeAutomationHtml(automation.title || "Revisão anual"),
+              personalizeAgent(automation.title || "Revisão anual"),
               `<p>${body.replaceAll("\n", "<br>")}</p>`
             ),
           });
@@ -3181,10 +3192,7 @@ async function runMessageAutomations(env: Env) {
         .first();
       if (sent) continue;
       const personalize = (value: unknown) =>
-        escapeAutomationHtml(value).replaceAll(
-          "{nome}",
-          escapeAutomationHtml(client.name)
-        );
+        personalizeAgent(value).replaceAll("{nome}", escapeAutomationHtml(client.name));
       try {
         const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
           to: String(client.email),

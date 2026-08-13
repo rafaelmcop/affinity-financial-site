@@ -2158,6 +2158,7 @@ export const appRouter = router({
           email: adminAccounts.email,
           name: adminAccounts.name,
           contactEmail: adminAccounts.contactEmail,
+          phone: adminAccounts.phone,
           whatsapp: adminAccounts.whatsapp,
           isActive: adminAccounts.isActive,
         })

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Edit2, Plus, Trash2 } from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
@@ -68,11 +68,34 @@ export function ScheduledMessagesPanel({
   clientId?: number;
 }) {
   const messages = trpc.agent.listMessages.useQuery(),
-    clients = trpc.agent.listClients.useQuery();
+    clients = trpc.agent.listClients.useQuery(),
+    profiles = trpc.crm.assignees.useQuery();
   const create = trpc.agent.scheduleMessage.useMutation(),
     update = trpc.agent.updateMessage.useMutation(),
     remove = trpc.agent.deleteMessage.useMutation();
   const [form, setForm] = useState<Form | null>(null);
+  const session = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("agentSession") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const profile = (profiles.data || []).find(
+    item => item.email.toLowerCase() === String(session.email || "").toLowerCase()
+  );
+  const previewMessage = (value: unknown) =>
+    String(value || "")
+      .replaceAll("{agente_nome}", profile?.name || session.name || "Nome do agente")
+      .replaceAll("{agente_telefone}", profile?.phone || profile?.whatsapp || "Telefone do agente");
+  const formRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!form) return;
+    window.setTimeout(
+      () => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50
+    );
+  }, [form?.id, form?.monthNumber, Boolean(form)]);
   const visibleMessages = (messages.data || []).filter(row => {
     if (scope === "collective")
       return (
@@ -181,7 +204,7 @@ export function ScheduledMessagesPanel({
           </h1>
           <p className="mt-2 text-sm text-gray-400">
             Enviadas às 8:30 AM pelo e-mail particular configurado no portal.
-            Use <b>{"{nome}"}</b> para personalizar.
+            Use <b>{"{nome}"}</b> para o cliente. O nome e telefone do agente são preenchidos automaticamente.
           </p>
         </div>
         <Button className="bg-gold text-black" onClick={newMessage}>
@@ -190,7 +213,7 @@ export function ScheduledMessagesPanel({
         </Button>
       </div>
       {form && (
-        <Card className="grid gap-4 border-gold/30 bg-[#0b1524] p-6 md:grid-cols-2">
+        <Card ref={formRef} className="scroll-mt-4 grid gap-4 border-2 border-gold/50 bg-[#0b1524] p-6 shadow-2xl shadow-black/50 md:grid-cols-2">
           <Input
             placeholder="Nome da automação"
             value={form.title}
@@ -485,8 +508,8 @@ export function ScheduledMessagesPanel({
                     ? "Todos os clientes"
                     : `Grupo ${row.recipientGroup || "selecionado"}`}
             </p>
-            <p className="mt-2 line-clamp-3 text-sm text-gray-300">
-              {row.message}
+            <p className="mt-2 whitespace-pre-wrap text-sm text-gray-300">
+              {previewMessage(row.message)}
             </p>
           </Card>
         ))}
