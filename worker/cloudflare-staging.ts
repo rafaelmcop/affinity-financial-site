@@ -1109,7 +1109,8 @@ async function runProcedure(
   }
   if (name === "agent.sendClientEmail") {
     const clientId = Number(input.clientId),
-      subject = String(input.subject ?? "").trim(),
+      subject =
+        String(input.subject ?? "").trim() || "Mensagem da Affinity Financial",
       body = String(input.body ?? "").trim();
     const customer = await env.DB.prepare(
       "SELECT id,name,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
@@ -1118,8 +1119,8 @@ async function runProcedure(
       .first<JsonRecord>();
     if (!customer || !validEmail(String(customer.email || "")))
       return trpcError("Este cliente não possui um e-mail válido");
-    if (!subject || !body || subject.length > 500 || body.length > 50000)
-      return trpcError("Preencha o assunto e a mensagem");
+    if (!body || subject.length > 500 || body.length > 50000)
+      return trpcError("Escreva a mensagem antes de enviar");
     const config = await env.DB.prepare(
       "SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?"
     )

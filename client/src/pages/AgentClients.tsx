@@ -371,7 +371,7 @@ export default function AgentClients() {
               </div>
               <div className="mt-5 space-y-3">
                 <Input
-                  placeholder="Assunto"
+                  placeholder="Assunto (opcional)"
                   value={emailSubject}
                   onChange={event => setEmailSubject(event.target.value)}
                 />
@@ -384,16 +384,15 @@ export default function AgentClients() {
                 <Button
                   className="w-full bg-gold text-black"
                   disabled={
-                    !selected.email ||
-                    !emailSubject.trim() ||
-                    !emailBody.trim() ||
-                    sendEmail.isPending
+                    !selected.email || !emailBody.trim() || sendEmail.isPending
                   }
                   onClick={async () => {
                     try {
                       await sendEmail.mutateAsync({
                         clientId: selected.id,
-                        subject: emailSubject,
+                        subject:
+                          emailSubject.trim() ||
+                          "Mensagem da Affinity Financial",
                         body: emailBody,
                       });
                       setEmailSubject("");
@@ -411,6 +410,11 @@ export default function AgentClients() {
                 >
                   <Send className="mr-2 h-4 w-4" /> Enviar e-mail
                 </Button>
+                {!selected.email && (
+                  <p className="text-center text-xs text-amber-300">
+                    Cadastre um e-mail válido para este cliente antes de enviar.
+                  </p>
+                )}
               </div>
             </Card>
             <div className="grid gap-4 md:grid-cols-2">

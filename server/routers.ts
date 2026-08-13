@@ -573,7 +573,7 @@ export const appRouter = router({
       .input(
         z.object({
           clientId: z.number(),
-          subject: z.string().min(1),
+          subject: z.string().optional(),
           body: z.string().min(1),
         })
       )
