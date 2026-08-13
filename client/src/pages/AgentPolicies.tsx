@@ -288,16 +288,24 @@ export function PcSheetUpload() {
               const filled = Object.values(extracted).filter(
                 value => value !== "" && value !== 0
               ).length;
-              if (!extracted.clientName && !extracted.policyNumber)
+              if (!extracted.clientName || !extracted.policyNumber)
                 toast.error(
                   "O texto foi lido, mas não foi possível identificar nome e número da apólice. Confira os campos abaixo ou tente o PDF original."
                 );
-              else
+              else {
+                const result = await save.mutateAsync(extracted);
+                await Promise.all([
+                  utils.agent.listPolicies.invalidate(),
+                  utils.agent.listMessages.invalidate(),
+                  utils.agent.listTasks.invalidate(),
+                  utils.agent.listClients.invalidate(),
+                ]);
                 toast.success(
-                  `${filled} campos extraídos. Confira antes de salvar.`
+                  `${filled} campos extraídos e salvos automaticamente. ${result.automationCount ?? 0} mensagens e acompanhamentos programados.`
                 );
+              }
             } catch {
-              toast.error("Não foi possível ler este PDF");
+              toast.error("Não foi possível ler e salvar este PDF");
             } finally {
               setLoading(false);
             }
@@ -462,33 +470,11 @@ export function PcSheetUpload() {
             onChange={e => setForm({ ...form, beneficiaries: e.target.value })}
           />
         </label>
-        <Button
-          className="bg-gold text-black md:col-span-2"
-          disabled={!form.clientName || !form.policyNumber || save.isPending}
-          onClick={async () => {
-            try {
-              const result = await save.mutateAsync(form);
-              setForm(empty);
-              await Promise.all([
-                utils.agent.listPolicies.invalidate(),
-                utils.agent.listMessages.invalidate(),
-                utils.agent.listTasks.invalidate(),
-                utils.agent.listClients.invalidate(),
-              ]);
-              toast.success(
-                `Cliente pronto: ${result.automationCount ?? 0} mensagens e acompanhamentos programados`
-              );
-            } catch (error) {
-              toast.error(
-                error instanceof Error ? error.message : "Erro ao salvar"
-              );
-            }
-          }}
-        >
+        <p className="rounded-lg border border-gold/20 bg-gold/10 p-3 text-sm text-gold md:col-span-2">
           {save.isPending
-            ? "Criando cliente e automações..."
-            : "Confirmar e automatizar"}
-        </Button>
+            ? "Salvando cliente, apólice e automações..."
+            : "O cadastro é salvo automaticamente assim que o PC Sheet termina de ser lido."}
+        </p>
       </div>
     </Card>
   );

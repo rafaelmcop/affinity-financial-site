@@ -2643,6 +2643,130 @@ async function runProcedure(
     );
   }
 
+  if (name === "crm.agentPortfolio") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+      .trim()
+      .toLowerCase();
+    if (!validEmail(owner)) return trpcError("Selecione um agente");
+    const [clients, policies] = await Promise.all([
+      env.DB.prepare(
+        "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name"
+      )
+        .bind(owner)
+        .all<JsonRecord>(),
+      env.DB.prepare(
+        "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY clientName,policyNumber"
+      )
+        .bind(owner)
+        .all<JsonRecord>(),
+    ]);
+    return trpcResult({
+      clients: clients.results.map(row => ({ ...row, id: Number(row.id) })),
+      policies: policies.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+        premiumAmount: Number(row.premiumAmount || 0),
+        coverageAmount: Number(row.coverageAmount || 0),
+      })),
+    });
+  }
+  if (name === "crm.updatePortfolioClient") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+        .trim()
+        .toLowerCase(),
+      id = Number(input.id),
+      clientName = String(input.name || "").trim(),
+      email = String(input.email || "")
+        .trim()
+        .toLowerCase();
+    if (
+      !validEmail(owner) ||
+      !id ||
+      !clientName ||
+      (email && !validEmail(email))
+    )
+      return trpcError("Confira os dados do cliente");
+    await env.DB.prepare(
+      "UPDATE crmClients SET name=?,email=?,phone=?,birthDate=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(
+        clientName,
+        email || null,
+        String(input.phone || "").trim() || null,
+        String(input.birthDate || "").trim() || null,
+        String(input.notes || "").trim() || null,
+        id,
+        owner
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.deletePortfolioClient") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+        .trim()
+        .toLowerCase(),
+      id = Number(input.id);
+    const linked = await env.DB.prepare(
+      "SELECT id FROM agentPolicies WHERE clientId=? AND lower(agentEmail)=? LIMIT 1"
+    )
+      .bind(id, owner)
+      .first<JsonRecord>();
+    if (linked) return trpcError("Exclua primeiro as apólices deste cliente");
+    await env.DB.prepare(
+      "DELETE FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(id, owner)
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.updatePortfolioPolicy") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+        .trim()
+        .toLowerCase(),
+      id = Number(input.id),
+      number = String(input.policyNumber || "").trim();
+    if (!validEmail(owner) || !id || !number)
+      return trpcError("Confira os dados da apólice");
+    await env.DB.prepare(
+      "UPDATE agentPolicies SET policyNumber=?,product=?,premiumAmount=?,coverageAmount=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        number,
+        String(input.product || "").trim() || null,
+        Number(input.premiumAmount || 0),
+        Number(input.coverageAmount || 0),
+        String(input.issuedAt || "").trim() || null,
+        id,
+        owner
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.deletePortfolioPolicy") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    await env.DB.prepare(
+      "DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        Number(input.id),
+        String(input.agentEmail || "")
+          .trim()
+          .toLowerCase()
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+
   if (name === "crm.communicationAudit") {
     if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
