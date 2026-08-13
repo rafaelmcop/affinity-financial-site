@@ -15,7 +15,6 @@ const items = [
   ["CRM", "/agentes/crm", Contact],
   ["Clientes", "/agentes/clientes", Contact],
   ["Apólices", "/agentes/apolices", FileText],
-  ["Enviar PC Sheet", "/agentes/pcsheet", FileText],
   ["Tarefas", "/agentes/tarefas", ListTodo],
   ["Configurações", "/agentes/configuracoes", Settings],
 ] as const;

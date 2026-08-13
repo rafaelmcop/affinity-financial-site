@@ -789,6 +789,26 @@ export const appRouter = router({
         .from(scheduledMessages)
         .where(eq(scheduledMessages.agentEmail, ctx.adminEmail.toLowerCase()));
     }),
+    messageHistory: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db
+        .select({
+          id: crmActivities.id,
+          clientId: crmActivities.clientId,
+          clientName: crmClients.name,
+          content: crmActivities.content,
+          createdAt: crmActivities.createdAt,
+        })
+        .from(crmActivities)
+        .innerJoin(crmClients, eq(crmClients.id, crmActivities.clientId))
+        .where(
+          and(
+            eq(crmActivities.type, "email"),
+            eq(crmClients.assignedAdminEmail, ctx.adminEmail.toLowerCase())
+          )
+        );
+    }),
     scheduleMessage: adminProcedure
       .input(
         z.object({

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { PcSheetUpload } from "./AgentPolicies";
 
 export default function AgentTasks() {
   const tasks = trpc.agent.listTasks.useQuery();
@@ -26,6 +27,15 @@ export default function AgentTasks() {
             apólices.
           </p>
         </div>
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-2xl font-bold text-gold">Enviar PC Sheet</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Importe a apólice e crie o cadastro do cliente automaticamente.
+            </p>
+          </div>
+          <PcSheetUpload />
+        </section>
         <section className="space-y-4">
           <h2 className="text-2xl font-bold text-gold">Suas tarefas</h2>
           <Card className="grid gap-3 border-gold/20 bg-[#0b1524] p-5 md:grid-cols-[1fr_240px_auto]">

@@ -1459,6 +1459,20 @@ async function runProcedure(
       rows.results.map(row => ({ ...row, id: Number(row.id) }))
     );
   }
+  if (name === "agent.messageHistory") {
+    const rows = await env.DB.prepare(
+      "SELECT a.id,a.clientId,c.name AS clientName,a.content,a.createdAt FROM crmActivities a JOIN crmClients c ON c.id=a.clientId WHERE a.type='email' AND lower(c.assignedAdminEmail)=? ORDER BY a.createdAt DESC,a.id DESC LIMIT 200"
+    )
+      .bind(adminEmail.toLowerCase())
+      .all<JsonRecord>();
+    return trpcResult(
+      rows.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+      }))
+    );
+  }
   if (name === "agent.scheduleMessage") {
     await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt) VALUES (?,?,?,'email',?,?,?,?,?,?,?)"
@@ -2944,18 +2958,20 @@ async function runMessageAutomations(env: Env) {
       if (part.type !== "literal") out[part.type] = part.value;
       return out;
     }, {});
-  if (eastern.hour !== "08" || eastern.minute !== "30") return;
+  const isMorningRun = eastern.hour === "08" && eastern.minute === "30";
   const month = Number(eastern.month),
     day = Number(eastern.day),
     year = eastern.year;
-  await env.DB.prepare(
-    "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
-  ).run();
+  if (isMorningRun)
+    await env.DB.prepare(
+      "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
+    ).run();
   const automations = await env.DB.prepare(
     "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
   ).all<JsonRecord>();
   for (const automation of automations.results) {
     const occasion = String(automation.occasion);
+    if (occasion !== "custom" && !isMorningRun) continue;
     if (occasion === "policy_anniversary") {
       let policySql =
         "SELECT p.id policyId,p.policyNumber,p.clientId,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND strftime('%m-%d',p.issuedAt)=?";
@@ -3104,7 +3120,7 @@ async function runMessageAutomations(env: Env) {
           escapeAutomationHtml(client.name)
         );
       try {
-        await sendAgentEmail(env, String(automation.agentEmail), {
+        const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
           to: String(client.email),
           subject: personalize(automation.subject || automation.title),
           html: emailHtml(
@@ -3121,7 +3137,18 @@ async function runMessageAutomations(env: Env) {
           ).bind(
             Number(client.id),
             `E-mail automático enviado: ${personalize(automation.title)}`,
-            String(automation.agentEmail)
+              String(automation.agentEmail)
+            ),
+          env.DB.prepare(
+            "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)"
+          ).bind(
+            String(automation.agentEmail).toLowerCase(),
+            Number(client.id),
+            String(sentMail.messageId || "") || null,
+            personalize(automation.subject || automation.title),
+            personalize(automation.message),
+            String(automation.agentEmail).toLowerCase(),
+            String(client.email)
           ),
         ]);
       } catch (error) {

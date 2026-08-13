@@ -126,6 +126,7 @@ export default function AdminCrm({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
+  const [crmView, setCrmView] = useState<"clients" | "automations" | "history">("clients");
   const activitiesQuery = trpc.crm.activities.useQuery(
     { clientId: selectedId || 0 },
     { enabled: !!selectedId }
@@ -136,6 +137,13 @@ export default function AdminCrm({
   const messagesQuery = trpc.agent.listMessages.useQuery(undefined, {
     enabled: agentMode,
   });
+  const messageHistoryQuery = trpc.agent.messageHistory.useQuery(undefined, {
+    enabled: agentMode,
+  });
+  const clientEmailsQuery = trpc.agent.clientEmails.useQuery(
+    { clientId: selectedId || 0 },
+    { enabled: agentMode && Boolean(selectedId), refetchInterval: 15000 }
+  );
   const tasksQuery = trpc.agent.listTasks.useQuery(undefined, {
     enabled: agentMode,
   });
@@ -298,6 +306,25 @@ export default function AdminCrm({
             Novo cliente
           </Button>
         </div>
+        {agentMode && (
+          <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2">
+            {([
+              ["clients", "Clientes e histórico"],
+              ["automations", "Mensagens automáticas"],
+              ["history", "Registro de envios"],
+            ] as const).map(([value, label]) => (
+              <Button
+                key={value}
+                variant={crmView === value ? "default" : "ghost"}
+                className={crmView === value ? "bg-gold text-black" : "text-gray-300"}
+                onClick={() => setCrmView(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        )}
+        <div className={agentMode && crmView !== "clients" ? "hidden" : "contents"}>
         <Card className="border-gold/20 bg-[#0b1524] p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <Input
@@ -708,6 +735,25 @@ export default function AdminCrm({
                   </Button>
                 </div>
                 <div className="mt-5 max-h-72 space-y-3 overflow-y-auto">
+                  {agentMode && (clientEmailsQuery.data || []).length > 0 && (
+                    <div className="mb-4 space-y-2 border-b border-white/10 pb-4">
+                      <p className="text-xs font-bold uppercase tracking-wider text-gold">
+                        Histórico de mensagens deste cliente
+                      </p>
+                      {(clientEmailsQuery.data || []).map(email => (
+                        <div
+                          key={email.id}
+                          className={`rounded-xl p-3 text-sm ${email.direction === "sent" ? "ml-5 bg-gold/15" : "mr-5 bg-sky-500/15"}`}
+                        >
+                          <p className="text-xs font-semibold text-gray-400">
+                            {email.direction === "sent" ? "Enviado" : "Recebido"} · {displayDate(email.sentAt)}
+                          </p>
+                          <p className="mt-1 font-semibold">{email.subject}</p>
+                          <p className="mt-1 whitespace-pre-wrap text-gray-300">{email.body}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {(activitiesQuery.data || []).map(activity => (
                     <div
                       key={activity.id}
@@ -730,7 +776,35 @@ export default function AdminCrm({
             )}
           </Card>
         </div>
-        {agentMode && <ScheduledMessagesPanel />}
+        </div>
+        {agentMode && crmView === "automations" && <ScheduledMessagesPanel />}
+        {agentMode && crmView === "history" && (
+          <Card className="border-gold/20 bg-[#0b1524] p-6">
+            <h2 className="text-2xl font-bold text-gold">Registro de envios</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Histórico geral das mensagens enviadas pelo CRM. Clique para abrir o cliente.
+            </p>
+            <div className="mt-5 space-y-3">
+              {(messageHistoryQuery.data || []).map(item => (
+                <button
+                  key={item.id}
+                  className="w-full rounded-xl border border-white/10 bg-black/25 p-4 text-left hover:border-gold/50"
+                  onClick={() => {
+                    setSelectedId(item.clientId);
+                    setCrmView("clients");
+                  }}
+                >
+                  <span className="font-semibold text-white">{item.clientName}</span>
+                  <span className="ml-2 text-xs text-gray-500">{displayDate(item.createdAt)}</span>
+                  <span className="mt-2 block text-sm text-gray-300">{item.content}</span>
+                </button>
+              ))}
+              {!messageHistoryQuery.data?.length && (
+                <p className="py-8 text-center text-sm text-gray-500">Nenhum envio registrado.</p>
+              )}
+            </div>
+          </Card>
+        )}
       </main>
     </div>
   );
