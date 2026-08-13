@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Upload, ShieldCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, Search, Upload, ShieldCheck } from "lucide-react";
 import { extractApplicationDate } from "../../../shared/pcSheet";
 type PolicyForm = {
   clientName: string;
@@ -499,6 +499,46 @@ export default function AgentPolicies({
   uploadOnly?: boolean;
 }) {
   const q = trpc.agent.listPolicies.useQuery();
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<
+    "name" | "date" | "type" | "coverage" | "premium"
+  >("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const policies = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const valueFor = (policy: NonNullable<typeof q.data>[number]) => {
+      if (sortKey === "date") return String(policy.issuedAt || "");
+      if (sortKey === "type") return String(policy.product || "").toLowerCase();
+      if (sortKey === "coverage") return Number(policy.coverageAmount || 0);
+      if (sortKey === "premium") return Number(policy.premiumAmount || 0);
+      return String(policy.clientName || "").toLowerCase();
+    };
+    return (q.data || [])
+      .filter(policy =>
+        `${policy.clientName} ${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`
+          .toLowerCase()
+          .includes(term)
+      )
+      .sort((a, b) => {
+        const first = valueFor(a),
+          second = valueFor(b);
+        const result =
+          typeof first === "number" && typeof second === "number"
+            ? first - second
+            : String(first).localeCompare(String(second), "pt-BR", {
+                numeric: true,
+              });
+        return sortDirection === "asc" ? result : -result;
+      });
+  }, [q.data, search, sortKey, sortDirection]);
+  const changeSort = (key: typeof sortKey) => {
+    if (sortKey === key)
+      setSortDirection(current => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+  };
   return (
     <div className="min-h-screen bg-black text-white lg:pl-64">
       <AgentSidebar />
@@ -515,7 +555,51 @@ export default function AgentPolicies({
           <PcSheetUpload />
         ) : (
           <div className="grid gap-4">
-            {(q.data || []).map(p => (
+            <Card className="border-gold/20 bg-[#0b1524] p-4">
+              <div className="relative">
+                <Search
+                  className="absolute left-3 top-3 text-gray-500"
+                  size={17}
+                />
+                <Input
+                  className="pl-10"
+                  placeholder="Buscar por cliente, número, tipo, data ou valor"
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(
+                  [
+                    ["name", "Nome"],
+                    ["date", "Data"],
+                    ["type", "Tipo de apólice"],
+                    ["coverage", "Cobertura"],
+                    ["premium", "Premium"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Button
+                    key={key}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => changeSort(key)}
+                    className={
+                      sortKey === key ? "border-gold bg-gold/15 text-gold" : ""
+                    }
+                  >
+                    {label}
+                    {sortKey === key &&
+                      (sortDirection === "asc" ? (
+                        <ArrowUp className="ml-2 h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDown className="ml-2 h-3.5 w-3.5" />
+                      ))}
+                  </Button>
+                ))}
+              </div>
+            </Card>
+            {policies.map(p => (
               <Card key={p.id} className="border-gold/20 bg-[#0b1524] p-5">
                 <div className="flex items-start justify-between">
                   <div>
@@ -548,12 +632,24 @@ export default function AgentPolicies({
                   <span>
                     Beneficiário: <b>{p.beneficiaries || "Não informado"}</b>
                   </span>
+                  <span>
+                    Data da aplicação:{" "}
+                    <b>
+                      {p.issuedAt
+                        ? new Date(
+                            `${String(p.issuedAt).slice(0, 10)}T12:00:00`
+                          ).toLocaleDateString("en-US")
+                        : "Não informada"}
+                    </b>
+                  </span>
                 </div>
               </Card>
             ))}
-            {q.data?.length === 0 && (
+            {policies.length === 0 && (
               <Card className="border-white/10 bg-[#0b1524] p-8 text-center text-gray-400">
-                Nenhuma apólice cadastrada.
+                {q.data?.length
+                  ? "Nenhuma apólice encontrada."
+                  : "Nenhuma apólice cadastrada."}
               </Card>
             )}
           </div>

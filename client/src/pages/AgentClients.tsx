@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowDown,
+  ArrowUp,
   AlertTriangle,
   Edit2,
   Mail,
@@ -26,6 +28,7 @@ type Status =
   | "proposal"
   | "client"
   | "closed";
+type SortKey = "name" | "date" | "type" | "coverage" | "premium";
 type Form = {
   id?: number;
   name: string;
@@ -82,6 +85,8 @@ const chatBody = (value: unknown) =>
 
 export default function AgentClients() {
   const [search, setSearch] = useState(""),
+    [sortKey, setSortKey] = useState<SortKey>("name"),
+    [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
     [selectedId, setSelectedId] = useState<number | null>(null),
     [form, setForm] = useState<Form | null>(null),
     [emailSubject, setEmailSubject] = useState(""),
@@ -107,15 +112,50 @@ export default function AgentClients() {
     missingFields = selected
       ? missingClientProfileFields(selected, selectedPolicies)
       : [];
-  const filtered = useMemo(
-    () =>
-      rows.filter(client =>
-        `${client.name} ${client.email || ""} ${client.phone || ""}`
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const policyFor = (clientId: number) =>
+      (policies.data || []).find(
+        policy => Number(policy.clientId) === Number(clientId)
+      );
+    const valueFor = (client: (typeof rows)[number]) => {
+      const policy = policyFor(client.id);
+      if (sortKey === "date") return String(policy?.issuedAt || "");
+      if (sortKey === "type")
+        return String(policy?.product || "").toLowerCase();
+      if (sortKey === "coverage") return Number(policy?.coverageAmount || 0);
+      if (sortKey === "premium") return Number(policy?.premiumAmount || 0);
+      return String(client.name || "").toLowerCase();
+    };
+    return rows
+      .filter(client => {
+        const clientPolicies = (policies.data || []).filter(
+          policy => Number(policy.clientId) === Number(client.id)
+        );
+        return `${client.name} ${client.email || ""} ${client.phone || ""} ${client.whatsapp || ""} ${clientPolicies.map(policy => `${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`).join(" ")}`
           .toLowerCase()
-          .includes(search.toLowerCase())
-      ),
-    [rows, search]
-  );
+          .includes(term);
+      })
+      .sort((a, b) => {
+        const first = valueFor(a),
+          second = valueFor(b);
+        const result =
+          typeof first === "number" && typeof second === "number"
+            ? first - second
+            : String(first).localeCompare(String(second), "pt-BR", {
+                numeric: true,
+              });
+        return sortDirection === "asc" ? result : -result;
+      });
+  }, [rows, policies.data, search, sortKey, sortDirection]);
+  const changeSort = (key: SortKey) => {
+    if (sortKey === key)
+      setSortDirection(current => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+  };
   useEffect(() => {
     const requested = Number(
       new URLSearchParams(window.location.search).get("cliente")
@@ -299,6 +339,36 @@ export default function AgentClients() {
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                 />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(
+                  [
+                    ["name", "Nome"],
+                    ["date", "Data"],
+                    ["type", "Tipo de apólice"],
+                    ["coverage", "Cobertura"],
+                    ["premium", "Premium"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Button
+                    key={key}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => changeSort(key)}
+                    className={
+                      sortKey === key ? "border-gold bg-gold/15 text-gold" : ""
+                    }
+                  >
+                    {label}
+                    {sortKey === key &&
+                      (sortDirection === "asc" ? (
+                        <ArrowUp className="ml-2 h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDown className="ml-2 h-3.5 w-3.5" />
+                      ))}
+                  </Button>
+                ))}
               </div>
             </Card>
             <Card className="overflow-hidden border-gold/20 bg-[#0b1524]">
