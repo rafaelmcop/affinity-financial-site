@@ -46,6 +46,25 @@ const empty: Form = {
   notes: "",
 };
 const isoDate = (value: unknown) => (value ? String(value).slice(0, 10) : "");
+const displayDate = (value: unknown) => {
+  const date = isoDate(value);
+  if (!date) return "Não informado";
+  const [year, month, day] = date.split("-");
+  return year && month && day ? `${month}/${day}/${year}` : date;
+};
+const currency = (value: unknown) =>
+  Number(value || 0).toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+  });
+const statusLabels: Record<Status, string> = {
+  new: "Novo",
+  contacted: "Contatado",
+  meeting: "Reunião",
+  proposal: "Proposta",
+  client: "Cliente",
+  closed: "Encerrado",
+};
 const chatBody = (value: unknown) =>
   String(value || "")
     .split(/\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i)[0]
@@ -71,7 +90,11 @@ export default function AgentClients() {
     markRead = trpc.agent.markClientEmailsRead.useMutation();
   const conversationEnd = useRef<HTMLDivElement>(null);
   const rows = clients.data || [],
-    selected = rows.find(client => client.id === selectedId);
+    selected = rows.find(client => client.id === selectedId),
+    selectedPolicies = (policies.data || []).filter(
+      policy => Number(policy.clientId) === selectedId
+    ),
+    primaryPolicy = selectedPolicies[0];
   const filtered = useMemo(
     () =>
       rows.filter(client =>
@@ -321,26 +344,106 @@ export default function AgentClients() {
               </Button>
             </div>
             <Card className="border-gold/20 bg-[#0b1524] p-6">
-              <h2 className="text-2xl font-bold">{selected.name}</h2>
-              <div className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
-                <p>
-                  E-mail: <b>{selected.email || "Não informado"}</b>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[.18em] text-gold">
+                    Ficha do cliente
+                  </p>
+                  <h2 className="mt-1 text-2xl font-bold">{selected.name}</h2>
+                </div>
+                <span className="w-fit rounded-full border border-gold/30 bg-gold/10 px-3 py-1 text-xs font-semibold text-gold">
+                  {statusLabels[selected.status as Status] || selected.status}
+                </span>
+              </div>
+              <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[
+                  ["E-mail", selected.email || primaryPolicy?.clientEmail],
+                  ["Telefone", selected.phone || primaryPolicy?.clientPhone],
+                  ["WhatsApp", selected.whatsapp],
+                  ["Data de nascimento", displayDate(selected.birthDate || primaryPolicy?.birthDate)],
+                  ["Origem do cadastro", selected.source],
+                  ["Total de apólices", String(selectedPolicies.length)],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-white/10 bg-black/25 p-4"
+                  >
+                    <p className="text-xs uppercase tracking-wide text-gray-500">
+                      {label}
+                    </p>
+                    <p className="mt-1 break-words font-semibold text-white">
+                      {value || "Não informado"}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/25 p-4">
+                <p className="text-xs uppercase tracking-wide text-gray-500">
+                  Observações
                 </p>
-                <p>
-                  Telefone: <b>{selected.phone || "Não informado"}</b>
-                </p>
-                <p>
-                  Nascimento:{" "}
-                  <b>{isoDate(selected.birthDate) || "Não informado"}</b>
-                </p>
-                <p>
-                  Grupo: <b>{selected.status}</b>
+                <p className="mt-2 whitespace-pre-wrap text-gray-300">
+                  {selected.notes || "Sem observações."}
                 </p>
               </div>
-              <p className="mt-4 rounded-lg bg-black/30 p-3 text-gray-300">
-                {selected.notes || "Sem observações."}
-              </p>
             </Card>
+            <div>
+              <h2 className="text-xl font-bold text-gold">
+                Apólices do cliente
+              </h2>
+              <p className="mt-1 text-sm text-gray-400">
+                Dados extraídos dos PC Sheets vinculados a este cliente.
+              </p>
+            </div>
+            <div className="grid gap-4">
+              {selectedPolicies.map(policy => (
+                <Card
+                  key={policy.id}
+                  className="border-gold/20 bg-[#0b1524] p-5"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wide text-gold">
+                        Número da apólice
+                      </p>
+                      <h3 className="mt-1 text-xl font-bold">
+                        {policy.policyNumber || "Não informado"}
+                      </h3>
+                      <p className="mt-1 text-sm text-gray-400">
+                        {policy.product || "Produto não informado"}
+                      </p>
+                    </div>
+                    <ShieldCheck className="shrink-0 text-gold" />
+                  </div>
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                    {[
+                      ["Data da aplicação", displayDate(policy.issuedAt)],
+                      ["Premium", `${currency(policy.premiumAmount)}${policy.premiumFrequency ? ` · ${policy.premiumFrequency}` : ""}`],
+                      ["Target premium anual", currency(policy.targetPremium)],
+                      ["Pontos", String(Math.round(Number(policy.points || 0)))],
+                      ["Valor da cobertura", currency(policy.coverageAmount)],
+                      ["Beneficiários", policy.beneficiaries],
+                      ["E-mail extraído", policy.clientEmail],
+                      ["Telefone extraído", policy.clientPhone],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="rounded-xl border border-white/10 bg-black/25 p-3"
+                      >
+                        <p className="text-xs text-gray-500">{label}</p>
+                        <p className="mt-1 break-words text-sm font-semibold text-white">
+                          {value || "Não informado"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+              {!selectedPolicies.length && (
+                <Card className="border-white/10 bg-[#0b1524] p-6 text-center text-gray-400">
+                  Nenhuma apólice vinculada a este cliente.
+                </Card>
+              )}
+            </div>
             <Card className="border-gold/20 bg-[#0b1524] p-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -458,24 +561,6 @@ export default function AgentClients() {
                 )}
               </div>
             </Card>
-            <div className="grid gap-4 md:grid-cols-2">
-              {(policies.data || [])
-                .filter(p => p.clientId === selected.id)
-                .map(policy => (
-                  <Card
-                    key={policy.id}
-                    className="border-gold/20 bg-[#0b1524] p-5"
-                  >
-                    <ShieldCheck className="text-gold" />
-                    <h3 className="mt-3 text-xl font-bold">
-                      {policy.policyNumber}
-                    </h3>
-                    <p className="mt-2 text-sm text-gray-400">
-                      {policy.product || "Produto não informado"}
-                    </p>
-                  </Card>
-                ))}
-            </div>
           </>
         )}
       </main>

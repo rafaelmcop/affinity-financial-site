@@ -15,6 +15,22 @@ describe("extractApplicationDate", () => {
       .toBe("2025-09-07");
   });
 
+  it("accepts the visual column separator produced by the real PC Sheet", () => {
+    expect(
+      extractApplicationDate(
+        "Name: | Adneia De Oliveira Carias | Role: | Proposed Insured Date and Time eSigned: | 08/05/2026 14:59:51 GMT | eSignature Method:"
+      )
+    ).toBe("2026-08-05");
+  });
+
+  it("falls back to the signed-by line when the label is detached", () => {
+    expect(
+      extractApplicationDate(
+        "e-Signed by Adneia De Oliveira Carias 08/05/2026 14:59:51 GMT"
+      )
+    ).toBe("2026-08-05");
+  });
+
   it("does not use policy, issue or effective dates", () => {
     expect(
       extractApplicationDate(
