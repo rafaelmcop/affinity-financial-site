@@ -121,10 +121,25 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
     const since = config.lastImapSyncAt
       ? new Date(String(config.lastImapSyncAt))
       : new Date(Date.now() - 30 * 86400000);
-    const search = await client.command("A3", `UID SEARCH SINCE ${imapDate(since)}`);
-    const searchLine = search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
-    const uids = searchLine.trim().split(/\s+/).filter(Boolean).slice(-500);
-    let sequence = 4;
+    const customers = await env.DB.prepare(
+      "SELECT id,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND trim(email)<>''"
+    )
+      .bind(owner)
+      .all<Row>();
+    const customerByEmail = new Map(
+      customers.results.map(row => [cleanAddress(String(row.email)), row])
+    );
+    const uidSet = new Set<string>();
+    let sequence = 3;
+    for (const email of customerByEmail.keys()) {
+      const search = await client.command(
+        `A${sequence++}`,
+        `UID SEARCH SINCE ${imapDate(since)} FROM ${quoteImap(email)}`
+      );
+      const line = search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
+      for (const uid of line.trim().split(/\s+/).filter(Boolean)) uidSet.add(uid);
+    }
+    const uids = [...uidSet].slice(-100);
     for (const uid of uids) {
       const fetched = await client.command(
         `A${sequence++}`,
@@ -135,11 +150,7 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
       const parsed = await simpleParser(Buffer.from(source));
         const from = cleanAddress(parsed.from?.text || "");
         if (!from) continue;
-        const customer = await env.DB.prepare(
-          "SELECT id,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1"
-        )
-          .bind(owner, from)
-          .first<Row>();
+        const customer = customerByEmail.get(from);
         if (!customer) continue;
         const externalId =
           parsed.messageId || `icloud:${owner}:${uid}`;
