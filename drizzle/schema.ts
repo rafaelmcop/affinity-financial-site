@@ -115,6 +115,9 @@ export const clientEmails = mysqlTable("clientEmails", {
   toEmail: varchar("toEmail", { length: 320 }).notNull(),
   sentAt: timestamp("sentAt").defaultNow().notNull(),
   readAt: timestamp("readAt"),
+  visibility: mysqlEnum("visibility", ["client", "central"])
+    .default("client")
+    .notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 

@@ -26,6 +26,7 @@ import AgentMessages from './pages/AgentMessages';
 import AgentClients from './pages/AgentClients';
 import AgentSettings from './pages/AgentSettings';
 import AdminUsers from './pages/AdminUsers';
+import AdminCommunicationAudit from './pages/AdminCommunicationAudit';
 
 function Router() {
   return (
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/admin/administradores" component={AdminUsers} />
       <Route path="/admin/usuarios" component={AdminUsers} />
       <Route path="/admin/crm">{() => <AdminCrm />}</Route>
+      <Route path="/admin/auditoria-comunicacoes" component={AdminCommunicationAudit} />
       <Route path="/admin/leads-afiliados" component={AdminAffiliateLeads} />
       <Route path="/agentes" component={AgentLogin} />
       <Route path="/agentes/login" component={AgentLogin} />

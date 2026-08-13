@@ -736,7 +736,7 @@ export default function AdminUsers() {
                     user.email.toLowerCase() !==
                       data?.currentEmail.toLowerCase() && (
                       <>
-                        {user.status !== "approved" && (
+                        {user.status === "pending" && (
                           <Button
                             className="bg-green-600 text-white hover:bg-green-500"
                             onClick={() =>
@@ -746,7 +746,7 @@ export default function AdminUsers() {
                             Aprovar
                           </Button>
                         )}
-                        {user.status !== "rejected" && (
+                        {user.status === "pending" && (
                           <Button
                             variant="outline"
                             onClick={() =>
@@ -756,7 +756,7 @@ export default function AdminUsers() {
                             Recusar
                           </Button>
                         )}
-                        {user.status !== "blocked" ? (
+                        {user.status === "approved" && (
                           <Button
                             variant="outline"
                             onClick={() =>
@@ -765,7 +765,8 @@ export default function AdminUsers() {
                           >
                             Bloquear
                           </Button>
-                        ) : (
+                        )}
+                        {user.status === "blocked" && (
                           <Button
                             variant="outline"
                             onClick={() =>
@@ -773,6 +774,16 @@ export default function AdminUsers() {
                             }
                           >
                             Desbloquear
+                          </Button>
+                        )}
+                        {user.status === "rejected" && (
+                          <Button
+                            className="bg-green-600 text-white hover:bg-green-500"
+                            onClick={() =>
+                              changeInternalStatus(user.id, "approved")
+                            }
+                          >
+                            Reconsiderar e aprovar
                           </Button>
                         )}
                       </>
@@ -804,7 +815,7 @@ export default function AdminUsers() {
                         <Edit2 className="mr-2 h-4 w-4" />
                         Editar informações
                       </Button>
-                      {user.status === "pending" && (
+                      {user.status === "pending" && !user.isActive && (
                         <Button
                           className="bg-green-600 text-white hover:bg-green-500"
                           onClick={async () => {
@@ -831,7 +842,7 @@ export default function AdminUsers() {
                           Aprovar
                         </Button>
                       )}
-                      {user.status === "pending" && (
+                      {user.status === "pending" && !user.isActive && (
                         <Button
                           variant="outline"
                           onClick={async () => {

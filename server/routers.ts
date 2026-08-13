@@ -584,7 +584,8 @@ export const appRouter = router({
           .where(
             and(
               eq(clientEmails.clientId, input.clientId),
-              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase())
+              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
+              eq(clientEmails.visibility, "client")
             )
           );
       }),
@@ -2302,6 +2303,41 @@ export const appRouter = router({
           .values({ ...input, createdBy: ctx.adminEmail });
         return { success: true };
       }),
+    communicationAudit: adminProcedure.query(async () => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      const conversations = await db
+        .select({
+          id: clientEmails.id,
+          agentEmail: clientEmails.agentEmail,
+          clientId: clientEmails.clientId,
+          clientName: crmClients.name,
+          direction: clientEmails.direction,
+          subject: clientEmails.subject,
+          body: clientEmails.body,
+          fromEmail: clientEmails.fromEmail,
+          toEmail: clientEmails.toEmail,
+          sentAt: clientEmails.sentAt,
+        })
+        .from(clientEmails)
+        .innerJoin(crmClients, eq(crmClients.id, clientEmails.clientId))
+        .where(eq(clientEmails.visibility, "client"));
+      return {
+        conversations,
+        campaigns: [] as Array<{
+          id: number;
+          agentEmail: string;
+          title: string;
+          subject: string;
+          message: string;
+          occasion: string;
+          audience: string;
+          sentKey: string;
+          sentAt: Date;
+          recipientCount: number;
+        }>,
+      };
+    }),
   }),
 
   passwordReset: router({

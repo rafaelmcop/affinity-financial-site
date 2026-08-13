@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
-import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ExternalLink, LogOut, Star, Contact, Menu, X } from 'lucide-react';
+import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ExternalLink, LogOut, Star, Contact, Menu, X, ShieldCheck } from 'lucide-react';
 
 type Props = { onLogout?: () => void };
 
@@ -10,6 +10,7 @@ const groups = [
     { label: 'Apólices', href: '/admin/dashboard?tab=policies', icon: FileText },
     { label: 'Usuários', href: '/admin/usuarios', icon: Users },
     { label: 'CRM de clientes', href: '/admin/crm', icon: Contact },
+    { label: 'Auditoria de mensagens', href: '/admin/auditoria-comunicacoes', icon: ShieldCheck },
     { label: 'Leads de afiliados', href: '/admin/leads-afiliados', icon: Users },
   ] },
   { title: 'Conteúdo', items: [

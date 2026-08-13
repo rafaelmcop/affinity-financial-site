@@ -1112,7 +1112,7 @@ async function runProcedure(
       .first();
     if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
     const rows = await env.DB.prepare(
-      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? ORDER BY sentAt ASC,id ASC"
+      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' ORDER BY sentAt ASC,id ASC"
     )
       .bind(clientId, adminEmail.toLowerCase())
       .all<JsonRecord>();
@@ -2544,6 +2544,21 @@ async function runProcedure(
     );
   }
 
+  if (name === "crm.communicationAudit") {
+    if (!['admin', 'both'].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const conversations = await env.DB.prepare(
+      "SELECT e.id,e.agentEmail,e.clientId,c.name AS clientName,e.direction,e.subject,e.body,e.fromEmail,e.toEmail,e.sentAt FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE coalesce(e.visibility,'client')='client' ORDER BY e.sentAt DESC,e.id DESC"
+    ).all<JsonRecord>();
+    const campaigns = await env.DB.prepare(
+      "SELECT m.id,m.agentEmail,m.title,m.subject,m.message,m.occasion,m.audience,d.sentKey,MIN(d.sentAt) AS sentAt,COUNT(*) AS recipientCount FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE coalesce(m.audience,'all')<>'individual' GROUP BY m.id,d.sentKey ORDER BY MIN(d.sentAt) DESC"
+    ).all<JsonRecord>();
+    return trpcResult({
+      conversations: conversations.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })),
+      campaigns: campaigns.results.map(row => ({ ...row, id: Number(row.id), recipientCount: Number(row.recipientCount || 0) })),
+    });
+  }
+
   if (name === "crm.create" || name === "crm.update") {
     const clientName = String(input.name ?? "").trim();
     const email = String(input.email ?? "")
@@ -3202,19 +3217,19 @@ async function runMessageAutomations(env: Env) {
             `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
           ),
         });
-        await env.DB.batch([
+        const statements = [
           env.DB.prepare(
             "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
           ).bind(Number(automation.id), Number(client.id), sentKey),
+        ];
+        const individual = String(automation.audience || "all") === "individual" ||
+          Boolean(automation.clientId) || ["birthday", "policy_anniversary"].includes(occasion);
+        if (individual) statements.push(
+          env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)").bind(
+            Number(client.id), `E-mail automático enviado: ${personalize(automation.title)}`, String(automation.agentEmail)
+          ),
           env.DB.prepare(
-            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
-          ).bind(
-            Number(client.id),
-            `E-mail automático enviado: ${personalize(automation.title)}`,
-              String(automation.agentEmail)
-            ),
-          env.DB.prepare(
-            "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)"
+            "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
           ).bind(
             String(automation.agentEmail).toLowerCase(),
             Number(client.id),
@@ -3223,8 +3238,9 @@ async function runMessageAutomations(env: Env) {
             personalize(automation.message),
             String(automation.agentEmail).toLowerCase(),
             String(client.email)
-          ),
-        ]);
+          )
+        );
+        await env.DB.batch(statements);
       } catch (error) {
         console.error(
           "automation_email_failed",
