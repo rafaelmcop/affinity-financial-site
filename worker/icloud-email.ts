@@ -1,4 +1,4 @@
-import { ImapFlow } from "imapflow";
+import { connect } from "cloudflare:sockets";
 import { simpleParser } from "mailparser";
 import { decryptSmtpPassword } from "./cloudflare-email";
 
@@ -20,6 +20,75 @@ const cleanAddress = (value: string) =>
     .toLowerCase()
     .replace(/^.*<([^>]+)>.*$/, "$1");
 
+const quoteImap = (value: string) =>
+  `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+
+class ImapConnection {
+  private reader: ReadableStreamDefaultReader<Uint8Array>;
+  private writer: WritableStreamDefaultWriter<Uint8Array>;
+  private encoder = new TextEncoder();
+  private decoder = new TextDecoder();
+  private pending = new Uint8Array();
+
+  constructor(private socket: ReturnType<typeof connect>) {
+    this.reader = socket.readable.getReader();
+    this.writer = socket.writable.getWriter();
+  }
+
+  async open() {
+    await this.socket.opened;
+    await this.readUntil(value => /(?:^|\r\n)\* (?:OK|PREAUTH)/i.test(value));
+  }
+
+  async command(tag: string, command: string) {
+    await this.writer.write(this.encoder.encode(`${tag} ${command}\r\n`));
+    const bytes = await this.readUntil(value =>
+      new RegExp(`(?:^|\\r\\n)${tag} (?:OK|NO|BAD)`, "i").test(value)
+    );
+    const text = this.decoder.decode(bytes);
+    const status = text.match(
+      new RegExp(`(?:^|\\r\\n)${tag} (OK|NO|BAD)[^\\r\\n]*`, "i")
+    );
+    if (!status || status[1].toUpperCase() !== "OK")
+      throw new Error(status?.[0]?.trim() || `IMAP ${command} falhou`);
+    return { bytes, text };
+  }
+
+  async close() {
+    await this.command("ZZ", "LOGOUT").catch(() => undefined);
+    this.reader.releaseLock();
+    this.writer.releaseLock();
+    await this.socket.close().catch(() => undefined);
+  }
+
+  private async readUntil(done: (text: string) => boolean) {
+    let data = this.pending;
+    this.pending = new Uint8Array();
+    while (!done(this.decoder.decode(data))) {
+      const next = await this.reader.read();
+      if (next.done) throw new Error("A conexão IMAP foi encerrada antes da resposta");
+      const joined = new Uint8Array(data.length + next.value.length);
+      joined.set(data);
+      joined.set(next.value, data.length);
+      data = joined;
+    }
+    return data;
+  }
+}
+
+const imapDate = (date: Date) => {
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${date.getUTCDate()}-${month[date.getUTCMonth()]}-${date.getUTCFullYear()}`;
+};
+
+const extractLiteral = (bytes: Uint8Array) => {
+  const preview = new TextDecoder().decode(bytes);
+  const match = /\{(\d+)\}\r\n/.exec(preview);
+  if (!match || match.index === undefined) return null;
+  const start = match.index + match[0].length;
+  return bytes.slice(start, start + Number(match[1]));
+};
+
 export async function syncIcloudInbox(env: Env, agentEmail: string) {
   const owner = agentEmail.toLowerCase();
   const config = await env.DB.prepare(
@@ -32,30 +101,37 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
     String(config.password),
     env.JWT_SECRET
   );
-  const client = new ImapFlow({
-    host: String(config.imapHost || "imap.mail.me.com"),
-    port: Number(config.imapPort || 993),
-    secure: true,
-    auth: {
-      user: String(config.imapUser || config.user),
-      pass: password,
+  const socket = connect(
+    {
+      hostname: String(config.imapHost || "imap.mail.me.com"),
+      port: Number(config.imapPort || 993),
     },
-    logger: false,
-  });
+    { secureTransport: "on" }
+  );
+  const client = new ImapConnection(socket);
   let imported = 0;
   try {
-    await client.connect();
-    const lock = await client.getMailboxLock("INBOX");
-    try {
-      const since = config.lastImapSyncAt
-        ? new Date(String(config.lastImapSyncAt))
-        : new Date(Date.now() - 30 * 86400000);
-      for await (const message of client.fetch(
-        { since },
-        { uid: true, envelope: true, source: true, internalDate: true }
-      )) {
-        if (!message.source) continue;
-        const parsed = await simpleParser(message.source);
+    await client.open();
+    await client.command(
+      "A1",
+      `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`
+    );
+    await client.command("A2", "SELECT INBOX");
+    const since = config.lastImapSyncAt
+      ? new Date(String(config.lastImapSyncAt))
+      : new Date(Date.now() - 30 * 86400000);
+    const search = await client.command("A3", `UID SEARCH SINCE ${imapDate(since)}`);
+    const searchLine = search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
+    const uids = searchLine.trim().split(/\s+/).filter(Boolean).slice(-500);
+    let sequence = 4;
+    for (const uid of uids) {
+      const fetched = await client.command(
+        `A${sequence++}`,
+        `UID FETCH ${uid} (BODY.PEEK[])`
+      );
+      const source = extractLiteral(fetched.bytes);
+      if (!source) continue;
+      const parsed = await simpleParser(source);
         const from = cleanAddress(parsed.from?.text || "");
         if (!from) continue;
         const customer = await env.DB.prepare(
@@ -65,7 +141,7 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
           .first<Row>();
         if (!customer) continue;
         const externalId =
-          parsed.messageId || `icloud:${owner}:${String(message.uid)}`;
+          parsed.messageId || `icloud:${owner}:${uid}`;
         const body = String(parsed.text || "")
           .trim()
           .slice(0, 50000);
@@ -81,13 +157,10 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
             body,
             from,
             String(config.fromEmail),
-            (message.internalDate || parsed.date || new Date()).toISOString()
+            (parsed.date || new Date()).toISOString()
           )
           .run();
         imported++;
-      }
-    } finally {
-      lock.release();
     }
     await env.DB.prepare(
       "UPDATE agentEmailSettings SET lastImapSyncAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
@@ -96,7 +169,7 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
       .run();
     return { success: true, imported };
   } finally {
-    await client.logout().catch(() => undefined);
+    await client.close();
   }
 }
 

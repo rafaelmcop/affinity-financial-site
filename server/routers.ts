@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   adminProcedure,
   affiliateProcedure,
@@ -435,6 +435,24 @@ export const appRouter = router({
         .select()
         .from(agentTasks)
         .where(eq(agentTasks.agentEmail, email));
+      const notifications = await db
+        .select({
+          id: clientEmails.id,
+          clientId: clientEmails.clientId,
+          subject: clientEmails.subject,
+          body: clientEmails.body,
+          sentAt: clientEmails.sentAt,
+          clientName: crmClients.name,
+        })
+        .from(clientEmails)
+        .innerJoin(crmClients, eq(crmClients.id, clientEmails.clientId))
+        .where(
+          and(
+            eq(clientEmails.agentEmail, email),
+            eq(clientEmails.direction, "received"),
+            isNull(clientEmails.readAt)
+          )
+        );
       return {
         policies,
         tasks,
@@ -443,7 +461,8 @@ export const appRouter = router({
           (total, policy) => total + Number(policy.points || 0),
           0
         ),
-        newMessages: 0,
+        newMessages: notifications.length,
+        notifications: notifications.slice(0, 10),
         followUps: tasks.filter(t => t.status === "pending" && t.dueAt).length,
       };
     }),
@@ -568,6 +587,24 @@ export const appRouter = router({
               eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase())
             )
           );
+      }),
+    markClientEmailsRead: adminProcedure
+      .input(z.object({ clientId: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(clientEmails)
+          .set({ readAt: new Date() })
+          .where(
+            and(
+              eq(clientEmails.clientId, input.clientId),
+              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
+              eq(clientEmails.direction, "received"),
+              isNull(clientEmails.readAt)
+            )
+          );
+        return { success: true };
       }),
     sendClientEmail: adminProcedure
       .input(

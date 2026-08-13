@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Edit2,
@@ -59,10 +59,12 @@ export default function AgentClients() {
     remove = trpc.agent.deleteClient.useMutation();
   const emails = trpc.agent.clientEmails.useQuery(
       { clientId: selectedId || 0 },
-      { enabled: Boolean(selectedId) }
+      { enabled: Boolean(selectedId), refetchInterval: 15000 }
     ),
     sendEmail = trpc.agent.sendClientEmail.useMutation(),
-    syncInbox = trpc.agent.syncInbox.useMutation();
+    syncInbox = trpc.agent.syncInbox.useMutation(),
+    markRead = trpc.agent.markClientEmailsRead.useMutation();
+  const conversationEnd = useRef<HTMLDivElement>(null);
   const rows = clients.data || [],
     selected = rows.find(client => client.id === selectedId);
   const filtered = useMemo(
@@ -74,6 +76,36 @@ export default function AgentClients() {
       ),
     [rows, search]
   );
+  useEffect(() => {
+    const requested = Number(new URLSearchParams(window.location.search).get("cliente"));
+    if (requested && rows.some(client => client.id === requested)) setSelectedId(requested);
+  }, [rows]);
+  useEffect(() => {
+    if (!selectedId) return;
+    markRead.mutate({ clientId: selectedId });
+  }, [selectedId]);
+  useEffect(() => {
+    conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
+  }, [emails.data?.length, selectedId]);
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    const refresh = async () => {
+      if (syncInbox.isPending) return;
+      try {
+        await syncInbox.mutateAsync();
+        if (active) await emails.refetch();
+      } catch {
+        // The manual button presents connection details; background refresh stays quiet.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [selectedId]);
   const edit = (client: any) =>
     setForm({
       id: client.id,
@@ -341,24 +373,24 @@ export default function AgentClients() {
                   Atualizar respostas
                 </Button>
               </div>
-              <div className="mt-5 max-h-96 space-y-3 overflow-y-auto rounded-xl bg-black/30 p-4">
+              <div className="mt-5 flex max-h-[34rem] min-h-72 flex-col gap-3 overflow-y-auto rounded-2xl border border-white/10 bg-[#050b13] p-4 sm:p-5">
                 {(emails.data || []).map(message => (
                   <div
                     key={message.id}
-                    className={`max-w-[88%] rounded-xl p-4 ${message.direction === "sent" ? "ml-auto bg-gold/15" : "mr-auto bg-sky-500/15"}`}
+                    className={`max-w-[88%] rounded-2xl px-4 py-3 shadow-sm ${message.direction === "sent" ? "ml-auto rounded-br-sm bg-gold text-black" : "mr-auto rounded-bl-sm bg-[#17395c] text-white"}`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-xs font-bold uppercase tracking-wider text-gold">
-                        {message.direction === "sent" ? "Enviado" : "Recebido"}
+                      <p className={`text-xs font-bold ${message.direction === "sent" ? "text-black/65" : "text-sky-200"}`}>
+                        {message.direction === "sent" ? "Você" : selected.name}
                       </p>
-                      <p className="text-xs text-gray-500">
+                      <p className={`text-xs ${message.direction === "sent" ? "text-black/55" : "text-white/55"}`}>
                         {new Date(String(message.sentAt)).toLocaleString(
                           "pt-BR"
                         )}
                       </p>
                     </div>
-                    <p className="mt-2 font-semibold">{message.subject}</p>
-                    <p className="mt-2 whitespace-pre-wrap text-sm text-gray-300">
+                    <p className={`mt-2 text-xs font-semibold ${message.direction === "sent" ? "text-black/60" : "text-white/60"}`}>{message.subject}</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm">
                       {message.body}
                     </p>
                   </div>
@@ -368,21 +400,24 @@ export default function AgentClients() {
                     Nenhum e-mail registrado para este cliente.
                   </p>
                 )}
+                <div ref={conversationEnd} />
               </div>
-              <div className="mt-5 space-y-3">
-                <Input
-                  placeholder="Assunto (opcional)"
-                  value={emailSubject}
-                  onChange={event => setEmailSubject(event.target.value)}
-                />
+              <div className="mt-4 rounded-2xl border border-white/10 bg-black/25 p-3">
                 <textarea
-                  className="min-h-32 w-full rounded-md border border-white/20 bg-black p-3"
-                  placeholder="Escreva sua mensagem"
+                  className="min-h-24 w-full resize-none border-0 bg-transparent p-2 text-white outline-none"
+                  placeholder={`Mensagem para ${selected.name}`}
                   value={emailBody}
                   onChange={event => setEmailBody(event.target.value)}
                 />
+                <div className="flex flex-col gap-3 border-t border-white/10 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                  <Input
+                    className="h-9 max-w-sm border-white/10 bg-black/20 text-sm"
+                    placeholder="Assunto opcional"
+                    value={emailSubject}
+                    onChange={event => setEmailSubject(event.target.value)}
+                  />
                 <Button
-                  className="w-full bg-gold text-black"
+                  className="bg-gold px-7 text-black"
                   disabled={
                     !selected.email || !emailBody.trim() || sendEmail.isPending
                   }
@@ -410,6 +445,7 @@ export default function AgentClients() {
                 >
                   <Send className="mr-2 h-4 w-4" /> Enviar e-mail
                 </Button>
+                </div>
                 {!selected.email && (
                   <p className="text-center text-xs text-amber-300">
                     Cadastre um e-mail válido para este cliente antes de enviar.

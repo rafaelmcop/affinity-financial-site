@@ -975,6 +975,18 @@ async function runProcedure(
         .bind(adminEmail.toLowerCase())
         .all<JsonRecord>()
     ).results;
+    const notifications = (
+      await env.DB.prepare(
+        "SELECT e.id,e.clientId,e.subject,e.body,e.sentAt,c.name AS clientName FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='received' AND e.readAt IS NULL ORDER BY e.sentAt DESC LIMIT 10"
+      )
+        .bind(adminEmail.toLowerCase())
+        .all<JsonRecord>()
+    ).results;
+    const unread = await env.DB.prepare(
+      "SELECT COUNT(*) AS total FROM clientEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL"
+    )
+      .bind(adminEmail.toLowerCase())
+      .first<JsonRecord>();
     return trpcResult({
       policies,
       tasks,
@@ -983,7 +995,12 @@ async function runProcedure(
         (total, row) => total + Math.round(Number(row.points || 0)),
         0
       ),
-      newMessages: 0,
+      newMessages: Number(unread?.total || 0),
+      notifications: notifications.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+      })),
       followUps: tasks.filter(row => row.status === "pending" && row.dueAt)
         .length,
     });
@@ -1107,6 +1124,21 @@ async function runProcedure(
       }))
     );
   }
+  if (name === "agent.markClientEmailsRead") {
+    const clientId = Number(input.clientId);
+    const owned = await env.DB.prepare(
+      "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(clientId, adminEmail.toLowerCase())
+      .first();
+    if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    await env.DB.prepare(
+      "UPDATE clientEmails SET readAt=CURRENT_TIMESTAMP WHERE clientId=? AND lower(agentEmail)=? AND direction='received' AND readAt IS NULL"
+    )
+      .bind(clientId, adminEmail.toLowerCase())
+      .run();
+    return trpcResult({ success: true });
+  }
   if (name === "agent.sendClientEmail") {
     const clientId = Number(input.clientId),
       subject =
@@ -1157,8 +1189,9 @@ async function runProcedure(
       return trpcResult(await syncIcloudInbox(env, adminEmail));
     } catch (error) {
       console.error("icloud_manual_sync_failed", adminEmail, error);
+      const detail = error instanceof Error ? error.message : String(error);
       return trpcError(
-        "Não foi possível sincronizar o iCloud. Confira a senha de aplicativo."
+        `Não foi possível sincronizar o iCloud: ${detail.slice(0, 180)}`
       );
     }
   }

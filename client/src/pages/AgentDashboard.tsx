@@ -1,13 +1,34 @@
-import { CalendarClock, Mail, MessageSquare, ShieldCheck } from "lucide-react";
+import { useEffect } from "react";
+import { CalendarClock, Mail, MessageSquare, ShieldCheck, UserRound } from "lucide-react";
+import { useLocation } from "wouter";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
 export default function AgentDashboard() {
-  const q = trpc.agent.dashboard.useQuery();
+  const [, setLocation] = useLocation();
+  const q = trpc.agent.dashboard.useQuery(undefined, { refetchInterval: 30000 });
+  const syncInbox = trpc.agent.syncInbox.useMutation();
+  useEffect(() => {
+    let active = true;
+    const refresh = async () => {
+      try {
+        await syncInbox.mutateAsync();
+        if (active) await q.refetch();
+      } catch {
+        // Connection details are available in the client's conversation screen.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(refresh, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
   const d = q.data;
   const cards = [
     ["Mensagens novas", d?.newMessages || 0, MessageSquare],
-    ["E-mails novos", 0, Mail],
+    ["E-mails novos", d?.newMessages || 0, Mail],
     ["Follow-ups", d?.followUps || 0, CalendarClock],
     ["Pontuação", d?.score || 0, ShieldCheck],
   ] as const;
@@ -33,6 +54,39 @@ export default function AgentDashboard() {
             </Card>
           ))}
         </div>
+        <Card className="border-gold/30 bg-[#0b1524] p-6">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="flex items-center gap-2 text-xl font-bold text-gold">
+                <Mail size={20} /> Notificações
+              </h2>
+              <p className="mt-1 text-sm text-gray-400">Respostas novas dos seus clientes.</p>
+            </div>
+            <span className="rounded-full bg-gold px-3 py-1 text-sm font-bold text-black">
+              {d?.newMessages || 0}
+            </span>
+          </div>
+          <div className="mt-4 space-y-3">
+            {(d?.notifications || []).map(notification => (
+              <button
+                key={notification.id}
+                onClick={() => setLocation(`/agentes/clientes?cliente=${notification.clientId}`)}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/25 p-4 text-left transition hover:border-gold/60 hover:bg-gold/10"
+              >
+                <span className="rounded-full bg-sky-500/15 p-2 text-sky-300"><UserRound size={18} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">{notification.clientName}</span>
+                  <span className="block truncate text-sm text-gray-300">{notification.body}</span>
+                  <span className="mt-1 block text-xs text-gray-500">{new Date(String(notification.sentAt)).toLocaleString("pt-BR")}</span>
+                </span>
+                <span className="text-sm font-semibold text-gold">Abrir caso</span>
+              </button>
+            ))}
+            {!d?.notifications?.length && (
+              <p className="rounded-xl bg-black/20 py-8 text-center text-sm text-gray-500">Nenhuma resposta nova.</p>
+            )}
+          </div>
+        </Card>
         <div className="grid gap-5 lg:grid-cols-2">
           <Card className="border-gold/20 bg-[#0b1524] p-6">
             <h2 className="text-xl font-bold text-gold">Próximas tarefas</h2>
