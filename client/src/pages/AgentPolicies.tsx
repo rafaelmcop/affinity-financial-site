@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Upload, ShieldCheck } from "lucide-react";
+import { extractApplicationDate } from "../../../shared/pcSheet";
 type PolicyForm = {
   clientName: string;
   clientEmail: string;
@@ -132,11 +133,7 @@ export async function readPcSheet(file: File) {
     all,
     /Target Premium[^$\d]{0,40}\$?\s*([\d,]+(?:\.\d{2})?)/i
   );
-  const issuedDate =
-    find(
-      all,
-      /(?:Policy Date|Issue Date|Effective Date)[^\d]{0,30}(\d{1,2}\/\d{1,2}\/\d{4})/i
-    ) || "";
+  const applicationDate = extractApplicationDate(all);
   const flatLines = pageLines.flat();
   const primaryIndex = flatLines.findIndex(line => /^Primary:/i.test(line));
   const primaryLine =
@@ -237,7 +234,6 @@ export async function readPcSheet(file: File) {
     if (coreBeneficiary) beneficiaries.unshift(coreBeneficiary.trim());
   }
   const dobParts = dob.split("/");
-  const issueParts = issuedDate.split("/");
   const targetPremium = targetPremiumText
     ? money(targetPremiumText)
     : money(premium) * 12;
@@ -261,10 +257,7 @@ export async function readPcSheet(file: File) {
     points: Math.round(targetPremium),
     coverageAmount: money(coverage),
     beneficiaries: Array.from(new Set(beneficiaries)).join(", "),
-    issuedAt:
-      issueParts.length === 3
-        ? `${issueParts[2]}-${issueParts[0].padStart(2, "0")}-${issueParts[1].padStart(2, "0")}`
-        : "",
+    issuedAt: applicationDate,
   };
 }
 export function PcSheetUpload() {
@@ -435,7 +428,7 @@ export function PcSheetUpload() {
           </p>
         </label>
         <label className="text-sm text-gray-300">
-          Data de emissão da apólice
+          Data da aplicação
           <Input
             className="mt-2"
             type="date"
@@ -443,7 +436,8 @@ export function PcSheetUpload() {
             onChange={e => setForm({ ...form, issuedAt: e.target.value })}
           />
           <p className="mt-1 text-xs text-gray-500">
-            Usada para a revisão anual e o aviso ao agente.
+            Extraída do campo “Date and Time eSigned” do PC Sheet, sem o
+            horário. Usada para a revisão anual e o aviso ao agente.
           </p>
         </label>
         <label className="text-sm text-gray-300">
