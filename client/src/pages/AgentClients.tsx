@@ -67,9 +67,16 @@ const statusLabels: Record<Status, string> = {
   client: "Cliente",
   closed: "Encerrado",
 };
+const MissingBadge = () => (
+  <span className="ml-2 inline-flex rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-black">
+    Faltando
+  </span>
+);
 const chatBody = (value: unknown) =>
   String(value || "")
-    .split(/\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i)[0]
+    .split(
+      /\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i
+    )[0]
     .replace(/\r?\n>[\s\S]*$/gi, "")
     .trim();
 
@@ -110,8 +117,11 @@ export default function AgentClients() {
     [rows, search]
   );
   useEffect(() => {
-    const requested = Number(new URLSearchParams(window.location.search).get("cliente"));
-    if (requested && rows.some(client => client.id === requested)) setSelectedId(requested);
+    const requested = Number(
+      new URLSearchParams(window.location.search).get("cliente")
+    );
+    if (requested && rows.some(client => client.id === requested))
+      setSelectedId(requested);
   }, [rows]);
   useEffect(() => {
     if (!selectedId) return;
@@ -292,36 +302,55 @@ export default function AgentClients() {
               </div>
             </Card>
             <Card className="overflow-hidden border-gold/20 bg-[#0b1524]">
-              {filtered.map(client => (
-                <div
-                  key={client.id}
-                  className="flex flex-col gap-3 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <button
-                    onClick={() => setSelectedId(client.id)}
-                    className="flex-1 text-left"
-                  >
-                    <p className="font-semibold">{client.name}</p>
-                    <p className="text-sm text-gray-400">
-                      {client.email || "Sem e-mail"} ·{" "}
-                      {client.phone || "Sem telefone"}
-                    </p>
-                  </button>
-                  <div className="flex gap-2">
-                    <Button variant="outline" onClick={() => edit(client)}>
-                      <Edit2 className="mr-2 h-4 w-4" />
-                      Alterar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => deleteClient(client.id)}
+              {filtered.map(client =>
+                (() => {
+                  const clientPolicies = (policies.data || []).filter(
+                    policy => Number(policy.clientId) === Number(client.id)
+                  );
+                  const clientMissing = missingClientProfileFields(
+                    client,
+                    clientPolicies
+                  );
+                  return (
+                    <div
+                      key={client.id}
+                      className="flex flex-col gap-3 border-b border-white/10 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"
                     >
-                      <Trash2 className="mr-2 h-4 w-4" />
-                      Excluir
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                      <button
+                        onClick={() => setSelectedId(client.id)}
+                        className="flex-1 text-left"
+                      >
+                        <p className="flex flex-wrap items-center gap-2 font-semibold">
+                          {client.name}
+                          {clientMissing.length > 0 && (
+                            <span className="rounded-full bg-amber-400 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-black">
+                              {clientMissing.length} pendência
+                              {clientMissing.length === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-sm text-gray-400">
+                          {client.email || "Sem e-mail"} ·{" "}
+                          {client.phone || "Sem telefone"}
+                        </p>
+                      </button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => edit(client)}>
+                          <Edit2 className="mr-2 h-4 w-4" />
+                          Alterar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          onClick={() => deleteClient(client.id)}
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Excluir
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
               {!filtered.length && (
                 <p className="p-10 text-center text-gray-500">
                   Nenhum cliente encontrado.
@@ -362,7 +391,10 @@ export default function AgentClients() {
               </div>
               {missingFields.length > 0 && (
                 <div className="mt-5 flex gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-amber-100">
-                  <AlertTriangle className="mt-0.5 shrink-0 text-amber-300" size={20} />
+                  <AlertTriangle
+                    className="mt-0.5 shrink-0 text-amber-300"
+                    size={20}
+                  />
                   <div>
                     <p className="font-bold">Perfil incompleto</p>
                     <p className="mt-1 text-sm">
@@ -373,19 +405,38 @@ export default function AgentClients() {
               )}
               <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
-                  ["E-mail", selected.email || primaryPolicy?.clientEmail],
-                  ["Telefone", selected.phone || primaryPolicy?.clientPhone],
-                  ["WhatsApp", selected.whatsapp],
-                  ["Data de nascimento", displayDate(selected.birthDate || primaryPolicy?.birthDate)],
-                  ["Origem do cadastro", selected.source],
-                  ["Total de apólices", String(selectedPolicies.length)],
-                ].map(([label, value]) => (
+                  [
+                    "E-mail",
+                    selected.email || primaryPolicy?.clientEmail,
+                    "e-mail",
+                  ],
+                  [
+                    "Telefone",
+                    selected.phone || primaryPolicy?.clientPhone,
+                    "telefone",
+                  ],
+                  ["WhatsApp", selected.whatsapp, ""],
+                  [
+                    "Data de nascimento",
+                    displayDate(selected.birthDate || primaryPolicy?.birthDate),
+                    "data de nascimento",
+                  ],
+                  ["Origem do cadastro", selected.source, ""],
+                  [
+                    "Total de apólices",
+                    String(selectedPolicies.length),
+                    "apólice",
+                  ],
+                ].map(([label, value, missingKey]) => (
                   <div
                     key={label}
-                    className="rounded-xl border border-white/10 bg-black/25 p-4"
+                    className={`rounded-xl border p-4 ${missingKey && missingFields.includes(missingKey) ? "border-amber-400/60 bg-amber-400/10" : "border-white/10 bg-black/25"}`}
                   >
                     <p className="text-xs uppercase tracking-wide text-gray-500">
                       {label}
+                      {missingKey && missingFields.includes(missingKey) && (
+                        <MissingBadge />
+                      )}
                     </p>
                     <p className="mt-1 break-words font-semibold text-white">
                       {value || "Não informado"}
@@ -411,49 +462,87 @@ export default function AgentClients() {
               </p>
             </div>
             <div className="grid gap-4">
-              {selectedPolicies.map(policy => (
-                <Card
-                  key={policy.id}
-                  className="border-gold/20 bg-[#0b1524] p-5"
-                >
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-gold">
-                        Número da apólice
-                      </p>
-                      <h3 className="mt-1 text-xl font-bold">
-                        {policy.policyNumber || "Não informado"}
-                      </h3>
-                      <p className="mt-1 text-sm text-gray-400">
-                        {policy.product || "Produto não informado"}
-                      </p>
-                    </div>
-                    <ShieldCheck className="shrink-0 text-gold" />
-                  </div>
-                  <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                    {[
-                      ["Data da aplicação", displayDate(policy.issuedAt)],
-                      ["Premium", `${currency(policy.premiumAmount)}${policy.premiumFrequency ? ` · ${policy.premiumFrequency}` : ""}`],
-                      ["Target premium anual", currency(policy.targetPremium)],
-                      ["Pontos", String(Math.round(Number(policy.points || 0)))],
-                      ["Valor da cobertura", currency(policy.coverageAmount)],
-                      ["Beneficiários", policy.beneficiaries],
-                      ["E-mail extraído", policy.clientEmail],
-                      ["Telefone extraído", policy.clientPhone],
-                    ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="rounded-xl border border-white/10 bg-black/25 p-3"
-                      >
-                        <p className="text-xs text-gray-500">{label}</p>
-                        <p className="mt-1 break-words text-sm font-semibold text-white">
-                          {value || "Não informado"}
-                        </p>
+              {selectedPolicies.map(policy =>
+                (() => {
+                  const policyMissing = missingClientProfileFields(
+                    { email: "ok", phone: "ok", birthDate: "ok" },
+                    [policy]
+                  );
+                  return (
+                    <Card
+                      key={policy.id}
+                      className="border-gold/20 bg-[#0b1524] p-5"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wide text-gold">
+                            Número da apólice
+                          </p>
+                          <h3 className="mt-1 text-xl font-bold">
+                            {policy.policyNumber || "Não informado"}
+                          </h3>
+                          <p className="mt-1 text-sm text-gray-400">
+                            {policy.product || "Produto não informado"}
+                          </p>
+                        </div>
+                        <ShieldCheck className="shrink-0 text-gold" />
                       </div>
-                    ))}
-                  </div>
-                </Card>
-              ))}
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                        {[
+                          [
+                            "Data da aplicação",
+                            displayDate(policy.issuedAt),
+                            "data da aplicação",
+                          ],
+                          [
+                            "Premium",
+                            `${currency(policy.premiumAmount)}${policy.premiumFrequency ? ` · ${policy.premiumFrequency}` : ""}`,
+                            "premium",
+                          ],
+                          [
+                            "Target premium anual",
+                            currency(policy.targetPremium),
+                            "target premium",
+                          ],
+                          [
+                            "Pontos",
+                            String(Math.round(Number(policy.points || 0))),
+                            "",
+                          ],
+                          [
+                            "Valor da cobertura",
+                            currency(policy.coverageAmount),
+                            "cobertura",
+                          ],
+                          [
+                            "Beneficiários",
+                            policy.beneficiaries,
+                            "beneficiários",
+                          ],
+                          ["E-mail extraído", policy.clientEmail, ""],
+                          ["Telefone extraído", policy.clientPhone, ""],
+                        ].map(([label, value, missingKey]) => (
+                          <div
+                            key={label}
+                            className={`rounded-xl border p-3 ${missingKey && policyMissing.includes(missingKey) ? "border-amber-400/60 bg-amber-400/10" : "border-white/10 bg-black/25"}`}
+                          >
+                            <p className="text-xs text-gray-500">
+                              {label}
+                              {missingKey &&
+                                policyMissing.includes(missingKey) && (
+                                  <MissingBadge />
+                                )}
+                            </p>
+                            <p className="mt-1 break-words text-sm font-semibold text-white">
+                              {value || "Não informado"}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    </Card>
+                  );
+                })()
+              )}
               {!selectedPolicies.length && (
                 <Card className="border-white/10 bg-[#0b1524] p-6 text-center text-gray-400">
                   Nenhuma apólice vinculada a este cliente.
@@ -504,16 +593,24 @@ export default function AgentClients() {
                     className={`max-w-[88%] rounded-2xl px-4 py-3 shadow-sm ${message.direction === "sent" ? "ml-auto rounded-br-sm bg-gold text-black" : "mr-auto rounded-bl-sm bg-[#17395c] text-white"}`}
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className={`text-xs font-bold ${message.direction === "sent" ? "text-black/65" : "text-sky-200"}`}>
+                      <p
+                        className={`text-xs font-bold ${message.direction === "sent" ? "text-black/65" : "text-sky-200"}`}
+                      >
                         {message.direction === "sent" ? "Você" : selected.name}
                       </p>
-                      <p className={`text-xs ${message.direction === "sent" ? "text-black/55" : "text-white/55"}`}>
+                      <p
+                        className={`text-xs ${message.direction === "sent" ? "text-black/55" : "text-white/55"}`}
+                      >
                         {new Date(String(message.sentAt)).toLocaleString(
                           "pt-BR"
                         )}
                       </p>
                     </div>
-                    <p className={`mt-2 text-xs font-semibold ${message.direction === "sent" ? "text-black/60" : "text-white/60"}`}>{message.subject}</p>
+                    <p
+                      className={`mt-2 text-xs font-semibold ${message.direction === "sent" ? "text-black/60" : "text-white/60"}`}
+                    >
+                      {message.subject}
+                    </p>
                     <p className="mt-1 whitespace-pre-wrap text-sm">
                       {chatBody(message.body)}
                     </p>
@@ -534,41 +631,45 @@ export default function AgentClients() {
                   onChange={event => setEmailBody(event.target.value)}
                 />
                 <div className="flex flex-col gap-3 border-t border-white/10 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                  {!emails.data?.length && <Input
-                    className="h-9 max-w-sm border-white/10 bg-black/20 text-sm"
-                    placeholder="Assunto da nova conversa (opcional)"
-                    value={emailSubject}
-                    onChange={event => setEmailSubject(event.target.value)}
-                  />}
-                <Button
-                  className="bg-gold px-7 text-black"
-                  disabled={
-                    !selected.email || !emailBody.trim() || sendEmail.isPending
-                  }
-                  onClick={async () => {
-                    try {
-                      await sendEmail.mutateAsync({
-                        clientId: selected.id,
-                        subject:
-                          emailSubject.trim() ||
-                          "Mensagem da Affinity Financial",
-                        body: emailBody,
-                      });
-                      setEmailSubject("");
-                      setEmailBody("");
-                      await emails.refetch();
-                      toast.success("E-mail enviado e salvo no histórico");
-                    } catch (error) {
-                      toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : "Não foi possível enviar"
-                      );
+                  {!emails.data?.length && (
+                    <Input
+                      className="h-9 max-w-sm border-white/10 bg-black/20 text-sm"
+                      placeholder="Assunto da nova conversa (opcional)"
+                      value={emailSubject}
+                      onChange={event => setEmailSubject(event.target.value)}
+                    />
+                  )}
+                  <Button
+                    className="bg-gold px-7 text-black"
+                    disabled={
+                      !selected.email ||
+                      !emailBody.trim() ||
+                      sendEmail.isPending
                     }
-                  }}
-                >
-                  <Send className="mr-2 h-4 w-4" /> Enviar e-mail
-                </Button>
+                    onClick={async () => {
+                      try {
+                        await sendEmail.mutateAsync({
+                          clientId: selected.id,
+                          subject:
+                            emailSubject.trim() ||
+                            "Mensagem da Affinity Financial",
+                          body: emailBody,
+                        });
+                        setEmailSubject("");
+                        setEmailBody("");
+                        await emails.refetch();
+                        toast.success("E-mail enviado e salvo no histórico");
+                      } catch (error) {
+                        toast.error(
+                          error instanceof Error
+                            ? error.message
+                            : "Não foi possível enviar"
+                        );
+                      }
+                    }}
+                  >
+                    <Send className="mr-2 h-4 w-4" /> Enviar e-mail
+                  </Button>
                 </div>
                 {!selected.email && (
                   <p className="text-center text-xs text-amber-300">

@@ -23,7 +23,14 @@ const items = [
 export default function AgentSidebar() {
   const [location, setLocation] = useLocation();
   const logout = trpc.auth.logout.useMutation();
-  const unread = trpc.crm.internalUnreadCount.useQuery({ mode: "agent" }, { refetchInterval: 30000 });
+  const unread = trpc.crm.internalUnreadCount.useQuery(
+    { mode: "agent" },
+    { refetchInterval: 30000 }
+  );
+  const dashboard = trpc.agent.dashboard.useQuery(undefined, {
+    refetchInterval: 30000,
+  });
+  const incompleteProfiles = dashboard.data?.profileAlerts?.length || 0;
   return (
     <aside className="w-full border-r border-gold/20 bg-[#0f1f36] text-white lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:overflow-y-auto">
       <div className="border-b border-gold/20 p-5">
@@ -39,7 +46,17 @@ export default function AgentSidebar() {
           >
             <Icon size={18} />
             <span className="flex-1 text-left">{label}</span>
-            {href === "/agentes/mensagens-internas" && Number(unread.data?.count || 0) > 0 && <span className="min-w-6 rounded-full bg-red-500 px-2 py-0.5 text-center text-xs font-black text-white">{Number(unread.data?.count) > 99 ? "99+" : unread.data?.count}</span>}
+            {href === "/agentes/clientes" && incompleteProfiles > 0 && (
+              <span className="min-w-6 rounded-full bg-amber-400 px-2 py-0.5 text-center text-xs font-black text-black">
+                {incompleteProfiles > 99 ? "99+" : incompleteProfiles}
+              </span>
+            )}
+            {href === "/agentes/mensagens-internas" &&
+              Number(unread.data?.count || 0) > 0 && (
+                <span className="min-w-6 rounded-full bg-red-500 px-2 py-0.5 text-center text-xs font-black text-white">
+                  {Number(unread.data?.count) > 99 ? "99+" : unread.data?.count}
+                </span>
+              )}
           </button>
         ))}
         <div className="my-3 border-t border-white/10" />
