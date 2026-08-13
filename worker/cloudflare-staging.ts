@@ -1,4 +1,5 @@
 import { isValidMediaUrl } from "../shared/videoUrl";
+import { missingClientProfileFields } from "../shared/clientProfile";
 import bcrypt from "bcryptjs";
 import {
   emailHtml,
@@ -975,6 +976,13 @@ async function runProcedure(
         .bind(adminEmail.toLowerCase())
         .all<JsonRecord>()
     ).results;
+    const clients = (
+      await env.DB.prepare(
+        "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
+      )
+        .bind(adminEmail.toLowerCase())
+        .all<JsonRecord>()
+    ).results;
     const notifications = (
       await env.DB.prepare(
         "SELECT e.id,e.clientId,e.subject,e.body,e.sentAt,c.name AS clientName FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='received' AND e.readAt IS NULL ORDER BY e.sentAt DESC LIMIT 10"
@@ -1001,6 +1009,16 @@ async function runProcedure(
         id: Number(row.id),
         clientId: Number(row.clientId),
       })),
+      profileAlerts: clients
+        .map(client => ({
+          clientId: Number(client.id),
+          clientName: String(client.name || "Cliente"),
+          missing: missingClientProfileFields(
+            client,
+            policies.filter(policy => Number(policy.clientId) === Number(client.id))
+          ),
+        }))
+        .filter(alert => alert.missing.length > 0),
       followUps: tasks.filter(row => row.status === "pending" && row.dueAt)
         .length,
     });

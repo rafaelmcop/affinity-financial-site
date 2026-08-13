@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  AlertTriangle,
   Edit2,
   Mail,
   Plus,
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import { missingClientProfileFields } from "../../../shared/clientProfile";
 
 type Status =
   | "new"
@@ -94,7 +96,10 @@ export default function AgentClients() {
     selectedPolicies = (policies.data || []).filter(
       policy => Number(policy.clientId) === selectedId
     ),
-    primaryPolicy = selectedPolicies[0];
+    primaryPolicy = selectedPolicies[0],
+    missingFields = selected
+      ? missingClientProfileFields(selected, selectedPolicies)
+      : [];
   const filtered = useMemo(
     () =>
       rows.filter(client =>
@@ -355,6 +360,17 @@ export default function AgentClients() {
                   {statusLabels[selected.status as Status] || selected.status}
                 </span>
               </div>
+              {missingFields.length > 0 && (
+                <div className="mt-5 flex gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-amber-100">
+                  <AlertTriangle className="mt-0.5 shrink-0 text-amber-300" size={20} />
+                  <div>
+                    <p className="font-bold">Perfil incompleto</p>
+                    <p className="mt-1 text-sm">
+                      Faltando: {missingFields.join(", ")}.
+                    </p>
+                  </div>
+                </div>
+              )}
               <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
                   ["E-mail", selected.email || primaryPolicy?.clientEmail],

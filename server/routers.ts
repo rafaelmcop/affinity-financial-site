@@ -24,6 +24,7 @@ import { COOKIE_NAME } from "../shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { enforceRateLimit } from "./rateLimit";
 import { isValidMediaUrl } from "../shared/videoUrl";
+import { missingClientProfileFields } from "../shared/clientProfile";
 
 const strongPassword = z
   .string()
@@ -437,6 +438,10 @@ export const appRouter = router({
         .select()
         .from(agentTasks)
         .where(eq(agentTasks.agentEmail, email));
+      const clients = await db
+        .select()
+        .from(crmClients)
+        .where(eq(crmClients.assignedAdminEmail, email));
       const notifications = await db
         .select({
           id: clientEmails.id,
@@ -465,6 +470,16 @@ export const appRouter = router({
         ),
         newMessages: notifications.length,
         notifications: notifications.slice(0, 10),
+        profileAlerts: clients
+          .map(client => ({
+            clientId: client.id,
+            clientName: client.name,
+            missing: missingClientProfileFields(
+              client,
+              policies.filter(policy => policy.clientId === client.id)
+            ),
+          }))
+          .filter(alert => alert.missing.length > 0),
         followUps: tasks.filter(t => t.status === "pending" && t.dueAt).length,
       };
     }),

@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { CalendarClock, Mail, MessageSquare, ShieldCheck, UserRound } from "lucide-react";
+import { AlertTriangle, CalendarClock, Mail, MessageSquare, ShieldCheck, UserRound } from "lucide-react";
 import { useLocation } from "wouter";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
@@ -27,7 +27,7 @@ export default function AgentDashboard() {
   }, []);
   const d = q.data;
   const cards = [
-    ["Mensagens novas", d?.newMessages || 0, MessageSquare],
+    ["Perfis incompletos", d?.profileAlerts?.length || 0, AlertTriangle],
     ["E-mails novos", d?.newMessages || 0, Mail],
     ["Follow-ups", d?.followUps || 0, CalendarClock],
     ["Pontuação", d?.score || 0, ShieldCheck],
@@ -60,13 +60,27 @@ export default function AgentDashboard() {
               <h2 className="flex items-center gap-2 text-xl font-bold text-gold">
                 <Mail size={20} /> Notificações
               </h2>
-              <p className="mt-1 text-sm text-gray-400">Respostas novas dos seus clientes.</p>
+              <p className="mt-1 text-sm text-gray-400">Respostas novas e cadastros que precisam de atenção.</p>
             </div>
             <span className="rounded-full bg-gold px-3 py-1 text-sm font-bold text-black">
-              {d?.newMessages || 0}
+              {(d?.newMessages || 0) + (d?.profileAlerts?.length || 0)}
             </span>
           </div>
           <div className="mt-4 space-y-3">
+            {(d?.profileAlerts || []).map(alert => (
+              <button
+                key={`profile-${alert.clientId}`}
+                onClick={() => setLocation(`/agentes/clientes?cliente=${alert.clientId}`)}
+                className="flex w-full items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-left transition hover:border-amber-300 hover:bg-amber-400/15"
+              >
+                <span className="rounded-full bg-amber-400/15 p-2 text-amber-300"><AlertTriangle size={18} /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-semibold">Perfil incompleto: {alert.clientName}</span>
+                  <span className="block text-sm text-amber-100/80">Faltando: {alert.missing.join(", ")}</span>
+                </span>
+                <span className="text-sm font-semibold text-gold">Corrigir</span>
+              </button>
+            ))}
             {(d?.notifications || []).map(notification => (
               <button
                 key={notification.id}
@@ -82,8 +96,8 @@ export default function AgentDashboard() {
                 <span className="text-sm font-semibold text-gold">Abrir caso</span>
               </button>
             ))}
-            {!d?.notifications?.length && (
-              <p className="rounded-xl bg-black/20 py-8 text-center text-sm text-gray-500">Nenhuma resposta nova.</p>
+            {!d?.notifications?.length && !d?.profileAlerts?.length && (
+              <p className="rounded-xl bg-black/20 py-8 text-center text-sm text-gray-500">Nenhuma pendência.</p>
             )}
           </div>
         </Card>
