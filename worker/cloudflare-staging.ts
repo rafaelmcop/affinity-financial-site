@@ -1330,7 +1330,7 @@ async function runProcedure(
         "policy_anniversary",
         "Revisão anual da apólice",
         "Sua apólice completa mais um ano",
-        "Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}",
+        "Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.",
       ],
     ];
     for (const [occasion, title, subject, message] of defaultMessages) {
@@ -1440,7 +1440,7 @@ async function runProcedure(
         "policy_anniversary",
         "Revisão anual da apólice",
         "Sua apólice completa mais um ano",
-        "Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}",
+        "Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.",
       ],
     ];
     for (const [occasion, title, subject, message] of defaults) {
@@ -3008,7 +3008,7 @@ async function runMessageAutomations(env: Env) {
     new Date(`${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`).getDay() === 4;
   if (isMorningRun)
     await env.DB.prepare(
-      "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
+      "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
     ).run();
   const automations = await env.DB.prepare(
     "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
@@ -3023,6 +3023,10 @@ async function runMessageAutomations(env: Env) {
         String(automation.agentEmail).toLowerCase(),
         `${eastern.month}-${eastern.day}`,
       ];
+      if (automation.clientId) {
+        policySql += " AND c.id=?";
+        policyBinds.push(Number(automation.clientId));
+      }
       if (automation.selectedClientIds) {
         let selected: number[] = [];
         try {
@@ -3038,6 +3042,12 @@ async function runMessageAutomations(env: Env) {
         .bind(...policyBinds)
         .all<JsonRecord>();
       for (const policy of policies.results) {
+        if (!automation.clientId) {
+          const customized = await env.DB.prepare(
+            "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND clientId=? AND isActive=1 LIMIT 1"
+          ).bind(String(automation.agentEmail).toLowerCase(), Number(policy.clientId)).first();
+          if (customized) continue;
+        }
         const sentKey = `policy-anniversary-${policy.policyId}-${year}`;
         const taskTitle = `Aniversário da apólice ${String(policy.policyNumber)} — revisar com ${String(policy.name)} (${year})`;
         const existingTask = await env.DB.prepare(
@@ -3073,7 +3083,7 @@ async function runMessageAutomations(env: Env) {
           .replaceAll("{nome}", safeName)
           .replaceAll(
             "{agenda}",
-            `<a href="${scheduleUrl}">agendar a revisão da apólice</a>`
+            `<a href="${scheduleUrl}">agendar uma reunião para analisar sua apólice</a>`
           );
         try {
           await sendAgentEmail(env, String(automation.agentEmail), {
@@ -3153,6 +3163,12 @@ async function runMessageAutomations(env: Env) {
       .bind(...binds)
       .all<JsonRecord>();
     for (const client of clients.results) {
+      if (occasion === "birthday" && !automation.clientId) {
+        const customized = await env.DB.prepare(
+          "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND clientId=? AND isActive=1 LIMIT 1"
+        ).bind(String(automation.agentEmail).toLowerCase(), Number(client.id)).first();
+        if (customized) continue;
+      }
       const sentKey = occasion === "custom"
         ? "once"
         : occasion === "monthly"

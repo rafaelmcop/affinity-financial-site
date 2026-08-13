@@ -76,11 +76,15 @@ export function ScheduledMessagesPanel({
   const visibleMessages = (messages.data || []).filter(row => {
     if (scope === "collective")
       return (
-        ["birthday", "thanksgiving", "christmas", "new_year", "monthly"].includes(row.occasion) &&
+        ["thanksgiving", "christmas", "new_year", "monthly"].includes(row.occasion) &&
         row.audience !== "individual"
       );
     if (scope === "client")
-      return row.clientId === clientId || row.occasion === "policy_anniversary";
+      return row.clientId === clientId ||
+        (["birthday", "policy_anniversary"].includes(row.occasion) &&
+          !(messages.data || []).some(
+            custom => custom.clientId === clientId && custom.occasion === row.occasion
+          ));
     return true;
   });
   const newMessage = () =>
@@ -88,7 +92,7 @@ export function ScheduledMessagesPanel({
       ...empty,
       audience: scope === "collective" ? "all" : "individual",
       clientId: scope === "client" ? clientId : undefined,
-      occasion: scope === "collective" ? "birthday" : "custom",
+      occasion: scope === "collective" ? "thanksgiving" : "custom",
     });
   const save = async () => {
     if (!form?.title.trim() || !form.subject.trim() || !form.message.trim())
@@ -142,12 +146,12 @@ export function ScheduledMessagesPanel({
   };
   const edit = (row: any) =>
     setForm({
-      id: row.id,
+      id: scope === "client" && row.clientId !== clientId ? undefined : row.id,
       title: row.title || "Automação",
       subject: row.subject || row.title || "Mensagem da Affinity",
       occasion: row.occasion,
-      audience: row.audience || (row.clientId ? "individual" : "all"),
-      clientId: row.clientId || undefined,
+      audience: scope === "client" ? "individual" : row.audience || (row.clientId ? "individual" : "all"),
+      clientId: scope === "client" ? clientId : row.clientId || undefined,
       recipientGroup: row.recipientGroup || "client",
       selectedClientIds: row.selectedClientIds
         ? parseRecipients(row.selectedClientIds)
@@ -206,11 +210,11 @@ export function ScheduledMessagesPanel({
                 setForm({ ...form, occasion: e.target.value as Occasion })
               }
             >
-              <option value="birthday">Aniversário</option>
+              {scope !== "collective" && <option value="birthday">Aniversário do cliente</option>}
               <option value="thanksgiving">Dia de Ação de Graças</option>
               <option value="christmas">Natal</option>
               <option value="new_year">Ano-Novo</option>
-              <option value="policy_anniversary">Aniversário da apólice</option>
+              {scope !== "collective" && <option value="policy_anniversary">Aniversário da apólice</option>}
               <option value="monthly">Início do mês</option>
               <option value="custom">Data personalizada</option>
             </select>
