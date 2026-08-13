@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import {
   adminProcedure,
   affiliateProcedure,
@@ -849,7 +849,9 @@ export const appRouter = router({
           selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
-          deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
+          deliveryMode: z
+            .enum(["default", "immediate", "scheduled"])
+            .optional(),
           monthNumber: z.number().int().min(1).max(12).optional(),
         })
       )
@@ -895,7 +897,9 @@ export const appRouter = router({
           selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
-          deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
+          deliveryMode: z
+            .enum(["default", "immediate", "scheduled"])
+            .optional(),
           monthNumber: z.number().int().min(1).max(12).optional(),
           isActive: z.boolean(),
         })
@@ -1187,15 +1191,34 @@ export const appRouter = router({
       const commissions = await getCommissionsByAffiliate();
       const db = await (await import("./db")).getDb();
       if (!db) throw new Error("Database not available");
-      const [internalUsers, affiliateUsers, referrals, reviews] = await Promise.all([
-        db.select({ email: adminAccounts.email, status: adminAccounts.status }).from(adminAccounts),
-        db.select({ email: affiliates.email, status: affiliates.status }).from(affiliates),
-        db.select({ status: affiliateReferrals.status }).from(affiliateReferrals),
-        db.select({ source: testimonials.source, isActive: testimonials.isActive }).from(testimonials),
-      ]);
+      const [internalUsers, affiliateUsers, referrals, reviews] =
+        await Promise.all([
+          db
+            .select({
+              email: adminAccounts.email,
+              status: adminAccounts.status,
+            })
+            .from(adminAccounts),
+          db
+            .select({ email: affiliates.email, status: affiliates.status })
+            .from(affiliates),
+          db
+            .select({ status: affiliateReferrals.status })
+            .from(affiliateReferrals),
+          db
+            .select({
+              source: testimonials.source,
+              isActive: testimonials.isActive,
+            })
+            .from(testimonials),
+        ]);
       const pendingUserEmails = new Set([
-        ...internalUsers.filter(row => row.status === "pending").map(row => row.email.toLowerCase()),
-        ...affiliateUsers.filter(row => row.status === "pending").map(row => row.email.toLowerCase()),
+        ...internalUsers
+          .filter(row => row.status === "pending")
+          .map(row => row.email.toLowerCase()),
+        ...affiliateUsers
+          .filter(row => row.status === "pending")
+          .map(row => row.email.toLowerCase()),
       ]);
 
       const totalCommissions = commissions.reduce(
@@ -1210,7 +1233,9 @@ export const appRouter = router({
         totalCommissions,
         pendingUsers: pendingUserEmails.size,
         pendingLeads: referrals.filter(row => row.status === "pending").length,
-        pendingReviews: reviews.filter(row => row.source === "client" && !row.isActive).length,
+        pendingReviews: reviews.filter(
+          row => row.source === "client" && !row.isActive
+        ).length,
       };
     }),
 
@@ -2355,7 +2380,12 @@ export const appRouter = router({
         })
         .from(clientEmails)
         .innerJoin(crmClients, eq(crmClients.id, clientEmails.clientId))
-        .where(and(eq(clientEmails.visibility, "client"), isNull(clientEmails.deletedAt)));
+        .where(
+          and(
+            eq(clientEmails.visibility, "client"),
+            isNull(clientEmails.deletedAt)
+          )
+        );
       return {
         conversations,
         campaigns: [] as Array<{
@@ -2377,35 +2407,199 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
-        await db.update(clientEmails).set({ deletedAt: new Date(), deletedBy: ctx.adminEmail.toLowerCase() }).where(eq(clientEmails.id, input.id));
+        await db
+          .update(clientEmails)
+          .set({
+            deletedAt: new Date(),
+            deletedBy: ctx.adminEmail.toLowerCase(),
+          })
+          .where(eq(clientEmails.id, input.id));
         return { success: true };
       }),
     internalMessages: adminProcedure
-      .input(z.object({ mode: z.enum(["admin", "agent"]), agentEmail: z.string().email().optional() }))
+      .input(
+        z.object({
+          mode: z.enum(["admin", "agent"]),
+          agentEmail: z.string().email().optional(),
+          peerEmail: z.string().email().optional(),
+        })
+      )
       .query(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
-        const agentEmail = input.mode === "agent" ? ctx.adminEmail.toLowerCase() : String(input.agentEmail || "").toLowerCase();
+        const agentEmail =
+          input.mode === "agent"
+            ? ctx.adminEmail.toLowerCase()
+            : String(input.agentEmail || "").toLowerCase();
         if (!agentEmail) return [];
-        return db.select().from(portalMessages).where(and(isNull(portalMessages.deletedAt), or(and(eq(portalMessages.senderEmail, agentEmail), eq(portalMessages.recipientEmail, "__admin__")), eq(portalMessages.recipientEmail, agentEmail)))).orderBy(portalMessages.sentAt);
+        if (input.mode === "agent" && input.peerEmail) {
+          const peer = input.peerEmail.toLowerCase();
+          const [allowedPeer] = await db
+            .select({ id: adminAccounts.id })
+            .from(adminAccounts)
+            .where(
+              and(
+                eq(adminAccounts.email, peer),
+                or(
+                  eq(adminAccounts.accountType, "agent"),
+                  eq(adminAccounts.accountType, "both")
+                ),
+                eq(adminAccounts.isActive, 1)
+              )
+            );
+          if (!allowedPeer || peer === agentEmail)
+            throw new Error("Agente destinatário inválido");
+          return db
+            .select()
+            .from(portalMessages)
+            .where(
+              and(
+                isNull(portalMessages.deletedAt),
+                or(
+                  and(
+                    eq(portalMessages.senderEmail, agentEmail),
+                    eq(portalMessages.recipientEmail, peer)
+                  ),
+                  and(
+                    eq(portalMessages.senderEmail, peer),
+                    eq(portalMessages.recipientEmail, agentEmail)
+                  )
+                )
+              )
+            )
+            .orderBy(portalMessages.sentAt);
+        }
+        const administrators = await db
+          .select({ email: adminAccounts.email })
+          .from(adminAccounts)
+          .where(
+            or(
+              eq(adminAccounts.accountType, "admin"),
+              eq(adminAccounts.accountType, "both")
+            )
+          );
+        const adminEmails = administrators.length
+          ? administrators.map(item => item.email.toLowerCase())
+          : ["__none__"];
+        return db
+          .select()
+          .from(portalMessages)
+          .where(
+            and(
+              isNull(portalMessages.deletedAt),
+              or(
+                and(
+                  eq(portalMessages.senderEmail, agentEmail),
+                  eq(portalMessages.recipientEmail, "__admin__")
+                ),
+                and(
+                  eq(portalMessages.recipientEmail, agentEmail),
+                  inArray(portalMessages.senderEmail, adminEmails)
+                )
+              )
+            )
+          )
+          .orderBy(portalMessages.sentAt);
       }),
     sendInternalMessage: adminProcedure
-      .input(z.object({ mode: z.enum(["admin", "agent"]), agentEmail: z.string().email().optional(), body: z.string().trim().min(1).max(10000) }))
+      .input(
+        z.object({
+          mode: z.enum(["admin", "agent"]),
+          agentEmail: z.string().email().optional(),
+          peerEmail: z.string().email().optional(),
+          body: z.string().trim().min(1).max(10000),
+        })
+      )
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
         const sender = ctx.adminEmail.toLowerCase();
-        await db.insert(portalMessages).values({ senderEmail: sender, recipientEmail: input.mode === "agent" ? "__admin__" : String(input.agentEmail || "").toLowerCase(), body: input.body });
+        const recipient =
+          input.mode === "agent"
+            ? String(input.peerEmail || "__admin__").toLowerCase()
+            : String(input.agentEmail || "").toLowerCase();
+        if (input.mode === "agent" && input.peerEmail) {
+          const [allowedPeer] = await db
+            .select({ id: adminAccounts.id })
+            .from(adminAccounts)
+            .where(
+              and(
+                eq(adminAccounts.email, recipient),
+                or(
+                  eq(adminAccounts.accountType, "agent"),
+                  eq(adminAccounts.accountType, "both")
+                ),
+                eq(adminAccounts.isActive, 1)
+              )
+            );
+          if (!allowedPeer || recipient === sender)
+            throw new Error("Agente destinatário inválido");
+        }
+        await db.insert(portalMessages).values({
+          senderEmail: sender,
+          recipientEmail: recipient,
+          body: input.body,
+        });
         return { success: true };
       }),
     markInternalMessagesRead: adminProcedure
-      .input(z.object({ mode: z.enum(["admin", "agent"]), agentEmail: z.string().email().optional() }))
+      .input(
+        z.object({
+          mode: z.enum(["admin", "agent"]),
+          agentEmail: z.string().email().optional(),
+          peerEmail: z.string().email().optional(),
+        })
+      )
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
-        const recipient = input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
-        const condition = input.mode === "agent" ? eq(portalMessages.recipientEmail, recipient) : and(eq(portalMessages.recipientEmail, recipient), eq(portalMessages.senderEmail, String(input.agentEmail || "").toLowerCase()));
-        await db.update(portalMessages).set({ readAt: new Date() }).where(and(condition, isNull(portalMessages.readAt), isNull(portalMessages.deletedAt)));
+        const recipient =
+          input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
+        const administrators =
+          input.mode === "agent" && !input.peerEmail
+            ? await db
+                .select({ email: adminAccounts.email })
+                .from(adminAccounts)
+                .where(
+                  or(
+                    eq(adminAccounts.accountType, "admin"),
+                    eq(adminAccounts.accountType, "both")
+                  )
+                )
+            : [];
+        const condition =
+          input.mode === "agent"
+            ? input.peerEmail
+              ? and(
+                  eq(portalMessages.recipientEmail, recipient),
+                  eq(portalMessages.senderEmail, input.peerEmail.toLowerCase())
+                )
+              : and(
+                  eq(portalMessages.recipientEmail, recipient),
+                  inArray(
+                    portalMessages.senderEmail,
+                    administrators.length
+                      ? administrators.map(item => item.email.toLowerCase())
+                      : ["__none__"]
+                  )
+                )
+            : and(
+                eq(portalMessages.recipientEmail, recipient),
+                eq(
+                  portalMessages.senderEmail,
+                  String(input.agentEmail || "").toLowerCase()
+                )
+              );
+        await db
+          .update(portalMessages)
+          .set({ readAt: new Date() })
+          .where(
+            and(
+              condition,
+              isNull(portalMessages.readAt),
+              isNull(portalMessages.deletedAt)
+            )
+          );
         return { success: true };
       }),
     internalUnreadCount: adminProcedure
@@ -2413,8 +2607,18 @@ export const appRouter = router({
       .query(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
-        const recipient = input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
-        const rows = await db.select({ id: portalMessages.id }).from(portalMessages).where(and(eq(portalMessages.recipientEmail, recipient), isNull(portalMessages.readAt), isNull(portalMessages.deletedAt)));
+        const recipient =
+          input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
+        const rows = await db
+          .select({ id: portalMessages.id })
+          .from(portalMessages)
+          .where(
+            and(
+              eq(portalMessages.recipientEmail, recipient),
+              isNull(portalMessages.readAt),
+              isNull(portalMessages.deletedAt)
+            )
+          );
         return { count: rows.length };
       }),
     deleteInternalMessage: adminProcedure
@@ -2422,7 +2626,13 @@ export const appRouter = router({
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
-        await db.update(portalMessages).set({ deletedAt: new Date(), deletedBy: ctx.adminEmail.toLowerCase() }).where(eq(portalMessages.id, input.id));
+        await db
+          .update(portalMessages)
+          .set({
+            deletedAt: new Date(),
+            deletedBy: ctx.adminEmail.toLowerCase(),
+          })
+          .where(eq(portalMessages.id, input.id));
         return { success: true };
       }),
   }),

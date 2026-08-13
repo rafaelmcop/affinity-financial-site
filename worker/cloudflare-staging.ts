@@ -1015,7 +1015,9 @@ async function runProcedure(
           clientName: String(client.name || "Cliente"),
           missing: missingClientProfileFields(
             client,
-            policies.filter(policy => Number(policy.clientId) === Number(client.id))
+            policies.filter(
+              policy => Number(policy.clientId) === Number(client.id)
+            )
           ),
         }))
         .filter(alert => alert.missing.length > 0),
@@ -1159,7 +1161,8 @@ async function runProcedure(
   }
   if (name === "agent.sendClientEmail") {
     const clientId = Number(input.clientId),
-      body = String(input.body ?? "").trim();
+      body = String(input.body ?? "").trim(),
+      requestedSubject = String(input.subject ?? "").trim();
     const customer = await env.DB.prepare(
       "SELECT id,name,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
     )
@@ -1167,7 +1170,7 @@ async function runProcedure(
       .first<JsonRecord>();
     if (!customer || !validEmail(String(customer.email || "")))
       return trpcError("Este cliente não possui um e-mail válido");
-    if (!body || subject.length > 500 || body.length > 50000)
+    if (!body || requestedSubject.length > 500 || body.length > 50000)
       return trpcError("Escreva a mensagem antes de enviar");
     const config = await env.DB.prepare(
       "SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?"
@@ -1180,8 +1183,10 @@ async function runProcedure(
     )
       .bind(clientId, adminEmail.toLowerCase())
       .first<JsonRecord>();
-    const requestedSubject = String(input.subject ?? "").trim();
-    const previousSubject = String(previous?.subject || "").replace(/^(?:re:\s*)+/i, "");
+    const previousSubject = String(previous?.subject || "").replace(
+      /^(?:re:\s*)+/i,
+      ""
+    );
     const subject = previous
       ? `Re: ${previousSubject || requestedSubject || "Mensagem da Affinity Financial"}`
       : requestedSubject || "Mensagem da Affinity Financial";
@@ -1475,33 +1480,97 @@ async function runProcedure(
           .run();
     }
     const monthly = [
-      [1, "Janeiro", "✨", "Um novo ano começa e, com ele, novas oportunidades para organizar os planos, definir objetivos e cuidar do futuro. Que janeiro seja o início de um ano de muitas conquistas, tranquilidade e bons momentos para você e sua família."],
-      [2, "Fevereiro", "💙", "Fevereiro chega lembrando que, mesmo sendo o mês mais curto do ano, pode ser cheio de grandes oportunidades. Que seja um período leve, próspero e repleto de bons momentos para você e sua família."],
-      [3, "Março", "🌱", "O ano já começou a ganhar ritmo e março chega como um bom momento para olhar para os planos feitos em janeiro e perguntar: estamos caminhando na direção certa? Pequenos ajustes podem fazer uma grande diferença no futuro."],
-      [4, "Abril", "🌷", "Abril chega trazendo renovação e a lembrança de que todo bom resultado começa com cuidado e planejamento. É um ótimo momento para rever prioridades e fortalecer a segurança de quem você ama."],
-      [5, "Maio", "💐", "Maio é um mês que nos convida a valorizar a família, o cuidado e tudo aquilo que construímos juntos. Que seja um período acolhedor, produtivo e cheio de motivos para celebrar."],
-      [6, "Junho", "☀️", "Chegamos à metade do ano. Junho é uma boa oportunidade para reconhecer as conquistas até aqui, ajustar os planos e seguir com confiança em direção aos seus objetivos."],
-      [7, "Julho", "🌞", "Julho traz a energia do verão, momentos em família e uma pausa importante para respirar. Que este mês seja leve, tranquilo e cheio de boas experiências, sem deixar de lado os planos para o futuro."],
-      [8, "Agosto", "🚀", "Agosto chega como um convite para retomar o ritmo com coragem e determinação. Que seja um mês de progresso, boas decisões e novas possibilidades para você e sua família."],
-      [9, "Setembro", "🍂", "Setembro marca uma mudança de estação e nos lembra que renovar também faz parte de crescer. Que este mês traga equilíbrio, prosperidade e boas oportunidades para seus projetos."],
-      [10, "Outubro", "🎃", "Outubro chega com novas cores e a reta final do ano se aproximando. É um bom momento para revisar objetivos e garantir que seus planos continuam protegendo o que realmente importa."],
-      [11, "Novembro", "🍁", "Novembro é um mês de gratidão e reflexão. Que possamos reconhecer as conquistas, valorizar quem caminha ao nosso lado e preparar com tranquilidade os próximos passos."],
-      [12, "Dezembro", "✨", "Dezembro chega com celebrações, reencontros e a oportunidade de olhar com carinho para tudo que vivemos. Que seja um mês de paz, união e momentos especiais ao lado de quem você ama."],
+      [
+        1,
+        "Janeiro",
+        "✨",
+        "Um novo ano começa e, com ele, novas oportunidades para organizar os planos, definir objetivos e cuidar do futuro. Que janeiro seja o início de um ano de muitas conquistas, tranquilidade e bons momentos para você e sua família.",
+      ],
+      [
+        2,
+        "Fevereiro",
+        "💙",
+        "Fevereiro chega lembrando que, mesmo sendo o mês mais curto do ano, pode ser cheio de grandes oportunidades. Que seja um período leve, próspero e repleto de bons momentos para você e sua família.",
+      ],
+      [
+        3,
+        "Março",
+        "🌱",
+        "O ano já começou a ganhar ritmo e março chega como um bom momento para olhar para os planos feitos em janeiro e perguntar: estamos caminhando na direção certa? Pequenos ajustes podem fazer uma grande diferença no futuro.",
+      ],
+      [
+        4,
+        "Abril",
+        "🌷",
+        "Abril chega trazendo renovação e a lembrança de que todo bom resultado começa com cuidado e planejamento. É um ótimo momento para rever prioridades e fortalecer a segurança de quem você ama.",
+      ],
+      [
+        5,
+        "Maio",
+        "💐",
+        "Maio é um mês que nos convida a valorizar a família, o cuidado e tudo aquilo que construímos juntos. Que seja um período acolhedor, produtivo e cheio de motivos para celebrar.",
+      ],
+      [
+        6,
+        "Junho",
+        "☀️",
+        "Chegamos à metade do ano. Junho é uma boa oportunidade para reconhecer as conquistas até aqui, ajustar os planos e seguir com confiança em direção aos seus objetivos.",
+      ],
+      [
+        7,
+        "Julho",
+        "🌞",
+        "Julho traz a energia do verão, momentos em família e uma pausa importante para respirar. Que este mês seja leve, tranquilo e cheio de boas experiências, sem deixar de lado os planos para o futuro.",
+      ],
+      [
+        8,
+        "Agosto",
+        "🚀",
+        "Agosto chega como um convite para retomar o ritmo com coragem e determinação. Que seja um mês de progresso, boas decisões e novas possibilidades para você e sua família.",
+      ],
+      [
+        9,
+        "Setembro",
+        "🍂",
+        "Setembro marca uma mudança de estação e nos lembra que renovar também faz parte de crescer. Que este mês traga equilíbrio, prosperidade e boas oportunidades para seus projetos.",
+      ],
+      [
+        10,
+        "Outubro",
+        "🎃",
+        "Outubro chega com novas cores e a reta final do ano se aproximando. É um bom momento para revisar objetivos e garantir que seus planos continuam protegendo o que realmente importa.",
+      ],
+      [
+        11,
+        "Novembro",
+        "🍁",
+        "Novembro é um mês de gratidão e reflexão. Que possamos reconhecer as conquistas, valorizar quem caminha ao nosso lado e preparar com tranquilidade os próximos passos.",
+      ],
+      [
+        12,
+        "Dezembro",
+        "✨",
+        "Dezembro chega com celebrações, reencontros e a oportunidade de olhar com carinho para tudo que vivemos. Que seja um mês de paz, união e momentos especiais ao lado de quem você ama.",
+      ],
     ] as const;
     for (const [monthNumber, monthName, emoji, reflection] of monthly) {
       const exists = await env.DB.prepare(
         "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='monthly' AND monthNumber=? LIMIT 1"
-      ).bind(owner, monthNumber).first();
+      )
+        .bind(owner, monthNumber)
+        .first();
       if (!exists)
         await env.DB.prepare(
           "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,monthNumber,isActive) VALUES (?,'monthly','email',?,?, 'all',?,?,1)"
-        ).bind(
-          owner,
-          `Boas-vindas a ${monthName}`,
-          `${monthName} começou — conte conosco`,
-          `Olá, {nome}! ${emoji} Seja bem-vindo(a) a ${monthName.toLowerCase()}!\n\n${reflection}\n\nSe quiser revisar seus planos, esclarecer alguma dúvida ou simplesmente conversar sobre seus objetivos financeiros, estamos à disposição.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nUm excelente mês de ${monthName.toLowerCase()}! 💙\n\n{agente_nome}\nAffinity Financial Consulting`,
-          monthNumber
-        ).run();
+        )
+          .bind(
+            owner,
+            `Boas-vindas a ${monthName}`,
+            `${monthName} começou — conte conosco`,
+            `Olá, {nome}! ${emoji} Seja bem-vindo(a) a ${monthName.toLowerCase()}!\n\n${reflection}\n\nSe quiser revisar seus planos, esclarecer alguma dúvida ou simplesmente conversar sobre seus objetivos financeiros, estamos à disposição.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nUm excelente mês de ${monthName.toLowerCase()}! 💙\n\n{agente_nome}\nAffinity Financial Consulting`,
+            monthNumber
+          )
+          .run();
     }
     const rows = await env.DB.prepare(
       "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND (title IS NOT NULL OR occasion='custom') ORDER BY scheduledAt"
@@ -2575,7 +2644,7 @@ async function runProcedure(
   }
 
   if (name === "crm.communicationAudit") {
-    if (!['admin', 'both'].includes(accountType))
+    if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
     const conversations = await env.DB.prepare(
       "SELECT e.id,e.agentEmail,e.clientId,c.name AS clientName,e.direction,e.subject,e.body,e.fromEmail,e.toEmail,e.sentAt FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE coalesce(e.visibility,'client')='client' AND e.deletedAt IS NULL ORDER BY e.sentAt DESC,e.id DESC"
@@ -2584,55 +2653,156 @@ async function runProcedure(
       "SELECT m.id,m.agentEmail,m.title,m.subject,m.message,m.occasion,m.audience,d.sentKey,MIN(d.sentAt) AS sentAt,COUNT(*) AS recipientCount FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE coalesce(m.audience,'all')<>'individual' GROUP BY m.id,d.sentKey ORDER BY MIN(d.sentAt) DESC"
     ).all<JsonRecord>();
     return trpcResult({
-      conversations: conversations.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })),
-      campaigns: campaigns.results.map(row => ({ ...row, id: Number(row.id), recipientCount: Number(row.recipientCount || 0) })),
+      conversations: conversations.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+      })),
+      campaigns: campaigns.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        recipientCount: Number(row.recipientCount || 0),
+      })),
     });
   }
 
   if (name === "crm.deleteAuditedMessage") {
-    if (!['admin', 'both'].includes(accountType))
+    if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-    await env.DB.prepare("UPDATE clientEmails SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL")
-      .bind(adminEmail.toLowerCase(), Number(input.id)).run();
+    await env.DB.prepare(
+      "UPDATE clientEmails SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL"
+    )
+      .bind(adminEmail.toLowerCase(), Number(input.id))
+      .run();
     return trpcResult({ success: true });
   }
 
-  if (["crm.internalMessages", "crm.sendInternalMessage", "crm.markInternalMessagesRead", "crm.internalUnreadCount", "crm.deleteInternalMessage"].includes(name)) {
+  if (
+    [
+      "crm.internalMessages",
+      "crm.sendInternalMessage",
+      "crm.markInternalMessagesRead",
+      "crm.internalUnreadCount",
+      "crm.deleteInternalMessage",
+    ].includes(name)
+  ) {
     const mode = String(input.mode || "agent");
-    const allowed = mode === "agent" ? ["agent", "both"].includes(accountType) : ["admin", "both"].includes(accountType);
+    const allowed =
+      mode === "agent"
+        ? ["agent", "both"].includes(accountType)
+        : ["admin", "both"].includes(accountType);
     if (!allowed) return trpcError("Acesso não permitido", "FORBIDDEN", 403);
-    const agentEmail = mode === "agent" ? adminEmail.toLowerCase() : String(input.agentEmail || "").trim().toLowerCase();
-    if (name !== "crm.internalUnreadCount" && mode === "admin" && !validEmail(agentEmail))
+    const agentEmail =
+      mode === "agent"
+        ? adminEmail.toLowerCase()
+        : String(input.agentEmail || "")
+            .trim()
+            .toLowerCase();
+    const peerEmail = String(input.peerEmail || "")
+      .trim()
+      .toLowerCase();
+    if (
+      name !== "crm.internalUnreadCount" &&
+      mode === "admin" &&
+      !validEmail(agentEmail)
+    )
       return trpcError("Selecione um agente");
     if (name === "crm.internalMessages") {
+      if (mode === "agent" && peerEmail) {
+        if (peerEmail === agentEmail || !validEmail(peerEmail))
+          return trpcError("Agente destinatário inválido");
+        const peer = await env.DB.prepare(
+          "SELECT id FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both') AND isActive=1 LIMIT 1"
+        )
+          .bind(peerEmail)
+          .first<JsonRecord>();
+        if (!peer)
+          return trpcError("Agente destinatário inválido", "NOT_FOUND", 404);
+        const rows = await env.DB.prepare(
+          "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND lower(recipientEmail)=?) OR (lower(senderEmail)=? AND lower(recipientEmail)=?)) ORDER BY sentAt ASC,id ASC"
+        )
+          .bind(agentEmail, peerEmail, peerEmail, agentEmail)
+          .all<JsonRecord>();
+        return trpcResult(
+          rows.results.map(row => ({ ...row, id: Number(row.id) }))
+        );
+      }
       const rows = await env.DB.prepare(
-        "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND recipientEmail='__admin__') OR lower(recipientEmail)=?) ORDER BY sentAt ASC,id ASC"
-      ).bind(agentEmail, agentEmail).all<JsonRecord>();
-      return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+        "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND recipientEmail='__admin__') OR (lower(recipientEmail)=? AND lower(senderEmail) IN (SELECT lower(email) FROM adminAccounts WHERE accountType IN ('admin','both')))) ORDER BY sentAt ASC,id ASC"
+      )
+        .bind(agentEmail, agentEmail)
+        .all<JsonRecord>();
+      return trpcResult(
+        rows.results.map(row => ({ ...row, id: Number(row.id) }))
+      );
     }
     if (name === "crm.sendInternalMessage") {
       const body = String(input.body || "").trim();
-      if (!body || body.length > 10000) return trpcError("Escreva uma mensagem válida");
-      await env.DB.prepare("INSERT INTO portalMessages (senderEmail,recipientEmail,body) VALUES (?,?,?)")
-        .bind(adminEmail.toLowerCase(), mode === "agent" ? "__admin__" : agentEmail, body).run();
+      if (!body || body.length > 10000)
+        return trpcError("Escreva uma mensagem válida");
+      const recipient =
+        mode === "agent" ? peerEmail || "__admin__" : agentEmail;
+      if (mode === "agent" && peerEmail) {
+        if (peerEmail === agentEmail || !validEmail(peerEmail))
+          return trpcError("Agente destinatário inválido");
+        const peer = await env.DB.prepare(
+          "SELECT id FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both') AND isActive=1 LIMIT 1"
+        )
+          .bind(peerEmail)
+          .first<JsonRecord>();
+        if (!peer)
+          return trpcError("Agente destinatário inválido", "NOT_FOUND", 404);
+      }
+      await env.DB.prepare(
+        "INSERT INTO portalMessages (senderEmail,recipientEmail,body) VALUES (?,?,?)"
+      )
+        .bind(adminEmail.toLowerCase(), recipient, body)
+        .run();
       return trpcResult({ success: true });
     }
     if (name === "crm.markInternalMessagesRead") {
       if (mode === "agent")
-        await env.DB.prepare("UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(adminEmail.toLowerCase()).run();
+        await (peerEmail
+          ? env.DB.prepare(
+              "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+            )
+              .bind(adminEmail.toLowerCase(), peerEmail)
+              .run()
+          : env.DB.prepare(
+              "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail) IN (SELECT lower(email) FROM adminAccounts WHERE accountType IN ('admin','both')) AND readAt IS NULL AND deletedAt IS NULL"
+            )
+              .bind(adminEmail.toLowerCase())
+              .run());
       else
-        await env.DB.prepare("UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE recipientEmail='__admin__' AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(agentEmail).run();
+        await env.DB.prepare(
+          "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE recipientEmail='__admin__' AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+        )
+          .bind(agentEmail)
+          .run();
       return trpcResult({ success: true });
     }
     if (name === "crm.internalUnreadCount") {
-      const recipient = mode === "agent" ? adminEmail.toLowerCase() : "__admin__";
-      const row = await env.DB.prepare("SELECT COUNT(*) total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(recipient).first<JsonRecord>();
+      const recipient =
+        mode === "agent" ? adminEmail.toLowerCase() : "__admin__";
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+      )
+        .bind(recipient)
+        .first<JsonRecord>();
       return trpcResult({ count: Number(row?.total || 0) });
     }
     if (name === "crm.deleteInternalMessage") {
-      if (!["admin", "both"].includes(accountType)) return trpcError("Somente administradores podem apagar mensagens", "FORBIDDEN", 403);
-      await env.DB.prepare("UPDATE portalMessages SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL")
-        .bind(adminEmail.toLowerCase(), Number(input.id)).run();
+      if (!["admin", "both"].includes(accountType))
+        return trpcError(
+          "Somente administradores podem apagar mensagens",
+          "FORBIDDEN",
+          403
+        );
+      await env.DB.prepare(
+        "UPDATE portalMessages SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL"
+      )
+        .bind(adminEmail.toLowerCase(), Number(input.id))
+        .run();
       return trpcResult({ success: true });
     }
   }
@@ -3098,7 +3268,9 @@ async function runMessageAutomations(env: Env) {
     month === 11 &&
     day >= 22 &&
     day <= 28 &&
-    new Date(`${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`).getDay() === 4;
+    new Date(
+      `${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`
+    ).getDay() === 4;
   if (isMorningRun)
     await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
@@ -3110,8 +3282,12 @@ async function runMessageAutomations(env: Env) {
     const occasion = String(automation.occasion);
     const agentProfile = await env.DB.prepare(
       "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
-    ).bind(String(automation.agentEmail).toLowerCase()).first<JsonRecord>();
-    const agentName = escapeAutomationHtml(agentProfile?.name || "Seu agente Affinity");
+    )
+      .bind(String(automation.agentEmail).toLowerCase())
+      .first<JsonRecord>();
+    const agentName = escapeAutomationHtml(
+      agentProfile?.name || "Seu agente Affinity"
+    );
     const agentPhone = escapeAutomationHtml(
       agentProfile?.phone || agentProfile?.whatsapp || "(857) 421-8325"
     );
@@ -3149,7 +3325,12 @@ async function runMessageAutomations(env: Env) {
         if (!automation.clientId) {
           const customized = await env.DB.prepare(
             "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND clientId=? AND isActive=1 LIMIT 1"
-          ).bind(String(automation.agentEmail).toLowerCase(), Number(policy.clientId)).first();
+          )
+            .bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(policy.clientId)
+            )
+            .first();
           if (customized) continue;
         }
         const sentKey = `policy-anniversary-${policy.policyId}-${year}`;
@@ -3228,7 +3409,9 @@ async function runMessageAutomations(env: Env) {
       (occasion === "thanksgiving" && isThanksgiving) ||
       (occasion === "christmas" && month === 12 && day === 25) ||
       (occasion === "new_year" && month === 1 && day === 1) ||
-      (occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month) ||
+      (occasion === "monthly" &&
+        day === 1 &&
+        Number(automation.monthNumber) === month) ||
       (occasion === "custom" &&
         automation.scheduledAt &&
         new Date(String(automation.scheduledAt)) <= now);
@@ -3270,14 +3453,17 @@ async function runMessageAutomations(env: Env) {
       if (occasion === "birthday" && !automation.clientId) {
         const customized = await env.DB.prepare(
           "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND clientId=? AND isActive=1 LIMIT 1"
-        ).bind(String(automation.agentEmail).toLowerCase(), Number(client.id)).first();
+        )
+          .bind(String(automation.agentEmail).toLowerCase(), Number(client.id))
+          .first();
         if (customized) continue;
       }
-      const sentKey = occasion === "custom"
-        ? "once"
-        : occasion === "monthly"
-          ? `monthly-${year}-${month}`
-          : `${occasion}-${year}`;
+      const sentKey =
+        occasion === "custom"
+          ? "once"
+          : occasion === "monthly"
+            ? `monthly-${year}-${month}`
+            : `${occasion}-${year}`;
       const sent = await env.DB.prepare(
         "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
       )
@@ -3285,39 +3471,53 @@ async function runMessageAutomations(env: Env) {
         .first();
       if (sent) continue;
       const personalize = (value: unknown) =>
-        personalizeAgent(value).replaceAll("{nome}", escapeAutomationHtml(client.name));
+        personalizeAgent(value).replaceAll(
+          "{nome}",
+          escapeAutomationHtml(client.name)
+        );
       try {
-        const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
-          to: String(client.email),
-          subject: personalize(automation.subject || automation.title),
-          html: emailHtml(
-            personalize(automation.title || "Mensagem"),
-            `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
-          ),
-        });
+        const sentMail = await sendAgentEmail(
+          env,
+          String(automation.agentEmail),
+          {
+            to: String(client.email),
+            subject: personalize(automation.subject || automation.title),
+            html: emailHtml(
+              personalize(automation.title || "Mensagem"),
+              `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
+            ),
+          }
+        );
         const statements = [
           env.DB.prepare(
             "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
           ).bind(Number(automation.id), Number(client.id), sentKey),
         ];
-        const individual = String(automation.audience || "all") === "individual" ||
-          Boolean(automation.clientId) || ["birthday", "policy_anniversary"].includes(occasion);
-        if (individual) statements.push(
-          env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)").bind(
-            Number(client.id), `E-mail automático enviado: ${personalize(automation.title)}`, String(automation.agentEmail)
-          ),
-          env.DB.prepare(
-            "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
-          ).bind(
-            String(automation.agentEmail).toLowerCase(),
-            Number(client.id),
-            String(sentMail.messageId || "") || null,
-            personalize(automation.subject || automation.title),
-            personalize(automation.message),
-            String(automation.agentEmail).toLowerCase(),
-            String(client.email)
-          )
-        );
+        const individual =
+          String(automation.audience || "all") === "individual" ||
+          Boolean(automation.clientId) ||
+          ["birthday", "policy_anniversary"].includes(occasion);
+        if (individual)
+          statements.push(
+            env.DB.prepare(
+              "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+            ).bind(
+              Number(client.id),
+              `E-mail automático enviado: ${personalize(automation.title)}`,
+              String(automation.agentEmail)
+            ),
+            env.DB.prepare(
+              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+            ).bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(client.id),
+              String(sentMail.messageId || "") || null,
+              personalize(automation.subject || automation.title),
+              personalize(automation.message),
+              String(automation.agentEmail).toLowerCase(),
+              String(client.email)
+            )
+          );
         await env.DB.batch(statements);
       } catch (error) {
         console.error(
