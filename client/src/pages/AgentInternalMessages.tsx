@@ -61,10 +61,9 @@ export default function AgentInternalMessages() {
     if (!selectedEmail) return;
     markRead.mutate({ mode: "agent", peerEmail });
   }, [selectedEmail, messages.data?.length]);
-  useEffect(
-    () => end.current?.scrollIntoView({ behavior: "smooth" }),
-    [messages.data?.length, selectedEmail]
-  );
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.data?.length, selectedEmail]);
 
   const submit = async () => {
     if (!body.trim()) return;
