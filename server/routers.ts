@@ -828,15 +828,22 @@ export const appRouter = router({
           selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
+          deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
         await db.insert(scheduledMessages).values({
-          ...input,
           agentEmail: ctx.adminEmail.toLowerCase(),
           clientId: input.clientId || null,
+          occasion: input.occasion,
+          channel: input.channel,
+          title: input.title,
+          subject: input.subject,
+          audience: input.audience,
+          recipientGroup: input.recipientGroup || null,
+          message: input.message,
           scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
           selectedClientIds: input.selectedClientIds
             ? JSON.stringify(input.selectedClientIds)
@@ -863,13 +870,14 @@ export const appRouter = router({
           selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
+          deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
           isActive: z.boolean(),
         })
       )
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
-        const { id, ...data } = input;
+        const { id, deliveryMode: _deliveryMode, ...data } = input;
         await db
           .update(scheduledMessages)
           .set({

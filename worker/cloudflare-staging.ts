@@ -1492,6 +1492,7 @@ async function runProcedure(
         input.scheduledAt || null
       )
       .run();
+    if (input.deliveryMode === "immediate") await runMessageAutomations(env);
     return trpcResult({ success: true });
   }
   if (name === "agent.updateMessage") {
@@ -1515,6 +1516,7 @@ async function runProcedure(
         adminEmail.toLowerCase()
       )
       .run();
+    if (input.deliveryMode === "immediate") await runMessageAutomations(env);
     return trpcResult({ success: true });
   }
   if (name === "agent.deleteMessage") {

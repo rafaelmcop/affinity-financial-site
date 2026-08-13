@@ -10,6 +10,7 @@ import { toast } from "sonner";
 type Occasion =
   "birthday" | "christmas" | "new_year" | "policy_anniversary" | "custom";
 type Audience = "individual" | "group" | "all";
+type DeliveryMode = "default" | "immediate" | "scheduled";
 type Form = {
   id?: number;
   title: string;
@@ -21,6 +22,7 @@ type Form = {
   selectedClientIds: number[];
   message: string;
   scheduledAt: string;
+  deliveryMode: DeliveryMode;
   isActive: boolean;
 };
 const empty: Form = {
@@ -32,6 +34,7 @@ const empty: Form = {
   selectedClientIds: [],
   message: "Olá {nome},",
   scheduledAt: "",
+  deliveryMode: "default",
   isActive: true,
 };
 const labels: Record<Occasion, string> = {
@@ -40,6 +43,12 @@ const labels: Record<Occasion, string> = {
   new_year: "Ano-Novo",
   policy_anniversary: "Aniversário da apólice",
   custom: "Data personalizada",
+};
+const nextDefaultTime = () => {
+  const date = new Date();
+  date.setHours(8, 30, 0, 0);
+  if (date.getTime() <= Date.now()) date.setDate(date.getDate() + 1);
+  return date.toISOString();
 };
 
 export function ScheduledMessagesPanel() {
@@ -55,19 +64,37 @@ export function ScheduledMessagesPanel() {
     if (form.audience === "individual" && !form.clientId)
       return toast.error("Selecione um cliente");
     try {
+      if (
+        form.occasion === "custom" &&
+        form.deliveryMode === "scheduled" &&
+        !form.scheduledAt
+      )
+        return toast.error("Escolha a data e o horário do envio");
+      const scheduledAt =
+        form.occasion !== "custom"
+          ? form.scheduledAt
+            ? new Date(form.scheduledAt).toISOString()
+            : ""
+          : form.deliveryMode === "immediate"
+            ? new Date().toISOString()
+            : form.deliveryMode === "default"
+              ? nextDefaultTime()
+              : new Date(form.scheduledAt).toISOString();
       const payload = {
         ...form,
         channel: "email" as const,
-        scheduledAt: form.scheduledAt
-          ? new Date(form.scheduledAt).toISOString()
-          : "",
+        scheduledAt,
       };
       form.id
         ? await update.mutateAsync({ ...payload, id: form.id })
         : await create.mutateAsync(payload);
       await messages.refetch();
       setForm(null);
-      toast.success("Automação salva");
+      toast.success(
+        form.occasion === "custom" && form.deliveryMode === "immediate"
+          ? "Mensagem enviada imediatamente"
+          : "Automação salva"
+      );
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Não foi possível salvar"
@@ -102,6 +129,7 @@ export function ScheduledMessagesPanel() {
             .map(client => client.id),
       message: row.message,
       scheduledAt: row.scheduledAt ? String(row.scheduledAt).slice(0, 16) : "",
+      deliveryMode: "scheduled",
       isActive: Boolean(row.isActive),
     });
   return (
@@ -287,17 +315,42 @@ export function ScheduledMessagesPanel() {
             </fieldset>
           )}
           {form.occasion === "custom" && (
-            <label className="text-sm text-gray-300 md:col-span-2">
-              Data do envio
-              <Input
-                className="mt-2"
-                type="datetime-local"
-                value={form.scheduledAt}
-                onChange={e =>
-                  setForm({ ...form, scheduledAt: e.target.value })
-                }
-              />
-            </label>
+            <div className="space-y-3 md:col-span-2">
+              <p className="text-sm font-semibold text-gray-300">Quando enviar</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                {([
+                  ["default", "Padrão", "Próximo envio às 8:30 AM"],
+                  ["immediate", "Imediato", "Enviar assim que salvar"],
+                  ["scheduled", "Programado", "Escolher data e horário"],
+                ] as const).map(([value, title, description]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setForm({ ...form, deliveryMode: value })}
+                    className={`rounded-xl border p-4 text-left transition ${form.deliveryMode === value ? "border-gold bg-gold/10" : "border-white/15 bg-black/25 hover:border-gold/40"}`}
+                  >
+                    <span className="block font-semibold text-white">{title}</span>
+                    <span className="mt-1 block text-xs text-gray-400">{description}</span>
+                  </button>
+                ))}
+              </div>
+              {form.deliveryMode === "scheduled" && (
+                <label className="block text-sm text-gray-300">
+                  Data e horário do envio
+                  <Input
+                    className="mt-2"
+                    type="datetime-local"
+                    value={form.scheduledAt}
+                    onChange={e => setForm({ ...form, scheduledAt: e.target.value })}
+                  />
+                </label>
+              )}
+              {form.deliveryMode === "default" && (
+                <p className="rounded-lg bg-gold/10 p-3 text-sm text-gold">
+                  Será enviada no próximo horário padrão: 8:30 AM.
+                </p>
+              )}
+            </div>
           )}
           <textarea
             className="min-h-32 rounded-md border border-white/20 bg-black p-3 md:col-span-2"
