@@ -1141,8 +1141,6 @@ async function runProcedure(
   }
   if (name === "agent.sendClientEmail") {
     const clientId = Number(input.clientId),
-      subject =
-        String(input.subject ?? "").trim() || "Mensagem da Affinity Financial",
       body = String(input.body ?? "").trim();
     const customer = await env.DB.prepare(
       "SELECT id,name,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
@@ -1159,19 +1157,33 @@ async function runProcedure(
       .bind(adminEmail.toLowerCase())
       .first<JsonRecord>();
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
+    const previous = await env.DB.prepare(
+      "SELECT subject,externalId FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? ORDER BY sentAt DESC,id DESC LIMIT 1"
+    )
+      .bind(clientId, adminEmail.toLowerCase())
+      .first<JsonRecord>();
+    const requestedSubject = String(input.subject ?? "").trim();
+    const previousSubject = String(previous?.subject || "").replace(/^(?:re:\s*)+/i, "");
+    const subject = previous
+      ? `Re: ${previousSubject || requestedSubject || "Mensagem da Affinity Financial"}`
+      : requestedSubject || "Mensagem da Affinity Financial";
+    const inReplyTo = String(previous?.externalId || "").trim() || undefined;
     const safeBody = escapeAutomationHtml(body).replaceAll("\n", "<br>");
-    await sendAgentEmail(env, adminEmail, {
+    const sent = await sendAgentEmail(env, adminEmail, {
       to: String(customer.email),
       subject,
       html: emailHtml(subject, `<p>${safeBody}</p>`),
       replyTo: String(config.fromEmail),
+      inReplyTo,
+      references: inReplyTo ? [inReplyTo] : undefined,
     });
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO clientEmails (agentEmail,clientId,direction,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP)"
+        "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)"
       ).bind(
         adminEmail.toLowerCase(),
         clientId,
+        String(sent.messageId || "") || null,
         subject,
         body,
         String(config.fromEmail),

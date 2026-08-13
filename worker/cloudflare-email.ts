@@ -85,7 +85,14 @@ export async function sendEmail(
 export async function sendAgentEmail(
   env: Env,
   agentEmail: string,
-  options: { to: string; subject: string; html: string; replyTo?: string }
+  options: {
+    to: string;
+    subject: string;
+    html: string;
+    replyTo?: string;
+    inReplyTo?: string;
+    references?: string[];
+  }
 ) {
   const config = await env.DB.prepare(
     "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
@@ -105,7 +112,7 @@ export async function sendAgentEmail(
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587,
   });
-  await transporter.sendMail({
+  return transporter.sendMail({
     from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
     ...options,
   });

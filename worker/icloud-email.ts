@@ -21,6 +21,12 @@ const cleanAddress = (value: string) =>
     .toLowerCase()
     .replace(/^.*<([^>]+)>.*$/, "$1");
 
+const cleanReplyBody = (value: string) =>
+  value
+    .split(/\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i)[0]
+    .replace(/\r?\n>[\s\S]*$/gi, "")
+    .trim();
+
 const quoteImap = (value: string) =>
   `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 
@@ -154,9 +160,7 @@ export async function syncIcloudInbox(env: Env, agentEmail: string) {
         if (!customer) continue;
         const externalId =
           parsed.messageId || `icloud:${owner}:${uid}`;
-        const body = String(parsed.text || "")
-          .trim()
-          .slice(0, 50000);
+        const body = cleanReplyBody(String(parsed.text || "")).slice(0, 50000);
         if (!body) continue;
         await env.DB.prepare(
           "INSERT OR IGNORE INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'received',?,?,?,?,?,?)"

@@ -46,6 +46,11 @@ const empty: Form = {
   notes: "",
 };
 const isoDate = (value: unknown) => (value ? String(value).slice(0, 10) : "");
+const chatBody = (value: unknown) =>
+  String(value || "")
+    .split(/\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i)[0]
+    .replace(/\r?\n>[\s\S]*$/gi, "")
+    .trim();
 
 export default function AgentClients() {
   const [search, setSearch] = useState(""),
@@ -391,7 +396,7 @@ export default function AgentClients() {
                     </div>
                     <p className={`mt-2 text-xs font-semibold ${message.direction === "sent" ? "text-black/60" : "text-white/60"}`}>{message.subject}</p>
                     <p className="mt-1 whitespace-pre-wrap text-sm">
-                      {message.body}
+                      {chatBody(message.body)}
                     </p>
                   </div>
                 ))}
@@ -410,12 +415,12 @@ export default function AgentClients() {
                   onChange={event => setEmailBody(event.target.value)}
                 />
                 <div className="flex flex-col gap-3 border-t border-white/10 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                  <Input
+                  {!emails.data?.length && <Input
                     className="h-9 max-w-sm border-white/10 bg-black/20 text-sm"
-                    placeholder="Assunto opcional"
+                    placeholder="Assunto da nova conversa (opcional)"
                     value={emailSubject}
                     onChange={event => setEmailSubject(event.target.value)}
-                  />
+                  />}
                 <Button
                   className="bg-gold px-7 text-black"
                   disabled={
