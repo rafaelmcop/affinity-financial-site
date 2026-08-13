@@ -200,10 +200,10 @@ export function ScheduledMessagesPanel({
             Automações do CRM
           </p>
           <h1 className="mt-2 text-3xl font-bold">
-            {scope === "collective" ? "Mensagens coletivas" : scope === "client" ? "Mensagens deste cliente" : "Mensagens automáticas"}
+            {scope === "collective" ? "Mensagens coletivas" : scope === "client" ? "Mensagens deste cliente" : "Mensagens e automações"}
           </h1>
           <p className="mt-2 text-sm text-gray-400">
-            Enviadas às 8:30 AM pelo e-mail particular configurado no portal.
+            Crie mensagens sob demanda ou automáticas, individuais, em grupo ou coletivas. Os envios programados usam 8:30 AM como horário padrão pelo e-mail particular configurado no portal.
             Use <b>{"{nome}"}</b> para o cliente. O nome e telefone do agente são preenchidos automaticamente.
           </p>
         </div>

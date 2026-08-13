@@ -6,6 +6,8 @@ import {
   ExternalLink,
   LogOut,
   Settings,
+  MessagesSquare,
+  ChevronRight,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -13,7 +15,6 @@ import FloatingInternalChat from "@/components/FloatingInternalChat";
 
 const items = [
   ["Início", "/agentes/dashboard", BarChart3],
-  ["CRM", "/agentes/crm", Contact],
   ["Clientes", "/agentes/clientes", Contact],
   ["Apólices", "/agentes/apolices", FileText],
   ["Tarefas", "/agentes/tarefas", ListTodo],
@@ -34,6 +35,28 @@ export default function AgentSidebar() {
         <div className="mt-1 text-xs text-gray-400">Portal do Agente</div>
       </div>
       <nav className="space-y-1 p-4">
+        <button
+          onClick={() => setLocation("/agentes/crm")}
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${location === "/agentes/crm" || location === "/agentes/mensagens" ? "bg-gold font-semibold text-black" : "text-gray-300 hover:bg-white/10"}`}
+        >
+          <Contact size={18} />
+          <span className="flex-1 text-left">CRM</span>
+          <ChevronRight size={16} />
+        </button>
+        <div className="mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3">
+          <button
+            onClick={() => setLocation("/agentes/crm")}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${location === "/agentes/crm" ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`}
+          >
+            <Contact size={15} /> Clientes e acompanhamento
+          </button>
+          <button
+            onClick={() => setLocation("/agentes/mensagens")}
+            className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${location === "/agentes/mensagens" ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`}
+          >
+            <MessagesSquare size={15} /> Mensagens e automações
+          </button>
+        </div>
         {items.map(([label, href, Icon]) => (
           <button
             key={href}

@@ -1,6 +1,5 @@
 import AgentSidebar from "@/components/AgentSidebar";
 import { PcSheetUpload } from "./AgentPolicies";
-import { ScheduledMessagesPanel } from "./AgentMessages";
 
 export default function AgentTasks() {
   return (
@@ -13,7 +12,7 @@ export default function AgentTasks() {
           </p>
           <h1 className="mt-2 text-3xl font-bold">Tarefas</h1>
           <p className="mt-2 text-gray-400">
-            Importe PC Sheets e administre as mensagens coletivas recorrentes.
+            Importe PC Sheets e transforme os dados das apólices em cadastros organizados.
           </p>
         </div>
         <section className="space-y-4">
@@ -24,9 +23,6 @@ export default function AgentTasks() {
             </p>
           </div>
           <PcSheetUpload />
-        </section>
-        <section className="space-y-4">
-          <ScheduledMessagesPanel scope="collective" />
         </section>
       </main>
     </div>
