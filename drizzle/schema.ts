@@ -120,7 +120,7 @@ export const agentPolicies = mysqlTable("agentPolicies", {
   targetPremium: decimal("targetPremium", { precision: 12, scale: 2 }).default(
     "0.00"
   ),
-  points: decimal("points", { precision: 12, scale: 2 }).default("0.00"),
+  points: int("points").default(0),
   coverageAmount: decimal("coverageAmount", {
     precision: 14,
     scale: 2,

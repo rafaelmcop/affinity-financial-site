@@ -258,7 +258,7 @@ export async function readPcSheet(file: File) {
         ? "Anual"
         : "",
     targetPremium,
-    points: targetPremium,
+    points: Math.round(targetPremium),
     coverageAmount: money(coverage),
     beneficiaries: Array.from(new Set(beneficiaries)).join(", "),
     issuedAt:
@@ -410,7 +410,7 @@ export function PcSheetUpload() {
               setForm({
                 ...form,
                 targetPremium,
-                points: targetPremium,
+                points: Math.round(targetPremium),
               });
             }}
           />
@@ -423,9 +423,12 @@ export function PcSheetUpload() {
           <Input
             className="mt-2"
             type="number"
-            step=".01"
+            step="1"
+            min="0"
             value={form.points || ""}
-            onChange={e => setForm({ ...form, points: Number(e.target.value) })}
+            onChange={e =>
+              setForm({ ...form, points: Math.round(Number(e.target.value)) })
+            }
           />
           <p className="mt-1 text-xs text-gray-500">
             Ajustável para apólices com cálculo diferente.
@@ -542,7 +545,7 @@ export default function AgentPolicies({
                     <b>${Number(p.targetPremium || 0).toFixed(2)}</b>
                   </span>
                   <span>
-                    Pontos: <b>{Number(p.points || 0).toFixed(2)}</b>
+                    Pontos: <b>{Math.round(Number(p.points || 0))}</b>
                   </span>
                   <span>
                     Cobertura:{" "}

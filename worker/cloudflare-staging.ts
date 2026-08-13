@@ -980,7 +980,7 @@ async function runProcedure(
       tasks,
       pendingTasks: tasks.filter(row => row.status === "pending").length,
       score: policies.reduce(
-        (total, row) => total + Number(row.points || 0),
+        (total, row) => total + Math.round(Number(row.points || 0)),
         0
       ),
       newMessages: 0,
@@ -1000,7 +1000,7 @@ async function runProcedure(
         id: Number(row.id),
         premiumAmount: Number(row.premiumAmount || 0),
         targetPremium: Number(row.targetPremium || 0),
-        points: Number(row.points || 0),
+        points: Math.round(Number(row.points || 0)),
         coverageAmount: Number(row.coverageAmount || 0),
       }))
     );
@@ -1162,7 +1162,7 @@ async function runProcedure(
       Number(input.premiumAmount || 0),
       String(input.premiumFrequency ?? "").trim() || null,
       Number(input.targetPremium || 0),
-      Number(input.points || 0),
+      Math.max(0, Math.round(Number(input.points || 0))),
       Number(input.coverageAmount || 0),
       String(input.beneficiaries ?? "").trim() || null,
       String(input.issuedAt ?? "").trim() || null,

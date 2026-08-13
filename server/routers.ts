@@ -560,7 +560,7 @@ export const appRouter = router({
           premiumAmount: z.number().min(0),
           premiumFrequency: z.string().optional(),
           targetPremium: z.number().min(0),
-          points: z.number().min(0),
+          points: z.number().int().min(0),
           coverageAmount: z.number().min(0),
           beneficiaries: z.string().optional(),
           issuedAt: z.string().optional(),
@@ -622,7 +622,7 @@ export const appRouter = router({
           birthDate: birth?.date || null,
           premiumAmount: input.premiumAmount.toFixed(2),
           targetPremium: input.targetPremium.toFixed(2),
-          points: input.points.toFixed(2),
+          points: Math.round(input.points),
           coverageAmount: input.coverageAmount.toFixed(2),
           issuedAt: input.issuedAt
             ? new Date(`${input.issuedAt}T12:00:00Z`)
