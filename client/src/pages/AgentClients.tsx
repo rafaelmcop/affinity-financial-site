@@ -2,8 +2,11 @@ import { useMemo, useState } from "react";
 import {
   ArrowLeft,
   Edit2,
+  Mail,
   Plus,
+  RefreshCw,
   Search,
+  Send,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
@@ -15,7 +18,12 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
 type Status =
-  "new" | "contacted" | "meeting" | "proposal" | "client" | "closed";
+  | "new"
+  | "contacted"
+  | "meeting"
+  | "proposal"
+  | "client"
+  | "closed";
 type Form = {
   id?: number;
   name: string;
@@ -40,13 +48,21 @@ const empty: Form = {
 const isoDate = (value: unknown) => (value ? String(value).slice(0, 10) : "");
 
 export default function AgentClients() {
+  const [search, setSearch] = useState(""),
+    [selectedId, setSelectedId] = useState<number | null>(null),
+    [form, setForm] = useState<Form | null>(null),
+    [emailSubject, setEmailSubject] = useState(""),
+    [emailBody, setEmailBody] = useState("");
   const clients = trpc.agent.listClients.useQuery(),
     policies = trpc.agent.listPolicies.useQuery();
   const saveClient = trpc.agent.saveClient.useMutation(),
     remove = trpc.agent.deleteClient.useMutation();
-  const [search, setSearch] = useState(""),
-    [selectedId, setSelectedId] = useState<number | null>(null),
-    [form, setForm] = useState<Form | null>(null);
+  const emails = trpc.agent.clientEmails.useQuery(
+      { clientId: selectedId || 0 },
+      { enabled: Boolean(selectedId) }
+    ),
+    sendEmail = trpc.agent.sendClientEmail.useMutation(),
+    syncInbox = trpc.agent.syncInbox.useMutation();
   const rows = clients.data || [],
     selected = rows.find(client => client.id === selectedId);
   const filtered = useMemo(
@@ -287,6 +303,115 @@ export default function AgentClients() {
               <p className="mt-4 rounded-lg bg-black/30 p-3 text-gray-300">
                 {selected.notes || "Sem observações."}
               </p>
+            </Card>
+            <Card className="border-gold/20 bg-[#0b1524] p-6">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="flex items-center gap-2 text-xl font-bold text-gold">
+                    <Mail size={20} /> Conversa por e-mail
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-400">
+                    Envie e acompanhe as respostas do iCloud sem sair do portal.
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  disabled={syncInbox.isPending}
+                  onClick={async () => {
+                    try {
+                      const result = await syncInbox.mutateAsync();
+                      await emails.refetch();
+                      toast.success(
+                        result.imported
+                          ? `${result.imported} resposta(s) sincronizada(s)`
+                          : "Caixa de entrada atualizada"
+                      );
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Não foi possível sincronizar"
+                      );
+                    }
+                  }}
+                >
+                  <RefreshCw
+                    className={`mr-2 h-4 w-4 ${syncInbox.isPending ? "animate-spin" : ""}`}
+                  />
+                  Atualizar respostas
+                </Button>
+              </div>
+              <div className="mt-5 max-h-96 space-y-3 overflow-y-auto rounded-xl bg-black/30 p-4">
+                {(emails.data || []).map(message => (
+                  <div
+                    key={message.id}
+                    className={`max-w-[88%] rounded-xl p-4 ${message.direction === "sent" ? "ml-auto bg-gold/15" : "mr-auto bg-sky-500/15"}`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-bold uppercase tracking-wider text-gold">
+                        {message.direction === "sent" ? "Enviado" : "Recebido"}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {new Date(String(message.sentAt)).toLocaleString(
+                          "pt-BR"
+                        )}
+                      </p>
+                    </div>
+                    <p className="mt-2 font-semibold">{message.subject}</p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-gray-300">
+                      {message.body}
+                    </p>
+                  </div>
+                ))}
+                {!emails.data?.length && (
+                  <p className="py-8 text-center text-sm text-gray-500">
+                    Nenhum e-mail registrado para este cliente.
+                  </p>
+                )}
+              </div>
+              <div className="mt-5 space-y-3">
+                <Input
+                  placeholder="Assunto"
+                  value={emailSubject}
+                  onChange={event => setEmailSubject(event.target.value)}
+                />
+                <textarea
+                  className="min-h-32 w-full rounded-md border border-white/20 bg-black p-3"
+                  placeholder="Escreva sua mensagem"
+                  value={emailBody}
+                  onChange={event => setEmailBody(event.target.value)}
+                />
+                <Button
+                  className="w-full bg-gold text-black"
+                  disabled={
+                    !selected.email ||
+                    !emailSubject.trim() ||
+                    !emailBody.trim() ||
+                    sendEmail.isPending
+                  }
+                  onClick={async () => {
+                    try {
+                      await sendEmail.mutateAsync({
+                        clientId: selected.id,
+                        subject: emailSubject,
+                        body: emailBody,
+                      });
+                      setEmailSubject("");
+                      setEmailBody("");
+                      await emails.refetch();
+                      toast.success("E-mail enviado e salvo no histórico");
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Não foi possível enviar"
+                      );
+                    }
+                  }}
+                >
+                  <Send className="mr-2 h-4 w-4" /> Enviar e-mail
+                </Button>
+              </div>
             </Card>
             <div className="grid gap-4 md:grid-cols-2">
               {(policies.data || [])

@@ -12,6 +12,7 @@ import {
   affiliates,
   crmActivities,
   crmClients,
+  clientEmails,
   agentEmailSettings,
   agentPolicies,
   agentTasks,
@@ -65,8 +66,9 @@ const notificationRouter = router({
   sendAffiliateRegistrationEmail: adminProcedure
     .input(z.object({ email: z.string().email(), name: z.string() }))
     .mutation(async ({ input }) => {
-      const { sendAffiliateRegistrationEmail } =
-        await import("./notifications");
+      const { sendAffiliateRegistrationEmail } = await import(
+        "./notifications"
+      );
       const success = await sendAffiliateRegistrationEmail(
         input.email,
         input.name
@@ -286,8 +288,9 @@ export const appRouter = router({
       .query(async ({ input, ctx }) => {
         if (input.affiliateId !== ctx.affiliateId)
           throw new Error("Acesso negado");
-        const { getAffiliateById, getAffiliateReferrals } =
-          await import("./db");
+        const { getAffiliateById, getAffiliateReferrals } = await import(
+          "./db"
+        );
 
         const affiliate = await getAffiliateById(input.affiliateId);
         if (!affiliate) {
@@ -545,9 +548,42 @@ export const appRouter = router({
         await db
           .delete(scheduledMessages)
           .where(eq(scheduledMessages.clientId, input.id));
+        await db
+          .delete(clientEmails)
+          .where(eq(clientEmails.clientId, input.id));
         await db.delete(crmClients).where(eq(crmClients.id, input.id));
         return { success: true };
       }),
+    clientEmails: adminProcedure
+      .input(z.object({ clientId: z.number() }))
+      .query(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        return db
+          .select()
+          .from(clientEmails)
+          .where(
+            and(
+              eq(clientEmails.clientId, input.clientId),
+              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase())
+            )
+          );
+      }),
+    sendClientEmail: adminProcedure
+      .input(
+        z.object({
+          clientId: z.number(),
+          subject: z.string().min(1),
+          body: z.string().min(1),
+        })
+      )
+      .mutation(async () => {
+        throw new Error("O envio integrado está disponível no site publicado");
+      }),
+    syncInbox: adminProcedure.mutation(async () => ({
+      success: true,
+      imported: 0,
+    })),
     savePcSheet: adminProcedure
       .input(
         z.object({
@@ -828,6 +864,9 @@ export const appRouter = router({
             user: row.user,
             fromEmail: row.fromEmail,
             fromName: row.fromName,
+            imapHost: row.imapHost,
+            imapPort: row.imapPort,
+            imapUser: row.imapUser || row.user,
             passwordConfigured: row.password.startsWith("v1."),
           }
         : null;
@@ -842,6 +881,9 @@ export const appRouter = router({
           password: z.string().optional(),
           fromEmail: z.string().email(),
           fromName: z.string().min(1),
+          imapHost: z.string().min(1),
+          imapPort: z.number().min(1),
+          imapUser: z.string().min(1),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -949,8 +991,9 @@ export const appRouter = router({
           input.email.toLowerCase() === previewAdminEmail.toLowerCase() &&
           input.password === previewAdminPassword
         ) {
-          const { createAdminSession, ADMIN_SESSION_COOKIE } =
-            await import("./sessionAuth");
+          const { createAdminSession, ADMIN_SESSION_COOKIE } = await import(
+            "./sessionAuth"
+          );
           const sessionToken = await createAdminSession(
             input.email.toLowerCase()
           );
@@ -985,8 +1028,9 @@ export const appRouter = router({
             ) {
               throw new Error("Credenciais inválidas");
             }
-            const { createAdminSession, ADMIN_SESSION_COOKIE } =
-              await import("./sessionAuth");
+            const { createAdminSession, ADMIN_SESSION_COOKIE } = await import(
+              "./sessionAuth"
+            );
             const sessionToken = await createAdminSession(account.email);
             ctx.res.cookie(ADMIN_SESSION_COOKIE, sessionToken, {
               ...getSessionCookieOptions(ctx.req),
@@ -1024,8 +1068,9 @@ export const appRouter = router({
           throw new Error("Credenciais inválidas");
         }
 
-        const { createAdminSession, ADMIN_SESSION_COOKIE } =
-          await import("./sessionAuth");
+        const { createAdminSession, ADMIN_SESSION_COOKIE } = await import(
+          "./sessionAuth"
+        );
         const sessionToken = await createAdminSession(adminEmail);
         ctx.res.cookie(ADMIN_SESSION_COOKIE, sessionToken, {
           ...getSessionCookieOptions(ctx.req),
@@ -1253,8 +1298,9 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input }) => {
-        const { updateAffiliateStatus, getAffiliateById } =
-          await import("./db");
+        const { updateAffiliateStatus, getAffiliateById } = await import(
+          "./db"
+        );
         const affiliate = await getAffiliateById(input.affiliateId);
         if (!affiliate) throw new Error("Afiliado não encontrado");
 

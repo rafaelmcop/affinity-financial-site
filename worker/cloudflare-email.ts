@@ -1,11 +1,20 @@
 import nodemailer from "nodemailer";
 
 type Row = Record<string, unknown>;
-type Env = { DB: { prepare(query: string): { first<T>(): Promise<T | null>; bind(...values: unknown[]): { first<T>(): Promise<T | null> } } }; JWT_SECRET: string };
+type Env = {
+  DB: {
+    prepare(query: string): {
+      first<T>(): Promise<T | null>;
+      bind(...values: unknown[]): { first<T>(): Promise<T | null> };
+    };
+  };
+  JWT_SECRET: string;
+};
 
 function bytesToBase64(bytes: Uint8Array) {
   let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  for (let index = 0; index < bytes.length; index += 1)
+    binary += String.fromCharCode(bytes[index]);
   return btoa(binary);
 }
 
@@ -15,8 +24,14 @@ function base64ToBytes(value: string) {
 }
 
 async function encryptionKey(secret: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
-  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, ["encrypt", "decrypt"]);
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(secret)
+  );
+  return crypto.subtle.importKey("raw", digest, "AES-GCM", false, [
+    "encrypt",
+    "decrypt",
+  ]);
 }
 
 export async function encryptSmtpPassword(password: string, secret: string) {
@@ -24,26 +39,35 @@ export async function encryptSmtpPassword(password: string, secret: string) {
   const encrypted = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     await encryptionKey(secret),
-    new TextEncoder().encode(password),
+    new TextEncoder().encode(password)
   );
   return `v1.${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(encrypted))}`;
 }
 
 export async function decryptSmtpPassword(value: string, secret: string) {
-  if (!value.startsWith("v1.")) throw new Error("A senha de e-mail precisa ser informada novamente");
+  if (!value.startsWith("v1."))
+    throw new Error("A senha de e-mail precisa ser informada novamente");
   const [, iv, encrypted] = value.split(".");
   const clear = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: base64ToBytes(iv) },
     await encryptionKey(secret),
-    base64ToBytes(encrypted),
+    base64ToBytes(encrypted)
   );
   return new TextDecoder().decode(clear);
 }
 
-export async function sendEmail(env: Env, options: { to: string; subject: string; html: string }) {
-  const config = await env.DB.prepare("SELECT * FROM smtpConfig ORDER BY id DESC LIMIT 1").first<Row>();
+export async function sendEmail(
+  env: Env,
+  options: { to: string; subject: string; html: string }
+) {
+  const config = await env.DB.prepare(
+    "SELECT * FROM smtpConfig ORDER BY id DESC LIMIT 1"
+  ).first<Row>();
   if (!config) throw new Error("Configuração de e-mail incompleta");
-  const password = await decryptSmtpPassword(String(config.password), env.JWT_SECRET);
+  const password = await decryptSmtpPassword(
+    String(config.password),
+    env.JWT_SECRET
+  );
   const port = Number(config.port);
   const transporter = nodemailer.createTransport({
     host: String(config.host),
@@ -58,13 +82,33 @@ export async function sendEmail(env: Env, options: { to: string; subject: string
   });
 }
 
-export async function sendAgentEmail(env: Env, agentEmail: string, options: { to: string; subject: string; html: string }) {
-  const config = await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first<Row>();
+export async function sendAgentEmail(
+  env: Env,
+  agentEmail: string,
+  options: { to: string; subject: string; html: string; replyTo?: string }
+) {
+  const config = await env.DB.prepare(
+    "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
+  )
+    .bind(agentEmail.toLowerCase())
+    .first<Row>();
   if (!config) throw new Error("Configuração de e-mail do agente incompleta");
-  const password = await decryptSmtpPassword(String(config.password), env.JWT_SECRET);
+  const password = await decryptSmtpPassword(
+    String(config.password),
+    env.JWT_SECRET
+  );
   const port = Number(config.port);
-  const transporter = nodemailer.createTransport({ host: String(config.host), port, secure: Number(config.secure) === 1, auth: { user: String(config.user), pass: password }, requireTLS: port === 587 });
-  await transporter.sendMail({ from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`, ...options });
+  const transporter = nodemailer.createTransport({
+    host: String(config.host),
+    port,
+    secure: Number(config.secure) === 1,
+    auth: { user: String(config.user), pass: password },
+    requireTLS: port === 587,
+  });
+  await transporter.sendMail({
+    from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
+    ...options,
+  });
 }
 
 export function emailHtml(title: string, content: string) {

@@ -1081,9 +1081,85 @@ async function runProcedure(
       env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
       env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
       env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(id),
       env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(id),
     ]);
     return trpcResult({ success: true });
+  }
+  if (name === "agent.clientEmails") {
+    const clientId = Number(input.clientId);
+    const owned = await env.DB.prepare(
+      "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(clientId, adminEmail.toLowerCase())
+      .first();
+    if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+    const rows = await env.DB.prepare(
+      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? ORDER BY sentAt ASC,id ASC"
+    )
+      .bind(clientId, adminEmail.toLowerCase())
+      .all<JsonRecord>();
+    return trpcResult(
+      rows.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+      }))
+    );
+  }
+  if (name === "agent.sendClientEmail") {
+    const clientId = Number(input.clientId),
+      subject = String(input.subject ?? "").trim(),
+      body = String(input.body ?? "").trim();
+    const customer = await env.DB.prepare(
+      "SELECT id,name,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(clientId, adminEmail.toLowerCase())
+      .first<JsonRecord>();
+    if (!customer || !validEmail(String(customer.email || "")))
+      return trpcError("Este cliente não possui um e-mail válido");
+    if (!subject || !body || subject.length > 500 || body.length > 50000)
+      return trpcError("Preencha o assunto e a mensagem");
+    const config = await env.DB.prepare(
+      "SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?"
+    )
+      .bind(adminEmail.toLowerCase())
+      .first<JsonRecord>();
+    if (!config) return trpcError("Configure seu e-mail antes de enviar");
+    const safeBody = escapeAutomationHtml(body).replaceAll("\n", "<br>");
+    await sendAgentEmail(env, adminEmail, {
+      to: String(customer.email),
+      subject,
+      html: emailHtml(subject, `<p>${safeBody}</p>`),
+      replyTo: String(config.fromEmail),
+    });
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO clientEmails (agentEmail,clientId,direction,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP)"
+      ).bind(
+        adminEmail.toLowerCase(),
+        clientId,
+        subject,
+        body,
+        String(config.fromEmail),
+        String(customer.email)
+      ),
+      env.DB.prepare(
+        "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+      ).bind(clientId, `E-mail enviado: ${subject}`, adminEmail.toLowerCase()),
+    ]);
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.syncInbox") {
+    try {
+      const { syncIcloudInbox } = await import("./icloud-email");
+      return trpcResult(await syncIcloudInbox(env, adminEmail));
+    } catch (error) {
+      console.error("icloud_manual_sync_failed", adminEmail, error);
+      return trpcError(
+        "Não foi possível sincronizar o iCloud. Confira a senha de aplicativo."
+      );
+    }
   }
   if (name === "agent.savePcSheet") {
     const owner = adminEmail.toLowerCase(),
@@ -1391,7 +1467,7 @@ async function runProcedure(
   }
   if (name === "agent.getEmailSettings") {
     const row = await env.DB.prepare(
-      "SELECT host,port,secure,user,fromEmail,fromName,password FROM agentEmailSettings WHERE lower(agentEmail)=?"
+      "SELECT host,port,secure,user,fromEmail,fromName,password,imapHost,imapPort,imapUser,lastImapSyncAt FROM agentEmailSettings WHERE lower(agentEmail)=?"
     )
       .bind(adminEmail.toLowerCase())
       .first<JsonRecord>();
@@ -1404,6 +1480,10 @@ async function runProcedure(
             user: row.user,
             fromEmail: row.fromEmail,
             fromName: row.fromName,
+            imapHost: row.imapHost || "imap.mail.me.com",
+            imapPort: Number(row.imapPort || 993),
+            imapUser: row.imapUser || row.user,
+            lastImapSyncAt: row.lastImapSyncAt || null,
             passwordConfigured: String(row.password || "").startsWith("v1."),
           }
         : null
@@ -1430,7 +1510,7 @@ async function runProcedure(
         "Informe todos os dados e uma senha específica de aplicativo"
       );
     await env.DB.prepare(
-      "INSERT INTO agentEmailSettings (agentEmail,host,port,secure,user,password,fromEmail,fromName) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(agentEmail) DO UPDATE SET host=excluded.host,port=excluded.port,secure=excluded.secure,user=excluded.user,password=excluded.password,fromEmail=excluded.fromEmail,fromName=excluded.fromName,updatedAt=CURRENT_TIMESTAMP"
+      "INSERT INTO agentEmailSettings (agentEmail,host,port,secure,user,password,fromEmail,fromName,imapHost,imapPort,imapUser) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(agentEmail) DO UPDATE SET host=excluded.host,port=excluded.port,secure=excluded.secure,user=excluded.user,password=excluded.password,fromEmail=excluded.fromEmail,fromName=excluded.fromName,imapHost=excluded.imapHost,imapPort=excluded.imapPort,imapUser=excluded.imapUser,updatedAt=CURRENT_TIMESTAMP"
     )
       .bind(
         owner,
@@ -1440,7 +1520,10 @@ async function runProcedure(
         String(input.user),
         password,
         String(input.fromEmail),
-        String(input.fromName || "Affinity Financial")
+        String(input.fromName || "Affinity Financial"),
+        String(input.imapHost || "imap.mail.me.com"),
+        Number(input.imapPort || 993),
+        String(input.imapUser || input.user)
       )
       .run();
     await env.DB.prepare(
@@ -2469,6 +2552,7 @@ async function runProcedure(
       env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
       env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
       env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
+      env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(id),
       env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(id),
     ]);
     return trpcResult({ success: true });
@@ -2778,7 +2862,14 @@ export default {
     }
   },
   async scheduled(_controller, env, ctx): Promise<void> {
-    ctx.waitUntil(runMessageAutomations(env));
+    ctx.waitUntil(
+      Promise.all([
+        runMessageAutomations(env),
+        import("./icloud-email").then(module =>
+          module.syncAllIcloudInboxes(env)
+        ),
+      ]).then(() => undefined)
+    );
   },
 } satisfies ExportedHandler<Env>;
 

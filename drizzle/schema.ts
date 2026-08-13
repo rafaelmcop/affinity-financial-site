@@ -103,6 +103,20 @@ export const crmActivities = mysqlTable("crmActivities", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+export const clientEmails = mysqlTable("clientEmails", {
+  id: int("id").autoincrement().primaryKey(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
+  clientId: int("clientId").notNull(),
+  direction: mysqlEnum("direction", ["sent", "received"]).notNull(),
+  externalId: varchar("externalId", { length: 500 }),
+  subject: varchar("subject", { length: 500 }).notNull(),
+  body: text("body").notNull(),
+  fromEmail: varchar("fromEmail", { length: 320 }).notNull(),
+  toEmail: varchar("toEmail", { length: 320 }).notNull(),
+  sentAt: timestamp("sentAt").defaultNow().notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export const agentPolicies = mysqlTable("agentPolicies", {
   id: int("id").autoincrement().primaryKey(),
   agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
@@ -183,6 +197,12 @@ export const agentEmailSettings = mysqlTable("agentEmailSettings", {
   fromName: varchar("fromName", { length: 255 })
     .default("Affinity Financial")
     .notNull(),
+  imapHost: varchar("imapHost", { length: 255 })
+    .default("imap.mail.me.com")
+    .notNull(),
+  imapPort: int("imapPort").default(993).notNull(),
+  imapUser: varchar("imapUser", { length: 320 }),
+  lastImapSyncAt: timestamp("lastImapSyncAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
