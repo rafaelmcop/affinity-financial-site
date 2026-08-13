@@ -436,9 +436,10 @@ export const appRouter = router({
         policies,
         tasks,
         pendingTasks: tasks.filter(t => t.status === "pending").length,
-        score:
-          policies.length * 100 +
-          tasks.filter(t => t.status === "completed").length * 10,
+        score: policies.reduce(
+          (total, policy) => total + Number(policy.points || 0),
+          0
+        ),
         newMessages: 0,
         followUps: tasks.filter(t => t.status === "pending" && t.dueAt).length,
       };
@@ -558,8 +559,11 @@ export const appRouter = router({
           product: z.string().optional(),
           premiumAmount: z.number().min(0),
           premiumFrequency: z.string().optional(),
+          targetPremium: z.number().min(0),
+          points: z.number().min(0),
           coverageAmount: z.number().min(0),
           beneficiaries: z.string().optional(),
+          issuedAt: z.string().optional(),
         })
       )
       .mutation(async ({ input, ctx }) => {
@@ -617,7 +621,12 @@ export const appRouter = router({
           clientEmail: input.clientEmail || null,
           birthDate: birth?.date || null,
           premiumAmount: input.premiumAmount.toFixed(2),
+          targetPremium: input.targetPremium.toFixed(2),
+          points: input.points.toFixed(2),
           coverageAmount: input.coverageAmount.toFixed(2),
+          issuedAt: input.issuedAt
+            ? new Date(`${input.issuedAt}T12:00:00Z`)
+            : null,
         };
         if (policy)
           await db
@@ -643,60 +652,6 @@ export const appRouter = router({
             clientId: client.id,
           }))
         );
-        const messages = [
-          {
-            occasion: "christmas" as const,
-            message: `Feliz Natal, ${input.clientName}! A Affinity Financial deseja muita paz e alegria para você e sua família.`,
-            scheduledAt: new Date(
-              Date.UTC(
-                now.getUTCFullYear() +
-                  (now.getUTCMonth() === 11 && now.getUTCDate() >= 24 ? 1 : 0),
-                11,
-                24,
-                15
-              )
-            ),
-          },
-          {
-            occasion: "new_year" as const,
-            message: `Feliz Ano Novo, ${input.clientName}! Desejamos um novo ciclo de saúde, proteção e realizações.`,
-            scheduledAt: new Date(
-              Date.UTC(
-                now.getUTCFullYear() +
-                  (now.getUTCMonth() === 11 && now.getUTCDate() >= 31 ? 1 : 0),
-                11,
-                31,
-                15
-              )
-            ),
-          },
-        ];
-        if (birth) {
-          let next = easternMorning(
-            now.getUTCFullYear(),
-            birth.month,
-            birth.day
-          );
-          if (next <= now)
-            next = easternMorning(
-              now.getUTCFullYear() + 1,
-              birth.month,
-              birth.day
-            );
-          messages.unshift({
-            occasion: "birthday" as any,
-            message: `Feliz aniversário, ${input.clientName}! A equipe da Affinity Financial deseja um dia muito especial para você.`,
-            scheduledAt: next,
-          });
-        }
-        await db.insert(scheduledMessages).values(
-          messages.map(message => ({
-            ...message,
-            agentEmail: owner,
-            clientId: client.id,
-            channel: "email" as const,
-          }))
-        );
         await db.insert(crmActivities).values({
           clientId: client.id,
           type: "status",
@@ -706,7 +661,7 @@ export const appRouter = router({
         return {
           success: true,
           clientId: client.id,
-          automationCount: messages.length,
+          automationCount: 4,
           tasksCreated: 2,
         };
       }),
@@ -765,12 +720,19 @@ export const appRouter = router({
       .input(
         z.object({
           clientId: z.number().optional(),
-          occasion: z.enum(["birthday", "christmas", "new_year", "custom"]),
+          occasion: z.enum([
+            "birthday",
+            "christmas",
+            "new_year",
+            "policy_anniversary",
+            "custom",
+          ]),
           channel: z.literal("email"),
           title: z.string().min(1),
           subject: z.string().min(1),
           audience: z.enum(["individual", "group", "all"]),
           recipientGroup: z.string().optional(),
+          selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
         })
@@ -783,6 +745,9 @@ export const appRouter = router({
           agentEmail: ctx.adminEmail.toLowerCase(),
           clientId: input.clientId || null,
           scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : null,
+          selectedClientIds: input.selectedClientIds
+            ? JSON.stringify(input.selectedClientIds)
+            : null,
         });
         return { success: true };
       }),
@@ -791,11 +756,18 @@ export const appRouter = router({
         z.object({
           id: z.number(),
           clientId: z.number().optional(),
-          occasion: z.enum(["birthday", "christmas", "new_year", "custom"]),
+          occasion: z.enum([
+            "birthday",
+            "christmas",
+            "new_year",
+            "policy_anniversary",
+            "custom",
+          ]),
           title: z.string().min(1),
           subject: z.string().min(1),
           audience: z.enum(["individual", "group", "all"]),
           recipientGroup: z.string().optional(),
+          selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
           isActive: z.boolean(),
@@ -813,6 +785,9 @@ export const appRouter = router({
             clientId: data.clientId || null,
             scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
             isActive: data.isActive ? 1 : 0,
+            selectedClientIds: data.selectedClientIds
+              ? JSON.stringify(data.selectedClientIds)
+              : null,
           })
           .where(
             and(

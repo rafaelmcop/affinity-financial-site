@@ -15,8 +15,11 @@ type PolicyForm = {
   product: string;
   premiumAmount: number;
   premiumFrequency: string;
+  targetPremium: number;
+  points: number;
   coverageAmount: number;
   beneficiaries: string;
+  issuedAt: string;
 };
 const empty: PolicyForm = {
   clientName: "",
@@ -27,8 +30,11 @@ const empty: PolicyForm = {
   product: "",
   premiumAmount: 0,
   premiumFrequency: "",
+  targetPremium: 0,
+  points: 0,
   coverageAmount: 0,
   beneficiaries: "",
+  issuedAt: "",
 };
 const money = (v: string) => Number(v.replace(/[$,]/g, "")) || 0;
 export async function readPcSheet(file: File) {
@@ -122,6 +128,15 @@ export async function readPcSheet(file: File) {
       .flat()
       .find(line => /Planned Periodic\/Modal Premium/i.test(line)) || "";
   let premium = (premiumLine.match(/\$[\d,]+\.\d{2}/g) || []).at(-1) || "";
+  const targetPremiumText = find(
+    all,
+    /Target Premium[^$\d]{0,40}\$?\s*([\d,]+(?:\.\d{2})?)/i
+  );
+  const issuedDate =
+    find(
+      all,
+      /(?:Policy Date|Issue Date|Effective Date)[^\d]{0,30}(\d{1,2}\/\d{1,2}\/\d{4})/i
+    ) || "";
   const flatLines = pageLines.flat();
   const primaryIndex = flatLines.findIndex(line => /^Primary:/i.test(line));
   const primaryLine =
@@ -222,6 +237,10 @@ export async function readPcSheet(file: File) {
     if (coreBeneficiary) beneficiaries.unshift(coreBeneficiary.trim());
   }
   const dobParts = dob.split("/");
+  const issueParts = issuedDate.split("/");
+  const targetPremium = targetPremiumText
+    ? money(targetPremiumText)
+    : money(premium) * 12;
   return {
     clientName: name,
     clientEmail: email,
@@ -238,8 +257,14 @@ export async function readPcSheet(file: File) {
       : /\bAnnual\b/.test(all)
         ? "Anual"
         : "",
+    targetPremium,
+    points: targetPremium,
     coverageAmount: money(coverage),
     beneficiaries: Array.from(new Set(beneficiaries)).join(", "),
+    issuedAt:
+      issueParts.length === 3
+        ? `${issueParts[2]}-${issueParts[0].padStart(2, "0")}-${issueParts[1].padStart(2, "0")}`
+        : "",
   };
 }
 export function PcSheetUpload() {
@@ -374,6 +399,51 @@ export function PcSheetUpload() {
           />
         </label>
         <label className="text-sm text-gray-300">
+          Target premium anual
+          <Input
+            className="mt-2"
+            type="number"
+            step=".01"
+            value={form.targetPremium || ""}
+            onChange={e => {
+              const targetPremium = Number(e.target.value);
+              setForm({
+                ...form,
+                targetPremium,
+                points: targetPremium,
+              });
+            }}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Normalmente é o premium mensal multiplicado por 12.
+          </p>
+        </label>
+        <label className="text-sm text-gray-300">
+          Pontos anuais
+          <Input
+            className="mt-2"
+            type="number"
+            step=".01"
+            value={form.points || ""}
+            onChange={e => setForm({ ...form, points: Number(e.target.value) })}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Ajustável para apólices com cálculo diferente.
+          </p>
+        </label>
+        <label className="text-sm text-gray-300">
+          Data de emissão da apólice
+          <Input
+            className="mt-2"
+            type="date"
+            value={form.issuedAt}
+            onChange={e => setForm({ ...form, issuedAt: e.target.value })}
+          />
+          <p className="mt-1 text-xs text-gray-500">
+            Usada para a revisão anual e o aviso ao agente.
+          </p>
+        </label>
+        <label className="text-sm text-gray-300">
           Valor da cobertura
           <Input
             className="mt-2"
@@ -406,7 +476,7 @@ export function PcSheetUpload() {
                 utils.agent.listPolicies.invalidate(),
                 utils.agent.listMessages.invalidate(),
                 utils.agent.listTasks.invalidate(),
-                utils.crm.list.invalidate(),
+                utils.agent.listClients.invalidate(),
               ]);
               toast.success(
                 `Cliente pronto: ${result.automationCount ?? 0} mensagens e acompanhamentos programados`
@@ -466,6 +536,13 @@ export default function AgentPolicies({
                       ${Number(p.premiumAmount || 0).toFixed(2)}{" "}
                       {p.premiumFrequency}
                     </b>
+                  </span>
+                  <span>
+                    Target premium:{" "}
+                    <b>${Number(p.targetPremium || 0).toFixed(2)}</b>
+                  </span>
+                  <span>
+                    Pontos: <b>{Number(p.points || 0).toFixed(2)}</b>
                   </span>
                   <span>
                     Cobertura:{" "}

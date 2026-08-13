@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
-type Occasion = "birthday" | "christmas" | "new_year" | "custom";
+type Occasion =
+  "birthday" | "christmas" | "new_year" | "policy_anniversary" | "custom";
 type Audience = "individual" | "group" | "all";
 type Form = {
   id?: number;
@@ -17,6 +18,7 @@ type Form = {
   audience: Audience;
   clientId?: number;
   recipientGroup: string;
+  selectedClientIds: number[];
   message: string;
   scheduledAt: string;
   isActive: boolean;
@@ -27,6 +29,7 @@ const empty: Form = {
   occasion: "custom",
   audience: "individual",
   recipientGroup: "client",
+  selectedClientIds: [],
   message: "Olá {nome},",
   scheduledAt: "",
   isActive: true,
@@ -35,6 +38,7 @@ const labels: Record<Occasion, string> = {
   birthday: "Aniversário",
   christmas: "Natal",
   new_year: "Ano-Novo",
+  policy_anniversary: "Aniversário da apólice",
   custom: "Data personalizada",
 };
 
@@ -70,6 +74,13 @@ export function ScheduledMessagesPanel() {
       );
     }
   };
+  const parseRecipients = (value: unknown) => {
+    try {
+      return value ? (JSON.parse(String(value)) as number[]) : [];
+    } catch {
+      return [];
+    }
+  };
   const edit = (row: any) =>
     setForm({
       id: row.id,
@@ -79,6 +90,16 @@ export function ScheduledMessagesPanel() {
       audience: row.audience || (row.clientId ? "individual" : "all"),
       clientId: row.clientId || undefined,
       recipientGroup: row.recipientGroup || "client",
+      selectedClientIds: row.selectedClientIds
+        ? parseRecipients(row.selectedClientIds)
+        : (clients.data || [])
+            .filter(
+              client =>
+                client.email &&
+                (row.audience !== "group" ||
+                  client.status === row.recipientGroup)
+            )
+            .map(client => client.id),
       message: row.message,
       scheduledAt: row.scheduledAt ? String(row.scheduledAt).slice(0, 16) : "",
       isActive: Boolean(row.isActive),
@@ -125,6 +146,7 @@ export function ScheduledMessagesPanel() {
               <option value="birthday">Aniversário</option>
               <option value="christmas">Natal</option>
               <option value="new_year">Ano-Novo</option>
+              <option value="policy_anniversary">Aniversário da apólice</option>
               <option value="custom">Data personalizada</option>
             </select>
           </label>
@@ -133,9 +155,19 @@ export function ScheduledMessagesPanel() {
             <select
               className="mt-2 h-10 w-full rounded-md border border-white/20 bg-black px-3"
               value={form.audience}
-              onChange={e =>
-                setForm({ ...form, audience: e.target.value as Audience })
-              }
+              onChange={e => {
+                const audience = e.target.value as Audience;
+                setForm({
+                  ...form,
+                  audience,
+                  selectedClientIds:
+                    audience === "individual"
+                      ? []
+                      : (clients.data || [])
+                          .filter(client => client.email)
+                          .map(client => client.id),
+                });
+              }}
             >
               <option value="individual">Individual</option>
               <option value="group">Grupo</option>
@@ -169,9 +201,19 @@ export function ScheduledMessagesPanel() {
               <select
                 className="mt-2 h-10 w-full rounded-md border border-white/20 bg-black px-3"
                 value={form.recipientGroup}
-                onChange={e =>
-                  setForm({ ...form, recipientGroup: e.target.value })
-                }
+                onChange={e => {
+                  const recipientGroup = e.target.value;
+                  setForm({
+                    ...form,
+                    recipientGroup,
+                    selectedClientIds: (clients.data || [])
+                      .filter(
+                        client =>
+                          client.email && client.status === recipientGroup
+                      )
+                      .map(client => client.id),
+                  });
+                }}
               >
                 <option value="new">Novos</option>
                 <option value="contacted">Contatados</option>
@@ -181,6 +223,68 @@ export function ScheduledMessagesPanel() {
                 <option value="closed">Encerrados</option>
               </select>
             </label>
+          )}
+          {form.audience !== "individual" && (
+            <fieldset className="max-h-64 overflow-y-auto rounded-lg border border-white/15 bg-black/30 p-4 md:col-span-2">
+              <legend className="px-2 text-sm font-semibold text-gold">
+                Para quem vai esta mensagem
+              </legend>
+              <p className="mb-3 text-xs text-gray-400">
+                Selecione ou desmarque clientes. A lista escolhida ficará salva
+                nesta automação.
+              </p>
+              <div className="mb-3 flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      selectedClientIds: (clients.data || [])
+                        .filter(client => client.email)
+                        .map(client => client.id),
+                    })
+                  }
+                >
+                  Selecionar todos
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setForm({ ...form, selectedClientIds: [] })}
+                >
+                  Desmarcar todos
+                </Button>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(clients.data || [])
+                  .filter(client => client.email)
+                  .map(client => (
+                    <label
+                      key={client.id}
+                      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-white/5"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.selectedClientIds.includes(client.id)}
+                        onChange={event =>
+                          setForm({
+                            ...form,
+                            selectedClientIds: event.target.checked
+                              ? [...form.selectedClientIds, client.id]
+                              : form.selectedClientIds.filter(
+                                  id => id !== client.id
+                                ),
+                          })
+                        }
+                      />
+                      {client.name} — {client.email}
+                    </label>
+                  ))}
+              </div>
+            </fieldset>
           )}
           {form.occasion === "custom" && (
             <label className="text-sm text-gray-300 md:col-span-2">
@@ -260,6 +364,17 @@ export function ScheduledMessagesPanel() {
             </p>
             <p className="mt-3 text-sm font-semibold">
               {row.subject || row.title}
+            </p>
+            <p className="mt-2 text-xs text-sky-300">
+              Para:{" "}
+              {row.audience === "individual"
+                ? (clients.data || []).find(c => c.id === row.clientId)?.name ||
+                  "1 cliente"
+                : row.selectedClientIds
+                  ? `${parseRecipients(row.selectedClientIds).length} clientes selecionados`
+                  : row.audience === "all"
+                    ? "Todos os clientes"
+                    : `Grupo ${row.recipientGroup || "selecionado"}`}
             </p>
             <p className="mt-2 line-clamp-3 text-sm text-gray-300">
               {row.message}

@@ -117,6 +117,10 @@ export const agentPolicies = mysqlTable("agentPolicies", {
     "0.00"
   ),
   premiumFrequency: varchar("premiumFrequency", { length: 50 }),
+  targetPremium: decimal("targetPremium", { precision: 12, scale: 2 }).default(
+    "0.00"
+  ),
+  points: decimal("points", { precision: 12, scale: 2 }).default("0.00"),
   coverageAmount: decimal("coverageAmount", {
     precision: 14,
     scale: 2,
@@ -147,6 +151,7 @@ export const scheduledMessages = mysqlTable("scheduledMessages", {
     "birthday",
     "christmas",
     "new_year",
+    "policy_anniversary",
     "custom",
   ])
     .default("custom")
@@ -158,6 +163,7 @@ export const scheduledMessages = mysqlTable("scheduledMessages", {
     .default("individual")
     .notNull(),
   recipientGroup: varchar("recipientGroup", { length: 50 }),
+  selectedClientIds: text("selectedClientIds"),
   subject: varchar("subject", { length: 255 }),
   scheduledAt: timestamp("scheduledAt"),
   lastSentAt: timestamp("lastSentAt"),

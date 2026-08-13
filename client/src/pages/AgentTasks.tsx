@@ -5,7 +5,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { PcSheetUpload } from "./AgentPolicies";
 
 export default function AgentTasks() {
   const tasks = trpc.agent.listTasks.useQuery();
@@ -23,20 +22,12 @@ export default function AgentTasks() {
           </p>
           <h1 className="mt-2 text-3xl font-bold">Tarefas</h1>
           <p className="mt-2 text-gray-400">
-            Importe um PC Sheet ou organize seus próximos acompanhamentos.
+            Organize seus acompanhamentos e veja os avisos de aniversário das
+            apólices.
           </p>
         </div>
         <section className="space-y-4">
-          <div>
-            <h2 className="text-2xl font-bold">Enviar PC Sheet</h2>
-            <p className="mt-1 text-sm text-gray-400">
-              O documento cria o cliente, a apólice e as automações necessárias.
-            </p>
-          </div>
-          <PcSheetUpload />
-        </section>
-        <section className="space-y-4">
-          <h2 className="text-2xl font-bold text-gold">Lista de tarefas</h2>
+          <h2 className="text-2xl font-bold text-gold">Suas tarefas</h2>
           <Card className="grid gap-3 border-gold/20 bg-[#0b1524] p-5 md:grid-cols-[1fr_240px_auto]">
             <Input
               placeholder="Nova tarefa"

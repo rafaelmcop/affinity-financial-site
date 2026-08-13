@@ -979,9 +979,10 @@ async function runProcedure(
       policies,
       tasks,
       pendingTasks: tasks.filter(row => row.status === "pending").length,
-      score:
-        policies.length * 100 +
-        tasks.filter(row => row.status === "completed").length * 10,
+      score: policies.reduce(
+        (total, row) => total + Number(row.points || 0),
+        0
+      ),
       newMessages: 0,
       followUps: tasks.filter(row => row.status === "pending" && row.dueAt)
         .length,
@@ -998,6 +999,8 @@ async function runProcedure(
         ...row,
         id: Number(row.id),
         premiumAmount: Number(row.premiumAmount || 0),
+        targetPremium: Number(row.targetPremium || 0),
+        points: Number(row.points || 0),
         coverageAmount: Number(row.coverageAmount || 0),
       }))
     );
@@ -1158,71 +1161,58 @@ async function runProcedure(
       String(input.product ?? "").trim() || null,
       Number(input.premiumAmount || 0),
       String(input.premiumFrequency ?? "").trim() || null,
+      Number(input.targetPremium || 0),
+      Number(input.points || 0),
       Number(input.coverageAmount || 0),
       String(input.beneficiaries ?? "").trim() || null,
+      String(input.issuedAt ?? "").trim() || null,
     ];
     if (policy)
       await env.DB.prepare(
-        "UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,product=?,premiumAmount=?,premiumFrequency=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+        "UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,product=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
       )
         .bind(...policyValues, Number(policy.id), owner)
         .run();
     else
       await env.DB.prepare(
-        "INSERT INTO agentPolicies (clientId,clientName,clientEmail,clientPhone,birthDate,product,premiumAmount,premiumFrequency,coverageAmount,beneficiaries,agentEmail,policyNumber) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)"
+        "INSERT INTO agentPolicies (clientId,clientName,clientEmail,clientPhone,birthDate,product,premiumAmount,premiumFrequency,targetPremium,points,coverageAmount,beneficiaries,issuedAt,agentEmail,policyNumber) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
       )
         .bind(...policyValues, owner, policyNumber)
         .run();
-    const now = new Date(),
-      year = now.getUTCFullYear();
-    const future = (month: number, day: number) => {
-      let date = new Date(Date.UTC(year, month - 1, day, 15, 0, 0));
-      if (date <= now)
-        date = new Date(Date.UTC(year + 1, month - 1, day, 15, 0, 0));
-      return date.toISOString();
-    };
-    const automations: Array<[string, string, string, string]> = [
+    const defaultMessages = [
+      [
+        "birthday",
+        "Feliz aniversário",
+        "Feliz aniversário, {nome}!",
+        "Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.",
+      ],
       [
         "christmas",
-        "email",
-        `Feliz Natal, ${clientName}! A Affinity Financial deseja muita paz e alegria para você e sua família.`,
-        future(12, 24),
+        "Feliz Natal",
+        "Feliz Natal, {nome}!",
+        "Olá {nome}, desejo a você e sua família um Natal repleto de paz, alegria e união.",
       ],
       [
         "new_year",
-        "email",
-        `Feliz Ano Novo, ${clientName}! Desejamos um novo ciclo de saúde, proteção e realizações.`,
-        future(12, 31),
+        "Feliz Ano-Novo",
+        "Feliz Ano-Novo, {nome}!",
+        "Olá {nome}, desejo um novo ano de saúde, proteção, prosperidade e grandes realizações.",
+      ],
+      [
+        "policy_anniversary",
+        "Revisão anual da apólice",
+        "Sua apólice completa mais um ano",
+        "Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}",
       ],
     ];
-    if (birthday)
-      automations.unshift([
-        "birthday",
-        clientEmail ? "email" : "sms",
-        `Feliz aniversário, ${clientName}! A equipe da Affinity Financial deseja um dia muito especial para você.`,
-        (() => {
-          let date = easternMorning(year, birthday.month, birthday.day);
-          if (date <= now)
-            date = easternMorning(year + 1, birthday.month, birthday.day);
-          return date.toISOString();
-        })(),
-      ]);
-    let automationCount = 0;
-    for (const [occasion, channel, message, scheduledAt] of automations) {
-      const exists = await env.DB.prepare(
-        "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND clientId=? AND occasion=? AND isActive=1"
+    for (const [occasion, title, subject, message] of defaultMessages) {
+      await env.DB.prepare(
+        "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT ?,?,'email',?,?,'all',?,1 WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion=? AND title IS NOT NULL)"
       )
-        .bind(owner, clientId, occasion)
-        .first();
-      if (!exists) {
-        await env.DB.prepare(
-          "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,message,scheduledAt) VALUES (?,?,?,?,?,?)"
-        )
-          .bind(owner, clientId, occasion, channel, message, scheduledAt)
-          .run();
-        automationCount++;
-      }
+        .bind(owner, occasion, title, subject, message, owner, occasion)
+        .run();
     }
+    const now = new Date();
     const followUps: Array<[string, string]> = [
       [
         `Confirmar boas-vindas e entrega da apólice de ${clientName}`,
@@ -1258,7 +1248,7 @@ async function runProcedure(
     return trpcResult({
       success: true,
       clientId,
-      automationCount,
+      automationCount: 4,
       tasksCreated: 2,
     });
   }
@@ -1299,26 +1289,47 @@ async function runProcedure(
   }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
-    const count = await env.DB.prepare(
-      "SELECT COUNT(*) total FROM scheduledMessages WHERE lower(agentEmail)=?"
-    )
-      .bind(owner)
-      .first<JsonRecord>();
-    if (!Number(count?.total || 0)) {
-      await env.DB.batch([
-        env.DB.prepare(
-          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,'birthday','email','Feliz aniversário','Feliz aniversário, {nome}!','all','Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.',1)"
-        ).bind(owner),
-        env.DB.prepare(
-          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,'christmas','email','Feliz Natal','Feliz Natal, {nome}!','all','Olá {nome}, desejo a você e sua família um Natal repleto de paz, alegria e união.',1)"
-        ).bind(owner),
-        env.DB.prepare(
-          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,'new_year','email','Feliz Ano-Novo','Feliz Ano-Novo, {nome}!','all','Olá {nome}, desejo um novo ano de saúde, proteção, prosperidade e grandes realizações.',1)"
-        ).bind(owner),
-      ]);
+    const defaults = [
+      [
+        "birthday",
+        "Feliz aniversário",
+        "Feliz aniversário, {nome}!",
+        "Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.",
+      ],
+      [
+        "christmas",
+        "Feliz Natal",
+        "Feliz Natal, {nome}!",
+        "Olá {nome}, desejo a você e sua família um Natal repleto de paz, alegria e união.",
+      ],
+      [
+        "new_year",
+        "Feliz Ano-Novo",
+        "Feliz Ano-Novo, {nome}!",
+        "Olá {nome}, desejo um novo ano de saúde, proteção, prosperidade e grandes realizações.",
+      ],
+      [
+        "policy_anniversary",
+        "Revisão anual da apólice",
+        "Sua apólice completa mais um ano",
+        "Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}",
+      ],
+    ];
+    for (const [occasion, title, subject, message] of defaults) {
+      const exists = await env.DB.prepare(
+        "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion=? AND title IS NOT NULL LIMIT 1"
+      )
+        .bind(owner, occasion)
+        .first();
+      if (!exists)
+        await env.DB.prepare(
+          "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) VALUES (?,?,'email',?,?,'all',?,1)"
+        )
+          .bind(owner, occasion, title, subject, message)
+          .run();
     }
     const rows = await env.DB.prepare(
-      "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? ORDER BY scheduledAt"
+      "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND (title IS NOT NULL OR occasion='custom') ORDER BY scheduledAt"
     )
       .bind(adminEmail.toLowerCase())
       .all<JsonRecord>();
@@ -1328,7 +1339,7 @@ async function runProcedure(
   }
   if (name === "agent.scheduleMessage") {
     await env.DB.prepare(
-      "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,message,scheduledAt) VALUES (?,?,?,'email',?,?,?,?,?,?)"
+      "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt) VALUES (?,?,?,'email',?,?,?,?,?,?,?)"
     )
       .bind(
         adminEmail.toLowerCase(),
@@ -1338,6 +1349,9 @@ async function runProcedure(
         String(input.subject ?? "Mensagem da Affinity Financial"),
         String(input.audience ?? "individual"),
         String(input.recipientGroup ?? "") || null,
+        Array.isArray(input.selectedClientIds)
+          ? JSON.stringify(input.selectedClientIds.map(Number))
+          : null,
         String(input.message ?? "").trim(),
         input.scheduledAt || null
       )
@@ -1346,7 +1360,7 @@ async function runProcedure(
   }
   if (name === "agent.updateMessage") {
     await env.DB.prepare(
-      "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,message=?,scheduledAt=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
+      "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
     )
       .bind(
         input.clientId || null,
@@ -1355,6 +1369,9 @@ async function runProcedure(
         String(input.subject),
         String(input.audience),
         String(input.recipientGroup ?? "") || null,
+        Array.isArray(input.selectedClientIds)
+          ? JSON.stringify(input.selectedClientIds.map(Number))
+          : null,
         String(input.message),
         input.scheduledAt || null,
         input.isActive ? 1 : 0,
@@ -2765,6 +2782,15 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
+function escapeAutomationHtml(value: unknown) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 async function runMessageAutomations(env: Env) {
   const now = new Date();
   const eastern = new Intl.DateTimeFormat("en-US", {
@@ -2785,18 +2811,114 @@ async function runMessageAutomations(env: Env) {
   const month = Number(eastern.month),
     day = Number(eastern.day),
     year = eastern.year;
+  await env.DB.prepare(
+    "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. É um ótimo momento para revisarmos sua proteção. Escolha o melhor horário em nossa agenda: {agenda}',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
+  ).run();
   const automations = await env.DB.prepare(
     "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
   ).all<JsonRecord>();
   for (const automation of automations.results) {
-    const occasion = String(automation.occasion),
-      due =
-        occasion === "birthday" ||
-        (occasion === "christmas" && month === 12 && day === 25) ||
-        (occasion === "new_year" && month === 1 && day === 1) ||
-        (occasion === "custom" &&
-          automation.scheduledAt &&
-          new Date(String(automation.scheduledAt)) <= now);
+    const occasion = String(automation.occasion);
+    if (occasion === "policy_anniversary") {
+      let policySql =
+        "SELECT p.id policyId,p.policyNumber,p.clientId,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND strftime('%m-%d',p.issuedAt)=?";
+      const policyBinds: unknown[] = [
+        String(automation.agentEmail).toLowerCase(),
+        `${eastern.month}-${eastern.day}`,
+      ];
+      if (automation.selectedClientIds) {
+        let selected: number[] = [];
+        try {
+          selected = JSON.parse(String(automation.selectedClientIds));
+        } catch {
+          selected = [];
+        }
+        if (!selected.length) continue;
+        policySql += ` AND c.id IN (${selected.map(() => "?").join(",")})`;
+        policyBinds.push(...selected);
+      }
+      const policies = await env.DB.prepare(policySql)
+        .bind(...policyBinds)
+        .all<JsonRecord>();
+      for (const policy of policies.results) {
+        const sentKey = `policy-anniversary-${policy.policyId}-${year}`;
+        const taskTitle = `Aniversário da apólice ${String(policy.policyNumber)} — revisar com ${String(policy.name)} (${year})`;
+        const existingTask = await env.DB.prepare(
+          "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
+        )
+          .bind(
+            String(automation.agentEmail).toLowerCase(),
+            Number(policy.clientId),
+            taskTitle
+          )
+          .first();
+        if (!existingTask)
+          await env.DB.prepare(
+            "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,CURRENT_TIMESTAMP)"
+          )
+            .bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(policy.clientId),
+              taskTitle
+            )
+            .run();
+        if (!policy.email) continue;
+        const sent = await env.DB.prepare(
+          "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
+        )
+          .bind(Number(automation.id), Number(policy.clientId), sentKey)
+          .first();
+        if (sent) continue;
+        const safeName = escapeAutomationHtml(policy.name);
+        const scheduleUrl =
+          "https://calendly.com/affinityfc/consultoria-gratuita?hide_event_type_details=1&hide_gdpr_banner=1";
+        const body = escapeAutomationHtml(automation.message)
+          .replaceAll("{nome}", safeName)
+          .replaceAll(
+            "{agenda}",
+            `<a href="${scheduleUrl}">agendar a revisão da apólice</a>`
+          );
+        try {
+          await sendAgentEmail(env, String(automation.agentEmail), {
+            to: String(policy.email),
+            subject: escapeAutomationHtml(
+              automation.subject || automation.title
+            ).replaceAll("{nome}", safeName),
+            html: emailHtml(
+              escapeAutomationHtml(automation.title || "Revisão anual"),
+              `<p>${body.replaceAll("\n", "<br>")}</p>`
+            ),
+          });
+          await env.DB.batch([
+            env.DB.prepare(
+              "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
+            ).bind(Number(automation.id), Number(policy.clientId), sentKey),
+            env.DB.prepare(
+              "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+            ).bind(
+              Number(policy.clientId),
+              `Convite automático para revisão anual da apólice ${String(policy.policyNumber)} enviado`,
+              String(automation.agentEmail)
+            ),
+          ]);
+        } catch (error) {
+          console.error(
+            "policy_anniversary_email_failed",
+            automation.id,
+            policy.policyId,
+            error
+          );
+        }
+      }
+      continue;
+    }
+    const due =
+      occasion === "birthday" ||
+      (occasion === "christmas" && month === 12 && day === 25) ||
+      (occasion === "new_year" && month === 1 && day === 1) ||
+      (occasion === "custom" &&
+        automation.scheduledAt &&
+        new Date(String(automation.scheduledAt)) <= now);
     if (!due) continue;
     let sql =
       "SELECT id,name,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND email<>''";
@@ -2809,9 +2931,24 @@ async function runMessageAutomations(env: Env) {
       sql += " AND id=?";
       binds.push(Number(automation.clientId));
     }
-    if (String(automation.audience) === "group" && automation.recipientGroup) {
+    if (
+      String(automation.audience) === "group" &&
+      automation.recipientGroup &&
+      !automation.selectedClientIds
+    ) {
       sql += " AND status=?";
       binds.push(String(automation.recipientGroup));
+    }
+    if (automation.selectedClientIds) {
+      let selected: number[] = [];
+      try {
+        selected = JSON.parse(String(automation.selectedClientIds));
+      } catch {
+        selected = [];
+      }
+      if (!selected.length) continue;
+      sql += ` AND id IN (${selected.map(() => "?").join(",")})`;
+      binds.push(...selected);
     }
     const clients = await env.DB.prepare(sql)
       .bind(...binds)
@@ -2824,15 +2961,11 @@ async function runMessageAutomations(env: Env) {
         .bind(Number(automation.id), Number(client.id), sentKey)
         .first();
       if (sent) continue;
-      const escapeHtml = (value: unknown) =>
-        String(value || "")
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;")
-          .replaceAll("'", "&#039;");
       const personalize = (value: unknown) =>
-        escapeHtml(value).replaceAll("{nome}", escapeHtml(client.name));
+        escapeAutomationHtml(value).replaceAll(
+          "{nome}",
+          escapeAutomationHtml(client.name)
+        );
       try {
         await sendAgentEmail(env, String(automation.agentEmail), {
           to: String(client.email),
