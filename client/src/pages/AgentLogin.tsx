@@ -59,86 +59,109 @@ export default function AgentLogin() {
 
   return (
     <div className="flex min-h-screen flex-col bg-black text-white">
-      <header className="border-b border-gold/20 p-4">
-        <div className="mx-auto flex max-w-7xl items-center justify-between">
-          <div>
-            <strong className="text-xl text-gold">Affinity Financial</strong>
-            <span className="ml-3 hidden text-sm text-gold/80 sm:inline">
-              Portal do Agente
-            </span>
+      <header className="sticky top-0 z-40 border-b border-gold/20 bg-black">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between py-4">
+            <div className="flex items-center gap-3">
+              <div className="text-xl font-bold text-gold">
+                Affinity Financial
+              </div>
+              <span className="hidden text-sm font-semibold text-gold/80 sm:inline">
+                Portal do Agente
+              </span>
+            </div>
+            <Button
+              variant="outline"
+              className="border-gold/30 text-gold hover:bg-gold/10"
+              onClick={() => setLocation("/")}
+            >
+              Voltar ao Site
+            </Button>
           </div>
-          <Button variant="outline" onClick={() => setLocation("/")}>
-            Voltar ao site
-          </Button>
         </div>
       </header>
-      <main className="flex flex-1 items-center justify-center p-4 py-10">
+      <main className="flex flex-1 items-center justify-center px-4 py-8">
         <Card className="w-full max-w-md border-gold/20 bg-black p-8">
-          <p className="text-sm font-bold uppercase tracking-[.2em] text-gold">
-            Portal do Agente
-          </p>
-          <h1 className="mt-2 text-3xl font-bold text-white">
+          <h1 className="mb-2 text-3xl font-bold text-gold">
             {mode === "login"
-              ? "Acessar sua conta"
+              ? "Bem-vindo"
               : mode === "register"
                 ? "Criar conta"
-                : "Redefinir senha"}
+                : "Recuperar Senha"}
           </h1>
-          <p className="mb-7 mt-2 text-sm text-gray-400">
+          <p className="mb-6 text-sm text-gray-400">
             {mode === "login"
-              ? "Entre para acessar clientes, CRM, apólices e tarefas."
+              ? "Faça login para acessar o Portal do Agente"
               : mode === "register"
                 ? "Preencha seus dados. O acesso será liberado após aprovação administrativa."
                 : "Informe seu e-mail para receber um link seguro de redefinição."}
           </p>
-          <form className="space-y-4" onSubmit={submit}>
+          <form method="post" className="space-y-4" onSubmit={submit}>
             {mode === "register" && (
               <>
-                <Input
-                  placeholder="Nome completo"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  required
-                />
-                <Input
-                  placeholder="Telefone"
-                  value={phone}
-                  onChange={e => setPhone(e.target.value)}
-                />
+                <Field label="Nome completo">
+                  <Input
+                    className="border-gold/30 bg-black text-white"
+                    placeholder="Seu nome completo"
+                    value={name}
+                    onChange={e => setName(e.target.value)}
+                    required
+                  />
+                </Field>
+                <Field label="Telefone">
+                  <Input
+                    className="border-gold/30 bg-black text-white"
+                    type="tel"
+                    placeholder="Seu telefone"
+                    value={phone}
+                    onChange={e => setPhone(e.target.value)}
+                  />
+                </Field>
               </>
             )}
-            <Input
-              type="email"
-              autoComplete="username"
-              placeholder="E-mail"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              required
-            />
-            {mode !== "forgot" && (
+            <Field label="Email">
               <Input
-                type="password"
-                autoComplete={
-                  mode === "login" ? "current-password" : "new-password"
-                }
-                placeholder={mode === "login" ? "Senha" : "Senha forte"}
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                minLength={6}
+                className="border-gold/30 bg-black text-white"
+                type="email"
+                autoComplete="username"
+                placeholder="seu@email.com"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
                 required
               />
-            )}
-            {mode === "register" && (
-              <>
+            </Field>
+            {mode !== "forgot" && (
+              <Field label="Senha">
                 <Input
+                  className="border-gold/30 bg-black text-white"
                   type="password"
-                  autoComplete="new-password"
-                  placeholder="Confirmar senha"
-                  value={confirmation}
-                  onChange={e => setConfirmation(e.target.value)}
+                  autoComplete={
+                    mode === "login" ? "current-password" : "new-password"
+                  }
+                  placeholder={
+                    mode === "login" ? "Sua senha" : "Crie uma senha forte"
+                  }
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
                   minLength={6}
                   required
                 />
+              </Field>
+            )}
+            {mode === "register" && (
+              <>
+                <Field label="Confirmar senha">
+                  <Input
+                    className="border-gold/30 bg-black text-white"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Digite a senha novamente"
+                    value={confirmation}
+                    onChange={e => setConfirmation(e.target.value)}
+                    minLength={6}
+                    required
+                  />
+                </Field>
                 <p className="text-xs text-gray-500">
                   Use letra maiúscula, minúscula, número e caractere especial.
                 </p>
@@ -147,7 +170,7 @@ export default function AgentLogin() {
             <Button
               type="submit"
               disabled={pending}
-              className="w-full bg-gold font-semibold text-black"
+              className="w-full bg-gold font-semibold text-black hover:bg-gold/90"
             >
               {pending
                 ? "Aguarde..."
@@ -158,12 +181,12 @@ export default function AgentLogin() {
                     : "Enviar link"}
             </Button>
           </form>
-          <div className="mt-6 flex flex-col items-center gap-3 text-sm">
+          <div className="mt-6 flex flex-col items-center gap-4 text-sm">
             {mode === "login" ? (
               <>
                 <button
                   type="button"
-                  className="text-gold hover:text-gold/80"
+                  className="cursor-pointer text-xs text-gold hover:text-gold/80"
                   onClick={() => setMode("forgot")}
                 >
                   Esqueci minha senha
@@ -192,5 +215,20 @@ export default function AgentLogin() {
         </Card>
       </main>
     </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block text-sm font-semibold text-gold">
+      <span className="mb-2 block">{label}</span>
+      {children}
+    </label>
   );
 }
