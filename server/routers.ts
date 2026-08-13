@@ -2747,6 +2747,26 @@ export const appRouter = router({
           );
         return { count: rows.length };
       }),
+    userInternalHistory: adminProcedure
+      .input(z.object({ email: z.string().email() }))
+      .query(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const email = input.email.toLowerCase();
+        return db
+          .select()
+          .from(portalMessages)
+          .where(
+            and(
+              isNull(portalMessages.deletedAt),
+              or(
+                eq(portalMessages.senderEmail, email),
+                eq(portalMessages.recipientEmail, email)
+              )
+            )
+          )
+          .orderBy(portalMessages.sentAt);
+      }),
     deleteInternalMessage: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input, ctx }) => {

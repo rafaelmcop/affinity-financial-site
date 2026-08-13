@@ -6,7 +6,6 @@ import {
   ExternalLink,
   LogOut,
   Settings,
-  MessageCircle,
 } from "lucide-react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
@@ -18,16 +17,11 @@ const items = [
   ["Clientes", "/agentes/clientes", Contact],
   ["Apólices", "/agentes/apolices", FileText],
   ["Tarefas", "/agentes/tarefas", ListTodo],
-  ["Administração", "/agentes/mensagens-internas", MessageCircle],
   ["Configurações", "/agentes/configuracoes", Settings],
 ] as const;
 export default function AgentSidebar() {
   const [location, setLocation] = useLocation();
   const logout = trpc.auth.logout.useMutation();
-  const unread = trpc.crm.internalUnreadCount.useQuery(
-    { mode: "agent" },
-    { refetchInterval: 30000 }
-  );
   const dashboard = trpc.agent.dashboard.useQuery(undefined, {
     refetchInterval: 30000,
   });
@@ -53,12 +47,6 @@ export default function AgentSidebar() {
                 {incompleteProfiles > 99 ? "99+" : incompleteProfiles}
               </span>
             )}
-            {href === "/agentes/mensagens-internas" &&
-              Number(unread.data?.count || 0) > 0 && (
-                <span className="min-w-6 rounded-full bg-red-500 px-2 py-0.5 text-center text-xs font-black text-white">
-                  {Number(unread.data?.count) > 99 ? "99+" : unread.data?.count}
-                </span>
-              )}
           </button>
         ))}
         <div className="my-3 border-t border-white/10" />

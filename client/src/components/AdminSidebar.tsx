@@ -12,7 +12,6 @@ import {
   Contact,
   Menu,
   X,
-  ShieldCheck,
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import FloatingInternalChat from "@/components/FloatingInternalChat";
@@ -44,12 +43,6 @@ const groups = [
         label: "Carteiras dos agentes",
         href: "/admin/carteiras-agentes",
         icon: FileText,
-      },
-      {
-        label: "Auditoria de mensagens",
-        href: "/admin/auditoria-comunicacoes",
-        icon: ShieldCheck,
-        badge: "internalMessages",
       },
       {
         label: "Leads de afiliados",
@@ -89,18 +82,12 @@ export default function AdminSidebar({ onLogout }: Props) {
   const pending = trpc.admin.getStats.useQuery(undefined, {
     refetchInterval: 30000,
   });
-  const internalUnread = trpc.crm.internalUnreadCount.useQuery(
-    { mode: "admin" },
-    { refetchInterval: 30000 }
-  );
   const badgeCount = (key?: string) =>
-    key === "internalMessages"
-      ? Number(internalUnread.data?.count || 0)
-      : key
-        ? Number(
-            (pending.data as Record<string, unknown> | undefined)?.[key] || 0
-          )
-        : 0;
+    key
+      ? Number(
+          (pending.data as Record<string, unknown> | undefined)?.[key] || 0
+        )
+      : 0;
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) =>

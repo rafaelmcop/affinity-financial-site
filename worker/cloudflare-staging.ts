@@ -2801,6 +2801,19 @@ async function runProcedure(
     return trpcResult({ success: true });
   }
 
+  if (name === "crm.userInternalHistory") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso não permitido", "FORBIDDEN", 403);
+    const email = String(input.email || "").trim().toLowerCase();
+    if (!validEmail(email)) return trpcError("Usuário inválido");
+    const rows = await env.DB.prepare(
+      "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND (lower(senderEmail)=? OR lower(recipientEmail)=?) ORDER BY sentAt ASC,id ASC"
+    )
+      .bind(email, email)
+      .all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+  }
+
   if (
     [
       "crm.internalMessages",
