@@ -1,21 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 import { BarChart3, FileText, Users, MessageSquareQuote, Mail, ExternalLink, LogOut, Star, Contact, Menu, X, ShieldCheck } from 'lucide-react';
+import { trpc } from '@/lib/trpc';
 
 type Props = { onLogout?: () => void };
 
 const groups = [
   { title: 'Visão geral', items: [{ label: 'Dashboard', href: '/admin/dashboard', icon: BarChart3 }] },
   { title: 'Operação', items: [
-    { label: 'Apólices', href: '/admin/dashboard?tab=policies', icon: FileText },
-    { label: 'Usuários', href: '/admin/usuarios', icon: Users },
+    { label: 'Apólices', href: '/admin/dashboard?tab=policies', icon: FileText, badge: 'pendingPolicies' },
+    { label: 'Usuários', href: '/admin/usuarios', icon: Users, badge: 'pendingUsers' },
     { label: 'CRM de clientes', href: '/admin/crm', icon: Contact },
-    { label: 'Auditoria de mensagens', href: '/admin/auditoria-comunicacoes', icon: ShieldCheck },
-    { label: 'Leads de afiliados', href: '/admin/leads-afiliados', icon: Users },
+    { label: 'Auditoria de mensagens', href: '/admin/auditoria-comunicacoes', icon: ShieldCheck, badge: 'internalMessages' },
+    { label: 'Leads de afiliados', href: '/admin/leads-afiliados', icon: Users, badge: 'pendingLeads' },
   ] },
   { title: 'Conteúdo', items: [
     { label: 'Depoimentos', href: '/admin/testimonials', icon: MessageSquareQuote },
-    { label: 'Avaliações', href: '/admin/avaliacoes', icon: Star },
+    { label: 'Avaliações', href: '/admin/avaliacoes', icon: Star, badge: 'pendingReviews' },
   ] },
   { title: 'Configurações', items: [
     { label: 'E-mail e iCloud', href: '/admin/smtp-config', icon: Mail },
@@ -25,6 +26,9 @@ const groups = [
 export default function AdminSidebar({ onLogout }: Props) {
   const [location, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
+  const pending = trpc.admin.getStats.useQuery(undefined, { refetchInterval: 30000 });
+  const internalUnread = trpc.crm.internalUnreadCount.useQuery({ mode: 'admin' }, { refetchInterval: 30000 });
+  const badgeCount = (key?: string) => key === 'internalMessages' ? Number(internalUnread.data?.count || 0) : key ? Number((pending.data as Record<string, unknown> | undefined)?.[key] || 0) : 0;
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) => event.key === 'Escape' && setOpen(false);
@@ -58,7 +62,8 @@ export default function AdminSidebar({ onLogout }: Props) {
               {group.items.map(item => {
                 const Icon = item.icon;
                 const active = location === item.href.split('?')[0];
-                return <button key={item.href} onClick={() => navigate(item.href)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'bg-gold text-black font-semibold' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}><Icon size={18} />{item.label}</button>;
+                const count = badgeCount('badge' in item ? item.badge : undefined);
+                return <button key={item.href} onClick={() => navigate(item.href)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${active ? 'bg-gold text-black font-semibold' : 'text-gray-300 hover:bg-white/10 hover:text-white'}`}><Icon size={18} /><span className="flex-1 text-left">{item.label}</span>{count > 0 && <span aria-label={`${count} pendente${count === 1 ? '' : 's'}`} className={`min-w-6 rounded-full px-2 py-0.5 text-center text-xs font-black ${active ? 'bg-black text-gold' : 'bg-red-500 text-white shadow-sm shadow-red-500/40'}`}>{count > 99 ? '99+' : count}</span>}</button>;
               })}
             </div>
           </div>

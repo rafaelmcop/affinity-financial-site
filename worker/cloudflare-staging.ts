@@ -1112,7 +1112,7 @@ async function runProcedure(
       .first();
     if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
     const rows = await env.DB.prepare(
-      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' ORDER BY sentAt ASC,id ASC"
+      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' AND deletedAt IS NULL ORDER BY sentAt ASC,id ASC"
     )
       .bind(clientId, adminEmail.toLowerCase())
       .all<JsonRecord>();
@@ -1691,6 +1691,15 @@ async function runProcedure(
     const commissions = await env.DB.prepare(
       "SELECT COALESCE(SUM(commissionAmount),0) total FROM affiliateReferrals WHERE status='converted'"
     ).first<JsonRecord>();
+    const pendingUsers = await env.DB.prepare(
+      "SELECT COUNT(DISTINCT email) total FROM (SELECT lower(email) email FROM adminAccounts WHERE status='pending' UNION ALL SELECT lower(email) email FROM affiliates WHERE status='pending')"
+    ).first<JsonRecord>();
+    const pendingLeads = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM affiliateReferrals WHERE status='pending'"
+    ).first<JsonRecord>();
+    const pendingReviews = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM testimonials WHERE source='client' AND isActive=0"
+    ).first<JsonRecord>();
     return trpcResult({
       totalAffiliates: Number(affiliates?.total || 0),
       pendingAffiliates: Number(affiliates?.pending || 0),
@@ -1698,6 +1707,9 @@ async function runProcedure(
       pendingPolicies: Number(policies?.pending || 0),
       approvedPolicies: Number(policies?.approved || 0),
       totalCommissions: Number(commissions?.total || 0),
+      pendingUsers: Number(pendingUsers?.total || 0),
+      pendingLeads: Number(pendingLeads?.total || 0),
+      pendingReviews: Number(pendingReviews?.total || 0),
     });
   }
 
@@ -2533,7 +2545,7 @@ async function runProcedure(
 
   if (name === "crm.assignees") {
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,contactEmail,phone,whatsapp,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
+      "SELECT id,email,name,contactEmail,phone,whatsapp,accountType,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
     ).all<JsonRecord>();
     return trpcResult(
       rows.results.map(row => ({
@@ -2548,7 +2560,7 @@ async function runProcedure(
     if (!['admin', 'both'].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
     const conversations = await env.DB.prepare(
-      "SELECT e.id,e.agentEmail,e.clientId,c.name AS clientName,e.direction,e.subject,e.body,e.fromEmail,e.toEmail,e.sentAt FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE coalesce(e.visibility,'client')='client' ORDER BY e.sentAt DESC,e.id DESC"
+      "SELECT e.id,e.agentEmail,e.clientId,c.name AS clientName,e.direction,e.subject,e.body,e.fromEmail,e.toEmail,e.sentAt FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE coalesce(e.visibility,'client')='client' AND e.deletedAt IS NULL ORDER BY e.sentAt DESC,e.id DESC"
     ).all<JsonRecord>();
     const campaigns = await env.DB.prepare(
       "SELECT m.id,m.agentEmail,m.title,m.subject,m.message,m.occasion,m.audience,d.sentKey,MIN(d.sentAt) AS sentAt,COUNT(*) AS recipientCount FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE coalesce(m.audience,'all')<>'individual' GROUP BY m.id,d.sentKey ORDER BY MIN(d.sentAt) DESC"
@@ -2557,6 +2569,54 @@ async function runProcedure(
       conversations: conversations.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })),
       campaigns: campaigns.results.map(row => ({ ...row, id: Number(row.id), recipientCount: Number(row.recipientCount || 0) })),
     });
+  }
+
+  if (name === "crm.deleteAuditedMessage") {
+    if (!['admin', 'both'].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    await env.DB.prepare("UPDATE clientEmails SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL")
+      .bind(adminEmail.toLowerCase(), Number(input.id)).run();
+    return trpcResult({ success: true });
+  }
+
+  if (["crm.internalMessages", "crm.sendInternalMessage", "crm.markInternalMessagesRead", "crm.internalUnreadCount", "crm.deleteInternalMessage"].includes(name)) {
+    const mode = String(input.mode || "agent");
+    const allowed = mode === "agent" ? ["agent", "both"].includes(accountType) : ["admin", "both"].includes(accountType);
+    if (!allowed) return trpcError("Acesso não permitido", "FORBIDDEN", 403);
+    const agentEmail = mode === "agent" ? adminEmail.toLowerCase() : String(input.agentEmail || "").trim().toLowerCase();
+    if (name !== "crm.internalUnreadCount" && mode === "admin" && !validEmail(agentEmail))
+      return trpcError("Selecione um agente");
+    if (name === "crm.internalMessages") {
+      const rows = await env.DB.prepare(
+        "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND recipientEmail='__admin__') OR lower(recipientEmail)=?) ORDER BY sentAt ASC,id ASC"
+      ).bind(agentEmail, agentEmail).all<JsonRecord>();
+      return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+    }
+    if (name === "crm.sendInternalMessage") {
+      const body = String(input.body || "").trim();
+      if (!body || body.length > 10000) return trpcError("Escreva uma mensagem válida");
+      await env.DB.prepare("INSERT INTO portalMessages (senderEmail,recipientEmail,body) VALUES (?,?,?)")
+        .bind(adminEmail.toLowerCase(), mode === "agent" ? "__admin__" : agentEmail, body).run();
+      return trpcResult({ success: true });
+    }
+    if (name === "crm.markInternalMessagesRead") {
+      if (mode === "agent")
+        await env.DB.prepare("UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(adminEmail.toLowerCase()).run();
+      else
+        await env.DB.prepare("UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE recipientEmail='__admin__' AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(agentEmail).run();
+      return trpcResult({ success: true });
+    }
+    if (name === "crm.internalUnreadCount") {
+      const recipient = mode === "agent" ? adminEmail.toLowerCase() : "__admin__";
+      const row = await env.DB.prepare("SELECT COUNT(*) total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(recipient).first<JsonRecord>();
+      return trpcResult({ count: Number(row?.total || 0) });
+    }
+    if (name === "crm.deleteInternalMessage") {
+      if (!["admin", "both"].includes(accountType)) return trpcError("Somente administradores podem apagar mensagens", "FORBIDDEN", 403);
+      await env.DB.prepare("UPDATE portalMessages SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL")
+        .bind(adminEmail.toLowerCase(), Number(input.id)).run();
+      return trpcResult({ success: true });
+    }
   }
 
   if (name === "crm.create" || name === "crm.update") {

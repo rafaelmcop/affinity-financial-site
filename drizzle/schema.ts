@@ -118,7 +118,20 @@ export const clientEmails = mysqlTable("clientEmails", {
   visibility: mysqlEnum("visibility", ["client", "central"])
     .default("client")
     .notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: varchar("deletedBy", { length: 320 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const portalMessages = mysqlTable("portalMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  senderEmail: varchar("senderEmail", { length: 320 }).notNull(),
+  recipientEmail: varchar("recipientEmail", { length: 320 }).notNull(),
+  body: text("body").notNull(),
+  sentAt: timestamp("sentAt").defaultNow().notNull(),
+  readAt: timestamp("readAt"),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: varchar("deletedBy", { length: 320 }),
 });
 
 export const agentPolicies = mysqlTable("agentPolicies", {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, or } from "drizzle-orm";
 import {
   adminProcedure,
   affiliateProcedure,
@@ -17,6 +17,8 @@ import {
   agentPolicies,
   agentTasks,
   scheduledMessages,
+  testimonials,
+  portalMessages,
 } from "../drizzle/schema";
 import { COOKIE_NAME } from "../shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -585,7 +587,8 @@ export const appRouter = router({
             and(
               eq(clientEmails.clientId, input.clientId),
               eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
-              eq(clientEmails.visibility, "client")
+              eq(clientEmails.visibility, "client"),
+              isNull(clientEmails.deletedAt)
             )
           );
       }),
@@ -1167,6 +1170,18 @@ export const appRouter = router({
       const pendingPolicies = await getPoliciesByStatus("pending");
       const approvedPolicies = await getPoliciesByStatus("approved");
       const commissions = await getCommissionsByAffiliate();
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      const [internalUsers, affiliateUsers, referrals, reviews] = await Promise.all([
+        db.select({ email: adminAccounts.email, status: adminAccounts.status }).from(adminAccounts),
+        db.select({ email: affiliates.email, status: affiliates.status }).from(affiliates),
+        db.select({ status: affiliateReferrals.status }).from(affiliateReferrals),
+        db.select({ source: testimonials.source, isActive: testimonials.isActive }).from(testimonials),
+      ]);
+      const pendingUserEmails = new Set([
+        ...internalUsers.filter(row => row.status === "pending").map(row => row.email.toLowerCase()),
+        ...affiliateUsers.filter(row => row.status === "pending").map(row => row.email.toLowerCase()),
+      ]);
 
       const totalCommissions = commissions.reduce(
         (sum, c) => sum + parseFloat(c.commissionAmount?.toString() || "0"),
@@ -1178,6 +1193,9 @@ export const appRouter = router({
         pendingPolicies: pendingPolicies.length,
         approvedPolicies: approvedPolicies.length,
         totalCommissions,
+        pendingUsers: pendingUserEmails.size,
+        pendingLeads: referrals.filter(row => row.status === "pending").length,
+        pendingReviews: reviews.filter(row => row.source === "client" && !row.isActive).length,
       };
     }),
 
@@ -2161,6 +2179,7 @@ export const appRouter = router({
           contactEmail: adminAccounts.contactEmail,
           phone: adminAccounts.phone,
           whatsapp: adminAccounts.whatsapp,
+          accountType: adminAccounts.accountType,
           isActive: adminAccounts.isActive,
         })
         .from(adminAccounts);
@@ -2321,7 +2340,7 @@ export const appRouter = router({
         })
         .from(clientEmails)
         .innerJoin(crmClients, eq(crmClients.id, clientEmails.clientId))
-        .where(eq(clientEmails.visibility, "client"));
+        .where(and(eq(clientEmails.visibility, "client"), isNull(clientEmails.deletedAt)));
       return {
         conversations,
         campaigns: [] as Array<{
@@ -2338,6 +2357,59 @@ export const appRouter = router({
         }>,
       };
     }),
+    deleteAuditedMessage: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(clientEmails).set({ deletedAt: new Date(), deletedBy: ctx.adminEmail.toLowerCase() }).where(eq(clientEmails.id, input.id));
+        return { success: true };
+      }),
+    internalMessages: adminProcedure
+      .input(z.object({ mode: z.enum(["admin", "agent"]), agentEmail: z.string().email().optional() }))
+      .query(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const agentEmail = input.mode === "agent" ? ctx.adminEmail.toLowerCase() : String(input.agentEmail || "").toLowerCase();
+        if (!agentEmail) return [];
+        return db.select().from(portalMessages).where(and(isNull(portalMessages.deletedAt), or(and(eq(portalMessages.senderEmail, agentEmail), eq(portalMessages.recipientEmail, "__admin__")), eq(portalMessages.recipientEmail, agentEmail)))).orderBy(portalMessages.sentAt);
+      }),
+    sendInternalMessage: adminProcedure
+      .input(z.object({ mode: z.enum(["admin", "agent"]), agentEmail: z.string().email().optional(), body: z.string().trim().min(1).max(10000) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const sender = ctx.adminEmail.toLowerCase();
+        await db.insert(portalMessages).values({ senderEmail: sender, recipientEmail: input.mode === "agent" ? "__admin__" : String(input.agentEmail || "").toLowerCase(), body: input.body });
+        return { success: true };
+      }),
+    markInternalMessagesRead: adminProcedure
+      .input(z.object({ mode: z.enum(["admin", "agent"]), agentEmail: z.string().email().optional() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const recipient = input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
+        const condition = input.mode === "agent" ? eq(portalMessages.recipientEmail, recipient) : and(eq(portalMessages.recipientEmail, recipient), eq(portalMessages.senderEmail, String(input.agentEmail || "").toLowerCase()));
+        await db.update(portalMessages).set({ readAt: new Date() }).where(and(condition, isNull(portalMessages.readAt), isNull(portalMessages.deletedAt)));
+        return { success: true };
+      }),
+    internalUnreadCount: adminProcedure
+      .input(z.object({ mode: z.enum(["admin", "agent"]) }))
+      .query(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const recipient = input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
+        const rows = await db.select({ id: portalMessages.id }).from(portalMessages).where(and(eq(portalMessages.recipientEmail, recipient), isNull(portalMessages.readAt), isNull(portalMessages.deletedAt)));
+        return { count: rows.length };
+      }),
+    deleteInternalMessage: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(portalMessages).set({ deletedAt: new Date(), deletedBy: ctx.adminEmail.toLowerCase() }).where(eq(portalMessages.id, input.id));
+        return { success: true };
+      }),
   }),
 
   passwordReset: router({

@@ -27,6 +27,7 @@ import AgentClients from './pages/AgentClients';
 import AgentSettings from './pages/AgentSettings';
 import AdminUsers from './pages/AdminUsers';
 import AdminCommunicationAudit from './pages/AdminCommunicationAudit';
+import AgentInternalMessages from './pages/AgentInternalMessages';
 
 function Router() {
   return (
@@ -58,6 +59,7 @@ function Router() {
       <Route path="/agentes/pcsheet">{() => <AgentPolicies uploadOnly />}</Route>
       <Route path="/agentes/tarefas" component={AgentTasks} />
       <Route path="/agentes/mensagens" component={AgentMessages} />
+      <Route path="/agentes/mensagens-internas" component={AgentInternalMessages} />
       <Route path="/agentes/configuracoes" component={AgentSettings} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/404" component={NotFound} />
