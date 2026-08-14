@@ -113,8 +113,11 @@ async function handlePaymentNotice(
     });
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE clientEmails SET subject=?,body=?,visibility='client',sentAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=? AND externalId=?"
-      ).bind(subjectToClient, message, owner, externalId),
+        "UPDATE clientEmails SET subject='Aviso de pagamento processado',body='Controle interno de processamento',visibility='central',sentAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=? AND externalId=?"
+      ).bind(owner, externalId),
+      env.DB.prepare(
+        "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+      ).bind(owner, Number(match.clientId), String(sent.messageId || `payment-sent:${owner}:${uid}`), subjectToClient, message, String(config.fromEmail || owner), String(match.email)),
       env.DB.prepare(
         "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
       ).bind(Number(match.clientId), `Aviso de pagamento encaminhado automaticamente para a apólice ${String(match.policyNumber || "")}. Referência: ${String(sent.messageId || externalId)}`, owner),

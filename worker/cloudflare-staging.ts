@@ -1179,7 +1179,7 @@ async function runProcedure(
       .first<JsonRecord>();
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
     const previous = await env.DB.prepare(
-      "SELECT subject,externalId FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? ORDER BY sentAt DESC,id DESC LIMIT 1"
+      "SELECT subject,externalId FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 1"
     )
       .bind(clientId, adminEmail.toLowerCase())
       .first<JsonRecord>();
