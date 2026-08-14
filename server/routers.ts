@@ -475,7 +475,10 @@ export const appRouter = router({
         tasks,
         pendingTasks: tasks.filter(t => t.status === "pending").length,
         score: policies.reduce(
-          (total, policy) => total + Number(policy.points || 0),
+          (total, policy) =>
+            policy.status === "active"
+              ? total + Number(policy.points || 0)
+              : total,
           0
         ),
         newMessages: notifications.length,
@@ -504,6 +507,7 @@ export const appRouter = router({
     updatePolicyDetails: adminProcedure
       .input(z.object({
         id: z.number(),
+        status: z.enum(["active", "lapse", "declined", "cancelled"]),
         product: z.string().optional(),
         issuedAt: z.string().optional(),
         premiumAmount: z.number().min(0),
@@ -2440,6 +2444,7 @@ export const appRouter = router({
           id: z.number(),
           agentEmail: z.string().email(),
           policyNumber: z.string().min(1),
+          status: z.enum(["active", "lapse", "declined", "cancelled"]),
           product: z.string().optional(),
           premiumAmount: z.number(),
           coverageAmount: z.number(),
@@ -2453,6 +2458,7 @@ export const appRouter = router({
           .update(agentPolicies)
           .set({
             policyNumber: input.policyNumber,
+            status: input.status,
             product: input.product || null,
             premiumAmount: String(input.premiumAmount),
             coverageAmount: String(input.coverageAmount),

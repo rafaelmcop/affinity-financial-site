@@ -129,6 +129,16 @@ export default function AdminAgentPortfolio() {
                 </>
               ) : (
                 <>
+                  <select
+                    className="h-10 rounded-md border border-white/20 bg-black px-3 text-sm"
+                    value={editing.status || "active"}
+                    onChange={e => setEditing({ ...editing, status: e.target.value })}
+                  >
+                    <option value="active">Ativa</option>
+                    <option value="lapse">Lapse</option>
+                    <option value="declined">Recusada</option>
+                    <option value="cancelled">Cancelada</option>
+                  </select>
                   <Input
                     placeholder="Número"
                     value={editing.policyNumber}
@@ -193,6 +203,7 @@ export default function AdminAgentPortfolio() {
                         id: editing.id,
                         agentEmail,
                         policyNumber: editing.policyNumber,
+                        status: editing.status || "active",
                         product: editing.product || "",
                         premiumAmount: Number(editing.premiumAmount || 0),
                         coverageAmount: Number(editing.coverageAmount || 0),
@@ -282,6 +293,9 @@ export default function AdminAgentPortfolio() {
                     {Number(policy.premiumAmount || 0).toFixed(2)} · Cobertura $
                     {Number(policy.coverageAmount || 0).toLocaleString()}
                   </p>
+                  <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${String(policy.status || "active") === "active" ? "bg-emerald-500/15 text-emerald-300" : String(policy.status) === "lapse" ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300"}`}>
+                    {({ active: "Ativa", lapse: "Lapse", declined: "Recusada", cancelled: "Cancelada" } as const)[String(policy.status || "active") as "active" | "lapse" | "declined" | "cancelled"]}
+                  </span>
                 </div>
                 <Button
                   variant="outline"

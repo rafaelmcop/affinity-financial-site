@@ -1016,7 +1016,10 @@ async function runProcedure(
       tasks,
       pendingTasks: tasks.filter(row => row.status === "pending").length,
       score: policies.reduce(
-        (total, row) => total + Math.round(Number(row.points || 0)),
+        (total, row) =>
+          String(row.status || "active") === "active"
+            ? total + Math.round(Number(row.points || 0))
+            : total,
         0
       ),
       newMessages: Number(unread?.total || 0),
@@ -1060,9 +1063,12 @@ async function runProcedure(
   }
   if (name === "agent.updatePolicyDetails") {
     await env.DB.prepare(
-      "UPDATE agentPolicies SET product=?,issuedAt=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+      "UPDATE agentPolicies SET status=?,product=?,issuedAt=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
     )
       .bind(
+        ["active", "lapse", "declined", "cancelled"].includes(String(input.status))
+          ? String(input.status)
+          : "active",
         String(input.product || "").trim() || null,
         String(input.issuedAt || "").trim() || null,
         Math.max(0, Number(input.premiumAmount || 0)),
@@ -2878,10 +2884,13 @@ async function runProcedure(
     if (!validEmail(owner) || !id || !number)
       return trpcError("Confira os dados da apólice");
     await env.DB.prepare(
-      "UPDATE agentPolicies SET policyNumber=?,product=?,premiumAmount=?,coverageAmount=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+      "UPDATE agentPolicies SET policyNumber=?,status=?,product=?,premiumAmount=?,coverageAmount=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
     )
       .bind(
         number,
+        ["active", "lapse", "declined", "cancelled"].includes(String(input.status))
+          ? String(input.status)
+          : "active",
         String(input.product || "").trim() || null,
         Number(input.premiumAmount || 0),
         Number(input.coverageAmount || 0),

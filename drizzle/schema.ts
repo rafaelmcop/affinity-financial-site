@@ -143,6 +143,9 @@ export const agentPolicies = mysqlTable("agentPolicies", {
   clientPhone: varchar("clientPhone", { length: 30 }),
   birthDate: timestamp("birthDate"),
   policyNumber: varchar("policyNumber", { length: 100 }).notNull(),
+  status: mysqlEnum("status", ["active", "lapse", "declined", "cancelled"])
+    .default("active")
+    .notNull(),
   product: varchar("product", { length: 120 }),
   premiumAmount: decimal("premiumAmount", { precision: 12, scale: 2 }).default(
     "0.00"

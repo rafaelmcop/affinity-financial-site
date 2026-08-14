@@ -593,6 +593,9 @@ export default function AgentPolicies({
                     <p className="text-sm text-gray-400">
                       {p.policyNumber} · {p.product || "Produto não informado"}
                     </p>
+                    <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${String(p.status || "active") === "active" ? "bg-emerald-500/15 text-emerald-300" : String(p.status) === "lapse" ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300"}`}>
+                      {({ active: "Ativa", lapse: "Lapse", declined: "Recusada", cancelled: "Cancelada" } as const)[String(p.status || "active") as "active" | "lapse" | "declined" | "cancelled"]}
+                    </span>
                   </div>
                   <ShieldCheck className="text-gold" />
                 </div>
@@ -609,7 +612,7 @@ export default function AgentPolicies({
                     <b>${Number(p.targetPremium || 0).toFixed(2)}</b>
                   </span>
                   <span>
-                    Pontos: <b>{Math.round(Number(p.points || 0))}</b>
+                    Pontos contabilizados: <b>{String(p.status || "active") === "active" ? Math.round(Number(p.points || 0)) : 0}</b>
                   </span>
                   <span>
                     Cobertura:{" "}

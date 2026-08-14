@@ -42,6 +42,7 @@ type Form = {
 };
 type PolicyEditForm = {
   id: number;
+  status: "active" | "lapse" | "declined" | "cancelled";
   product: string;
   issuedAt: string;
   premiumAmount: number;
@@ -253,6 +254,7 @@ export default function AgentClients() {
   const editPolicy = (policy: any) =>
     setPolicyForm({
       id: Number(policy.id),
+      status: policy.status || "active",
       product: policy.product || "",
       issuedAt: isoDate(policy.issuedAt),
       premiumAmount: Number(policy.premiumAmount || 0),
@@ -587,6 +589,14 @@ export default function AgentClients() {
                   <Button variant="outline" onClick={() => setPolicyForm(null)}>Cancelar</Button>
                 </div>
                 <form className="grid gap-4 md:grid-cols-2" onSubmit={savePolicyDetails}>
+                  <label className="text-sm text-gray-300">Status da apólice
+                    <select className="mt-2 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-white" value={policyForm.status} onChange={e => setPolicyForm({ ...policyForm, status: e.target.value as PolicyEditForm["status"] })}>
+                      <option value="active">Ativa</option>
+                      <option value="lapse">Lapse</option>
+                      <option value="declined">Recusada</option>
+                      <option value="cancelled">Cancelada</option>
+                    </select>
+                  </label>
                   <label className="text-sm text-gray-300">Tipo de apólice<Input className="mt-2" value={policyForm.product} onChange={e => setPolicyForm({ ...policyForm, product: e.target.value })} /></label>
                   <label className="text-sm text-gray-300">Data da aplicação<Input className="mt-2" type="date" value={policyForm.issuedAt} onChange={e => setPolicyForm({ ...policyForm, issuedAt: e.target.value })} /></label>
                   <label className="text-sm text-gray-300">Premium<Input className="mt-2" type="number" min="0" step="0.01" value={policyForm.premiumAmount} onChange={e => setPolicyForm({ ...policyForm, premiumAmount: Number(e.target.value) })} /></label>
@@ -638,6 +648,11 @@ export default function AgentClients() {
                       </div>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         {[
+                          [
+                            "Status",
+                            ({ active: "Ativa", lapse: "Lapse", declined: "Recusada", cancelled: "Cancelada" } as const)[String(policy.status || "active") as "active" | "lapse" | "declined" | "cancelled"],
+                            "",
+                          ],
                           [
                             "Data da aplicação",
                             displayDate(policy.issuedAt),
