@@ -9,7 +9,7 @@ type Props = { mode: "admin" | "agent" };
 type Presence = "available" | "away" | "meeting" | "offline";
 type Contact = { email: string; name: string; presence: Presence };
 const presenceLabel: Record<Presence, string> = { available: "Disponível", away: "Ausente", meeting: "Em reunião", offline: "Offline" };
-const presenceColor: Record<Presence, string> = { available: "bg-emerald-400", away: "bg-amber-400", meeting: "bg-violet-400", offline: "bg-gray-500" };
+const presenceColor: Record<Presence, string> = { available: "bg-emerald-400", away: "bg-amber-400", meeting: "bg-red-500", offline: "bg-gray-500" };
 const effectivePresence = (status: unknown, lastSeenAt: unknown): Presence => {
   const seen = new Date(String(lastSeenAt || "")).getTime();
   if (!Number.isFinite(seen) || Date.now() - seen > 2 * 60 * 1000) return "offline";
