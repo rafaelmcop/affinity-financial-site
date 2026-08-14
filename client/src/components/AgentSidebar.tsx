@@ -8,13 +8,14 @@ import {
   Settings,
   MessagesSquare,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { trpc } from "@/lib/trpc";
 import FloatingInternalChat from "@/components/FloatingInternalChat";
 
 const items = [
-  ["Início", "/agentes/dashboard", BarChart3],
   ["Clientes", "/agentes/clientes", Contact],
   ["Apólices", "/agentes/apolices", FileText],
   ["Tarefas", "/agentes/tarefas", ListTodo],
@@ -22,6 +23,8 @@ const items = [
 ] as const;
 export default function AgentSidebar() {
   const [location, setLocation] = useLocation();
+  const crmRouteActive = location === "/agentes/crm" || location === "/agentes/mensagens";
+  const [crmOpen, setCrmOpen] = useState(crmRouteActive);
   const logout = trpc.auth.logout.useMutation();
   const dashboard = trpc.agent.dashboard.useQuery(undefined, {
     refetchInterval: 30000,
@@ -36,14 +39,24 @@ export default function AgentSidebar() {
       </div>
       <nav className="space-y-1 p-4">
         <button
-          onClick={() => setLocation("/agentes/crm")}
-          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${location === "/agentes/crm" || location === "/agentes/mensagens" ? "bg-gold font-semibold text-black" : "text-gray-300 hover:bg-white/10"}`}
+          onClick={() => setLocation("/agentes/dashboard")}
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${location === "/agentes/dashboard" ? "bg-gold font-semibold text-black" : "text-gray-300 hover:bg-white/10"}`}
+        >
+          <BarChart3 size={18} />
+          <span className="flex-1 text-left">Início</span>
+        </button>
+        <button
+          type="button"
+          aria-expanded={crmOpen}
+          aria-controls="agent-crm-menu"
+          onClick={() => setCrmOpen(open => !open)}
+          className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${crmRouteActive ? "bg-gold font-semibold text-black" : "text-gray-300 hover:bg-white/10"}`}
         >
           <Contact size={18} />
           <span className="flex-1 text-left">CRM</span>
-          <ChevronRight size={16} />
+          {crmOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
         </button>
-        <div className="mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3">
+        {crmOpen && <div id="agent-crm-menu" className="mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3">
           <button
             onClick={() => setLocation("/agentes/crm")}
             className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${location === "/agentes/crm" ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`}
@@ -56,7 +69,7 @@ export default function AgentSidebar() {
           >
             <MessagesSquare size={15} /> Mensagens e automações
           </button>
-        </div>
+        </div>}
         {items.map(([label, href, Icon]) => (
           <button
             key={href}
