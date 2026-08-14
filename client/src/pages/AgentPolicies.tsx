@@ -74,6 +74,10 @@ const spreadsheetStatus = (value: string): SpreadsheetRow["policyStatus"] => {
 export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[]> {
   const XLSX = await import("xlsx");
   const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const createdAt = workbook.Props?.CreatedDate ? new Date(workbook.Props.CreatedDate) : null;
+  const fileCreationDate = createdAt && !Number.isNaN(createdAt.getTime())
+    ? createdAt.toISOString().slice(0, 10)
+    : "";
   const tableRows = workbook.SheetNames.flatMap(sheetName =>
     XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "", raw: false })
   );
@@ -95,7 +99,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
       points: Math.round(suppliedPoints || targetPremium),
       coverageAmount: money(spreadsheetValue(row, ["valor cobertura", "cobertura", "coverage", "face amount"])),
       beneficiaries: spreadsheetValue(row, ["beneficiarios", "beneficiario", "beneficiaries"]),
-      issuedAt: spreadsheetDate(spreadsheetValue(row, ["data aplicacao", "application date", "date esigned", "data emissao"])),
+      issuedAt: spreadsheetDate(spreadsheetValue(row, ["data aplicacao", "application date", "date esigned", "data emissao"])) || fileCreationDate,
     } satisfies SpreadsheetRow;
   }).filter(row => row.clientName);
 
@@ -170,7 +174,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
       premiumAmount, premiumFrequency, targetPremium,
       points: Math.round(targetPremium), coverageAmount,
       beneficiaries: beneficiaries.join("; "),
-      issuedAt: spreadsheetDate(applicationDate),
+      issuedAt: spreadsheetDate(applicationDate) || fileCreationDate,
     } satisfies SpreadsheetRow];
   });
 
