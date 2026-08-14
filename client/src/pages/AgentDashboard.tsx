@@ -201,7 +201,7 @@ export default function AgentDashboard() {
                 {(d?.profileAlerts || []).map(alert => (
                   <button
                     key={`profile-${alert.clientId}`}
-                    onClick={() => setLocation(`/agentes/clientes?cliente=${alert.clientId}`)}
+                    onClick={() => setLocation(`/agentes/clientes?cliente=${alert.clientId}&completar=1`)}
                     className="w-full rounded-xl border border-sky-300/20 bg-black/30 p-3 text-left transition hover:border-sky-300 hover:bg-sky-400/10"
                   >
                     <span className="block font-semibold text-white">{alert.clientName}</span>

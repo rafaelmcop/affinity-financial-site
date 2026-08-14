@@ -40,6 +40,17 @@ type Form = {
   source: string;
   notes: string;
 };
+type PolicyEditForm = {
+  id: number;
+  product: string;
+  issuedAt: string;
+  premiumAmount: number;
+  premiumFrequency: string;
+  targetPremium: number;
+  points: number;
+  coverageAmount: number;
+  beneficiaries: string;
+};
 const empty: Form = {
   name: "",
   email: "",
@@ -89,12 +100,14 @@ export default function AgentClients() {
     [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
     [selectedId, setSelectedId] = useState<number | null>(null),
     [form, setForm] = useState<Form | null>(null),
+    [policyForm, setPolicyForm] = useState<PolicyEditForm | null>(null),
     [emailSubject, setEmailSubject] = useState(""),
     [emailBody, setEmailBody] = useState("");
   const clients = trpc.agent.listClients.useQuery(),
     policies = trpc.agent.listPolicies.useQuery();
   const saveClient = trpc.agent.saveClient.useMutation(),
-    remove = trpc.agent.deleteClient.useMutation();
+    remove = trpc.agent.deleteClient.useMutation(),
+    updatePolicy = trpc.agent.updatePolicyDetails.useMutation();
   const emails = trpc.agent.clientEmails.useQuery(
       { clientId: selectedId || 0 },
       { enabled: Boolean(selectedId), refetchInterval: 15000 }
@@ -156,12 +169,28 @@ export default function AgentClients() {
       setSortDirection("asc");
     }
   };
+  const edit = (client: any) =>
+    setForm({
+      id: client.id,
+      name: client.name,
+      email: client.email || "",
+      phone: client.phone || "",
+      whatsapp: client.whatsapp || "",
+      birthDate: isoDate(client.birthDate),
+      status: client.status,
+      source: client.source || "Cadastro manual",
+      notes: client.notes || "",
+    });
   useEffect(() => {
     const requested = Number(
       new URLSearchParams(window.location.search).get("cliente")
     );
-    if (requested && rows.some(client => client.id === requested))
+    const requestedClient = rows.find(client => client.id === requested);
+    if (requestedClient) {
       setSelectedId(requested);
+      if (new URLSearchParams(window.location.search).get("completar") === "1")
+        edit(requestedClient);
+    }
   }, [rows]);
   useEffect(() => {
     if (!selectedId) return;
@@ -189,18 +218,6 @@ export default function AgentClients() {
       window.clearInterval(timer);
     };
   }, [selectedId]);
-  const edit = (client: any) =>
-    setForm({
-      id: client.id,
-      name: client.name,
-      email: client.email || "",
-      phone: client.phone || "",
-      whatsapp: client.whatsapp || "",
-      birthDate: isoDate(client.birthDate),
-      status: client.status,
-      source: client.source || "Cadastro manual",
-      notes: client.notes || "",
-    });
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form) return;
@@ -233,6 +250,30 @@ export default function AgentClients() {
       );
     }
   };
+  const editPolicy = (policy: any) =>
+    setPolicyForm({
+      id: Number(policy.id),
+      product: policy.product || "",
+      issuedAt: isoDate(policy.issuedAt),
+      premiumAmount: Number(policy.premiumAmount || 0),
+      premiumFrequency: policy.premiumFrequency || "",
+      targetPremium: Number(policy.targetPremium || 0),
+      points: Math.round(Number(policy.points || 0)),
+      coverageAmount: Number(policy.coverageAmount || 0),
+      beneficiaries: policy.beneficiaries || "",
+    });
+  const savePolicyDetails = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!policyForm) return;
+    try {
+      await updatePolicy.mutateAsync(policyForm);
+      await policies.refetch();
+      setPolicyForm(null);
+      toast.success("Dados da apólice atualizados");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível atualizar a apólice");
+    }
+  };
   return (
     <div className="min-h-screen bg-black text-white lg:pl-64">
       <AgentSidebar />
@@ -256,7 +297,7 @@ export default function AgentClients() {
           <Card className="border-gold/30 bg-[#0b1524] p-6">
             <div className="mb-5 flex justify-between">
               <h2 className="text-xl font-bold text-gold">
-                {form.id ? "Alterar cliente" : "Novo cliente"}
+                {form.id && missingFields.length ? "Completar cadastro do cliente" : form.id ? "Alterar cliente" : "Novo cliente"}
               </h2>
               <Button variant="outline" onClick={() => setForm(null)}>
                 Cancelar
@@ -270,12 +311,14 @@ export default function AgentClients() {
                 required
               />
               <Input
+                className={missingFields.includes("e-mail") ? "border-amber-400 bg-amber-400/5" : ""}
                 type="email"
                 placeholder="E-mail"
                 value={form.email}
                 onChange={e => setForm({ ...form, email: e.target.value })}
               />
               <Input
+                className={missingFields.includes("telefone") ? "border-amber-400 bg-amber-400/5" : ""}
                 placeholder="Telefone"
                 value={form.phone}
                 onChange={e => setForm({ ...form, phone: e.target.value })}
@@ -288,7 +331,7 @@ export default function AgentClients() {
               <label className="text-sm text-gray-300">
                 Data de nascimento
                 <Input
-                  className="mt-2"
+                  className={`mt-2 ${missingFields.includes("data de nascimento") ? "border-amber-400 bg-amber-400/5" : ""}`}
                   type="date"
                   value={form.birthDate}
                   onChange={e =>
@@ -320,7 +363,7 @@ export default function AgentClients() {
                 onChange={e => setForm({ ...form, notes: e.target.value })}
               />
               <Button className="bg-gold text-black md:col-span-2">
-                Salvar cliente
+                {form.id && missingFields.length ? "Salvar e concluir cadastro" : "Salvar cliente"}
               </Button>
             </form>
           </Card>
@@ -435,9 +478,9 @@ export default function AgentClients() {
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Voltar
               </Button>
-              <Button variant="outline" onClick={() => edit(selected)}>
+              <Button className={missingFields.length ? "bg-gold text-black" : ""} variant={missingFields.length ? "default" : "outline"} onClick={() => edit(selected)}>
                 <Edit2 className="mr-2 h-4 w-4" />
-                Alterar
+                {missingFields.length ? "Completar cadastro" : "Alterar"}
               </Button>
               <Button
                 variant="outline"
@@ -460,17 +503,20 @@ export default function AgentClients() {
                 </span>
               </div>
               {missingFields.length > 0 && (
-                <div className="mt-5 flex gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-amber-100">
+                <div className="mt-5 flex flex-col gap-3 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4 text-amber-100 sm:flex-row sm:items-center">
                   <AlertTriangle
                     className="mt-0.5 shrink-0 text-amber-300"
                     size={20}
                   />
-                  <div>
+                  <div className="flex-1">
                     <p className="font-bold">Perfil incompleto</p>
                     <p className="mt-1 text-sm">
                       Faltando: {missingFields.join(", ")}.
                     </p>
                   </div>
+                  <Button className="shrink-0 bg-amber-400 text-black hover:bg-amber-300" onClick={() => edit(selected)}>
+                    <Edit2 className="mr-2 h-4 w-4" /> Completar dados do cliente
+                  </Button>
                 </div>
               )}
               <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -531,6 +577,28 @@ export default function AgentClients() {
                 Dados extraídos dos PC Sheets vinculados a este cliente.
               </p>
             </div>
+            {policyForm && (
+              <Card className="border-2 border-gold/50 bg-[#0b1524] p-6">
+                <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-[.18em] text-gold">Correção da pendência</p>
+                    <h2 className="mt-1 text-xl font-bold">Completar dados da apólice</h2>
+                  </div>
+                  <Button variant="outline" onClick={() => setPolicyForm(null)}>Cancelar</Button>
+                </div>
+                <form className="grid gap-4 md:grid-cols-2" onSubmit={savePolicyDetails}>
+                  <label className="text-sm text-gray-300">Tipo de apólice<Input className="mt-2" value={policyForm.product} onChange={e => setPolicyForm({ ...policyForm, product: e.target.value })} /></label>
+                  <label className="text-sm text-gray-300">Data da aplicação<Input className="mt-2" type="date" value={policyForm.issuedAt} onChange={e => setPolicyForm({ ...policyForm, issuedAt: e.target.value })} /></label>
+                  <label className="text-sm text-gray-300">Premium<Input className="mt-2" type="number" min="0" step="0.01" value={policyForm.premiumAmount} onChange={e => setPolicyForm({ ...policyForm, premiumAmount: Number(e.target.value) })} /></label>
+                  <label className="text-sm text-gray-300">Frequência do premium<Input className="mt-2" placeholder="Mensal ou anual" value={policyForm.premiumFrequency} onChange={e => setPolicyForm({ ...policyForm, premiumFrequency: e.target.value })} /></label>
+                  <label className="text-sm text-gray-300">Target premium anual<Input className="mt-2" type="number" min="0" step="0.01" value={policyForm.targetPremium} onChange={e => setPolicyForm({ ...policyForm, targetPremium: Number(e.target.value) })} /></label>
+                  <label className="text-sm text-gray-300">Pontos<Input className="mt-2" type="number" min="0" step="1" value={policyForm.points} onChange={e => setPolicyForm({ ...policyForm, points: Math.round(Number(e.target.value)) })} /></label>
+                  <label className="text-sm text-gray-300">Valor da cobertura<Input className="mt-2" type="number" min="0" step="0.01" value={policyForm.coverageAmount} onChange={e => setPolicyForm({ ...policyForm, coverageAmount: Number(e.target.value) })} /></label>
+                  <label className="text-sm text-gray-300">Beneficiários<Input className="mt-2" value={policyForm.beneficiaries} onChange={e => setPolicyForm({ ...policyForm, beneficiaries: e.target.value })} /></label>
+                  <Button className="bg-gold text-black md:col-span-2">Salvar e concluir dados da apólice</Button>
+                </form>
+              </Card>
+            )}
             <div className="grid gap-4">
               {selectedPolicies.map(policy =>
                 (() => {
@@ -555,7 +623,18 @@ export default function AgentClients() {
                             {policy.product || "Produto não informado"}
                           </p>
                         </div>
-                        <ShieldCheck className="shrink-0 text-gold" />
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <ShieldCheck className="text-gold" />
+                          <Button
+                            size="sm"
+                            className={policyMissing.length ? "bg-amber-400 text-black hover:bg-amber-300" : ""}
+                            variant={policyMissing.length ? "default" : "outline"}
+                            onClick={() => editPolicy(policy)}
+                          >
+                            <Edit2 className="mr-2 h-4 w-4" />
+                            {policyMissing.length ? "Completar apólice" : "Alterar apólice"}
+                          </Button>
+                        </div>
                       </div>
                       <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                         {[

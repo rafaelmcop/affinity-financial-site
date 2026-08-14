@@ -1058,6 +1058,25 @@ async function runProcedure(
       }))
     );
   }
+  if (name === "agent.updatePolicyDetails") {
+    await env.DB.prepare(
+      "UPDATE agentPolicies SET product=?,issuedAt=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        String(input.product || "").trim() || null,
+        String(input.issuedAt || "").trim() || null,
+        Math.max(0, Number(input.premiumAmount || 0)),
+        String(input.premiumFrequency || "").trim() || null,
+        Math.max(0, Number(input.targetPremium || 0)),
+        Math.max(0, Math.round(Number(input.points || 0))),
+        Math.max(0, Number(input.coverageAmount || 0)),
+        String(input.beneficiaries || "").trim() || null,
+        Number(input.id),
+        adminEmail.toLowerCase()
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
   if (name === "agent.listClients") {
     const rows = await env.DB.prepare(
       "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
