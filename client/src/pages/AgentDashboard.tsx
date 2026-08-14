@@ -109,14 +109,20 @@ export default function AgentDashboard() {
                 .filter(t => t.status === "pending")
                 .slice(0, 5)
                 .map(t => (
-                  <div key={t.id} className="rounded-lg bg-black/30 p-3">
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setLocation(t.clientId ? `/agentes/clientes?cliente=${t.clientId}` : "/agentes/apolices")}
+                    className="w-full rounded-lg bg-black/30 p-3 text-left transition hover:bg-gold/10"
+                  >
                     <p>{t.title}</p>
                     <p className="text-xs text-gray-500">
                       {t.dueAt
                         ? new Date(String(t.dueAt)).toLocaleString("pt-BR")
                         : "Sem data"}
                     </p>
-                  </div>
+                    <span className="mt-2 block text-xs font-semibold text-gold">Abrir e corrigir dados</span>
+                  </button>
                 ))}
               {!d?.pendingTasks && (
                 <p className="text-sm text-gray-500">
