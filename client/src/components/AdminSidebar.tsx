@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import FloatingInternalChat from "@/components/FloatingInternalChat";
+import { useNotificationSound } from "@/hooks/useNotificationSound";
 
 type Props = { onLogout?: () => void };
 
@@ -88,6 +89,8 @@ export default function AdminSidebar({ onLogout }: Props) {
           (pending.data as Record<string, unknown> | undefined)?.[key] || 0
         )
       : 0;
+  const portalPendingTotal = badgeCount("pendingPolicies") + badgeCount("pendingUsers") + badgeCount("pendingLeads") + badgeCount("pendingReviews");
+  useNotificationSound("portal", portalPendingTotal, "affinity-admin-pending");
   useEffect(() => {
     if (!open) return;
     const closeOnEscape = (event: KeyboardEvent) =>

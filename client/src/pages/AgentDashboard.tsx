@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
 import { trpc } from "@/lib/trpc";
+import { useNotificationSound } from "@/hooks/useNotificationSound";
 export default function AgentDashboard() {
   const [, setLocation] = useLocation();
   const q = trpc.agent.dashboard.useQuery(undefined, { refetchInterval: 30000 });
@@ -39,6 +40,7 @@ export default function AgentDashboard() {
     });
   const notificationTotal =
     (d?.notifications?.length || 0) + pendingTasks.length + (d?.profileAlerts?.length || 0);
+  useNotificationSound("portal", notificationTotal, "affinity-agent-pending");
   const cards = [
     ["Perfis incompletos", d?.profileAlerts?.length || 0, AlertTriangle],
     ["E-mails novos", d?.newMessages || 0, Mail],
@@ -67,7 +69,7 @@ export default function AgentDashboard() {
             </Card>
           ))}
         </div>
-        <Card className="border-gold/30 bg-[#0b1524] p-6">
+        {notificationTotal > 0 && <Card className="border-gold/30 bg-[#0b1524] p-6">
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="flex items-center gap-2 text-xl font-bold text-gold">
@@ -80,7 +82,7 @@ export default function AgentDashboard() {
             </span>
           </div>
           <div className="mt-5 grid gap-4 xl:grid-cols-3">
-            <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4">
+            {(d?.notifications?.length || 0) > 0 && <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-red-300">1 · Prioridade máxima</p>
@@ -125,13 +127,10 @@ export default function AgentDashboard() {
                     </div>
                   </div>
                 ))}
-                {!d?.notifications?.length && (
-                  <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Nenhuma mensagem nova.</p>
-                )}
               </div>
-            </section>
+            </section>}
 
-            <section className="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4">
+            {pendingTasks.length > 0 && <section className="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-amber-300">2 · Atenção necessária</p>
@@ -183,13 +182,10 @@ export default function AgentDashboard() {
                     </div>
                   </div>
                 ))}
-                {!pendingTasks.length && (
-                  <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Nenhuma tarefa pendente.</p>
-                )}
               </div>
-            </section>
+            </section>}
 
-            <section className="rounded-2xl border border-sky-400/25 bg-sky-400/5 p-4">
+            {(d?.profileAlerts?.length || 0) > 0 && <section className="rounded-2xl border border-sky-400/25 bg-sky-400/5 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-bold uppercase tracking-wider text-sky-300">3 · Manutenção cadastral</p>
@@ -209,13 +205,10 @@ export default function AgentDashboard() {
                     <span className="mt-2 block text-xs font-bold text-sky-300">Completar cadastro</span>
                   </button>
                 ))}
-                {!d?.profileAlerts?.length && (
-                  <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Todos os perfis estão completos.</p>
-                )}
               </div>
-            </section>
+            </section>}
           </div>
-        </Card>
+        </Card>}
         <Card className="border-gold/20 bg-[#0b1524] p-6">
           <h2 className="text-xl font-bold text-gold">Suas apólices</h2>
           <p className="mt-4 text-5xl font-bold">{d?.policies.length || 0}</p>

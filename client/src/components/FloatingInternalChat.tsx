@@ -4,6 +4,7 @@ import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { useNotificationSound } from "@/hooks/useNotificationSound";
 
 type Props = { mode: "admin" | "agent" };
 type Presence = "available" | "away" | "meeting" | "offline";
@@ -71,6 +72,7 @@ export default function FloatingInternalChat({ mode }: Props) {
     `${item.name} ${item.email}`.toLowerCase().includes(search.trim().toLowerCase())
   );
   const count = Number(unread.data?.count || 0);
+  useNotificationSound("chat", count, `affinity-chat-unread-${mode}`);
   const currentUser = (presence.data?.users || []).find(item => item.email.toLowerCase() === presence.data?.currentEmail.toLowerCase());
   const myPresence = String(currentUser?.presenceStatus || "available") as "available" | "away" | "meeting";
 
