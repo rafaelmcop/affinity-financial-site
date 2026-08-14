@@ -629,6 +629,24 @@ export const appRouter = router({
           );
         return { success: true };
       }),
+    markClientEmailRead: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(clientEmails)
+          .set({ readAt: new Date() })
+          .where(
+            and(
+              eq(clientEmails.id, input.id),
+              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
+              eq(clientEmails.direction, "received"),
+              isNull(clientEmails.readAt)
+            )
+          );
+        return { success: true };
+      }),
     sendClientEmail: adminProcedure
       .input(
         z.object({

@@ -8,6 +8,7 @@ export default function AgentDashboard() {
   const [, setLocation] = useLocation();
   const q = trpc.agent.dashboard.useQuery(undefined, { refetchInterval: 30000 });
   const syncInbox = trpc.agent.syncInbox.useMutation();
+  const markMessageRead = trpc.agent.markClientEmailRead.useMutation();
   useEffect(() => {
     let active = true;
     const refresh = async () => {
@@ -87,16 +88,40 @@ export default function AgentDashboard() {
               </div>
               <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
                 {(d?.notifications || []).map(notification => (
-                  <button
+                  <div
                     key={notification.id}
-                    onClick={() => setLocation(`/agentes/clientes?cliente=${notification.clientId}`)}
-                    className="w-full rounded-xl border border-red-300/25 bg-black/35 p-3 text-left transition hover:border-red-200 hover:bg-red-400/10"
+                    className="rounded-xl border border-red-300/25 bg-black/35 p-3 transition hover:border-red-200 hover:bg-red-400/10"
                   >
-                    <span className="block font-semibold text-white">{notification.clientName}</span>
-                    <span className="mt-1 block truncate text-sm text-gray-200">{notification.body}</span>
-                    <span className="mt-2 block text-xs text-red-200/80">{new Date(String(notification.sentAt)).toLocaleString("pt-BR")}</span>
-                    <span className="mt-2 block text-xs font-bold text-red-200">Abrir conversa</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setLocation(`/agentes/clientes?cliente=${notification.clientId}`)}
+                      className="w-full text-left"
+                    >
+                      <span className="block font-semibold text-white">{notification.clientName}</span>
+                      <span className="mt-1 block truncate text-sm text-gray-200">{notification.body}</span>
+                      <span className="mt-2 block text-xs text-red-200/80">{new Date(String(notification.sentAt)).toLocaleString("pt-BR")}</span>
+                    </button>
+                    <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-red-200/10 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setLocation(`/agentes/clientes?cliente=${notification.clientId}`)}
+                        className="text-xs font-bold text-red-200 hover:text-white"
+                      >
+                        Abrir conversa
+                      </button>
+                      <button
+                        type="button"
+                        disabled={markMessageRead.isPending}
+                        onClick={async () => {
+                          await markMessageRead.mutateAsync({ id: notification.id });
+                          await q.refetch();
+                        }}
+                        className="ml-auto rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-gray-200 transition hover:border-white/40 hover:bg-white/10 disabled:opacity-50"
+                      >
+                        Marcar como lida
+                      </button>
+                    </div>
+                  </div>
                 ))}
                 {!d?.notifications?.length && (
                   <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Nenhuma mensagem nova.</p>
