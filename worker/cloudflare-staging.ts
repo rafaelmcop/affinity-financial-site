@@ -1501,6 +1501,18 @@ async function runProcedure(
       .run();
     return trpcResult({ success: true });
   }
+  if (name === "agent.deleteTask") {
+    const owner = adminEmail.toLowerCase();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE agentTasks SET status='completed' WHERE id=? AND lower(agentEmail)=? AND title LIKE '%Flex Life%'"
+      ).bind(Number(input.id), owner),
+      env.DB.prepare(
+        "DELETE FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title NOT LIKE '%Flex Life%'"
+      ).bind(Number(input.id), owner),
+    ]);
+    return trpcResult({ success: true });
+  }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
     const defaults = [
@@ -3601,6 +3613,12 @@ async function runMessageAutomations(env: Env) {
           if (customized) continue;
         }
         const sentKey = `flex-life-review-${policy.policyId}`;
+        const sent = await env.DB.prepare(
+          "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
+        )
+          .bind(Number(automation.id), Number(policy.clientId), sentKey)
+          .first();
+        if (sent) continue;
         const taskTitle = `${reviewDates.reviewAt.toISOString().slice(0, 10) < today ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${String(policy.policyNumber)} — ${String(policy.name)}`;
         const existingTask = await env.DB.prepare(
           "SELECT id,createdAt FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
@@ -3630,12 +3648,6 @@ async function runMessageAutomations(env: Env) {
           continue;
         }
         if (!policy.email) continue;
-        const sent = await env.DB.prepare(
-          "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
-        )
-          .bind(Number(automation.id), Number(policy.clientId), sentKey)
-          .first();
-        if (sent) continue;
         const safeName = escapeAutomationHtml(policy.name);
         const scheduleUrl =
           "https://calendly.com/affinityfc/consultoria-gratuita?hide_event_type_details=1&hide_gdpr_banner=1";

@@ -861,6 +861,33 @@ export const appRouter = router({
           );
         return { success: true };
       }),
+    deleteTask: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const owner = ctx.adminEmail.toLowerCase();
+        const [task] = await db
+          .select({ title: agentTasks.title })
+          .from(agentTasks)
+          .where(
+            and(
+              eq(agentTasks.id, input.id),
+              eq(agentTasks.agentEmail, owner)
+            )
+          )
+          .limit(1);
+        if (task?.title.includes("Flex Life"))
+          await db
+            .update(agentTasks)
+            .set({ status: "completed" })
+            .where(and(eq(agentTasks.id, input.id), eq(agentTasks.agentEmail, owner)));
+        else
+          await db
+            .delete(agentTasks)
+            .where(and(eq(agentTasks.id, input.id), eq(agentTasks.agentEmail, owner)));
+        return { success: true };
+      }),
     listMessages: adminProcedure.query(async ({ ctx }) => {
       const db = await (await import("./db")).getDb();
       if (!db) throw new Error("Database not available");

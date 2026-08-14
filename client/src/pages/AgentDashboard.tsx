@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { AlertTriangle, CalendarClock, Mail, MessageSquare, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCheck, Mail, MessageSquare, ShieldCheck, Trash2 } from "lucide-react";
 import { useLocation } from "wouter";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
@@ -9,6 +9,8 @@ export default function AgentDashboard() {
   const q = trpc.agent.dashboard.useQuery(undefined, { refetchInterval: 30000 });
   const syncInbox = trpc.agent.syncInbox.useMutation();
   const markMessageRead = trpc.agent.markClientEmailRead.useMutation();
+  const markTaskRead = trpc.agent.toggleTask.useMutation();
+  const deleteTask = trpc.agent.deleteTask.useMutation();
   useEffect(() => {
     let active = true;
     const refresh = async () => {
@@ -139,18 +141,47 @@ export default function AgentDashboard() {
               </div>
               <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
                 {pendingTasks.map(task => (
-                  <button
+                  <div
                     key={task.id}
-                    type="button"
-                    onClick={() => setLocation(task.clientId ? `/agentes/clientes?cliente=${task.clientId}` : "/agentes/apolices")}
-                    className="w-full rounded-xl border border-amber-300/20 bg-black/30 p-3 text-left transition hover:border-amber-300 hover:bg-amber-400/10"
+                    className="rounded-xl border border-amber-300/20 bg-black/30 p-3 transition hover:border-amber-300 hover:bg-amber-400/10"
                   >
-                    <span className="block font-semibold text-white">{task.title}</span>
-                    <span className="mt-1 block text-xs text-gray-400">
-                      {task.dueAt ? new Date(String(task.dueAt)).toLocaleString("pt-BR") : "Sem data definida"}
-                    </span>
-                    <span className="mt-2 block text-xs font-bold text-amber-300">Abrir pendência</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setLocation(task.clientId ? `/agentes/clientes?cliente=${task.clientId}` : "/agentes/apolices")}
+                      className="w-full text-left"
+                    >
+                      <span className="block font-semibold text-white">{task.title}</span>
+                      <span className="mt-1 block text-xs text-gray-400">
+                        {task.dueAt ? new Date(String(task.dueAt)).toLocaleString("pt-BR") : "Sem data definida"}
+                      </span>
+                      <span className="mt-2 block text-xs font-bold text-amber-300">Abrir pendência</span>
+                    </button>
+                    <div className="mt-3 flex flex-wrap gap-2 border-t border-amber-200/10 pt-3">
+                      <button
+                        type="button"
+                        disabled={markTaskRead.isPending}
+                        onClick={async () => {
+                          await markTaskRead.mutateAsync({ id: task.id, completed: true });
+                          await q.refetch();
+                        }}
+                        className="flex items-center gap-1.5 rounded-full border border-green-300/25 px-3 py-1 text-xs font-semibold text-green-200 transition hover:border-green-300 hover:bg-green-400/10 disabled:opacity-50"
+                      >
+                        <CheckCheck size={13} /> Marcar como lida
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deleteTask.isPending}
+                        onClick={async () => {
+                          if (!window.confirm("Excluir esta pendência?")) return;
+                          await deleteTask.mutateAsync({ id: task.id });
+                          await q.refetch();
+                        }}
+                        className="ml-auto flex items-center gap-1.5 rounded-full border border-red-300/25 px-3 py-1 text-xs font-semibold text-red-200 transition hover:border-red-300 hover:bg-red-400/10 disabled:opacity-50"
+                      >
+                        <Trash2 size={13} /> Excluir
+                      </button>
+                    </div>
+                  </div>
                 ))}
                 {!pendingTasks.length && (
                   <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Nenhuma tarefa pendente.</p>
