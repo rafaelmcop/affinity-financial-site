@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Edit2, MessageCircle, Search, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { Activity, Edit2, MessageCircle, Search, ShieldCheck, UserPlus, Users, X } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -148,6 +148,10 @@ export default function AdminUsers() {
   } | null>(null);
   const [historyUser, setHistoryUser] = useState<{ name: string; email: string } | null>(null);
   const internalHistory = trpc.crm.userInternalHistory.useQuery(
+    { email: historyUser?.email || "usuario@affinityfc.org" },
+    { enabled: Boolean(historyUser) }
+  );
+  const auditHistory = trpc.crm.userAuditHistory.useQuery(
     { email: historyUser?.email || "usuario@affinityfc.org" },
     { enabled: Boolean(historyUser) }
   );
@@ -637,15 +641,21 @@ export default function AdminUsers() {
             <Card className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden border-gold/30 bg-[#0b1524] text-white shadow-2xl">
               <div className="flex items-center gap-3 border-b border-white/10 p-5">
                 <MessageCircle className="text-gold" />
-                <div className="min-w-0 flex-1"><h2 className="font-bold text-gold">Histórico de comunicações</h2><p className="truncate text-sm text-gray-400">{historyUser.name} · {historyUser.email}</p></div>
+                <div className="min-w-0 flex-1"><h2 className="font-bold text-gold">Histórico do usuário</h2><p className="truncate text-sm text-gray-400">{historyUser.name} · {historyUser.email}</p></div>
                 <Button size="icon" variant="ghost" onClick={() => setHistoryUser(null)} aria-label="Fechar histórico"><X /></Button>
               </div>
-              <div className="min-h-64 space-y-3 overflow-y-auto p-5">
+              <div className="min-h-64 space-y-6 overflow-y-auto p-5">
+                <section><h3 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-gold"><Activity size={16} /> Atividades no portal</h3><div className="space-y-2">
+                  {(auditHistory.data || []).map(log => <div key={log.id} className="rounded-xl border border-white/10 bg-black/25 p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-white">{log.action}</p><p className="text-xs text-gray-500">{new Date(String(log.createdAt)).toLocaleString("pt-BR")}</p></div>{log.targetId && <p className="mt-1 text-xs text-gray-400">Registro relacionado: {log.targetId}</p>}</div>)}
+                  {!auditHistory.isLoading && !auditHistory.data?.length && <p className="rounded-xl bg-black/20 py-6 text-center text-sm text-gray-500">Nenhuma alteração registrada para este usuário.</p>}
+                </div></section>
+                <section><h3 className="mb-3 flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-gold"><MessageCircle size={16} /> Comunicações internas</h3><div className="space-y-3">
                 {(internalHistory.data || []).map(message => {
                   const sent = message.senderEmail.toLowerCase() === historyUser.email.toLowerCase();
-                  return <div key={message.id} className={`max-w-[88%] rounded-2xl p-3 ${sent ? "ml-auto bg-gold text-black" : "mr-auto bg-[#193554]"}`}><p className="text-xs font-bold opacity-70">{sent ? "Enviada por este usuário" : `Recebida de ${message.senderEmail}`}</p><p className="mt-1 whitespace-pre-wrap text-sm">{message.body}</p><p className="mt-1 text-[10px] opacity-60">{new Date(String(message.sentAt)).toLocaleString("pt-BR")}</p></div>;
+                  return <div key={message.id} className={`max-w-[88%] rounded-2xl p-3 ${sent ? "ml-auto bg-gold text-black" : "mr-auto bg-[#193554]"}`}><p className="text-xs font-bold opacity-70">{sent ? "Enviada por este usuário" : `Recebida de ${message.senderEmail}`}</p><p className="mt-1 whitespace-pre-wrap text-sm">{message.body}</p><p className="mt-1 text-[10px] opacity-60">{new Date(String(message.sentAt)).toLocaleString("pt-BR")}{sent ? ` · ${message.readAt ? "Lido" : "Enviado"}` : ""}</p></div>;
                 })}
                 {!internalHistory.isLoading && !internalHistory.data?.length && <p className="py-12 text-center text-gray-500">Nenhuma comunicação interna registrada para este usuário.</p>}
+                </div></section>
               </div>
             </Card>
           </div>
@@ -704,12 +714,10 @@ export default function AdminUsers() {
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {user.kind === "internal" && (
-                    <Button variant="outline" onClick={() => setHistoryUser({ name: user.name, email: user.email })}>
+                  <Button variant="outline" onClick={() => setHistoryUser({ name: user.name, email: user.email })}>
                       <MessageCircle className="mr-2 h-4 w-4" />
                       Histórico
-                    </Button>
-                  )}
+                  </Button>
                   {user.kind === "internal" &&
                     isMaster &&
                     user.accountType === "admin" && (

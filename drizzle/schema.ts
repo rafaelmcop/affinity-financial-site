@@ -53,6 +53,9 @@ export const adminAccounts = mysqlTable("adminAccounts", {
     .default("approved")
     .notNull(),
   isActive: int("isActive").default(1).notNull(),
+  presenceStatus: mysqlEnum("presenceStatus", ["available", "away", "meeting"])
+    .default("available").notNull(),
+  lastSeenAt: timestamp("lastSeenAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -132,6 +135,16 @@ export const portalMessages = mysqlTable("portalMessages", {
   readAt: timestamp("readAt"),
   deletedAt: timestamp("deletedAt"),
   deletedBy: varchar("deletedBy", { length: 320 }),
+});
+
+export const portalAuditLogs = mysqlTable("portalAuditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  actorEmail: varchar("actorEmail", { length: 320 }).notNull(),
+  action: varchar("action", { length: 255 }).notNull(),
+  entityType: varchar("entityType", { length: 100 }),
+  targetId: varchar("targetId", { length: 320 }),
+  details: text("details"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
 export const agentPolicies = mysqlTable("agentPolicies", {

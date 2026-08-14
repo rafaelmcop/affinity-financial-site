@@ -19,6 +19,7 @@ import {
   scheduledMessages,
   testimonials,
   portalMessages,
+  portalAuditLogs,
 } from "../drizzle/schema";
 import { COOKIE_NAME } from "../shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
@@ -2993,6 +2994,26 @@ export const appRouter = router({
           );
         return { count: rows.length };
       }),
+    presence: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      await db.update(adminAccounts).set({ lastSeenAt: new Date() })
+        .where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase()));
+      const users = await db.select({
+        email: adminAccounts.email, name: adminAccounts.name,
+        accountType: adminAccounts.accountType, presenceStatus: adminAccounts.presenceStatus, lastSeenAt: adminAccounts.lastSeenAt,
+      }).from(adminAccounts).where(eq(adminAccounts.isActive, 1));
+      return { currentEmail: ctx.adminEmail.toLowerCase(), users };
+    }),
+    setPresence: adminProcedure
+      .input(z.object({ status: z.enum(["available", "away", "meeting"]) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(adminAccounts).set({ presenceStatus: input.status, lastSeenAt: new Date() })
+          .where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase()));
+        return { success: true };
+      }),
     userInternalHistory: adminProcedure
       .input(z.object({ email: z.string().email() }))
       .query(async ({ input }) => {
@@ -3012,6 +3033,15 @@ export const appRouter = router({
             )
           )
           .orderBy(portalMessages.sentAt);
+      }),
+    userAuditHistory: adminProcedure
+      .input(z.object({ email: z.string().email() }))
+      .query(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        return db.select().from(portalAuditLogs)
+          .where(eq(portalAuditLogs.actorEmail, input.email.toLowerCase()))
+          .orderBy(portalAuditLogs.createdAt);
       }),
     deleteInternalMessage: adminProcedure
       .input(z.object({ id: z.number() }))

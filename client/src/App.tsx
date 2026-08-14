@@ -1,7 +1,8 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
-import { Route, Switch } from "wouter";
+import { Route, Switch, useLocation } from "wouter";
+import { useEffect } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { LanguageProvider } from "./contexts/LanguageContext";
@@ -30,6 +31,14 @@ import AgentSettings from "./pages/AgentSettings";
 import AdminUsers from "./pages/AdminUsers";
 import AdminCommunicationAudit from "./pages/AdminCommunicationAudit";
 import AgentInternalMessages from "./pages/AgentInternalMessages";
+
+function ScrollToTop() {
+  const [location] = useLocation();
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  }, [location]);
+  return null;
+}
 
 function Router() {
   return (
@@ -87,6 +96,7 @@ function App() {
         <LanguageProvider>
           <TooltipProvider>
             <Toaster />
+            <ScrollToTop />
             <Router />
           </TooltipProvider>
         </LanguageProvider>

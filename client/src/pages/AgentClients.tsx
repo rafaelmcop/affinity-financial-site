@@ -120,6 +120,7 @@ export default function AgentClients() {
     syncInbox = trpc.agent.syncInbox.useMutation(),
     markRead = trpc.agent.markClientEmailsRead.useMutation();
   const conversationEnd = useRef<HTMLDivElement>(null);
+  const conversationContainer = useRef<HTMLDivElement>(null);
   const spreadsheetInput = useRef<HTMLInputElement>(null);
   const rows = clients.data || [],
     selected = rows.find(client => client.id === selectedId),
@@ -174,7 +175,7 @@ export default function AgentClients() {
       setSortDirection("asc");
     }
   };
-  const edit = (client: any) =>
+  const edit = (client: any) => {
     setForm({
       id: client.id,
       name: client.name,
@@ -186,6 +187,8 @@ export default function AgentClients() {
       source: client.source || "Cadastro manual",
       notes: client.notes || "",
     });
+    window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "smooth" }));
+  };
   useEffect(() => {
     const requested = Number(
       new URLSearchParams(window.location.search).get("cliente")
@@ -202,7 +205,8 @@ export default function AgentClients() {
     markRead.mutate({ clientId: selectedId });
   }, [selectedId]);
   useEffect(() => {
-    conversationEnd.current?.scrollIntoView({ behavior: "smooth" });
+    const container = conversationContainer.current;
+    if (container) container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
   }, [emails.data?.length, selectedId]);
   useEffect(() => {
     if (!selectedId) return;
@@ -784,7 +788,7 @@ export default function AgentClients() {
                   Atualizar respostas
                 </Button>
               </div>
-              <div className="mt-5 flex max-h-[34rem] min-h-72 flex-col gap-3 overflow-y-auto rounded-2xl border border-white/10 bg-[#050b13] p-4 sm:p-5">
+              <div ref={conversationContainer} className="mt-5 flex max-h-[34rem] min-h-72 flex-col gap-3 overflow-y-auto rounded-2xl border border-white/10 bg-[#050b13] p-4 sm:p-5">
                 {(emails.data || []).map(message => (
                   <div
                     key={message.id}

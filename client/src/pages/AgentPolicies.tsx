@@ -81,7 +81,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
     const premiumAmount = money(spreadsheetValue(row, ["premium", "premio", "valor premium"]));
     const frequency = spreadsheetValue(row, ["frequencia", "frequency", "modal"]);
     const suppliedTarget = money(spreadsheetValue(row, ["target premium", "premium anual"]));
-    const targetPremium = suppliedTarget || (/mensal|monthly/i.test(frequency) ? premiumAmount * 12 : 0);
+    const targetPremium = suppliedTarget || premiumAmount * 12;
     const suppliedPoints = money(spreadsheetValue(row, ["pontos", "points"]));
     return {
       clientName: spreadsheetValue(row, ["nome completo", "nome cliente", "client name", "cliente", "nome"]),
@@ -141,8 +141,8 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
     if (!clientName) return [];
 
     const premiumAmount = money(belowValue(["premium", "premio"]));
-    const premiumFrequency = rightValue(["frequencia", "frequency", "modal"], 0, personalStart);
-    const targetPremium = /mensal|monthly/i.test(premiumFrequency) ? premiumAmount * 12 : 0;
+    const premiumFrequency = rightValue(["frequencia", "frequency", "modal"], 0, personalStart) || "Mensal";
+    const targetPremium = premiumAmount * 12;
     const productRows = matrix.slice(0, personalStart).filter(row => row.some(value => /\(\s*x\s*\)/i.test(value)));
     const productText = productRows.flat().join(" ");
     const product = /term|temporar/i.test(productText) ? "Term Life"

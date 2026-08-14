@@ -874,7 +874,7 @@ async function runProcedure(
     }
     if (name === "affiliate.submitLead") {
       const affiliate = await env.DB.prepare(
-        "SELECT affiliateCode FROM affiliates WHERE id=?"
+        "SELECT affiliateCode,email FROM affiliates WHERE id=?"
       )
         .bind(affiliateId)
         .first<JsonRecord>();
@@ -905,6 +905,8 @@ async function runProcedure(
           notes
         )
         .run();
+      await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,'Cadastrou um novo lead','affiliate',?)")
+        .bind(String(affiliate.email).toLowerCase(), visitorEmail).run();
       return trpcResult({
         success: true,
         message: "Lead enviado com sucesso!",
@@ -999,6 +1001,43 @@ async function runProcedure(
     return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
   if (name.startsWith("admin.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+
+  await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?")
+    .bind(adminEmail.toLowerCase()).run();
+  const auditedActions: Record<string, string> = {
+    "agent.saveClient": "Criou ou alterou um cliente",
+    "agent.deleteClient": "Excluiu um cliente",
+    "agent.updatePolicyDetails": "Alterou uma apólice",
+    "agent.deletePolicy": "Excluiu uma apólice",
+    "agent.importPcSheet": "Importou um PC Sheet",
+    "agent.importSpreadsheet": "Importou uma planilha de clientes",
+    "agent.saveScheduledMessage": "Criou ou alterou uma automação",
+    "agent.deleteScheduledMessage": "Excluiu uma automação",
+    "agent.sendClientEmail": "Enviou um e-mail para cliente",
+    "agent.decideAssignedReview": "Analisou uma avaliação",
+    "crm.create": "Criou um registro no CRM",
+    "crm.update": "Alterou um registro no CRM",
+    "crm.delete": "Excluiu um registro do CRM",
+    "crm.sendInternalMessage": "Enviou uma mensagem interna",
+    "admin.createUnifiedUser": "Criou ou ampliou acessos de um usuário",
+    "admin.updateAdmin": "Alterou dados de um usuário",
+    "admin.setInternalUserStatus": "Alterou o status de um usuário",
+    "admin.setInternalPortalAccess": "Alterou os acessos de um usuário",
+    "admin.updateAffiliateUser": "Alterou dados de um afiliado",
+    "admin.approveAffiliate": "Aprovou um afiliado",
+    "admin.rejectAffiliate": "Recusou um afiliado",
+    "admin.blockAffiliate": "Bloqueou um afiliado",
+    "admin.reactivateAffiliate": "Reativou um afiliado",
+    "testimonials.setAdminDecision": "Decidiu sobre uma avaliação",
+    "testimonials.update": "Alterou um depoimento ou avaliação",
+    "testimonials.delete": "Excluiu um depoimento ou avaliação",
+  };
+  const auditedAction = auditedActions[name];
+  if (auditedAction) {
+    const targetId = String(input.clientId ?? input.affiliateId ?? input.id ?? input.email ?? input.agentEmail ?? "").trim() || null;
+    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)")
+      .bind(adminEmail.toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
+  }
 
   if (name === "agent.dashboard") {
     const policies = (
@@ -3058,6 +3097,30 @@ async function runProcedure(
       .bind(email, email)
       .all<JsonRecord>();
     return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+  }
+
+  if (name === "crm.userAuditHistory") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso não permitido", "FORBIDDEN", 403);
+    const email = String(input.email || "").trim().toLowerCase();
+    if (!validEmail(email)) return trpcError("Usuário inválido");
+    const rows = await env.DB.prepare("SELECT * FROM portalAuditLogs WHERE lower(actorEmail)=? ORDER BY createdAt DESC,id DESC LIMIT 500")
+      .bind(email).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+  }
+
+  if (name === "crm.presence") {
+    const rows = await env.DB.prepare("SELECT email,name,accountType,presenceStatus,lastSeenAt FROM adminAccounts WHERE isActive=1 ORDER BY name")
+      .all<JsonRecord>();
+    return trpcResult({ currentEmail: adminEmail.toLowerCase(), users: rows.results });
+  }
+
+  if (name === "crm.setPresence") {
+    const status = String(input.status || "available");
+    if (!["available", "away", "meeting"].includes(status)) return trpcError("Status inválido");
+    await env.DB.prepare("UPDATE adminAccounts SET presenceStatus=?,lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?")
+      .bind(status, adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
   }
 
   if (
