@@ -1351,8 +1351,13 @@ async function runProcedure(
         "Use uma data de aniversário válida no formato MM/DD/AAAA"
       );
     const storedBirthDate = birthday?.iso || null;
-    let client = clientEmail
-      ? await env.DB.prepare(
+    const existingPolicy = await env.DB.prepare(
+      "SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=?"
+    ).bind(owner, policyNumber).first<JsonRecord>();
+    let client = existingPolicy?.clientId
+      ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?")
+          .bind(Number(existingPolicy.clientId), owner).first<JsonRecord>()
+      : clientEmail ? await env.DB.prepare(
           "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?"
         )
           .bind(clientEmail, owner)
@@ -1364,10 +1369,14 @@ async function runProcedure(
       )
         .bind(clientPhone, owner)
         .first<JsonRecord>();
+    if (!client)
+      client = await env.DB.prepare(
+        "SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1"
+      ).bind(clientName, owner).first<JsonRecord>();
     let clientId = Number(client?.id || 0);
     if (clientId) {
       await env.DB.prepare(
-        "UPDATE crmClients SET name=?,email=COALESCE(?,email),phone=COALESCE(?,phone),whatsapp=COALESCE(?,whatsapp),status='client',source='PC Sheet',birthDate=COALESCE(?,birthDate),notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+        "UPDATE crmClients SET name=?,email=COALESCE(NULLIF(?,''),email),phone=COALESCE(NULLIF(?,''),phone),whatsapp=COALESCE(NULLIF(?,''),whatsapp),status='client',source='PC Sheet',birthDate=COALESCE(NULLIF(?,''),birthDate),notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
       )
         .bind(
           clientName,
@@ -1396,11 +1405,7 @@ async function runProcedure(
         .run();
       clientId = Number(inserted.meta.last_row_id);
     }
-    const policy = await env.DB.prepare(
-      "SELECT id FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=?"
-    )
-      .bind(owner, policyNumber)
-      .first<JsonRecord>();
+    const policy = existingPolicy;
     const policyValues = [
       clientId,
       clientName,
@@ -1418,9 +1423,19 @@ async function runProcedure(
     ];
     if (policy)
       await env.DB.prepare(
-        "UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,product=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+        "UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=COALESCE(NULLIF(?,''),clientEmail),clientPhone=COALESCE(NULLIF(?,''),clientPhone),birthDate=COALESCE(NULLIF(?,''),birthDate),product=COALESCE(NULLIF(?,''),product),premiumAmount=CASE WHEN ?>0 THEN ? ELSE premiumAmount END,premiumFrequency=COALESCE(NULLIF(?,''),premiumFrequency),targetPremium=CASE WHEN ?>0 THEN ? ELSE targetPremium END,points=CASE WHEN ?>0 THEN ? ELSE points END,coverageAmount=CASE WHEN ?>0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(?,''),beneficiaries),issuedAt=COALESCE(NULLIF(?,''),issuedAt),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
       )
-        .bind(...policyValues, Number(policy.id), owner)
+        .bind(
+          clientId, clientName, clientEmail, clientPhone, storedBirthDate,
+          String(input.product ?? "").trim(),
+          Number(input.premiumAmount || 0), Number(input.premiumAmount || 0),
+          String(input.premiumFrequency ?? "").trim(),
+          Number(input.targetPremium || 0), Number(input.targetPremium || 0),
+          Number(input.points || 0), Math.max(0, Math.round(Number(input.points || 0))),
+          Number(input.coverageAmount || 0), Number(input.coverageAmount || 0),
+          String(input.beneficiaries ?? "").trim(), String(input.issuedAt ?? "").trim(),
+          Number(policy.id), owner
+        )
         .run();
     else
       await env.DB.prepare(

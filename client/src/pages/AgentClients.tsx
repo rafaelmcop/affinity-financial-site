@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { missingClientProfileFields } from "../../../shared/clientProfile";
-import { readClientSpreadsheet } from "./AgentPolicies";
+import { readClientSpreadsheet, readPcSheet } from "./AgentPolicies";
 
 type Status =
   | "new"
@@ -96,6 +96,8 @@ const chatBody = (value: unknown) =>
     )[0]
     .replace(/\r?\n>[\s\S]*$/gi, "")
     .trim();
+const cleanName = (value: unknown) =>
+  String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 export default function AgentClients() {
   const [search, setSearch] = useState(""),
@@ -111,7 +113,8 @@ export default function AgentClients() {
   const saveClient = trpc.agent.saveClient.useMutation(),
     requestDeletion = trpc.agent.requestClientDeletion.useMutation(),
     updatePolicy = trpc.agent.updatePolicyDetails.useMutation(),
-    importSpreadsheet = trpc.agent.importSpreadsheet.useMutation();
+    importSpreadsheet = trpc.agent.importSpreadsheet.useMutation(),
+    savePcSheet = trpc.agent.savePcSheet.useMutation();
   const deletionRequests = trpc.agent.listClientDeletionRequests.useQuery();
   const emails = trpc.agent.clientEmails.useQuery(
       { clientId: selectedId || 0 },
@@ -282,6 +285,38 @@ export default function AgentClients() {
       toast.success("Dados da apólice atualizados");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível atualizar a apólice");
+    }
+  };
+  const completeFromFile = async (file: File) => {
+    if (!selected) return;
+    try {
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      if (isPdf) {
+        const extracted = await readPcSheet(file);
+        const selectedName = cleanName(selected.name);
+        const extractedName = cleanName(extracted.clientName);
+        const knownPolicyNumbers = selectedPolicies.map(policy => String(policy.policyNumber || "").replace(/\s/g, ""));
+        if (extractedName !== selectedName && !knownPolicyNumbers.includes(String(extracted.policyNumber || "").replace(/\s/g, "")))
+          throw new Error("Este PDF parece pertencer a outro cliente");
+        if (!extracted.clientName || !extracted.policyNumber)
+          throw new Error("Não foi possível identificar nome e número da apólice neste PDF");
+        await savePcSheet.mutateAsync(extracted);
+        await Promise.all([clients.refetch(), policies.refetch()]);
+        toast.success("PC Sheet conferido e cadastro completado");
+        return;
+      }
+      const parsed = await readClientSpreadsheet(file);
+      const selectedEmail = String(selected.email || primaryPolicy?.clientEmail || "").trim().toLowerCase();
+      const selectedName = cleanName(selected.name);
+      const match = parsed.find(row => selectedEmail && row.clientEmail.trim().toLowerCase() === selectedEmail)
+        || parsed.find(row => cleanName(row.clientName) === selectedName)
+        || (parsed.length === 1 ? parsed[0] : undefined);
+      if (!match) throw new Error("Não foi possível identificar este cliente na ficha");
+      const result = await importSpreadsheet.mutateAsync({ rows: [match] });
+      await Promise.all([clients.refetch(), policies.refetch()]);
+      toast.success(`Ficha conferida: ${result.updatedClients + result.updatedPolicies} cadastro(s) completado(s).`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível usar este arquivo");
     }
   };
   return (
@@ -484,7 +519,7 @@ export default function AgentClients() {
           </>
         ) : (
           <>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => setSelectedId(null)}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Voltar
@@ -493,6 +528,25 @@ export default function AgentClients() {
                 <Edit2 className="mr-2 h-4 w-4" />
                 {missingFields.length ? "Completar cadastro" : "Alterar"}
               </Button>
+              <Button
+                variant="outline"
+                disabled={importSpreadsheet.isPending || savePcSheet.isPending}
+                onClick={() => spreadsheetInput.current?.click()}
+              >
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Completar com PDF ou ficha
+              </Button>
+              <input
+                ref={spreadsheetInput}
+                className="hidden"
+                type="file"
+                accept=".pdf,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+                onChange={async event => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) await completeFromFile(file);
+                }}
+              />
               <Button
                 variant="outline"
                 onClick={() => deleteClient(selected.id)}
@@ -527,34 +581,9 @@ export default function AgentClients() {
                     </p>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
-                    <Button variant="outline" className="border-amber-300/50 text-amber-100 hover:bg-amber-300/10" disabled={importSpreadsheet.isPending} onClick={() => spreadsheetInput.current?.click()}>
-                      <FileSpreadsheet className="mr-2 h-4 w-4" /> Completar com Excel
+                    <Button variant="outline" className="border-amber-300/50 text-amber-100 hover:bg-amber-300/10" disabled={importSpreadsheet.isPending || savePcSheet.isPending} onClick={() => spreadsheetInput.current?.click()}>
+                      <FileSpreadsheet className="mr-2 h-4 w-4" /> Completar com PDF ou ficha
                     </Button>
-                    <input
-                      ref={spreadsheetInput}
-                      className="hidden"
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      onChange={async event => {
-                        const file = event.target.files?.[0];
-                        event.currentTarget.value = "";
-                        if (!file) return;
-                        try {
-                          const parsed = await readClientSpreadsheet(file);
-                          const selectedEmail = String(selected.email || primaryPolicy?.clientEmail || "").trim().toLowerCase();
-                          const selectedName = String(selected.name || "").trim().toLowerCase();
-                          const match = parsed.find(row => selectedEmail && row.clientEmail.trim().toLowerCase() === selectedEmail)
-                            || parsed.find(row => row.clientName.trim().toLowerCase() === selectedName)
-                            || (parsed.length === 1 ? parsed[0] : undefined);
-                          if (!match) throw new Error("Não foi possível identificar este cliente na planilha");
-                          const result = await importSpreadsheet.mutateAsync({ rows: [match] });
-                          await Promise.all([clients.refetch(), policies.refetch()]);
-                          toast.success(`Planilha conferida: ${result.updatedClients + result.updatedPolicies} cadastro(s) completado(s).`);
-                        } catch (error) {
-                          toast.error(error instanceof Error ? error.message : "Não foi possível usar esta planilha");
-                        }
-                      }}
-                    />
                     <Button className="bg-amber-400 text-black hover:bg-amber-300" onClick={() => edit(selected)}>
                       <Edit2 className="mr-2 h-4 w-4" /> Completar manualmente
                     </Button>

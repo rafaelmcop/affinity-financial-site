@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { extractApplicationDate } from "../shared/pcSheet";
+import { extractApplicationDate, extractPdfCreationDate } from "../shared/pcSheet";
 
 describe("extractApplicationDate", () => {
+  it("reads the Application Date on the cover sheet", () => {
+    expect(extractApplicationDate("Application Date: 02/08/2026 Application State: MA")).toBe("2026-02-08");
+  });
   it("reads Date and Time eSigned and discards the time", () => {
     expect(
       extractApplicationDate(
@@ -37,5 +40,11 @@ describe("extractApplicationDate", () => {
         "Policy Date: 08/20/2026 Issue Date: 08/21/2026 Effective Date: 08/22/2026"
       )
     ).toBe("");
+  });
+});
+
+describe("extractPdfCreationDate", () => {
+  it("uses the PDF creation metadata as a fallback", () => {
+    expect(extractPdfCreationDate("D:20260211171515-05'00'")).toBe("2026-02-11");
   });
 });

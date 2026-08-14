@@ -718,7 +718,13 @@ export const appRouter = router({
         if (!db) throw new Error("Database not available");
         const owner = ctx.adminEmail.toLowerCase();
         const birth = parseAmericanBirthDate(input.birthDate);
-        let [client] = input.clientEmail
+        const [existingPolicy] = await db.select().from(agentPolicies).where(and(
+          eq(agentPolicies.agentEmail, owner),
+          eq(agentPolicies.policyNumber, input.policyNumber)
+        )).limit(1);
+        let [client] = existingPolicy?.clientId
+          ? await db.select().from(crmClients).where(eq(crmClients.id, existingPolicy.clientId)).limit(1)
+          : input.clientEmail
           ? await db
               .select()
               .from(crmClients)
@@ -730,6 +736,12 @@ export const appRouter = router({
               )
               .limit(1)
           : [];
+        if (!client) {
+          [client] = await db.select().from(crmClients).where(and(
+            eq(crmClients.assignedAdminEmail, owner),
+            eq(crmClients.name, input.clientName)
+          )).limit(1);
+        }
         if (!client) {
           const inserted = await db
             .insert(crmClients)
@@ -750,17 +762,19 @@ export const appRouter = router({
             .from(crmClients)
             .where(eq(crmClients.id, inserted[0].id))
             .limit(1);
+        } else {
+          await db.update(crmClients).set({
+            name: input.clientName,
+            email: input.clientEmail || client.email,
+            phone: input.clientPhone || client.phone,
+            whatsapp: input.clientPhone || client.whatsapp,
+            birthDate: birth?.date || client.birthDate,
+            source: "PC Sheet",
+            status: "client",
+            notes: `Apólice ${input.policyNumber}`,
+          }).where(eq(crmClients.id, client.id));
         }
-        const [policy] = await db
-          .select()
-          .from(agentPolicies)
-          .where(
-            and(
-              eq(agentPolicies.agentEmail, owner),
-              eq(agentPolicies.policyNumber, input.policyNumber)
-            )
-          )
-          .limit(1);
+        const policy = existingPolicy;
         const values = {
           ...input,
           agentEmail: owner,
@@ -778,7 +792,20 @@ export const appRouter = router({
         if (policy)
           await db
             .update(agentPolicies)
-            .set(values)
+            .set({
+              ...values,
+              clientEmail: input.clientEmail || policy.clientEmail,
+              clientPhone: input.clientPhone || policy.clientPhone,
+              birthDate: birth?.date || policy.birthDate,
+              product: input.product || policy.product,
+              premiumAmount: input.premiumAmount > 0 ? input.premiumAmount.toFixed(2) : policy.premiumAmount,
+              premiumFrequency: input.premiumFrequency || policy.premiumFrequency,
+              targetPremium: input.targetPremium > 0 ? input.targetPremium.toFixed(2) : policy.targetPremium,
+              points: input.points > 0 ? Math.round(input.points) : policy.points,
+              coverageAmount: input.coverageAmount > 0 ? input.coverageAmount.toFixed(2) : policy.coverageAmount,
+              beneficiaries: input.beneficiaries || policy.beneficiaries,
+              issuedAt: input.issuedAt ? new Date(`${input.issuedAt}T12:00:00Z`) : policy.issuedAt,
+            })
             .where(eq(agentPolicies.id, policy.id));
         else await db.insert(agentPolicies).values(values);
         const now = new Date();

@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { ArrowDown, ArrowUp, FileSpreadsheet, Search, Upload, ShieldCheck, X } from "lucide-react";
-import { extractApplicationDate } from "../../../shared/pcSheet";
+import { extractApplicationDate, extractPdfCreationDate } from "../../../shared/pcSheet";
+import { extractIssuedPolicyData } from "../../../shared/issuedPolicy";
 type PolicyForm = {
   clientName: string;
   clientEmail: string;
@@ -62,7 +63,9 @@ const spreadsheetDate = (value: string) => {
   const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
   const us = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
-  return us ? `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}` : "";
+  if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  const named = new Date(value);
+  return Number.isNaN(named.getTime()) ? "" : named.toISOString().slice(0, 10);
 };
 export const spreadsheetBirthDate = (value: string) => {
   const text = String(value || "").trim();
@@ -225,6 +228,10 @@ export async function readPcSheet(file: File) {
     password: "",
     stopAtErrors: false,
   }).promise;
+  const metadata = await pdf.getMetadata().catch(() => null);
+  const pdfCreationDate = extractPdfCreationDate(
+    (metadata?.info as Record<string, unknown> | undefined)?.CreationDate
+  );
   const pageLines: string[][] = [];
   const rawPages: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -309,7 +316,7 @@ export async function readPcSheet(file: File) {
     all,
     /Target Premium[^$\d]{0,40}\$?\s*([\d,]+(?:\.\d{2})?)/i
   );
-  const applicationDate = extractApplicationDate(all);
+  let applicationDate = extractApplicationDate(all) || pdfCreationDate;
   const flatLines = pageLines.flat();
   const primaryIndex = flatLines.findIndex(line => /^Primary:/i.test(line));
   const primaryLine =
@@ -353,6 +360,16 @@ export async function readPcSheet(file: File) {
       find(nationalCover, /Proposed Insured\s*\nDOB:\s*\n?([^\n|]+)/i).match(
         /\d{1,2}\/\d{1,2}\/\d{4}/
       )?.[0] || dob;
+
+    // Issued policy packages use a Data Section instead of the application
+    // cover sheet. These values are authoritative when both are present.
+    const issued = extractIssuedPolicyData(all);
+    policy = issued.policyNumber || policy;
+    name = issued.clientName || name;
+    coverage = issued.coverage || coverage;
+    premium = issued.premium || premium;
+    product = issued.product || product;
+    applicationDate = applicationDate || spreadsheetDate(issued.issuedAt);
   }
   const corebridge = /American General Life Insurance Company|Corebridge/i.test(
     all
