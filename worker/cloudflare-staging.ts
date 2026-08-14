@@ -1,4 +1,21 @@
 import { isValidMediaUrl } from "../shared/videoUrl";
+import { missingClientProfileFields } from "../shared/clientProfile";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "../shared/paymentReturnTemplate";
+import {
+  DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+  DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+  LEGACY_POLICY_REVIEW_MESSAGE,
+  flexLifeReviewDates,
+  isFlexLifeProduct,
+} from "../shared/flexLifeReviewTemplate";
+import {
+  DEFAULT_THANKSGIVING_MESSAGE,
+  DEFAULT_THANKSGIVING_SUBJECT,
+  LEGACY_THANKSGIVING_MESSAGES,
+} from "../shared/thanksgivingTemplate";
 import bcrypt from "bcryptjs";
 import {
   emailHtml,
@@ -11,6 +28,18 @@ const ADMIN_COOKIE = "affinity_admin_session";
 const AFFILIATE_COOKIE = "affinity_affiliate_session";
 
 type JsonRecord = Record<string, unknown>;
+
+function normalizeBirthDate(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso)
+    return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const american = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (american)
+    return `${american[3]}-${american[1].padStart(2, "0")}-${american[2].padStart(2, "0")}`;
+  return "";
+}
 
 function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
   return new Response(JSON.stringify(body), {
@@ -650,14 +679,18 @@ async function runProcedure(
     const email = String(input.email ?? "")
       .trim()
       .toLowerCase();
-    const role = String(input.role ?? "").trim();
+    const city = String(input.city ?? "").trim();
+    const state = String(input.state ?? "").trim().toUpperCase();
+    const agentId = Number(input.agentId);
     const quote = String(input.quote ?? "").trim();
     const rating = Number(input.rating);
     const language = String(input.language ?? "pt");
     if (
       nameValue.length < 2 ||
       !email.includes("@") ||
-      role.length < 2 ||
+      city.length < 2 ||
+      !/^[A-Z]{2}$/.test(state) ||
+      !Number.isInteger(agentId) || agentId <= 0 ||
       quote.length < 20 ||
       rating < 1 ||
       rating > 5 ||
@@ -676,15 +709,22 @@ async function runProcedure(
         "TOO_MANY_REQUESTS",
         429
       );
+    const agent = await env.DB.prepare("SELECT email FROM adminAccounts WHERE id=? AND status='approved' AND isActive=1 AND accountType IN ('agent','both') LIMIT 1").bind(agentId).first<JsonRecord>();
+    if (!agent) return trpcError("Selecione um agente válido.");
     await env.DB.prepare(
-      "INSERT INTO testimonials (name, email, role, quote, rating, source, language, mediaType, isActive) VALUES (?, ?, ?, ?, ?, 'client', ?, 'image', 0)"
+      "INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client',?,'image',0)"
     )
-      .bind(nameValue, email, role, quote, rating, language)
+      .bind(nameValue, email, `${city}, ${state}`, city, state, String(agent.email).toLowerCase(), quote, rating, language)
       .run();
     return trpcResult({
       success: true,
       message: "Avaliação enviada para aprovação.",
     });
+  }
+
+  if (name === "testimonials.getAgentOptions") {
+    const rows = await env.DB.prepare("SELECT id,name FROM adminAccounts WHERE status='approved' AND isActive=1 AND accountType IN ('agent','both') ORDER BY name").all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ id: Number(row.id), name: String(row.name) })));
   }
 
   if (name === "affiliate.register") {
@@ -834,7 +874,7 @@ async function runProcedure(
     }
     if (name === "affiliate.submitLead") {
       const affiliate = await env.DB.prepare(
-        "SELECT affiliateCode FROM affiliates WHERE id=?"
+        "SELECT affiliateCode,email FROM affiliates WHERE id=?"
       )
         .bind(affiliateId)
         .first<JsonRecord>();
@@ -865,6 +905,8 @@ async function runProcedure(
           notes
         )
         .run();
+      await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,'Cadastrou um novo lead','affiliate',?)")
+        .bind(String(affiliate.email).toLowerCase(), visitorEmail).run();
       return trpcResult({
         success: true,
         message: "Lead enviado com sucesso!",
@@ -960,6 +1002,43 @@ async function runProcedure(
   if (name.startsWith("admin.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
 
+  await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?")
+    .bind(adminEmail.toLowerCase()).run();
+  const auditedActions: Record<string, string> = {
+    "agent.saveClient": "Criou ou alterou um cliente",
+    "agent.requestClientDeletion": "Solicitou a exclusão de um cliente",
+    "agent.updatePolicyDetails": "Alterou uma apólice",
+    "agent.deletePolicy": "Excluiu uma apólice",
+    "agent.importPcSheet": "Importou um PC Sheet",
+    "agent.importSpreadsheet": "Importou uma planilha de clientes",
+    "agent.saveScheduledMessage": "Criou ou alterou uma automação",
+    "agent.deleteScheduledMessage": "Excluiu uma automação",
+    "agent.sendClientEmail": "Enviou um e-mail para cliente",
+    "agent.decideAssignedReview": "Analisou uma avaliação",
+    "crm.create": "Criou um registro no CRM",
+    "crm.update": "Alterou um registro no CRM",
+    "crm.delete": "Excluiu um registro do CRM",
+    "crm.sendInternalMessage": "Enviou uma mensagem interna",
+    "admin.createUnifiedUser": "Criou ou ampliou acessos de um usuário",
+    "admin.updateAdmin": "Alterou dados de um usuário",
+    "admin.setInternalUserStatus": "Alterou o status de um usuário",
+    "admin.setInternalPortalAccess": "Alterou os acessos de um usuário",
+    "admin.updateAffiliateUser": "Alterou dados de um afiliado",
+    "admin.approveAffiliate": "Aprovou um afiliado",
+    "admin.rejectAffiliate": "Recusou um afiliado",
+    "admin.blockAffiliate": "Bloqueou um afiliado",
+    "admin.reactivateAffiliate": "Reativou um afiliado",
+    "testimonials.setAdminDecision": "Decidiu sobre uma avaliação",
+    "testimonials.update": "Alterou um depoimento ou avaliação",
+    "testimonials.delete": "Excluiu um depoimento ou avaliação",
+  };
+  const auditedAction = auditedActions[name];
+  if (auditedAction) {
+    const targetId = String(input.clientId ?? input.affiliateId ?? input.id ?? input.email ?? input.agentEmail ?? "").trim() || null;
+    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)")
+      .bind(adminEmail.toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
+  }
+
   if (name === "agent.dashboard") {
     const policies = (
       await env.DB.prepare(
@@ -971,6 +1050,13 @@ async function runProcedure(
     const tasks = (
       await env.DB.prepare(
         "SELECT * FROM agentTasks WHERE lower(agentEmail)=? ORDER BY dueAt"
+      )
+        .bind(adminEmail.toLowerCase())
+        .all<JsonRecord>()
+    ).results;
+    const clients = (
+      await env.DB.prepare(
+        "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
       )
         .bind(adminEmail.toLowerCase())
         .all<JsonRecord>()
@@ -992,7 +1078,10 @@ async function runProcedure(
       tasks,
       pendingTasks: tasks.filter(row => row.status === "pending").length,
       score: policies.reduce(
-        (total, row) => total + Math.round(Number(row.points || 0)),
+        (total, row) =>
+          String(row.status || "active") === "active"
+            ? total + Math.round(Number(row.points || 0))
+            : total,
         0
       ),
       newMessages: Number(unread?.total || 0),
@@ -1001,6 +1090,18 @@ async function runProcedure(
         id: Number(row.id),
         clientId: Number(row.clientId),
       })),
+      profileAlerts: clients
+        .map(client => ({
+          clientId: Number(client.id),
+          clientName: String(client.name || "Cliente"),
+          missing: missingClientProfileFields(
+            client,
+            policies.filter(
+              policy => Number(policy.clientId) === Number(client.id)
+            )
+          ),
+        }))
+        .filter(alert => alert.missing.length > 0),
       followUps: tasks.filter(row => row.status === "pending" && row.dueAt)
         .length,
     });
@@ -1021,6 +1122,28 @@ async function runProcedure(
         coverageAmount: Number(row.coverageAmount || 0),
       }))
     );
+  }
+  if (name === "agent.updatePolicyDetails") {
+    await env.DB.prepare(
+      "UPDATE agentPolicies SET status=?,product=?,issuedAt=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        ["active", "lapse", "declined", "cancelled"].includes(String(input.status))
+          ? String(input.status)
+          : "active",
+        String(input.product || "").trim() || null,
+        String(input.issuedAt || "").trim() || null,
+        Math.max(0, Number(input.premiumAmount || 0)),
+        String(input.premiumFrequency || "").trim() || null,
+        Math.max(0, Number(input.targetPremium || 0)),
+        Math.max(0, Math.round(Number(input.points || 0))),
+        Math.max(0, Number(input.coverageAmount || 0)),
+        String(input.beneficiaries || "").trim() || null,
+        Number(input.id),
+        adminEmail.toLowerCase()
+      )
+      .run();
+    return trpcResult({ success: true });
   }
   if (name === "agent.listClients") {
     const rows = await env.DB.prepare(
@@ -1076,32 +1199,33 @@ async function runProcedure(
       return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (name === "agent.deleteClient") {
+  if (name === "agent.requestClientDeletion") {
     const id = Number(input.id);
     const owner = adminEmail.toLowerCase();
     const client = await env.DB.prepare(
-      "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+      "SELECT id,name FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
     )
       .bind(id, owner)
-      .first();
+      .first<JsonRecord>();
     if (!client) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
-    const policy = await env.DB.prepare(
-      "SELECT id FROM agentPolicies WHERE clientId=? AND lower(agentEmail)=? LIMIT 1"
+    const reason = String(input.reason || "").trim();
+    if (reason.length < 5) return trpcError("Informe o motivo da solicitação");
+    const pending = await env.DB.prepare(
+      "SELECT id FROM clientDeletionRequests WHERE clientId=? AND status='pending' LIMIT 1"
     )
-      .bind(id, owner)
+      .bind(id)
       .first();
-    if (policy)
-      return trpcError(
-        "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
-      );
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(id),
-    ]);
+    if (pending) return trpcError("Já existe uma solicitação aguardando o administrador");
+    await env.DB.prepare(
+      "INSERT INTO clientDeletionRequests (clientId,agentEmail,clientName,reason) VALUES (?,?,?,?)"
+    ).bind(id, owner, String(client.name || "Cliente"), reason).run();
     return trpcResult({ success: true });
+  }
+  if (name === "agent.listClientDeletionRequests") {
+    const rows = await env.DB.prepare(
+      "SELECT * FROM clientDeletionRequests WHERE lower(agentEmail)=? ORDER BY requestedAt DESC"
+    ).bind(adminEmail.toLowerCase()).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })));
   }
   if (name === "agent.clientEmails") {
     const clientId = Number(input.clientId);
@@ -1112,7 +1236,7 @@ async function runProcedure(
       .first();
     if (!owned) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
     const rows = await env.DB.prepare(
-      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? ORDER BY sentAt ASC,id ASC"
+      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' AND deletedAt IS NULL ORDER BY sentAt ASC,id ASC"
     )
       .bind(clientId, adminEmail.toLowerCase())
       .all<JsonRecord>();
@@ -1141,7 +1265,8 @@ async function runProcedure(
   }
   if (name === "agent.sendClientEmail") {
     const clientId = Number(input.clientId),
-      body = String(input.body ?? "").trim();
+      body = String(input.body ?? "").trim(),
+      requestedSubject = String(input.subject ?? "").trim();
     const customer = await env.DB.prepare(
       "SELECT id,name,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
     )
@@ -1149,7 +1274,7 @@ async function runProcedure(
       .first<JsonRecord>();
     if (!customer || !validEmail(String(customer.email || "")))
       return trpcError("Este cliente não possui um e-mail válido");
-    if (!body || subject.length > 500 || body.length > 50000)
+    if (!body || requestedSubject.length > 500 || body.length > 50000)
       return trpcError("Escreva a mensagem antes de enviar");
     const config = await env.DB.prepare(
       "SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?"
@@ -1158,12 +1283,14 @@ async function runProcedure(
       .first<JsonRecord>();
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
     const previous = await env.DB.prepare(
-      "SELECT subject,externalId FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? ORDER BY sentAt DESC,id DESC LIMIT 1"
+      "SELECT subject,externalId FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 1"
     )
       .bind(clientId, adminEmail.toLowerCase())
       .first<JsonRecord>();
-    const requestedSubject = String(input.subject ?? "").trim();
-    const previousSubject = String(previous?.subject || "").replace(/^(?:re:\s*)+/i, "");
+    const previousSubject = String(previous?.subject || "").replace(
+      /^(?:re:\s*)+/i,
+      ""
+    );
     const subject = previous
       ? `Re: ${previousSubject || requestedSubject || "Mensagem da Affinity Financial"}`
       : requestedSubject || "Mensagem da Affinity Financial";
@@ -1224,8 +1351,13 @@ async function runProcedure(
         "Use uma data de aniversário válida no formato MM/DD/AAAA"
       );
     const storedBirthDate = birthday?.iso || null;
-    let client = clientEmail
-      ? await env.DB.prepare(
+    const existingPolicy = await env.DB.prepare(
+      "SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=?"
+    ).bind(owner, policyNumber).first<JsonRecord>();
+    let client = existingPolicy?.clientId
+      ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?")
+          .bind(Number(existingPolicy.clientId), owner).first<JsonRecord>()
+      : clientEmail ? await env.DB.prepare(
           "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?"
         )
           .bind(clientEmail, owner)
@@ -1237,10 +1369,14 @@ async function runProcedure(
       )
         .bind(clientPhone, owner)
         .first<JsonRecord>();
+    if (!client)
+      client = await env.DB.prepare(
+        "SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1"
+      ).bind(clientName, owner).first<JsonRecord>();
     let clientId = Number(client?.id || 0);
     if (clientId) {
       await env.DB.prepare(
-        "UPDATE crmClients SET name=?,email=COALESCE(?,email),phone=COALESCE(?,phone),whatsapp=COALESCE(?,whatsapp),status='client',source='PC Sheet',birthDate=COALESCE(?,birthDate),notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+        "UPDATE crmClients SET name=?,email=COALESCE(NULLIF(?,''),email),phone=COALESCE(NULLIF(?,''),phone),whatsapp=COALESCE(NULLIF(?,''),whatsapp),status='client',source='PC Sheet',birthDate=COALESCE(NULLIF(?,''),birthDate),notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
       )
         .bind(
           clientName,
@@ -1269,11 +1405,7 @@ async function runProcedure(
         .run();
       clientId = Number(inserted.meta.last_row_id);
     }
-    const policy = await env.DB.prepare(
-      "SELECT id FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=?"
-    )
-      .bind(owner, policyNumber)
-      .first<JsonRecord>();
+    const policy = existingPolicy;
     const policyValues = [
       clientId,
       clientName,
@@ -1291,9 +1423,19 @@ async function runProcedure(
     ];
     if (policy)
       await env.DB.prepare(
-        "UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,product=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+        "UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=COALESCE(NULLIF(?,''),clientEmail),clientPhone=COALESCE(NULLIF(?,''),clientPhone),birthDate=COALESCE(NULLIF(?,''),birthDate),product=COALESCE(NULLIF(?,''),product),premiumAmount=CASE WHEN ?>0 THEN ? ELSE premiumAmount END,premiumFrequency=COALESCE(NULLIF(?,''),premiumFrequency),targetPremium=CASE WHEN ?>0 THEN ? ELSE targetPremium END,points=CASE WHEN ?>0 THEN ? ELSE points END,coverageAmount=CASE WHEN ?>0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(?,''),beneficiaries),issuedAt=COALESCE(NULLIF(?,''),issuedAt),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
       )
-        .bind(...policyValues, Number(policy.id), owner)
+        .bind(
+          clientId, clientName, clientEmail, clientPhone, storedBirthDate,
+          String(input.product ?? "").trim(),
+          Number(input.premiumAmount || 0), Number(input.premiumAmount || 0),
+          String(input.premiumFrequency ?? "").trim(),
+          Number(input.targetPremium || 0), Number(input.targetPremium || 0),
+          Number(input.points || 0), Math.max(0, Math.round(Number(input.points || 0))),
+          Number(input.coverageAmount || 0), Number(input.coverageAmount || 0),
+          String(input.beneficiaries ?? "").trim(), String(input.issuedAt ?? "").trim(),
+          Number(policy.id), owner
+        )
         .run();
     else
       await env.DB.prepare(
@@ -1311,29 +1453,42 @@ async function runProcedure(
       [
         "thanksgiving",
         "Feliz Dia de Ação de Graças",
-        "Feliz Dia de Ação de Graças, {nome}!",
-        "Olá {nome}, neste Dia de Ação de Graças desejamos muita união, gratidão e bons momentos para você e sua família. Conte sempre conosco.",
+        DEFAULT_THANKSGIVING_SUBJECT,
+        DEFAULT_THANKSGIVING_MESSAGE,
       ],
       [
         "christmas",
         "Feliz Natal",
         "Feliz Natal, {nome}!",
-        "Olá {nome}, desejo a você e sua família um Natal repleto de paz, alegria e união.",
+        "Olá, {nome}! 🎄✨\n\nNeste Natal, desejamos a você e à sua família momentos de muita paz, alegria e união. Que seja um tempo especial para celebrar ao lado de quem realmente importa e renovar os sonhos e planos para o futuro.\n\nAgradecemos pela confiança e por nos permitir fazer parte da sua jornada. Conte sempre com a equipe da Affinity Financial Consulting.\n\nSe precisar de qualquer orientação ou quiser conversar conosco, estaremos à disposição.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nUm Feliz Natal para você e toda a sua família! ❤️🎄\n\n{agente_nome}\nAffinity Financial Consulting",
       ],
       [
         "new_year",
         "Feliz Ano-Novo",
         "Feliz Ano-Novo, {nome}!",
-        "Olá {nome}, desejo um novo ano de saúde, proteção, prosperidade e grandes realizações.",
+        "Olá, {nome}! ✨🥂\n\nQue este novo ano chegue trazendo novas oportunidades, conquistas, saúde e muitos momentos especiais para você e sua família.\n\nAgradecemos pela confiança em nosso trabalho e esperamos continuar fazendo parte da sua jornada, ajudando você a construir um futuro cada vez mais seguro e tranquilo.\n\nSempre que precisar de alguma orientação ou quiser conversar conosco, conte com a equipe da Affinity Financial Consulting.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nFeliz Ano Novo! Que seja um ano incrível para você e sua família! 🎆✨\n\n{agente_nome}\nAffinity Financial Consulting",
       ],
       [
         "policy_anniversary",
-        "Revisão anual da apólice",
-        "Sua apólice completa mais um ano",
-        "Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.",
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
       ],
     ];
     for (const [occasion, title, subject, message] of defaultMessages) {
+      if (occasion === "policy_anniversary")
+        await env.DB.prepare(
+          "UPDATE scheduledMessages SET title=?,subject=?,message=? WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND message=?"
+        )
+          .bind(title, subject, message, owner, LEGACY_POLICY_REVIEW_MESSAGE)
+          .run();
+      if (occasion === "thanksgiving")
+        for (const legacyMessage of LEGACY_THANKSGIVING_MESSAGES)
+          await env.DB.prepare(
+            "UPDATE scheduledMessages SET subject=?,message=? WHERE lower(agentEmail)=? AND occasion='thanksgiving' AND message=?"
+          )
+            .bind(subject, message, owner, legacyMessage)
+            .run();
       await env.DB.prepare(
         "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT ?,?,'email',?,?,'all',?,1 WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion=? AND title IS NOT NULL)"
       )
@@ -1341,6 +1496,10 @@ async function runProcedure(
         .run();
     }
     const now = new Date();
+    const reviewDates =
+      isFlexLifeProduct(input.product) && String(input.issuedAt || "").trim()
+        ? flexLifeReviewDates(`${String(input.issuedAt).trim()}T12:00:00Z`)
+        : null;
     const followUps: Array<[string, string]> = [
       [
         `Confirmar boas-vindas e entrega da apólice de ${clientName}`,
@@ -1350,6 +1509,12 @@ async function runProcedure(
         `Revisar a apólice ${policyNumber} com ${clientName}`,
         new Date(now.getTime() + 30 * 86400000).toISOString(),
       ],
+      ...(reviewDates
+        ? [[
+            `${reviewDates.reviewAt < now ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${policyNumber} — ${clientName}`,
+            reviewDates.reviewAt.toISOString(),
+          ] as [string, string]]
+        : []),
     ];
     for (const [title, dueAt] of followUps) {
       const exists = await env.DB.prepare(
@@ -1377,14 +1542,111 @@ async function runProcedure(
       success: true,
       clientId,
       automationCount: 4,
-      tasksCreated: 2,
+      tasksCreated: followUps.length,
     });
   }
+  if (name === "agent.listAssignedReviews") {
+    const result = await env.DB.prepare("SELECT * FROM testimonials WHERE source='client' AND lower(agentEmail)=? ORDER BY createdAt DESC")
+      .bind(adminEmail.toLowerCase()).all<JsonRecord>();
+    return trpcResult(result.results.map(normalizeTestimonial));
+  }
+
+  if (name === "agent.decideAssignedReview") {
+    const id = Number(input.id), decision = String(input.decision || "");
+    if (!id || !["approved", "rejected"].includes(decision)) return trpcError("Decisão inválida.");
+    await env.DB.prepare("UPDATE testimonials SET agentDecision=?,agentReviewedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND source='client' AND lower(agentEmail)=?")
+      .bind(decision, id, adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
+  }
+
+  if (name === "agent.importSpreadsheet") {
+    const owner = adminEmail.toLowerCase();
+    const rows = Array.isArray(input.rows) ? input.rows.slice(0, 500) : [];
+    if (!rows.length) return trpcError("A planilha não possui linhas válidas");
+    let createdClients = 0, updatedClients = 0, createdPolicies = 0, updatedPolicies = 0;
+    for (const raw of rows) {
+      const row = (raw || {}) as JsonRecord;
+      const clientName = String(row.clientName || "").trim();
+      if (!clientName) continue;
+      const email = String(row.clientEmail || "").trim().toLowerCase();
+      const phone = String(row.clientPhone || "").trim();
+      const birthDate = normalizeBirthDate(row.birthDate) || null;
+      let client = email
+        ? await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1").bind(owner, email).first<JsonRecord>()
+        : null;
+      if (!client)
+        client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(name)=lower(?) LIMIT 1").bind(owner, clientName).first<JsonRecord>();
+      let clientId: number;
+      if (client) {
+        clientId = Number(client.id);
+        await env.DB.prepare(
+          "UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+        ).bind(email || null, phone || null, phone || null, birthDate, clientId, owner).run();
+        updatedClients++;
+      } else {
+        const result = await env.DB.prepare(
+          "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail) VALUES (?,?,?,?,?,'client','Planilha Excel',?)"
+        ).bind(clientName, email || null, phone || null, phone || null, birthDate, owner).run();
+        clientId = Number(result.meta.last_row_id);
+        createdClients++;
+      }
+      const policyNumber = String(row.policyNumber || "").trim();
+      if (!policyNumber) continue;
+      const policy = await env.DB.prepare(
+        "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=? LIMIT 1"
+      ).bind(owner, policyNumber).first<JsonRecord>();
+      const product = String(row.product || "").trim() || null;
+      const frequency = String(row.premiumFrequency || "").trim() || null;
+      const beneficiaries = String(row.beneficiaries || "").trim() || null;
+      const issuedAt = String(row.issuedAt || "").trim() || null;
+      const premium = Math.max(0, Number(row.premiumAmount || 0));
+      const target = Math.max(0, Number(row.targetPremium || 0));
+      const points = Math.max(0, Math.round(Number(row.points || 0)));
+      const coverage = Math.max(0, Number(row.coverageAmount || 0));
+      if (policy) {
+        await env.DB.prepare(
+          "UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),birthDate=COALESCE(birthDate,?),product=COALESCE(NULLIF(product,''),?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,premiumFrequency=COALESCE(NULLIF(premiumFrequency,''),?),targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),issuedAt=COALESCE(issuedAt,?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+        ).bind(clientId, email || null, phone || null, birthDate, product, premium, frequency, target, points, coverage, beneficiaries, issuedAt, Number(policy.id), owner).run();
+        updatedPolicies++;
+      } else {
+        const status = ["active", "lapse", "declined", "cancelled"].includes(String(row.policyStatus)) ? String(row.policyStatus) : "active";
+        await env.DB.prepare(
+          "INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,birthDate,policyNumber,status,product,premiumAmount,premiumFrequency,targetPremium,points,coverageAmount,beneficiaries,issuedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        ).bind(owner, clientId, clientName, email || null, phone || null, birthDate, policyNumber, status, product, premium, frequency, target, points, coverage, beneficiaries, issuedAt).run();
+        createdPolicies++;
+      }
+    }
+    return trpcResult({ success: true, createdClients, updatedClients, createdPolicies, updatedPolicies });
+  }
   if (name === "agent.listTasks") {
+    const owner = adminEmail.toLowerCase();
+    const flexPolicies = await env.DB.prepare(
+      "SELECT p.policyNumber,p.clientId,p.clientName,p.issuedAt FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND lower(coalesce(p.product,'')) LIKE '%flex%life%'"
+    )
+      .bind(owner)
+      .all<JsonRecord>();
+    for (const policy of flexPolicies.results) {
+      const dates = flexLifeReviewDates(String(policy.issuedAt));
+      if (!dates) continue;
+      const title = `${dates.reviewAt.getTime() < Date.now() ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${String(policy.policyNumber)} — ${String(policy.clientName)}`;
+      await env.DB.prepare(
+        "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=?)"
+      )
+        .bind(
+          owner,
+          Number(policy.clientId),
+          title,
+          dates.reviewAt.toISOString(),
+          owner,
+          Number(policy.clientId),
+          title
+        )
+        .run();
+    }
     const rows = await env.DB.prepare(
       "SELECT * FROM agentTasks WHERE lower(agentEmail)=? ORDER BY status,dueAt"
     )
-      .bind(adminEmail.toLowerCase())
+      .bind(owner)
       .all<JsonRecord>();
     return trpcResult(
       rows.results.map(row => ({ ...row, id: Number(row.id) }))
@@ -1415,6 +1677,18 @@ async function runProcedure(
       .run();
     return trpcResult({ success: true });
   }
+  if (name === "agent.deleteTask") {
+    const owner = adminEmail.toLowerCase();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE agentTasks SET status='completed' WHERE id=? AND lower(agentEmail)=? AND title LIKE '%Flex Life%'"
+      ).bind(Number(input.id), owner),
+      env.DB.prepare(
+        "DELETE FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title NOT LIKE '%Flex Life%'"
+      ).bind(Number(input.id), owner),
+    ]);
+    return trpcResult({ success: true });
+  }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
     const defaults = [
@@ -1423,6 +1697,12 @@ async function runProcedure(
         "Feliz aniversário",
         "Feliz aniversário, {nome}!",
         "Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.",
+      ],
+      [
+        "thanksgiving",
+        "Feliz Dia de Ação de Graças",
+        DEFAULT_THANKSGIVING_SUBJECT,
+        DEFAULT_THANKSGIVING_MESSAGE,
       ],
       [
         "christmas",
@@ -1438,11 +1718,33 @@ async function runProcedure(
       ],
       [
         "policy_anniversary",
-        "Revisão anual da apólice",
-        "Sua apólice completa mais um ano",
-        "Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.",
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
       ],
     ];
+    await env.DB.prepare(
+      "UPDATE scheduledMessages SET title=?,subject=?,message=? WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND message=?"
+    )
+      .bind(
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+        owner,
+        LEGACY_POLICY_REVIEW_MESSAGE
+      )
+      .run();
+    for (const legacyMessage of LEGACY_THANKSGIVING_MESSAGES)
+      await env.DB.prepare(
+        "UPDATE scheduledMessages SET subject=?,message=? WHERE lower(agentEmail)=? AND occasion='thanksgiving' AND message=?"
+      )
+        .bind(
+          DEFAULT_THANKSGIVING_SUBJECT,
+          DEFAULT_THANKSGIVING_MESSAGE,
+          owner,
+          legacyMessage
+        )
+        .run();
     for (const [occasion, title, subject, message] of defaults) {
       const exists = await env.DB.prepare(
         "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion=? AND title IS NOT NULL LIMIT 1"
@@ -1457,33 +1759,97 @@ async function runProcedure(
           .run();
     }
     const monthly = [
-      [1, "Janeiro", "um novo ano de esperança, saúde e grandes realizações"],
-      [2, "Fevereiro", "um mês leve, próspero e cheio de boas oportunidades"],
-      [3, "Março", "um mês de renovação, equilíbrio e novas conquistas"],
-      [4, "Abril", "um mês de crescimento, serenidade e bons encontros"],
-      [5, "Maio", "um mês acolhedor, produtivo e repleto de alegrias"],
-      [6, "Junho", "um mês de união, energia e excelentes resultados"],
-      [7, "Julho", "um mês iluminado, tranquilo e cheio de bons momentos"],
-      [8, "Agosto", "um mês de coragem, progresso e novas possibilidades"],
-      [9, "Setembro", "um mês de renovação, florescimento e prosperidade"],
-      [10, "Outubro", "um mês de esperança, cuidado e muitas conquistas"],
-      [11, "Novembro", "um mês de gratidão, união e boas notícias"],
-      [12, "Dezembro", "um mês de celebração, paz e momentos especiais"],
+      [
+        1,
+        "Janeiro",
+        "✨",
+        "Um novo ano começa e, com ele, novas oportunidades para organizar os planos, definir objetivos e cuidar do futuro. Que janeiro seja o início de um ano de muitas conquistas, tranquilidade e bons momentos para você e sua família.",
+      ],
+      [
+        2,
+        "Fevereiro",
+        "💙",
+        "Fevereiro chega lembrando que, mesmo sendo o mês mais curto do ano, pode ser cheio de grandes oportunidades. Que seja um período leve, próspero e repleto de bons momentos para você e sua família.",
+      ],
+      [
+        3,
+        "Março",
+        "🌱",
+        "O ano já começou a ganhar ritmo e março chega como um bom momento para olhar para os planos feitos em janeiro e perguntar: estamos caminhando na direção certa? Pequenos ajustes podem fazer uma grande diferença no futuro.",
+      ],
+      [
+        4,
+        "Abril",
+        "🌷",
+        "Abril chega trazendo renovação e a lembrança de que todo bom resultado começa com cuidado e planejamento. É um ótimo momento para rever prioridades e fortalecer a segurança de quem você ama.",
+      ],
+      [
+        5,
+        "Maio",
+        "💐",
+        "Maio é um mês que nos convida a valorizar a família, o cuidado e tudo aquilo que construímos juntos. Que seja um período acolhedor, produtivo e cheio de motivos para celebrar.",
+      ],
+      [
+        6,
+        "Junho",
+        "☀️",
+        "Chegamos à metade do ano. Junho é uma boa oportunidade para reconhecer as conquistas até aqui, ajustar os planos e seguir com confiança em direção aos seus objetivos.",
+      ],
+      [
+        7,
+        "Julho",
+        "🌞",
+        "Julho traz a energia do verão, momentos em família e uma pausa importante para respirar. Que este mês seja leve, tranquilo e cheio de boas experiências, sem deixar de lado os planos para o futuro.",
+      ],
+      [
+        8,
+        "Agosto",
+        "🚀",
+        "Agosto chega como um convite para retomar o ritmo com coragem e determinação. Que seja um mês de progresso, boas decisões e novas possibilidades para você e sua família.",
+      ],
+      [
+        9,
+        "Setembro",
+        "🍂",
+        "Setembro marca uma mudança de estação e nos lembra que renovar também faz parte de crescer. Que este mês traga equilíbrio, prosperidade e boas oportunidades para seus projetos.",
+      ],
+      [
+        10,
+        "Outubro",
+        "🎃",
+        "Outubro chega com novas cores e a reta final do ano se aproximando. É um bom momento para revisar objetivos e garantir que seus planos continuam protegendo o que realmente importa.",
+      ],
+      [
+        11,
+        "Novembro",
+        "🍁",
+        "Novembro é um mês de gratidão e reflexão. Que possamos reconhecer as conquistas, valorizar quem caminha ao nosso lado e preparar com tranquilidade os próximos passos.",
+      ],
+      [
+        12,
+        "Dezembro",
+        "✨",
+        "Dezembro chega com celebrações, reencontros e a oportunidade de olhar com carinho para tudo que vivemos. Que seja um mês de paz, união e momentos especiais ao lado de quem você ama.",
+      ],
     ] as const;
-    for (const [monthNumber, monthName, wish] of monthly) {
+    for (const [monthNumber, monthName, emoji, reflection] of monthly) {
       const exists = await env.DB.prepare(
         "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='monthly' AND monthNumber=? LIMIT 1"
-      ).bind(owner, monthNumber).first();
+      )
+        .bind(owner, monthNumber)
+        .first();
       if (!exists)
         await env.DB.prepare(
           "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,monthNumber,isActive) VALUES (?,'monthly','email',?,?, 'all',?,?,1)"
-        ).bind(
-          owner,
-          `Boas-vindas a ${monthName}`,
-          `${monthName} começou — conte conosco`,
-          `Olá {nome}, desejamos ${wish}. A Affinity Financial está à sua disposição sempre que precisar.`,
-          monthNumber
-        ).run();
+        )
+          .bind(
+            owner,
+            `Boas-vindas a ${monthName}`,
+            `${monthName} começou — conte conosco`,
+            `Olá, {nome}! ${emoji} Seja bem-vindo(a) a ${monthName.toLowerCase()}!\n\n${reflection}\n\nSe quiser revisar seus planos, esclarecer alguma dúvida ou simplesmente conversar sobre seus objetivos financeiros, estamos à disposição.\n\n📞 {agente_telefone}\n🌐 www.affinityfc.org\n\nUm excelente mês de ${monthName.toLowerCase()}! 💙\n\n{agente_nome}\nAffinity Financial Consulting`,
+            monthNumber
+          )
+          .run();
     }
     const rows = await env.DB.prepare(
       "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND (title IS NOT NULL OR occasion='custom') ORDER BY scheduledAt"
@@ -1588,6 +1954,25 @@ async function runProcedure(
         : null
     );
   }
+  if (name === "agent.getPaymentReturnTemplate") {
+    const row = await env.DB.prepare(
+      "SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=?"
+    ).bind(adminEmail.toLowerCase()).first<JsonRecord>();
+    return trpcResult({
+      subject: row?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT,
+      message: row?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE,
+    });
+  }
+  if (name === "agent.savePaymentReturnTemplate") {
+    const subject = String(input.subject || "").trim();
+    const message = String(input.message || "").trim();
+    if (!subject || subject.length > 500 || !message || message.length > 10000)
+      return trpcError("Revise o assunto e a mensagem");
+    await env.DB.prepare(
+      "UPDATE agentEmailSettings SET paymentReturnSubject=?,paymentReturnMessage=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
+    ).bind(subject, message, adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
+  }
   if (name === "agent.saveEmailSettings") {
     const owner = adminEmail.toLowerCase(),
       current = await env.DB.prepare(
@@ -1691,6 +2076,18 @@ async function runProcedure(
     const commissions = await env.DB.prepare(
       "SELECT COALESCE(SUM(commissionAmount),0) total FROM affiliateReferrals WHERE status='converted'"
     ).first<JsonRecord>();
+    const pendingUsers = await env.DB.prepare(
+      "SELECT COUNT(DISTINCT email) total FROM (SELECT lower(email) email FROM adminAccounts WHERE status='pending' UNION ALL SELECT lower(email) email FROM affiliates WHERE status='pending')"
+    ).first<JsonRecord>();
+    const pendingLeads = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM affiliateReferrals WHERE status='pending'"
+    ).first<JsonRecord>();
+    const pendingReviews = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM testimonials WHERE source='client' AND isActive=0"
+    ).first<JsonRecord>();
+    const pendingClientDeletions = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM clientDeletionRequests WHERE status='pending'"
+    ).first<JsonRecord>();
     return trpcResult({
       totalAffiliates: Number(affiliates?.total || 0),
       pendingAffiliates: Number(affiliates?.pending || 0),
@@ -1698,6 +2095,10 @@ async function runProcedure(
       pendingPolicies: Number(policies?.pending || 0),
       approvedPolicies: Number(policies?.approved || 0),
       totalCommissions: Number(commissions?.total || 0),
+      pendingUsers: Number(pendingUsers?.total || 0),
+      pendingLeads: Number(pendingLeads?.total || 0),
+      pendingReviews: Number(pendingReviews?.total || 0),
+      pendingClientDeletions: Number(pendingClientDeletions?.total || 0),
     });
   }
 
@@ -2533,7 +2934,7 @@ async function runProcedure(
 
   if (name === "crm.assignees") {
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,contactEmail,whatsapp,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
+      "SELECT id,email,name,contactEmail,phone,whatsapp,accountType,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
     ).all<JsonRecord>();
     return trpcResult(
       rows.results.map(row => ({
@@ -2542,6 +2943,369 @@ async function runProcedure(
         isActive: Number(row.isActive),
       }))
     );
+  }
+
+  if (name === "crm.agentPortfolio") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+      .trim()
+      .toLowerCase();
+    if (!validEmail(owner)) return trpcError("Selecione um agente");
+    const [clients, policies] = await Promise.all([
+      env.DB.prepare(
+        "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name"
+      )
+        .bind(owner)
+        .all<JsonRecord>(),
+      env.DB.prepare(
+        "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY clientName,policyNumber"
+      )
+        .bind(owner)
+        .all<JsonRecord>(),
+    ]);
+    return trpcResult({
+      clients: clients.results.map(row => ({ ...row, id: Number(row.id) })),
+      policies: policies.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+        premiumAmount: Number(row.premiumAmount || 0),
+        coverageAmount: Number(row.coverageAmount || 0),
+      })),
+    });
+  }
+  if (name === "crm.listClientDeletionRequests") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const rows = await env.DB.prepare(
+      "SELECT r.*,a.name agentName FROM clientDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC"
+    ).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })));
+  }
+  if (name === "crm.reviewClientDeletionRequest") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const id = Number(input.id), decision = String(input.decision || "");
+    if (!id || !["approved", "rejected"].includes(decision))
+      return trpcError("Decisão inválida");
+    const requestRow = await env.DB.prepare(
+      "SELECT * FROM clientDeletionRequests WHERE id=? AND status='pending'"
+    ).bind(id).first<JsonRecord>();
+    if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
+    if (decision === "approved") {
+      const linked = await env.DB.prepare("SELECT id FROM agentPolicies WHERE clientId=? LIMIT 1")
+        .bind(Number(requestRow.clientId)).first();
+      if (linked) return trpcError("Este cliente possui apólice vinculada. Exclua ou transfira a apólice antes de aprovar.");
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(Number(requestRow.clientId)),
+      ]);
+    }
+    await env.DB.prepare(
+      "UPDATE clientDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?"
+    ).bind(decision, adminEmail.toLowerCase(), String(input.adminNote || "").trim() || null, id).run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.updatePortfolioClient") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+        .trim()
+        .toLowerCase(),
+      id = Number(input.id),
+      clientName = String(input.name || "").trim(),
+      email = String(input.email || "")
+        .trim()
+        .toLowerCase();
+    if (
+      !validEmail(owner) ||
+      !id ||
+      !clientName ||
+      (email && !validEmail(email))
+    )
+      return trpcError("Confira os dados do cliente");
+    await env.DB.prepare(
+      "UPDATE crmClients SET name=?,email=?,phone=?,birthDate=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(
+        clientName,
+        email || null,
+        String(input.phone || "").trim() || null,
+        String(input.birthDate || "").trim() || null,
+        String(input.notes || "").trim() || null,
+        id,
+        owner
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.deletePortfolioClient") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+        .trim()
+        .toLowerCase(),
+      id = Number(input.id);
+    const linked = await env.DB.prepare(
+      "SELECT id FROM agentPolicies WHERE clientId=? AND lower(agentEmail)=? LIMIT 1"
+    )
+      .bind(id, owner)
+      .first<JsonRecord>();
+    if (linked) return trpcError("Exclua primeiro as apólices deste cliente");
+    await env.DB.prepare(
+      "DELETE FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+    )
+      .bind(id, owner)
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.updatePortfolioPolicy") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const owner = String(input.agentEmail || "")
+        .trim()
+        .toLowerCase(),
+      id = Number(input.id),
+      number = String(input.policyNumber || "").trim();
+    if (!validEmail(owner) || !id || !number)
+      return trpcError("Confira os dados da apólice");
+    await env.DB.prepare(
+      "UPDATE agentPolicies SET policyNumber=?,status=?,product=?,premiumAmount=?,coverageAmount=?,issuedAt=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        number,
+        ["active", "lapse", "declined", "cancelled"].includes(String(input.status))
+          ? String(input.status)
+          : "active",
+        String(input.product || "").trim() || null,
+        Number(input.premiumAmount || 0),
+        Number(input.coverageAmount || 0),
+        String(input.issuedAt || "").trim() || null,
+        id,
+        owner
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+  if (name === "crm.deletePortfolioPolicy") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    await env.DB.prepare(
+      "DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=?"
+    )
+      .bind(
+        Number(input.id),
+        String(input.agentEmail || "")
+          .trim()
+          .toLowerCase()
+      )
+      .run();
+    return trpcResult({ success: true });
+  }
+
+  if (name === "crm.communicationAudit") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const conversations = await env.DB.prepare(
+      "SELECT e.id,e.agentEmail,e.clientId,c.name AS clientName,e.direction,e.subject,e.body,e.fromEmail,e.toEmail,e.sentAt FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE coalesce(e.visibility,'client')='client' AND e.deletedAt IS NULL ORDER BY e.sentAt DESC,e.id DESC"
+    ).all<JsonRecord>();
+    const campaigns = await env.DB.prepare(
+      "SELECT m.id,m.agentEmail,m.title,m.subject,m.message,m.occasion,m.audience,d.sentKey,MIN(d.sentAt) AS sentAt,COUNT(*) AS recipientCount FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE coalesce(m.audience,'all')<>'individual' GROUP BY m.id,d.sentKey ORDER BY MIN(d.sentAt) DESC"
+    ).all<JsonRecord>();
+    return trpcResult({
+      conversations: conversations.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        clientId: Number(row.clientId),
+      })),
+      campaigns: campaigns.results.map(row => ({
+        ...row,
+        id: Number(row.id),
+        recipientCount: Number(row.recipientCount || 0),
+      })),
+    });
+  }
+
+  if (name === "crm.deleteAuditedMessage") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    await env.DB.prepare(
+      "UPDATE clientEmails SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL"
+    )
+      .bind(adminEmail.toLowerCase(), Number(input.id))
+      .run();
+    return trpcResult({ success: true });
+  }
+
+  if (name === "crm.userInternalHistory") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso não permitido", "FORBIDDEN", 403);
+    const email = String(input.email || "").trim().toLowerCase();
+    if (!validEmail(email)) return trpcError("Usuário inválido");
+    const rows = await env.DB.prepare(
+      "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND (lower(senderEmail)=? OR lower(recipientEmail)=?) ORDER BY sentAt ASC,id ASC"
+    )
+      .bind(email, email)
+      .all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+  }
+
+  if (name === "crm.userAuditHistory") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso não permitido", "FORBIDDEN", 403);
+    const email = String(input.email || "").trim().toLowerCase();
+    if (!validEmail(email)) return trpcError("Usuário inválido");
+    const rows = await env.DB.prepare("SELECT * FROM portalAuditLogs WHERE lower(actorEmail)=? ORDER BY createdAt DESC,id DESC LIMIT 500")
+      .bind(email).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id) })));
+  }
+
+  if (name === "crm.presence") {
+    const rows = await env.DB.prepare("SELECT email,name,accountType,presenceStatus,lastSeenAt FROM adminAccounts WHERE isActive=1 ORDER BY name")
+      .all<JsonRecord>();
+    return trpcResult({ currentEmail: adminEmail.toLowerCase(), users: rows.results });
+  }
+
+  if (name === "crm.setPresence") {
+    const status = String(input.status || "available");
+    if (!["available", "away", "meeting"].includes(status)) return trpcError("Status inválido");
+    await env.DB.prepare("UPDATE adminAccounts SET presenceStatus=?,lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?")
+      .bind(status, adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
+  }
+
+  if (
+    [
+      "crm.internalMessages",
+      "crm.sendInternalMessage",
+      "crm.markInternalMessagesRead",
+      "crm.internalUnreadCount",
+      "crm.deleteInternalMessage",
+    ].includes(name)
+  ) {
+    const mode = String(input.mode || "agent");
+    const allowed =
+      mode === "agent"
+        ? ["agent", "both"].includes(accountType)
+        : ["admin", "both"].includes(accountType);
+    if (!allowed) return trpcError("Acesso não permitido", "FORBIDDEN", 403);
+    const agentEmail =
+      mode === "agent"
+        ? adminEmail.toLowerCase()
+        : String(input.agentEmail || "")
+            .trim()
+            .toLowerCase();
+    const peerEmail = String(input.peerEmail || "")
+      .trim()
+      .toLowerCase();
+    if (
+      name !== "crm.internalUnreadCount" &&
+      mode === "admin" &&
+      !validEmail(agentEmail)
+    )
+      return trpcError("Selecione um agente");
+    if (name === "crm.internalMessages") {
+      if (mode === "agent" && peerEmail) {
+        if (peerEmail === agentEmail || !validEmail(peerEmail))
+          return trpcError("Agente destinatário inválido");
+        const peer = await env.DB.prepare(
+          "SELECT id FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both') AND isActive=1 LIMIT 1"
+        )
+          .bind(peerEmail)
+          .first<JsonRecord>();
+        if (!peer)
+          return trpcError("Agente destinatário inválido", "NOT_FOUND", 404);
+        const rows = await env.DB.prepare(
+          "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND lower(recipientEmail)=?) OR (lower(senderEmail)=? AND lower(recipientEmail)=?)) ORDER BY sentAt ASC,id ASC"
+        )
+          .bind(agentEmail, peerEmail, peerEmail, agentEmail)
+          .all<JsonRecord>();
+        return trpcResult(
+          rows.results.map(row => ({ ...row, id: Number(row.id) }))
+        );
+      }
+      const rows = await env.DB.prepare(
+        "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND recipientEmail='__admin__') OR (lower(recipientEmail)=? AND lower(senderEmail) IN (SELECT lower(email) FROM adminAccounts WHERE accountType IN ('admin','both')))) ORDER BY sentAt ASC,id ASC"
+      )
+        .bind(agentEmail, agentEmail)
+        .all<JsonRecord>();
+      return trpcResult(
+        rows.results.map(row => ({ ...row, id: Number(row.id) }))
+      );
+    }
+    if (name === "crm.sendInternalMessage") {
+      const body = String(input.body || "").trim();
+      if (!body || body.length > 10000)
+        return trpcError("Escreva uma mensagem válida");
+      const recipient =
+        mode === "agent" ? peerEmail || "__admin__" : agentEmail;
+      if (mode === "agent" && peerEmail) {
+        if (peerEmail === agentEmail || !validEmail(peerEmail))
+          return trpcError("Agente destinatário inválido");
+        const peer = await env.DB.prepare(
+          "SELECT id FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both') AND isActive=1 LIMIT 1"
+        )
+          .bind(peerEmail)
+          .first<JsonRecord>();
+        if (!peer)
+          return trpcError("Agente destinatário inválido", "NOT_FOUND", 404);
+      }
+      await env.DB.prepare(
+        "INSERT INTO portalMessages (senderEmail,recipientEmail,body) VALUES (?,?,?)"
+      )
+        .bind(adminEmail.toLowerCase(), recipient, body)
+        .run();
+      return trpcResult({ success: true });
+    }
+    if (name === "crm.markInternalMessagesRead") {
+      if (mode === "agent")
+        await (peerEmail
+          ? env.DB.prepare(
+              "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+            )
+              .bind(adminEmail.toLowerCase(), peerEmail)
+              .run()
+          : env.DB.prepare(
+              "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail) IN (SELECT lower(email) FROM adminAccounts WHERE accountType IN ('admin','both')) AND readAt IS NULL AND deletedAt IS NULL"
+            )
+              .bind(adminEmail.toLowerCase())
+              .run());
+      else
+        await env.DB.prepare(
+          "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE recipientEmail='__admin__' AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+        )
+          .bind(agentEmail)
+          .run();
+      return trpcResult({ success: true });
+    }
+    if (name === "crm.internalUnreadCount") {
+      const recipient =
+        mode === "agent" ? adminEmail.toLowerCase() : "__admin__";
+      const row = await env.DB.prepare(
+        "SELECT COUNT(*) total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+      )
+        .bind(recipient)
+        .first<JsonRecord>();
+      return trpcResult({ count: Number(row?.total || 0) });
+    }
+    if (name === "crm.deleteInternalMessage") {
+      if (!["admin", "both"].includes(accountType))
+        return trpcError(
+          "Somente administradores podem apagar mensagens",
+          "FORBIDDEN",
+          403
+        );
+      await env.DB.prepare(
+        "UPDATE portalMessages SET deletedAt=CURRENT_TIMESTAMP,deletedBy=? WHERE id=? AND deletedAt IS NULL"
+      )
+        .bind(adminEmail.toLowerCase(), Number(input.id))
+        .run();
+      return trpcResult({ success: true });
+    }
   }
 
   if (name === "crm.create" || name === "crm.update") {
@@ -2847,13 +3611,16 @@ async function runProcedure(
     if (mediaUrlChanged && !isValidMediaUrl(mediaUrl, mediaType))
       return trpcError("O endereço da mídia não é válido.");
     await env.DB.prepare(
-      "UPDATE testimonials SET name=?, role=?, quote=?, email=?, rating=?, amountReceived=?, mediaUrl=?, mediaType=?, language=?, thumbnailUrl=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?"
+      "UPDATE testimonials SET name=?,role=?,quote=?,email=?,city=?,state=?,agentEmail=?,rating=?,amountReceived=?,mediaUrl=?,mediaType=?,language=?,thumbnailUrl=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
     )
       .bind(
         input.name ?? current.name,
         input.role ?? current.role,
         input.quote ?? current.quote,
         input.email ?? current.email,
+        input.city ?? current.city,
+        input.state ?? current.state,
+        input.agentEmail ?? current.agentEmail,
         input.rating ?? current.rating,
         amountReceived,
         mediaUrl || null,
@@ -2867,6 +3634,14 @@ async function runProcedure(
       success: true,
       message: "Depoimento atualizado com sucesso!",
     });
+  }
+
+  if (name === "testimonials.setAdminDecision") {
+    const id = Number(input.id), decision = String(input.decision || "");
+    if (!id || !["approved", "rejected"].includes(decision)) return trpcError("Decisão inválida.");
+    await env.DB.prepare("UPDATE testimonials SET adminDecision=?,isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND source='client'")
+      .bind(decision, decision === "approved" ? 1 : 0, id).run();
+    return trpcResult({ success: true });
   }
 
   if (name === "testimonials.toggleActive") {
@@ -3005,23 +3780,55 @@ async function runMessageAutomations(env: Env) {
     month === 11 &&
     day >= 22 &&
     day <= 28 &&
-    new Date(`${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`).getDay() === 4;
+    new Date(
+      `${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`
+    ).getDay() === 4;
   if (isMorningRun)
-    await env.DB.prepare(
-      "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
-    ).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE scheduledMessages SET title=?,subject=?,message=? WHERE occasion='policy_anniversary' AND message=?"
+      ).bind(
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+        LEGACY_POLICY_REVIEW_MESSAGE
+      ),
+      env.DB.prepare(
+        "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email',?,?,'all',?,1 FROM agentPolicies p WHERE lower(coalesce(p.product,'')) LIKE '%flex%life%' AND NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
+      ).bind(
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE
+      ),
+    ]);
   const automations = await env.DB.prepare(
     "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
   ).all<JsonRecord>();
   for (const automation of automations.results) {
     const occasion = String(automation.occasion);
+    const agentProfile = await env.DB.prepare(
+      "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
+    )
+      .bind(String(automation.agentEmail).toLowerCase())
+      .first<JsonRecord>();
+    const agentName = escapeAutomationHtml(
+      agentProfile?.name || "Seu agente Affinity"
+    );
+    const agentPhone = escapeAutomationHtml(
+      agentProfile?.phone || agentProfile?.whatsapp || "(857) 421-8325"
+    );
+    const personalizeAgent = (value: unknown) =>
+      escapeAutomationHtml(value)
+        .replaceAll("{agente_nome}", agentName)
+        .replaceAll("{agente_telefone}", agentPhone)
+        .replaceAll("{agente}", agentName)
+        .replaceAll("{telefone do agente}", agentPhone);
     if (occasion !== "custom" && !isMorningRun) continue;
     if (occasion === "policy_anniversary") {
       let policySql =
-        "SELECT p.id policyId,p.policyNumber,p.clientId,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND strftime('%m-%d',p.issuedAt)=?";
+        "SELECT p.id policyId,p.policyNumber,p.clientId,p.issuedAt,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND lower(coalesce(p.product,'')) LIKE '%flex%life%'";
       const policyBinds: unknown[] = [
         String(automation.agentEmail).toLowerCase(),
-        `${eastern.month}-${eastern.day}`,
       ];
       if (automation.clientId) {
         policySql += " AND c.id=?";
@@ -3042,58 +3849,89 @@ async function runMessageAutomations(env: Env) {
         .bind(...policyBinds)
         .all<JsonRecord>();
       for (const policy of policies.results) {
+        const reviewDates = flexLifeReviewDates(String(policy.issuedAt));
+        if (!reviewDates) continue;
+        const noticeDay = reviewDates.noticeAt.toISOString().slice(0, 10);
+        const today = `${year}-${eastern.month}-${eastern.day}`;
+        if (noticeDay > today) continue;
         if (!automation.clientId) {
           const customized = await env.DB.prepare(
             "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND clientId=? AND isActive=1 LIMIT 1"
-          ).bind(String(automation.agentEmail).toLowerCase(), Number(policy.clientId)).first();
-          if (customized) continue;
-        }
-        const sentKey = `policy-anniversary-${policy.policyId}-${year}`;
-        const taskTitle = `Aniversário da apólice ${String(policy.policyNumber)} — revisar com ${String(policy.name)} (${year})`;
-        const existingTask = await env.DB.prepare(
-          "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
-        )
-          .bind(
-            String(automation.agentEmail).toLowerCase(),
-            Number(policy.clientId),
-            taskTitle
-          )
-          .first();
-        if (!existingTask)
-          await env.DB.prepare(
-            "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,CURRENT_TIMESTAMP)"
           )
             .bind(
               String(automation.agentEmail).toLowerCase(),
-              Number(policy.clientId),
-              taskTitle
+              Number(policy.clientId)
             )
-            .run();
-        if (!policy.email) continue;
+            .first();
+          if (customized) continue;
+        }
+        const sentKey = `flex-life-review-${policy.policyId}`;
         const sent = await env.DB.prepare(
           "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
         )
           .bind(Number(automation.id), Number(policy.clientId), sentKey)
           .first();
         if (sent) continue;
+        const taskTitle = `${reviewDates.reviewAt.toISOString().slice(0, 10) < today ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${String(policy.policyNumber)} — ${String(policy.name)}`;
+        const existingTask = await env.DB.prepare(
+          "SELECT id,createdAt FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
+        )
+          .bind(
+            String(automation.agentEmail).toLowerCase(),
+            Number(policy.clientId),
+            taskTitle
+          )
+          .first<JsonRecord>();
+        if (!existingTask) {
+          await env.DB.prepare(
+            "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,?)"
+          )
+            .bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(policy.clientId),
+              taskTitle,
+              reviewDates.reviewAt.toISOString()
+            )
+            .run();
+          if (noticeDay < today) continue;
+        } else if (
+          noticeDay < today &&
+          String(existingTask.createdAt || "").slice(0, 10) >= today
+        ) {
+          continue;
+        }
+        if (!policy.email) continue;
         const safeName = escapeAutomationHtml(policy.name);
         const scheduleUrl =
           "https://calendly.com/affinityfc/consultoria-gratuita?hide_event_type_details=1&hide_gdpr_banner=1";
-        const body = escapeAutomationHtml(automation.message)
+        const body = personalizeAgent(automation.message)
           .replaceAll("{nome}", safeName)
+          .replaceAll(
+            "{apolice numero}",
+            escapeAutomationHtml(policy.policyNumber)
+          )
           .replaceAll(
             "{agenda}",
             `<a href="${scheduleUrl}">agendar uma reunião para analisar sua apólice</a>`
           );
+        const subject = personalizeAgent(
+          automation.subject || automation.title
+        )
+          .replaceAll("{nome}", safeName)
+          .replaceAll(
+            "{apolice numero}",
+            escapeAutomationHtml(policy.policyNumber)
+          );
+        const historyBody = body.replaceAll("**", "");
         try {
-          await sendAgentEmail(env, String(automation.agentEmail), {
+          const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
-            subject: escapeAutomationHtml(
-              automation.subject || automation.title
-            ).replaceAll("{nome}", safeName),
+            subject,
             html: emailHtml(
-              escapeAutomationHtml(automation.title || "Revisão anual"),
-              `<p>${body.replaceAll("\n", "<br>")}</p>`
+              personalizeAgent(automation.title || "Revisão anual"),
+              `<p>${body
+                .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+                .replaceAll("\n", "<br>")}</p>`
             ),
           });
           await env.DB.batch([
@@ -3104,8 +3942,19 @@ async function runMessageAutomations(env: Env) {
               "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
             ).bind(
               Number(policy.clientId),
-              `Convite automático para revisão anual da apólice ${String(policy.policyNumber)} enviado`,
+              `Convite automático para revisão Flex Life da apólice ${String(policy.policyNumber)} enviado`,
               String(automation.agentEmail)
+            ),
+            env.DB.prepare(
+              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+            ).bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(policy.clientId),
+              String(sentMail.messageId || "") || null,
+              subject,
+              historyBody,
+              String(automation.agentEmail).toLowerCase(),
+              String(policy.email)
             ),
           ]);
         } catch (error) {
@@ -3124,7 +3973,9 @@ async function runMessageAutomations(env: Env) {
       (occasion === "thanksgiving" && isThanksgiving) ||
       (occasion === "christmas" && month === 12 && day === 25) ||
       (occasion === "new_year" && month === 1 && day === 1) ||
-      (occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month) ||
+      (occasion === "monthly" &&
+        day === 1 &&
+        Number(automation.monthNumber) === month) ||
       (occasion === "custom" &&
         automation.scheduledAt &&
         new Date(String(automation.scheduledAt)) <= now);
@@ -3166,14 +4017,17 @@ async function runMessageAutomations(env: Env) {
       if (occasion === "birthday" && !automation.clientId) {
         const customized = await env.DB.prepare(
           "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND clientId=? AND isActive=1 LIMIT 1"
-        ).bind(String(automation.agentEmail).toLowerCase(), Number(client.id)).first();
+        )
+          .bind(String(automation.agentEmail).toLowerCase(), Number(client.id))
+          .first();
         if (customized) continue;
       }
-      const sentKey = occasion === "custom"
-        ? "once"
-        : occasion === "monthly"
-          ? `monthly-${year}-${month}`
-          : `${occasion}-${year}`;
+      const sentKey =
+        occasion === "custom"
+          ? "once"
+          : occasion === "monthly"
+            ? `monthly-${year}-${month}`
+            : `${occasion}-${year}`;
       const sent = await env.DB.prepare(
         "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
       )
@@ -3181,42 +4035,54 @@ async function runMessageAutomations(env: Env) {
         .first();
       if (sent) continue;
       const personalize = (value: unknown) =>
-        escapeAutomationHtml(value).replaceAll(
+        personalizeAgent(value).replaceAll(
           "{nome}",
           escapeAutomationHtml(client.name)
         );
       try {
-        const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
-          to: String(client.email),
-          subject: personalize(automation.subject || automation.title),
-          html: emailHtml(
-            personalize(automation.title || "Mensagem"),
-            `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
-          ),
-        });
-        await env.DB.batch([
+        const sentMail = await sendAgentEmail(
+          env,
+          String(automation.agentEmail),
+          {
+            to: String(client.email),
+            subject: personalize(automation.subject || automation.title),
+            html: emailHtml(
+              personalize(automation.title || "Mensagem"),
+              `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
+            ),
+          }
+        );
+        const statements = [
           env.DB.prepare(
             "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
           ).bind(Number(automation.id), Number(client.id), sentKey),
-          env.DB.prepare(
-            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
-          ).bind(
-            Number(client.id),
-            `E-mail automático enviado: ${personalize(automation.title)}`,
+        ];
+        const individual =
+          String(automation.audience || "all") === "individual" ||
+          Boolean(automation.clientId) ||
+          ["birthday", "policy_anniversary"].includes(occasion);
+        if (individual)
+          statements.push(
+            env.DB.prepare(
+              "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+            ).bind(
+              Number(client.id),
+              `E-mail automático enviado: ${personalize(automation.title)}`,
               String(automation.agentEmail)
             ),
-          env.DB.prepare(
-            "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)"
-          ).bind(
-            String(automation.agentEmail).toLowerCase(),
-            Number(client.id),
-            String(sentMail.messageId || "") || null,
-            personalize(automation.subject || automation.title),
-            personalize(automation.message),
-            String(automation.agentEmail).toLowerCase(),
-            String(client.email)
-          ),
-        ]);
+            env.DB.prepare(
+              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+            ).bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(client.id),
+              String(sentMail.messageId || "") || null,
+              personalize(automation.subject || automation.title),
+              personalize(automation.message),
+              String(automation.agentEmail).toLowerCase(),
+              String(client.email)
+            )
+          );
+        await env.DB.batch(statements);
       } catch (error) {
         console.error(
           "automation_email_failed",

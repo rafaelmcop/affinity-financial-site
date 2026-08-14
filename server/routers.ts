@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import {
   adminProcedure,
   affiliateProcedure,
@@ -12,16 +12,31 @@ import {
   affiliates,
   crmActivities,
   crmClients,
+  clientDeletionRequests,
   clientEmails,
   agentEmailSettings,
   agentPolicies,
   agentTasks,
   scheduledMessages,
+  testimonials,
+  portalMessages,
+  portalAuditLogs,
 } from "../drizzle/schema";
 import { COOKIE_NAME } from "../shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { enforceRateLimit } from "./rateLimit";
 import { isValidMediaUrl } from "../shared/videoUrl";
+import { missingClientProfileFields } from "../shared/clientProfile";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "../shared/paymentReturnTemplate";
+import {
+  DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+  DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+  flexLifeReviewDates,
+  isFlexLifeProduct,
+} from "../shared/flexLifeReviewTemplate";
 
 const strongPassword = z
   .string()
@@ -435,6 +450,10 @@ export const appRouter = router({
         .select()
         .from(agentTasks)
         .where(eq(agentTasks.agentEmail, email));
+      const clients = await db
+        .select()
+        .from(crmClients)
+        .where(eq(crmClients.assignedAdminEmail, email));
       const notifications = await db
         .select({
           id: clientEmails.id,
@@ -458,11 +477,24 @@ export const appRouter = router({
         tasks,
         pendingTasks: tasks.filter(t => t.status === "pending").length,
         score: policies.reduce(
-          (total, policy) => total + Number(policy.points || 0),
+          (total, policy) =>
+            policy.status === "active"
+              ? total + Number(policy.points || 0)
+              : total,
           0
         ),
         newMessages: notifications.length,
         notifications: notifications.slice(0, 10),
+        profileAlerts: clients
+          .map(client => ({
+            clientId: client.id,
+            clientName: client.name,
+            missing: missingClientProfileFields(
+              client,
+              policies.filter(policy => policy.clientId === client.id)
+            ),
+          }))
+          .filter(alert => alert.missing.length > 0),
         followUps: tasks.filter(t => t.status === "pending" && t.dueAt).length,
       };
     }),
@@ -474,6 +506,33 @@ export const appRouter = router({
         .from(agentPolicies)
         .where(eq(agentPolicies.agentEmail, ctx.adminEmail.toLowerCase()));
     }),
+    updatePolicyDetails: adminProcedure
+      .input(z.object({
+        id: z.number(),
+        status: z.enum(["active", "lapse", "declined", "cancelled"]),
+        product: z.string().optional(),
+        issuedAt: z.string().optional(),
+        premiumAmount: z.number().min(0),
+        premiumFrequency: z.string().optional(),
+        targetPremium: z.number().min(0),
+        points: z.number().int().min(0),
+        coverageAmount: z.number().min(0),
+        beneficiaries: z.string().optional(),
+      }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const { id, ...values } = input;
+        await db.update(agentPolicies).set({
+          ...values,
+          issuedAt: values.issuedAt ? new Date(`${values.issuedAt}T12:00:00Z`) : null,
+          premiumAmount: values.premiumAmount.toFixed(2),
+          targetPremium: values.targetPremium.toFixed(2),
+          points: Math.round(values.points),
+          coverageAmount: values.coverageAmount.toFixed(2),
+        }).where(and(eq(agentPolicies.id, id), eq(agentPolicies.agentEmail, ctx.adminEmail.toLowerCase())));
+        return { success: true };
+      }),
     listClients: adminProcedure.query(async ({ ctx }) => {
       const db = await (await import("./db")).getDb();
       if (!db) throw new Error("Database not available");
@@ -531,14 +590,14 @@ export const appRouter = router({
         } else await db.insert(crmClients).values(values);
         return { success: true };
       }),
-    deleteClient: adminProcedure
-      .input(z.object({ id: z.number() }))
+    requestClientDeletion: adminProcedure
+      .input(z.object({ id: z.number(), reason: z.string().min(5).max(1000) }))
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
         const owner = ctx.adminEmail.toLowerCase();
         const [client] = await db
-          .select({ id: crmClients.id })
+          .select({ id: crmClients.id, name: crmClients.name })
           .from(crmClients)
           .where(
             and(
@@ -547,32 +606,27 @@ export const appRouter = router({
             )
           );
         if (!client) throw new Error("Cliente não encontrado");
-        const policies = await db
-          .select({ id: agentPolicies.id })
-          .from(agentPolicies)
-          .where(
-            and(
-              eq(agentPolicies.clientId, input.id),
-              eq(agentPolicies.agentEmail, owner)
-            )
-          );
-        if (policies.length)
-          throw new Error(
-            "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
-          );
-        await db
-          .delete(crmActivities)
-          .where(eq(crmActivities.clientId, input.id));
-        await db.delete(agentTasks).where(eq(agentTasks.clientId, input.id));
-        await db
-          .delete(scheduledMessages)
-          .where(eq(scheduledMessages.clientId, input.id));
-        await db
-          .delete(clientEmails)
-          .where(eq(clientEmails.clientId, input.id));
-        await db.delete(crmClients).where(eq(crmClients.id, input.id));
+        const [pending] = await db.select({ id: clientDeletionRequests.id })
+          .from(clientDeletionRequests).where(and(
+            eq(clientDeletionRequests.clientId, input.id),
+            eq(clientDeletionRequests.status, "pending")
+          ));
+        if (pending) throw new Error("Já existe uma solicitação aguardando o administrador");
+        await db.insert(clientDeletionRequests).values({
+          clientId: input.id,
+          agentEmail: owner,
+          clientName: client.name,
+          reason: input.reason.trim(),
+        });
         return { success: true };
       }),
+    listClientDeletionRequests: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db.select().from(clientDeletionRequests).where(
+        eq(clientDeletionRequests.agentEmail, ctx.adminEmail.toLowerCase())
+      );
+    }),
     clientEmails: adminProcedure
       .input(z.object({ clientId: z.number() }))
       .query(async ({ input, ctx }) => {
@@ -584,7 +638,9 @@ export const appRouter = router({
           .where(
             and(
               eq(clientEmails.clientId, input.clientId),
-              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase())
+              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
+              eq(clientEmails.visibility, "client"),
+              isNull(clientEmails.deletedAt)
             )
           );
       }),
@@ -599,6 +655,24 @@ export const appRouter = router({
           .where(
             and(
               eq(clientEmails.clientId, input.clientId),
+              eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
+              eq(clientEmails.direction, "received"),
+              isNull(clientEmails.readAt)
+            )
+          );
+        return { success: true };
+      }),
+    markClientEmailRead: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(clientEmails)
+          .set({ readAt: new Date() })
+          .where(
+            and(
+              eq(clientEmails.id, input.id),
               eq(clientEmails.agentEmail, ctx.adminEmail.toLowerCase()),
               eq(clientEmails.direction, "received"),
               isNull(clientEmails.readAt)
@@ -644,7 +718,13 @@ export const appRouter = router({
         if (!db) throw new Error("Database not available");
         const owner = ctx.adminEmail.toLowerCase();
         const birth = parseAmericanBirthDate(input.birthDate);
-        let [client] = input.clientEmail
+        const [existingPolicy] = await db.select().from(agentPolicies).where(and(
+          eq(agentPolicies.agentEmail, owner),
+          eq(agentPolicies.policyNumber, input.policyNumber)
+        )).limit(1);
+        let [client] = existingPolicy?.clientId
+          ? await db.select().from(crmClients).where(eq(crmClients.id, existingPolicy.clientId)).limit(1)
+          : input.clientEmail
           ? await db
               .select()
               .from(crmClients)
@@ -656,6 +736,12 @@ export const appRouter = router({
               )
               .limit(1)
           : [];
+        if (!client) {
+          [client] = await db.select().from(crmClients).where(and(
+            eq(crmClients.assignedAdminEmail, owner),
+            eq(crmClients.name, input.clientName)
+          )).limit(1);
+        }
         if (!client) {
           const inserted = await db
             .insert(crmClients)
@@ -676,17 +762,19 @@ export const appRouter = router({
             .from(crmClients)
             .where(eq(crmClients.id, inserted[0].id))
             .limit(1);
+        } else {
+          await db.update(crmClients).set({
+            name: input.clientName,
+            email: input.clientEmail || client.email,
+            phone: input.clientPhone || client.phone,
+            whatsapp: input.clientPhone || client.whatsapp,
+            birthDate: birth?.date || client.birthDate,
+            source: "PC Sheet",
+            status: "client",
+            notes: `Apólice ${input.policyNumber}`,
+          }).where(eq(crmClients.id, client.id));
         }
-        const [policy] = await db
-          .select()
-          .from(agentPolicies)
-          .where(
-            and(
-              eq(agentPolicies.agentEmail, owner),
-              eq(agentPolicies.policyNumber, input.policyNumber)
-            )
-          )
-          .limit(1);
+        const policy = existingPolicy;
         const values = {
           ...input,
           agentEmail: owner,
@@ -704,10 +792,27 @@ export const appRouter = router({
         if (policy)
           await db
             .update(agentPolicies)
-            .set(values)
+            .set({
+              ...values,
+              clientEmail: input.clientEmail || policy.clientEmail,
+              clientPhone: input.clientPhone || policy.clientPhone,
+              birthDate: birth?.date || policy.birthDate,
+              product: input.product || policy.product,
+              premiumAmount: input.premiumAmount > 0 ? input.premiumAmount.toFixed(2) : policy.premiumAmount,
+              premiumFrequency: input.premiumFrequency || policy.premiumFrequency,
+              targetPremium: input.targetPremium > 0 ? input.targetPremium.toFixed(2) : policy.targetPremium,
+              points: input.points > 0 ? Math.round(input.points) : policy.points,
+              coverageAmount: input.coverageAmount > 0 ? input.coverageAmount.toFixed(2) : policy.coverageAmount,
+              beneficiaries: input.beneficiaries || policy.beneficiaries,
+              issuedAt: input.issuedAt ? new Date(`${input.issuedAt}T12:00:00Z`) : policy.issuedAt,
+            })
             .where(eq(agentPolicies.id, policy.id));
         else await db.insert(agentPolicies).values(values);
         const now = new Date();
+        const reviewDates =
+          isFlexLifeProduct(input.product) && input.issuedAt
+            ? flexLifeReviewDates(`${input.issuedAt}T12:00:00Z`)
+            : null;
         const followUps = [
           {
             title: `Confirmar boas-vindas e entrega da apólice de ${input.clientName}`,
@@ -717,6 +822,12 @@ export const appRouter = router({
             title: `Revisar a apólice ${input.policyNumber} com ${input.clientName}`,
             dueAt: new Date(now.getTime() + 30 * 86400000),
           },
+          ...(reviewDates
+            ? [{
+                title: `${reviewDates.reviewAt < now ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${input.policyNumber} — ${input.clientName}`,
+                dueAt: reviewDates.reviewAt,
+              }]
+            : []),
         ];
         await db.insert(agentTasks).values(
           followUps.map(task => ({
@@ -731,12 +842,103 @@ export const appRouter = router({
           content: `PC Sheet processado. Apólice ${input.policyNumber} vinculada e acompanhamentos preparados.`,
           createdBy: owner,
         });
+        if (reviewDates) {
+          const [reviewTemplate] = await db
+            .select({ id: scheduledMessages.id })
+            .from(scheduledMessages)
+            .where(
+              and(
+                eq(scheduledMessages.agentEmail, owner),
+                eq(scheduledMessages.occasion, "policy_anniversary")
+              )
+            )
+            .limit(1);
+          if (!reviewTemplate)
+            await db.insert(scheduledMessages).values({
+              agentEmail: owner,
+              occasion: "policy_anniversary",
+              channel: "email",
+              title: "Revisão de apólice Flex Life",
+              subject: DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+              audience: "all",
+              message: DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+              isActive: 1,
+            });
+        }
         return {
           success: true,
           clientId: client.id,
           automationCount: 4,
-          tasksCreated: 2,
+          tasksCreated: followUps.length,
         };
+      }),
+    importSpreadsheet: adminProcedure
+      .input(z.object({ rows: z.array(z.object({
+        clientName: z.string().min(1),
+        clientEmail: z.string().email().optional().or(z.literal("")),
+        clientPhone: z.string().optional(), birthDate: z.string().optional(),
+        policyNumber: z.string().optional(), product: z.string().optional(),
+        policyStatus: z.enum(["active", "lapse", "declined", "cancelled"]).default("active"),
+        premiumAmount: z.number().min(0).default(0), premiumFrequency: z.string().optional(),
+        targetPremium: z.number().min(0).default(0), points: z.number().int().min(0).default(0),
+        coverageAmount: z.number().min(0).default(0), beneficiaries: z.string().optional(), issuedAt: z.string().optional(),
+      })).min(1).max(500) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const owner = ctx.adminEmail.toLowerCase();
+        let createdClients = 0, updatedClients = 0, createdPolicies = 0, updatedPolicies = 0;
+        for (const row of input.rows) {
+          const email = (row.clientEmail || "").trim().toLowerCase();
+          const candidates = await db.select().from(crmClients).where(eq(crmClients.assignedAdminEmail, owner));
+          let client = candidates.find(item => email && item.email?.toLowerCase() === email)
+            || candidates.find(item => item.name.trim().toLowerCase() === row.clientName.trim().toLowerCase());
+          const birth = parseAmericanBirthDate(row.birthDate);
+          if (client) {
+            await db.update(crmClients).set({
+              email: client.email || email || null, phone: client.phone || row.clientPhone || null,
+              whatsapp: client.whatsapp || row.clientPhone || null, birthDate: client.birthDate || birth?.date || null,
+            }).where(eq(crmClients.id, client.id));
+            updatedClients++;
+          } else {
+            const inserted = await db.insert(crmClients).values({
+              name: row.clientName.trim(), email: email || null, phone: row.clientPhone || null,
+              whatsapp: row.clientPhone || null, birthDate: birth?.date || null, status: "client",
+              source: "Planilha Excel", assignedAdminEmail: owner,
+            }).$returningId();
+            [client] = await db.select().from(crmClients).where(eq(crmClients.id, inserted[0].id)).limit(1);
+            createdClients++;
+          }
+          const number = (row.policyNumber || "").trim();
+          if (!number) continue;
+          const [policy] = await db.select().from(agentPolicies).where(and(eq(agentPolicies.agentEmail, owner), eq(agentPolicies.policyNumber, number))).limit(1);
+          if (policy) {
+            await db.update(agentPolicies).set({
+              clientId: policy.clientId || client.id, clientEmail: policy.clientEmail || email || null,
+              clientPhone: policy.clientPhone || row.clientPhone || null, birthDate: policy.birthDate || birth?.date || null,
+              product: policy.product || row.product || null,
+              premiumAmount: Number(policy.premiumAmount || 0) > 0 ? policy.premiumAmount : row.premiumAmount.toFixed(2),
+              premiumFrequency: policy.premiumFrequency || row.premiumFrequency || null,
+              targetPremium: Number(policy.targetPremium || 0) > 0 ? policy.targetPremium : row.targetPremium.toFixed(2),
+              points: Number(policy.points || 0) > 0 ? policy.points : row.points,
+              coverageAmount: Number(policy.coverageAmount || 0) > 0 ? policy.coverageAmount : row.coverageAmount.toFixed(2),
+              beneficiaries: policy.beneficiaries || row.beneficiaries || null,
+              issuedAt: policy.issuedAt || (row.issuedAt ? new Date(`${row.issuedAt}T12:00:00Z`) : null),
+            }).where(eq(agentPolicies.id, policy.id));
+            updatedPolicies++;
+          } else {
+            await db.insert(agentPolicies).values({
+              agentEmail: owner, clientId: client.id, clientName: row.clientName.trim(), clientEmail: email || null,
+              clientPhone: row.clientPhone || null, birthDate: birth?.date || null, policyNumber: number,
+              status: row.policyStatus, product: row.product || null, premiumAmount: row.premiumAmount.toFixed(2),
+              premiumFrequency: row.premiumFrequency || null, targetPremium: row.targetPremium.toFixed(2), points: row.points,
+              coverageAmount: row.coverageAmount.toFixed(2), beneficiaries: row.beneficiaries || null,
+              issuedAt: row.issuedAt ? new Date(`${row.issuedAt}T12:00:00Z`) : null,
+            });
+            createdPolicies++;
+          }
+        }
+        return { success: true, createdClients, updatedClients, createdPolicies, updatedPolicies };
       }),
     listTasks: adminProcedure.query(async ({ ctx }) => {
       const db = await (await import("./db")).getDb();
@@ -779,6 +981,33 @@ export const appRouter = router({
               eq(agentTasks.agentEmail, ctx.adminEmail.toLowerCase())
             )
           );
+        return { success: true };
+      }),
+    deleteTask: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const owner = ctx.adminEmail.toLowerCase();
+        const [task] = await db
+          .select({ title: agentTasks.title })
+          .from(agentTasks)
+          .where(
+            and(
+              eq(agentTasks.id, input.id),
+              eq(agentTasks.agentEmail, owner)
+            )
+          )
+          .limit(1);
+        if (task?.title.includes("Flex Life"))
+          await db
+            .update(agentTasks)
+            .set({ status: "completed" })
+            .where(and(eq(agentTasks.id, input.id), eq(agentTasks.agentEmail, owner)));
+        else
+          await db
+            .delete(agentTasks)
+            .where(and(eq(agentTasks.id, input.id), eq(agentTasks.agentEmail, owner)));
         return { success: true };
       }),
     listMessages: adminProcedure.query(async ({ ctx }) => {
@@ -830,7 +1059,9 @@ export const appRouter = router({
           selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
-          deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
+          deliveryMode: z
+            .enum(["default", "immediate", "scheduled"])
+            .optional(),
           monthNumber: z.number().int().min(1).max(12).optional(),
         })
       )
@@ -876,7 +1107,9 @@ export const appRouter = router({
           selectedClientIds: z.array(z.number()).optional(),
           message: z.string().min(1),
           scheduledAt: z.string().optional(),
-          deliveryMode: z.enum(["default", "immediate", "scheduled"]).optional(),
+          deliveryMode: z
+            .enum(["default", "immediate", "scheduled"])
+            .optional(),
           monthNumber: z.number().int().min(1).max(12).optional(),
           isActive: z.boolean(),
         })
@@ -943,6 +1176,41 @@ export const appRouter = router({
           }
         : null;
     }),
+    getPaymentReturnTemplate: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      const [row] = await db
+        .select({
+          subject: agentEmailSettings.paymentReturnSubject,
+          message: agentEmailSettings.paymentReturnMessage,
+        })
+        .from(agentEmailSettings)
+        .where(eq(agentEmailSettings.agentEmail, ctx.adminEmail.toLowerCase()))
+        .limit(1);
+      return {
+        subject: row?.subject || DEFAULT_PAYMENT_RETURN_SUBJECT,
+        message: row?.message || DEFAULT_PAYMENT_RETURN_MESSAGE,
+      };
+    }),
+    savePaymentReturnTemplate: adminProcedure
+      .input(
+        z.object({
+          subject: z.string().trim().min(1).max(500),
+          message: z.string().trim().min(1).max(10000),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(agentEmailSettings)
+          .set({
+            paymentReturnSubject: input.subject,
+            paymentReturnMessage: input.message,
+          })
+          .where(eq(agentEmailSettings.agentEmail, ctx.adminEmail.toLowerCase()));
+        return { success: true };
+      }),
     saveEmailSettings: adminProcedure
       .input(
         z.object({
@@ -1034,6 +1302,29 @@ export const appRouter = router({
           .update(adminAccounts)
           .set({ ...input, contactEmail: input.contactEmail || null })
           .where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase()));
+        return { success: true };
+      }),
+    listAssignedReviews: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db.select().from(testimonials).where(and(
+        eq(testimonials.source, "client"),
+        eq(testimonials.agentEmail, ctx.adminEmail.toLowerCase())
+      ));
+    }),
+    decideAssignedReview: adminProcedure
+      .input(z.object({ id: z.number(), decision: z.enum(["approved", "rejected"]) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(testimonials).set({
+          agentDecision: input.decision,
+          agentReviewedAt: new Date(),
+        }).where(and(
+          eq(testimonials.id, input.id),
+          eq(testimonials.source, "client"),
+          eq(testimonials.agentEmail, ctx.adminEmail.toLowerCase())
+        ));
         return { success: true };
       }),
   }),
@@ -1166,6 +1457,38 @@ export const appRouter = router({
       const pendingPolicies = await getPoliciesByStatus("pending");
       const approvedPolicies = await getPoliciesByStatus("approved");
       const commissions = await getCommissionsByAffiliate();
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      const [internalUsers, affiliateUsers, referrals, reviews, deletionRequests] =
+        await Promise.all([
+          db
+            .select({
+              email: adminAccounts.email,
+              status: adminAccounts.status,
+            })
+            .from(adminAccounts),
+          db
+            .select({ email: affiliates.email, status: affiliates.status })
+            .from(affiliates),
+          db
+            .select({ status: affiliateReferrals.status })
+            .from(affiliateReferrals),
+          db
+            .select({
+              source: testimonials.source,
+              isActive: testimonials.isActive,
+            })
+            .from(testimonials),
+          db.select({ status: clientDeletionRequests.status }).from(clientDeletionRequests),
+        ]);
+      const pendingUserEmails = new Set([
+        ...internalUsers
+          .filter(row => row.status === "pending")
+          .map(row => row.email.toLowerCase()),
+        ...affiliateUsers
+          .filter(row => row.status === "pending")
+          .map(row => row.email.toLowerCase()),
+      ]);
 
       const totalCommissions = commissions.reduce(
         (sum, c) => sum + parseFloat(c.commissionAmount?.toString() || "0"),
@@ -1177,6 +1500,12 @@ export const appRouter = router({
         pendingPolicies: pendingPolicies.length,
         approvedPolicies: approvedPolicies.length,
         totalCommissions,
+        pendingUsers: pendingUserEmails.size,
+        pendingLeads: referrals.filter(row => row.status === "pending").length,
+        pendingReviews: reviews.filter(
+          row => row.source === "client" && !row.isActive
+        ).length,
+        pendingClientDeletions: deletionRequests.filter(row => row.status === "pending").length,
       };
     }),
 
@@ -2149,6 +2478,167 @@ export const appRouter = router({
   }),
 
   crm: router({
+    listClientDeletionRequests: adminProcedure.query(async () => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db.select().from(clientDeletionRequests);
+    }),
+    reviewClientDeletionRequest: adminProcedure
+      .input(z.object({ id: z.number(), decision: z.enum(["approved", "rejected"]), adminNote: z.string().max(1000).optional() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const [request] = await db.select().from(clientDeletionRequests).where(and(
+          eq(clientDeletionRequests.id, input.id),
+          eq(clientDeletionRequests.status, "pending")
+        ));
+        if (!request) throw new Error("Solicitação não encontrada ou já analisada");
+        if (input.decision === "approved") {
+          const linked = await db.select({ id: agentPolicies.id }).from(agentPolicies)
+            .where(eq(agentPolicies.clientId, request.clientId));
+          if (linked.length) throw new Error("Este cliente possui apólice vinculada. Exclua ou transfira a apólice antes de aprovar.");
+          await db.delete(crmActivities).where(eq(crmActivities.clientId, request.clientId));
+          await db.delete(agentTasks).where(eq(agentTasks.clientId, request.clientId));
+          await db.delete(scheduledMessages).where(eq(scheduledMessages.clientId, request.clientId));
+          await db.delete(clientEmails).where(eq(clientEmails.clientId, request.clientId));
+          await db.delete(crmClients).where(eq(crmClients.id, request.clientId));
+        }
+        await db.update(clientDeletionRequests).set({
+          status: input.decision,
+          reviewedAt: new Date(),
+          reviewedBy: ctx.adminEmail.toLowerCase(),
+          adminNote: input.adminNote || null,
+        }).where(eq(clientDeletionRequests.id, input.id));
+        return { success: true };
+      }),
+    agentPortfolio: adminProcedure
+      .input(z.object({ agentEmail: z.string().email() }))
+      .query(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const owner = input.agentEmail.toLowerCase();
+        return {
+          clients: await db
+            .select()
+            .from(crmClients)
+            .where(eq(crmClients.assignedAdminEmail, owner)),
+          policies: await db
+            .select()
+            .from(agentPolicies)
+            .where(eq(agentPolicies.agentEmail, owner)),
+        };
+      }),
+    updatePortfolioClient: adminProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          agentEmail: z.string().email(),
+          name: z.string().min(1),
+          email: z.string().email().optional().or(z.literal("")),
+          phone: z.string().optional(),
+          birthDate: z.string().optional(),
+          notes: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(crmClients)
+          .set({
+            name: input.name,
+            email: input.email || null,
+            phone: input.phone || null,
+            birthDate: input.birthDate
+              ? new Date(`${input.birthDate}T12:00:00Z`)
+              : null,
+            notes: input.notes || null,
+          })
+          .where(
+            and(
+              eq(crmClients.id, input.id),
+              eq(crmClients.assignedAdminEmail, input.agentEmail.toLowerCase())
+            )
+          );
+        return { success: true };
+      }),
+    deletePortfolioClient: adminProcedure
+      .input(z.object({ id: z.number(), agentEmail: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const linked = await db
+          .select({ id: agentPolicies.id })
+          .from(agentPolicies)
+          .where(
+            and(
+              eq(agentPolicies.clientId, input.id),
+              eq(agentPolicies.agentEmail, input.agentEmail.toLowerCase())
+            )
+          );
+        if (linked.length)
+          throw new Error("Exclua primeiro as apólices deste cliente");
+        await db
+          .delete(crmClients)
+          .where(
+            and(
+              eq(crmClients.id, input.id),
+              eq(crmClients.assignedAdminEmail, input.agentEmail.toLowerCase())
+            )
+          );
+        return { success: true };
+      }),
+    updatePortfolioPolicy: adminProcedure
+      .input(
+        z.object({
+          id: z.number(),
+          agentEmail: z.string().email(),
+          policyNumber: z.string().min(1),
+          status: z.enum(["active", "lapse", "declined", "cancelled"]),
+          product: z.string().optional(),
+          premiumAmount: z.number(),
+          coverageAmount: z.number(),
+          issuedAt: z.string().optional(),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(agentPolicies)
+          .set({
+            policyNumber: input.policyNumber,
+            status: input.status,
+            product: input.product || null,
+            premiumAmount: String(input.premiumAmount),
+            coverageAmount: String(input.coverageAmount),
+            issuedAt: input.issuedAt
+              ? new Date(`${input.issuedAt}T12:00:00Z`)
+              : null,
+          })
+          .where(
+            and(
+              eq(agentPolicies.id, input.id),
+              eq(agentPolicies.agentEmail, input.agentEmail.toLowerCase())
+            )
+          );
+        return { success: true };
+      }),
+    deletePortfolioPolicy: adminProcedure
+      .input(z.object({ id: z.number(), agentEmail: z.string().email() }))
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .delete(agentPolicies)
+          .where(
+            and(
+              eq(agentPolicies.id, input.id),
+              eq(agentPolicies.agentEmail, input.agentEmail.toLowerCase())
+            )
+          );
+        return { success: true };
+      }),
     assignees: adminProcedure.query(async () => {
       const db = await (await import("./db")).getDb();
       if (!db) throw new Error("Database not available");
@@ -2158,7 +2648,9 @@ export const appRouter = router({
           email: adminAccounts.email,
           name: adminAccounts.name,
           contactEmail: adminAccounts.contactEmail,
+          phone: adminAccounts.phone,
           whatsapp: adminAccounts.whatsapp,
+          accountType: adminAccounts.accountType,
           isActive: adminAccounts.isActive,
         })
         .from(adminAccounts);
@@ -2301,6 +2793,328 @@ export const appRouter = router({
           .values({ ...input, createdBy: ctx.adminEmail });
         return { success: true };
       }),
+    communicationAudit: adminProcedure.query(async () => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      const conversations = await db
+        .select({
+          id: clientEmails.id,
+          agentEmail: clientEmails.agentEmail,
+          clientId: clientEmails.clientId,
+          clientName: crmClients.name,
+          direction: clientEmails.direction,
+          subject: clientEmails.subject,
+          body: clientEmails.body,
+          fromEmail: clientEmails.fromEmail,
+          toEmail: clientEmails.toEmail,
+          sentAt: clientEmails.sentAt,
+        })
+        .from(clientEmails)
+        .innerJoin(crmClients, eq(crmClients.id, clientEmails.clientId))
+        .where(
+          and(
+            eq(clientEmails.visibility, "client"),
+            isNull(clientEmails.deletedAt)
+          )
+        );
+      return {
+        conversations,
+        campaigns: [] as Array<{
+          id: number;
+          agentEmail: string;
+          title: string;
+          subject: string;
+          message: string;
+          occasion: string;
+          audience: string;
+          sentKey: string;
+          sentAt: Date;
+          recipientCount: number;
+        }>,
+      };
+    }),
+    deleteAuditedMessage: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(clientEmails)
+          .set({
+            deletedAt: new Date(),
+            deletedBy: ctx.adminEmail.toLowerCase(),
+          })
+          .where(eq(clientEmails.id, input.id));
+        return { success: true };
+      }),
+    internalMessages: adminProcedure
+      .input(
+        z.object({
+          mode: z.enum(["admin", "agent"]),
+          agentEmail: z.string().email().optional(),
+          peerEmail: z.string().email().optional(),
+        })
+      )
+      .query(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const agentEmail =
+          input.mode === "agent"
+            ? ctx.adminEmail.toLowerCase()
+            : String(input.agentEmail || "").toLowerCase();
+        if (!agentEmail) return [];
+        if (input.mode === "agent" && input.peerEmail) {
+          const peer = input.peerEmail.toLowerCase();
+          const [allowedPeer] = await db
+            .select({ id: adminAccounts.id })
+            .from(adminAccounts)
+            .where(
+              and(
+                eq(adminAccounts.email, peer),
+                or(
+                  eq(adminAccounts.accountType, "agent"),
+                  eq(adminAccounts.accountType, "both")
+                ),
+                eq(adminAccounts.isActive, 1)
+              )
+            );
+          if (!allowedPeer || peer === agentEmail)
+            throw new Error("Agente destinatário inválido");
+          return db
+            .select()
+            .from(portalMessages)
+            .where(
+              and(
+                isNull(portalMessages.deletedAt),
+                or(
+                  and(
+                    eq(portalMessages.senderEmail, agentEmail),
+                    eq(portalMessages.recipientEmail, peer)
+                  ),
+                  and(
+                    eq(portalMessages.senderEmail, peer),
+                    eq(portalMessages.recipientEmail, agentEmail)
+                  )
+                )
+              )
+            )
+            .orderBy(portalMessages.sentAt);
+        }
+        const administrators = await db
+          .select({ email: adminAccounts.email })
+          .from(adminAccounts)
+          .where(
+            or(
+              eq(adminAccounts.accountType, "admin"),
+              eq(adminAccounts.accountType, "both")
+            )
+          );
+        const adminEmails = administrators.length
+          ? administrators.map(item => item.email.toLowerCase())
+          : ["__none__"];
+        return db
+          .select()
+          .from(portalMessages)
+          .where(
+            and(
+              isNull(portalMessages.deletedAt),
+              or(
+                and(
+                  eq(portalMessages.senderEmail, agentEmail),
+                  eq(portalMessages.recipientEmail, "__admin__")
+                ),
+                and(
+                  eq(portalMessages.recipientEmail, agentEmail),
+                  inArray(portalMessages.senderEmail, adminEmails)
+                )
+              )
+            )
+          )
+          .orderBy(portalMessages.sentAt);
+      }),
+    sendInternalMessage: adminProcedure
+      .input(
+        z.object({
+          mode: z.enum(["admin", "agent"]),
+          agentEmail: z.string().email().optional(),
+          peerEmail: z.string().email().optional(),
+          body: z.string().trim().min(1).max(10000),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const sender = ctx.adminEmail.toLowerCase();
+        const recipient =
+          input.mode === "agent"
+            ? String(input.peerEmail || "__admin__").toLowerCase()
+            : String(input.agentEmail || "").toLowerCase();
+        if (input.mode === "agent" && input.peerEmail) {
+          const [allowedPeer] = await db
+            .select({ id: adminAccounts.id })
+            .from(adminAccounts)
+            .where(
+              and(
+                eq(adminAccounts.email, recipient),
+                or(
+                  eq(adminAccounts.accountType, "agent"),
+                  eq(adminAccounts.accountType, "both")
+                ),
+                eq(adminAccounts.isActive, 1)
+              )
+            );
+          if (!allowedPeer || recipient === sender)
+            throw new Error("Agente destinatário inválido");
+        }
+        await db.insert(portalMessages).values({
+          senderEmail: sender,
+          recipientEmail: recipient,
+          body: input.body,
+        });
+        return { success: true };
+      }),
+    markInternalMessagesRead: adminProcedure
+      .input(
+        z.object({
+          mode: z.enum(["admin", "agent"]),
+          agentEmail: z.string().email().optional(),
+          peerEmail: z.string().email().optional(),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const recipient =
+          input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
+        const administrators =
+          input.mode === "agent" && !input.peerEmail
+            ? await db
+                .select({ email: adminAccounts.email })
+                .from(adminAccounts)
+                .where(
+                  or(
+                    eq(adminAccounts.accountType, "admin"),
+                    eq(adminAccounts.accountType, "both")
+                  )
+                )
+            : [];
+        const condition =
+          input.mode === "agent"
+            ? input.peerEmail
+              ? and(
+                  eq(portalMessages.recipientEmail, recipient),
+                  eq(portalMessages.senderEmail, input.peerEmail.toLowerCase())
+                )
+              : and(
+                  eq(portalMessages.recipientEmail, recipient),
+                  inArray(
+                    portalMessages.senderEmail,
+                    administrators.length
+                      ? administrators.map(item => item.email.toLowerCase())
+                      : ["__none__"]
+                  )
+                )
+            : and(
+                eq(portalMessages.recipientEmail, recipient),
+                eq(
+                  portalMessages.senderEmail,
+                  String(input.agentEmail || "").toLowerCase()
+                )
+              );
+        await db
+          .update(portalMessages)
+          .set({ readAt: new Date() })
+          .where(
+            and(
+              condition,
+              isNull(portalMessages.readAt),
+              isNull(portalMessages.deletedAt)
+            )
+          );
+        return { success: true };
+      }),
+    internalUnreadCount: adminProcedure
+      .input(z.object({ mode: z.enum(["admin", "agent"]) }))
+      .query(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const recipient =
+          input.mode === "agent" ? ctx.adminEmail.toLowerCase() : "__admin__";
+        const rows = await db
+          .select({ id: portalMessages.id })
+          .from(portalMessages)
+          .where(
+            and(
+              eq(portalMessages.recipientEmail, recipient),
+              isNull(portalMessages.readAt),
+              isNull(portalMessages.deletedAt)
+            )
+          );
+        return { count: rows.length };
+      }),
+    presence: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      await db.update(adminAccounts).set({ lastSeenAt: new Date() })
+        .where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase()));
+      const users = await db.select({
+        email: adminAccounts.email, name: adminAccounts.name,
+        accountType: adminAccounts.accountType, presenceStatus: adminAccounts.presenceStatus, lastSeenAt: adminAccounts.lastSeenAt,
+      }).from(adminAccounts).where(eq(adminAccounts.isActive, 1));
+      return { currentEmail: ctx.adminEmail.toLowerCase(), users };
+    }),
+    setPresence: adminProcedure
+      .input(z.object({ status: z.enum(["available", "away", "meeting"]) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(adminAccounts).set({ presenceStatus: input.status, lastSeenAt: new Date() })
+          .where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase()));
+        return { success: true };
+      }),
+    userInternalHistory: adminProcedure
+      .input(z.object({ email: z.string().email() }))
+      .query(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const email = input.email.toLowerCase();
+        return db
+          .select()
+          .from(portalMessages)
+          .where(
+            and(
+              isNull(portalMessages.deletedAt),
+              or(
+                eq(portalMessages.senderEmail, email),
+                eq(portalMessages.recipientEmail, email)
+              )
+            )
+          )
+          .orderBy(portalMessages.sentAt);
+      }),
+    userAuditHistory: adminProcedure
+      .input(z.object({ email: z.string().email() }))
+      .query(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        return db.select().from(portalAuditLogs)
+          .where(eq(portalAuditLogs.actorEmail, input.email.toLowerCase()))
+          .orderBy(portalAuditLogs.createdAt);
+      }),
+    deleteInternalMessage: adminProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(portalMessages)
+          .set({
+            deletedAt: new Date(),
+            deletedBy: ctx.adminEmail.toLowerCase(),
+          })
+          .where(eq(portalMessages.id, input.id));
+        return { success: true };
+      }),
   }),
 
   passwordReset: router({
@@ -2426,12 +3240,26 @@ export const appRouter = router({
   notification: notificationRouter,
 
   testimonials: router({
+    getAgentOptions: publicProcedure.query(async () => {
+      const db = await (await import("./db")).getDb();
+      if (!db) return [];
+      const rows = await db.select({ id: adminAccounts.id, name: adminAccounts.name })
+        .from(adminAccounts)
+        .where(and(
+          eq(adminAccounts.status, "approved"),
+          eq(adminAccounts.isActive, 1),
+          inArray(adminAccounts.accountType, ["agent", "both"])
+        ));
+      return rows;
+    }),
     submitReview: publicProcedure
       .input(
         z.object({
           name: z.string().trim().min(2).max(120),
           email: z.string().trim().email().max(320),
-          role: z.string().trim().min(2).max(120),
+          city: z.string().trim().min(2).max(120),
+          state: z.string().length(2),
+          agentId: z.number().int().positive(),
           quote: z.string().trim().min(20).max(1500),
           rating: z.number().int().min(1).max(5),
           language: z.enum(["pt", "en", "es"]).default("pt"),
@@ -2446,10 +3274,20 @@ export const appRouter = router({
           24 * 60 * 60 * 1000
         );
         const { createTestimonial } = await import("./db");
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const [agent] = await db.select({ email: adminAccounts.email }).from(adminAccounts)
+          .where(and(eq(adminAccounts.id, input.agentId), eq(adminAccounts.status, "approved"), eq(adminAccounts.isActive, 1))).limit(1);
+        if (!agent) throw new Error("Selecione um agente válido.");
         await createTestimonial({
           name: input.name,
           email: input.email.toLowerCase(),
-          role: input.role,
+          role: `${input.city}, ${input.state}`,
+          city: input.city,
+          state: input.state.toUpperCase(),
+          agentEmail: agent.email.toLowerCase(),
+          agentDecision: "pending",
+          adminDecision: "pending",
           quote: input.quote,
           rating: input.rating,
           source: "client",
@@ -2486,6 +3324,9 @@ export const appRouter = router({
           role: z.string().min(1),
           quote: z.string().min(1),
           email: z.string().email().optional(),
+          city: z.string().optional(),
+          state: z.string().length(2).optional(),
+          agentEmail: z.string().email().optional(),
           rating: z.number().int().min(1).max(5).optional(),
           amountReceived: z.number().min(0).max(9999999999.99).default(0),
           mediaUrl: z.string().optional(),
@@ -2516,6 +3357,18 @@ export const appRouter = router({
         return { success: true, message: "Depoimento adicionado com sucesso!" };
       }),
 
+    setAdminDecision: adminProcedure
+      .input(z.object({ id: z.number(), decision: z.enum(["approved", "rejected"]) }))
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(testimonials).set({
+          adminDecision: input.decision,
+          isActive: input.decision === "approved" ? 1 : 0,
+        }).where(and(eq(testimonials.id, input.id), eq(testimonials.source, "client")));
+        return { success: true };
+      }),
+
     update: adminProcedure
       .input(
         z.object({
@@ -2524,6 +3377,9 @@ export const appRouter = router({
           role: z.string().optional(),
           quote: z.string().optional(),
           email: z.string().email().optional(),
+          city: z.string().optional(),
+          state: z.string().length(2).optional(),
+          agentEmail: z.string().email().optional(),
           rating: z.number().int().min(1).max(5).optional(),
           amountReceived: z.number().min(0).max(9999999999.99).optional(),
           mediaUrl: z.string().optional(),
