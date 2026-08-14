@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { AlertTriangle, CalendarClock, Mail, MessageSquare, ShieldCheck, UserRound } from "lucide-react";
+import { AlertTriangle, CalendarClock, Mail, MessageSquare, ShieldCheck } from "lucide-react";
 import { useLocation } from "wouter";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
@@ -26,6 +26,16 @@ export default function AgentDashboard() {
     };
   }, []);
   const d = q.data;
+  const pendingTasks = (d?.tasks || [])
+    .filter(task => task.status === "pending")
+    .sort((first, second) => {
+      const firstIsPayment = first.title.startsWith("[Pagamento ") ? 0 : 1;
+      const secondIsPayment = second.title.startsWith("[Pagamento ") ? 0 : 1;
+      if (firstIsPayment !== secondIsPayment) return firstIsPayment - secondIsPayment;
+      return new Date(String(first.dueAt || 0)).getTime() - new Date(String(second.dueAt || 0)).getTime();
+    });
+  const notificationTotal =
+    (d?.notifications?.length || 0) + pendingTasks.length + (d?.profileAlerts?.length || 0);
   const cards = [
     ["Perfis incompletos", d?.profileAlerts?.length || 0, AlertTriangle],
     ["E-mails novos", d?.newMessages || 0, Mail],
@@ -58,87 +68,105 @@ export default function AgentDashboard() {
           <div className="flex items-center justify-between gap-4">
             <div>
               <h2 className="flex items-center gap-2 text-xl font-bold text-gold">
-                <Mail size={20} /> Notificações
+                <AlertTriangle size={20} /> Central de notificações
               </h2>
-              <p className="mt-1 text-sm text-gray-400">Respostas novas e cadastros que precisam de atenção.</p>
+              <p className="mt-1 text-sm text-gray-400">Tudo o que precisa da sua atenção, organizado por prioridade.</p>
             </div>
             <span className="rounded-full bg-gold px-3 py-1 text-sm font-bold text-black">
-              {(d?.newMessages || 0) + (d?.profileAlerts?.length || 0)}
+              {notificationTotal}
             </span>
           </div>
-          <div className="mt-4 space-y-3">
-            {(d?.profileAlerts || []).map(alert => (
-              <button
-                key={`profile-${alert.clientId}`}
-                onClick={() => setLocation(`/agentes/clientes?cliente=${alert.clientId}`)}
-                className="flex w-full items-center gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-left transition hover:border-amber-300 hover:bg-amber-400/15"
-              >
-                <span className="rounded-full bg-amber-400/15 p-2 text-amber-300"><AlertTriangle size={18} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold">Perfil incompleto: {alert.clientName}</span>
-                  <span className="block text-sm text-amber-100/80">Faltando: {alert.missing.join(", ")}</span>
-                </span>
-                <span className="text-sm font-semibold text-gold">Corrigir</span>
-              </button>
-            ))}
-            {(d?.notifications || []).map(notification => (
-              <button
-                key={notification.id}
-                onClick={() => setLocation(`/agentes/clientes?cliente=${notification.clientId}`)}
-                className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-black/25 p-4 text-left transition hover:border-gold/60 hover:bg-gold/10"
-              >
-                <span className="rounded-full bg-sky-500/15 p-2 text-sky-300"><UserRound size={18} /></span>
-                <span className="min-w-0 flex-1">
-                  <span className="block font-semibold">{notification.clientName}</span>
-                  <span className="block truncate text-sm text-gray-300">{notification.body}</span>
-                  <span className="mt-1 block text-xs text-gray-500">{new Date(String(notification.sentAt)).toLocaleString("pt-BR")}</span>
-                </span>
-                <span className="text-sm font-semibold text-gold">Abrir caso</span>
-              </button>
-            ))}
-            {!d?.notifications?.length && !d?.profileAlerts?.length && (
-              <p className="rounded-xl bg-black/20 py-8 text-center text-sm text-gray-500">Nenhuma pendência.</p>
-            )}
-          </div>
-        </Card>
-        <div className="grid gap-5 lg:grid-cols-2">
-          <Card className="border-gold/20 bg-[#0b1524] p-6">
-            <h2 className="text-xl font-bold text-gold">Próximas tarefas</h2>
-            <div className="mt-4 space-y-3">
-              {(d?.tasks || [])
-                .filter(t => t.status === "pending")
-                .slice(0, 5)
-                .map(t => (
+          <div className="mt-5 grid gap-4 xl:grid-cols-3">
+            <section className="rounded-2xl border border-red-400/40 bg-red-500/10 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-red-300">1 · Prioridade máxima</p>
+                  <h3 className="mt-1 flex items-center gap-2 font-bold text-white"><MessageSquare size={18} /> Mensagens de clientes</h3>
+                </div>
+                <span className="rounded-full bg-red-400 px-2.5 py-1 text-xs font-bold text-black">{d?.notifications?.length || 0}</span>
+              </div>
+              <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
+                {(d?.notifications || []).map(notification => (
                   <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setLocation(t.clientId ? `/agentes/clientes?cliente=${t.clientId}` : "/agentes/apolices")}
-                    className="w-full rounded-lg bg-black/30 p-3 text-left transition hover:bg-gold/10"
+                    key={notification.id}
+                    onClick={() => setLocation(`/agentes/clientes?cliente=${notification.clientId}`)}
+                    className="w-full rounded-xl border border-red-300/25 bg-black/35 p-3 text-left transition hover:border-red-200 hover:bg-red-400/10"
                   >
-                    <p>{t.title}</p>
-                    <p className="text-xs text-gray-500">
-                      {t.dueAt
-                        ? new Date(String(t.dueAt)).toLocaleString("pt-BR")
-                        : "Sem data"}
-                    </p>
-                    <span className="mt-2 block text-xs font-semibold text-gold">Abrir e corrigir dados</span>
+                    <span className="block font-semibold text-white">{notification.clientName}</span>
+                    <span className="mt-1 block truncate text-sm text-gray-200">{notification.body}</span>
+                    <span className="mt-2 block text-xs text-red-200/80">{new Date(String(notification.sentAt)).toLocaleString("pt-BR")}</span>
+                    <span className="mt-2 block text-xs font-bold text-red-200">Abrir conversa</span>
                   </button>
                 ))}
-              {!d?.pendingTasks && (
-                <p className="text-sm text-gray-500">
-                  Nenhuma tarefa pendente.
-                </p>
-              )}
-            </div>
-          </Card>
-          <Card className="border-gold/20 bg-[#0b1524] p-6">
-            <h2 className="text-xl font-bold text-gold">Suas apólices</h2>
-            <p className="mt-4 text-5xl font-bold">{d?.policies.length || 0}</p>
-            <p className="mt-2 text-sm text-gray-400">
-              A pontuação usa o target premium anual de cada apólice.
-            </p>
-          </Card>
-        </div>
+                {!d?.notifications?.length && (
+                  <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Nenhuma mensagem nova.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-amber-400/30 bg-amber-400/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-amber-300">2 · Atenção necessária</p>
+                  <h3 className="mt-1 flex items-center gap-2 font-bold text-white"><CalendarClock size={18} /> Tarefas e pagamentos</h3>
+                </div>
+                <span className="rounded-full bg-amber-400 px-2.5 py-1 text-xs font-bold text-black">{pendingTasks.length}</span>
+              </div>
+              <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
+                {pendingTasks.map(task => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => setLocation(task.clientId ? `/agentes/clientes?cliente=${task.clientId}` : "/agentes/apolices")}
+                    className="w-full rounded-xl border border-amber-300/20 bg-black/30 p-3 text-left transition hover:border-amber-300 hover:bg-amber-400/10"
+                  >
+                    <span className="block font-semibold text-white">{task.title}</span>
+                    <span className="mt-1 block text-xs text-gray-400">
+                      {task.dueAt ? new Date(String(task.dueAt)).toLocaleString("pt-BR") : "Sem data definida"}
+                    </span>
+                    <span className="mt-2 block text-xs font-bold text-amber-300">Abrir pendência</span>
+                  </button>
+                ))}
+                {!pendingTasks.length && (
+                  <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Nenhuma tarefa pendente.</p>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-sky-400/25 bg-sky-400/5 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-wider text-sky-300">3 · Manutenção cadastral</p>
+                  <h3 className="mt-1 flex items-center gap-2 font-bold text-white"><AlertTriangle size={18} /> Dados incompletos</h3>
+                </div>
+                <span className="rounded-full bg-sky-300 px-2.5 py-1 text-xs font-bold text-black">{d?.profileAlerts?.length || 0}</span>
+              </div>
+              <div className="mt-4 max-h-96 space-y-3 overflow-y-auto pr-1">
+                {(d?.profileAlerts || []).map(alert => (
+                  <button
+                    key={`profile-${alert.clientId}`}
+                    onClick={() => setLocation(`/agentes/clientes?cliente=${alert.clientId}`)}
+                    className="w-full rounded-xl border border-sky-300/20 bg-black/30 p-3 text-left transition hover:border-sky-300 hover:bg-sky-400/10"
+                  >
+                    <span className="block font-semibold text-white">{alert.clientName}</span>
+                    <span className="mt-1 block text-sm text-sky-100/80">Faltando: {alert.missing.join(", ")}</span>
+                    <span className="mt-2 block text-xs font-bold text-sky-300">Completar cadastro</span>
+                  </button>
+                ))}
+                {!d?.profileAlerts?.length && (
+                  <p className="rounded-xl bg-black/20 px-3 py-8 text-center text-sm text-gray-400">Todos os perfis estão completos.</p>
+                )}
+              </div>
+            </section>
+          </div>
+        </Card>
+        <Card className="border-gold/20 bg-[#0b1524] p-6">
+          <h2 className="text-xl font-bold text-gold">Suas apólices</h2>
+          <p className="mt-4 text-5xl font-bold">{d?.policies.length || 0}</p>
+          <p className="mt-2 text-sm text-gray-400">
+            A pontuação usa o target premium anual de cada apólice.
+          </p>
+        </Card>
       </main>
     </div>
   );
