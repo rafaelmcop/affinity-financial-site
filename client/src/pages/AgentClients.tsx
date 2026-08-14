@@ -109,9 +109,10 @@ export default function AgentClients() {
   const clients = trpc.agent.listClients.useQuery(),
     policies = trpc.agent.listPolicies.useQuery();
   const saveClient = trpc.agent.saveClient.useMutation(),
-    remove = trpc.agent.deleteClient.useMutation(),
+    requestDeletion = trpc.agent.requestClientDeletion.useMutation(),
     updatePolicy = trpc.agent.updatePolicyDetails.useMutation(),
     importSpreadsheet = trpc.agent.importSpreadsheet.useMutation();
+  const deletionRequests = trpc.agent.listClientDeletionRequests.useQuery();
   const emails = trpc.agent.clientEmails.useQuery(
       { clientId: selectedId || 0 },
       { enabled: Boolean(selectedId), refetchInterval: 15000 }
@@ -242,20 +243,19 @@ export default function AgentClients() {
     }
   };
   const deleteClient = async (id: number) => {
-    if (
-      !window.confirm(
-        "Excluir este cliente? Esta ação não poderá ser desfeita."
-      )
-    )
+    const reason = window.prompt("Explique ao administrador por que este cliente deve ser excluído:");
+    if (reason === null) return;
+    if (reason.trim().length < 5) {
+      toast.error("Informe um motivo com pelo menos 5 caracteres");
       return;
+    }
     try {
-      await remove.mutateAsync({ id });
-      await clients.refetch();
-      setSelectedId(null);
-      toast.success("Cliente excluído");
+      await requestDeletion.mutateAsync({ id, reason: reason.trim() });
+      await deletionRequests.refetch();
+      toast.success("Solicitação enviada ao administrador");
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Não foi possível excluir"
+        error instanceof Error ? error.message : "Não foi possível enviar a solicitação"
       );
     }
   };
@@ -465,9 +465,10 @@ export default function AgentClients() {
                         <Button
                           variant="outline"
                           onClick={() => deleteClient(client.id)}
+                          disabled={(deletionRequests.data || []).some(request => Number(request.clientId) === client.id && request.status === "pending")}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />
-                          Excluir
+                          {(deletionRequests.data || []).some(request => Number(request.clientId) === client.id && request.status === "pending") ? "Aguardando aprovação" : "Solicitar exclusão"}
                         </Button>
                       </div>
                     </div>
@@ -495,9 +496,10 @@ export default function AgentClients() {
               <Button
                 variant="outline"
                 onClick={() => deleteClient(selected.id)}
+                disabled={(deletionRequests.data || []).some(request => Number(request.clientId) === selected.id && request.status === "pending")}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Excluir
+                {(deletionRequests.data || []).some(request => Number(request.clientId) === selected.id && request.status === "pending") ? "Aguardando aprovação" : "Solicitar exclusão"}
               </Button>
             </div>
             <Card className="border-gold/20 bg-[#0b1524] p-6">

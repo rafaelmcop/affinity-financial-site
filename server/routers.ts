@@ -12,6 +12,7 @@ import {
   affiliates,
   crmActivities,
   crmClients,
+  clientDeletionRequests,
   clientEmails,
   agentEmailSettings,
   agentPolicies,
@@ -589,14 +590,14 @@ export const appRouter = router({
         } else await db.insert(crmClients).values(values);
         return { success: true };
       }),
-    deleteClient: adminProcedure
-      .input(z.object({ id: z.number() }))
+    requestClientDeletion: adminProcedure
+      .input(z.object({ id: z.number(), reason: z.string().min(5).max(1000) }))
       .mutation(async ({ input, ctx }) => {
         const db = await (await import("./db")).getDb();
         if (!db) throw new Error("Database not available");
         const owner = ctx.adminEmail.toLowerCase();
         const [client] = await db
-          .select({ id: crmClients.id })
+          .select({ id: crmClients.id, name: crmClients.name })
           .from(crmClients)
           .where(
             and(
@@ -605,32 +606,27 @@ export const appRouter = router({
             )
           );
         if (!client) throw new Error("Cliente não encontrado");
-        const policies = await db
-          .select({ id: agentPolicies.id })
-          .from(agentPolicies)
-          .where(
-            and(
-              eq(agentPolicies.clientId, input.id),
-              eq(agentPolicies.agentEmail, owner)
-            )
-          );
-        if (policies.length)
-          throw new Error(
-            "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
-          );
-        await db
-          .delete(crmActivities)
-          .where(eq(crmActivities.clientId, input.id));
-        await db.delete(agentTasks).where(eq(agentTasks.clientId, input.id));
-        await db
-          .delete(scheduledMessages)
-          .where(eq(scheduledMessages.clientId, input.id));
-        await db
-          .delete(clientEmails)
-          .where(eq(clientEmails.clientId, input.id));
-        await db.delete(crmClients).where(eq(crmClients.id, input.id));
+        const [pending] = await db.select({ id: clientDeletionRequests.id })
+          .from(clientDeletionRequests).where(and(
+            eq(clientDeletionRequests.clientId, input.id),
+            eq(clientDeletionRequests.status, "pending")
+          ));
+        if (pending) throw new Error("Já existe uma solicitação aguardando o administrador");
+        await db.insert(clientDeletionRequests).values({
+          clientId: input.id,
+          agentEmail: owner,
+          clientName: client.name,
+          reason: input.reason.trim(),
+        });
         return { success: true };
       }),
+    listClientDeletionRequests: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db.select().from(clientDeletionRequests).where(
+        eq(clientDeletionRequests.agentEmail, ctx.adminEmail.toLowerCase())
+      );
+    }),
     clientEmails: adminProcedure
       .input(z.object({ clientId: z.number() }))
       .query(async ({ input, ctx }) => {
@@ -1436,7 +1432,7 @@ export const appRouter = router({
       const commissions = await getCommissionsByAffiliate();
       const db = await (await import("./db")).getDb();
       if (!db) throw new Error("Database not available");
-      const [internalUsers, affiliateUsers, referrals, reviews] =
+      const [internalUsers, affiliateUsers, referrals, reviews, deletionRequests] =
         await Promise.all([
           db
             .select({
@@ -1456,6 +1452,7 @@ export const appRouter = router({
               isActive: testimonials.isActive,
             })
             .from(testimonials),
+          db.select({ status: clientDeletionRequests.status }).from(clientDeletionRequests),
         ]);
       const pendingUserEmails = new Set([
         ...internalUsers
@@ -1481,6 +1478,7 @@ export const appRouter = router({
         pendingReviews: reviews.filter(
           row => row.source === "client" && !row.isActive
         ).length,
+        pendingClientDeletions: deletionRequests.filter(row => row.status === "pending").length,
       };
     }),
 
@@ -2453,6 +2451,39 @@ export const appRouter = router({
   }),
 
   crm: router({
+    listClientDeletionRequests: adminProcedure.query(async () => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db.select().from(clientDeletionRequests);
+    }),
+    reviewClientDeletionRequest: adminProcedure
+      .input(z.object({ id: z.number(), decision: z.enum(["approved", "rejected"]), adminNote: z.string().max(1000).optional() }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const [request] = await db.select().from(clientDeletionRequests).where(and(
+          eq(clientDeletionRequests.id, input.id),
+          eq(clientDeletionRequests.status, "pending")
+        ));
+        if (!request) throw new Error("Solicitação não encontrada ou já analisada");
+        if (input.decision === "approved") {
+          const linked = await db.select({ id: agentPolicies.id }).from(agentPolicies)
+            .where(eq(agentPolicies.clientId, request.clientId));
+          if (linked.length) throw new Error("Este cliente possui apólice vinculada. Exclua ou transfira a apólice antes de aprovar.");
+          await db.delete(crmActivities).where(eq(crmActivities.clientId, request.clientId));
+          await db.delete(agentTasks).where(eq(agentTasks.clientId, request.clientId));
+          await db.delete(scheduledMessages).where(eq(scheduledMessages.clientId, request.clientId));
+          await db.delete(clientEmails).where(eq(clientEmails.clientId, request.clientId));
+          await db.delete(crmClients).where(eq(crmClients.id, request.clientId));
+        }
+        await db.update(clientDeletionRequests).set({
+          status: input.decision,
+          reviewedAt: new Date(),
+          reviewedBy: ctx.adminEmail.toLowerCase(),
+          adminNote: input.adminNote || null,
+        }).where(eq(clientDeletionRequests.id, input.id));
+        return { success: true };
+      }),
     agentPortfolio: adminProcedure
       .input(z.object({ agentEmail: z.string().email() }))
       .query(async ({ input }) => {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Edit2, FileText, Trash2, Users } from "lucide-react";
+import { Check, Edit2, FileText, Trash2, Users, X } from "lucide-react";
 import AdminSidebar from "@/components/AdminSidebar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,8 @@ export default function AdminAgentPortfolio() {
   const deleteClient = trpc.crm.deletePortfolioClient.useMutation();
   const updatePolicy = trpc.crm.updatePortfolioPolicy.useMutation();
   const deletePolicy = trpc.crm.deletePortfolioPolicy.useMutation();
+  const deletionRequests = trpc.crm.listClientDeletionRequests.useQuery();
+  const reviewDeletion = trpc.crm.reviewClientDeletionRequest.useMutation();
   const refresh = () => portfolio.refetch();
   const agentOptions = (agents.data || []).filter(item =>
     ["agent", "both"].includes(String(item.accountType || ""))
@@ -40,6 +42,41 @@ export default function AdminAgentPortfolio() {
             Selecione um agente para administrar individualmente sua carteira.
           </p>
         </div>
+        {(deletionRequests.data || []).filter(request => request.status === "pending").length > 0 && (
+          <Card className="border-amber-400/40 bg-amber-400/10 p-5">
+            <h2 className="text-lg font-bold text-amber-300">Solicitações de exclusão pendentes</h2>
+            <p className="mt-1 text-sm text-gray-300">O cliente só será excluído depois da sua aprovação.</p>
+            <div className="mt-4 space-y-3">
+              {(deletionRequests.data || []).filter(request => request.status === "pending").map(request => (
+                <div key={request.id} className="rounded-lg border border-white/10 bg-black/30 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="flex-1">
+                      <p className="font-bold">{request.clientName}</p>
+                      <p className="text-sm text-gray-400">Solicitado por {(request as typeof request & { agentName?: string }).agentName || request.agentEmail}</p>
+                      <p className="mt-2 text-sm"><span className="font-semibold text-gold">Motivo:</span> {request.reason}</p>
+                    </div>
+                    <Button variant="outline" onClick={async () => {
+                      const note = window.prompt("Observação da recusa (opcional):") ?? "";
+                      try {
+                        await reviewDeletion.mutateAsync({ id: request.id, decision: "rejected", adminNote: note });
+                        await deletionRequests.refetch();
+                        toast.success("Solicitação recusada; o cliente foi mantido");
+                      } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível recusar"); }
+                    }}><X className="mr-2 h-4 w-4" />Recusar</Button>
+                    <Button className="bg-red-600 text-white hover:bg-red-500" onClick={async () => {
+                      if (!window.confirm(`Aprovar a exclusão definitiva de ${request.clientName}?`)) return;
+                      try {
+                        await reviewDeletion.mutateAsync({ id: request.id, decision: "approved" });
+                        await Promise.all([deletionRequests.refetch(), portfolio.refetch()]);
+                        toast.success("Exclusão aprovada e concluída");
+                      } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível aprovar"); }
+                    }}><Check className="mr-2 h-4 w-4" />Aprovar exclusão</Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
         <Card className="border-gold/20 bg-[#0b1524] p-4">
           <select
             className="h-11 w-full rounded-md border border-white/20 bg-black px-3"

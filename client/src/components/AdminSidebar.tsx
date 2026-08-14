@@ -44,6 +44,7 @@ const groups = [
         label: "Carteiras dos agentes",
         href: "/admin/carteiras-agentes",
         icon: FileText,
+        badge: "pendingClientDeletions",
       },
       {
         label: "Leads de afiliados",
@@ -89,7 +90,7 @@ export default function AdminSidebar({ onLogout }: Props) {
           (pending.data as Record<string, unknown> | undefined)?.[key] || 0
         )
       : 0;
-  const portalPendingTotal = badgeCount("pendingPolicies") + badgeCount("pendingUsers") + badgeCount("pendingLeads") + badgeCount("pendingReviews");
+  const portalPendingTotal = badgeCount("pendingPolicies") + badgeCount("pendingUsers") + badgeCount("pendingLeads") + badgeCount("pendingReviews") + badgeCount("pendingClientDeletions");
   useNotificationSound("portal", portalPendingTotal, "affinity-admin-pending");
   useEffect(() => {
     if (!open) return;

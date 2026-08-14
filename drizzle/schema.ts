@@ -88,6 +88,21 @@ export const crmClients = mysqlTable("crmClients", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const clientDeletionRequests = mysqlTable("clientDeletionRequests", {
+  id: int("id").autoincrement().primaryKey(),
+  clientId: int("clientId").notNull(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
+  clientName: varchar("clientName", { length: 255 }).notNull(),
+  reason: text("reason").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
+  requestedAt: timestamp("requestedAt").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewedBy: varchar("reviewedBy", { length: 320 }),
+  adminNote: text("adminNote"),
+});
+
 export const crmActivities = mysqlTable("crmActivities", {
   id: int("id").autoincrement().primaryKey(),
   clientId: int("clientId").notNull(),

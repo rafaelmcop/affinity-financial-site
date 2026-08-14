@@ -1006,7 +1006,7 @@ async function runProcedure(
     .bind(adminEmail.toLowerCase()).run();
   const auditedActions: Record<string, string> = {
     "agent.saveClient": "Criou ou alterou um cliente",
-    "agent.deleteClient": "Excluiu um cliente",
+    "agent.requestClientDeletion": "Solicitou a exclusão de um cliente",
     "agent.updatePolicyDetails": "Alterou uma apólice",
     "agent.deletePolicy": "Excluiu uma apólice",
     "agent.importPcSheet": "Importou um PC Sheet",
@@ -1199,32 +1199,33 @@ async function runProcedure(
       return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (name === "agent.deleteClient") {
+  if (name === "agent.requestClientDeletion") {
     const id = Number(input.id);
     const owner = adminEmail.toLowerCase();
     const client = await env.DB.prepare(
-      "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
+      "SELECT id,name FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
     )
       .bind(id, owner)
-      .first();
+      .first<JsonRecord>();
     if (!client) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
-    const policy = await env.DB.prepare(
-      "SELECT id FROM agentPolicies WHERE clientId=? AND lower(agentEmail)=? LIMIT 1"
+    const reason = String(input.reason || "").trim();
+    if (reason.length < 5) return trpcError("Informe o motivo da solicitação");
+    const pending = await env.DB.prepare(
+      "SELECT id FROM clientDeletionRequests WHERE clientId=? AND status='pending' LIMIT 1"
     )
-      .bind(id, owner)
+      .bind(id)
       .first();
-    if (policy)
-      return trpcError(
-        "Este cliente possui apólice vinculada. Remova a apólice antes de excluir o cliente."
-      );
-    await env.DB.batch([
-      env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(id),
-      env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(id),
-    ]);
+    if (pending) return trpcError("Já existe uma solicitação aguardando o administrador");
+    await env.DB.prepare(
+      "INSERT INTO clientDeletionRequests (clientId,agentEmail,clientName,reason) VALUES (?,?,?,?)"
+    ).bind(id, owner, String(client.name || "Cliente"), reason).run();
     return trpcResult({ success: true });
+  }
+  if (name === "agent.listClientDeletionRequests") {
+    const rows = await env.DB.prepare(
+      "SELECT * FROM clientDeletionRequests WHERE lower(agentEmail)=? ORDER BY requestedAt DESC"
+    ).bind(adminEmail.toLowerCase()).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })));
   }
   if (name === "agent.clientEmails") {
     const clientId = Number(input.clientId);
@@ -2069,6 +2070,9 @@ async function runProcedure(
     const pendingReviews = await env.DB.prepare(
       "SELECT COUNT(*) total FROM testimonials WHERE source='client' AND isActive=0"
     ).first<JsonRecord>();
+    const pendingClientDeletions = await env.DB.prepare(
+      "SELECT COUNT(*) total FROM clientDeletionRequests WHERE status='pending'"
+    ).first<JsonRecord>();
     return trpcResult({
       totalAffiliates: Number(affiliates?.total || 0),
       pendingAffiliates: Number(affiliates?.pending || 0),
@@ -2079,6 +2083,7 @@ async function runProcedure(
       pendingUsers: Number(pendingUsers?.total || 0),
       pendingLeads: Number(pendingLeads?.total || 0),
       pendingReviews: Number(pendingReviews?.total || 0),
+      pendingClientDeletions: Number(pendingClientDeletions?.total || 0),
     });
   }
 
@@ -2954,6 +2959,41 @@ async function runProcedure(
         coverageAmount: Number(row.coverageAmount || 0),
       })),
     });
+  }
+  if (name === "crm.listClientDeletionRequests") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const rows = await env.DB.prepare(
+      "SELECT r.*,a.name agentName FROM clientDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC"
+    ).all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })));
+  }
+  if (name === "crm.reviewClientDeletionRequest") {
+    if (!["admin", "both"].includes(accountType))
+      return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+    const id = Number(input.id), decision = String(input.decision || "");
+    if (!id || !["approved", "rejected"].includes(decision))
+      return trpcError("Decisão inválida");
+    const requestRow = await env.DB.prepare(
+      "SELECT * FROM clientDeletionRequests WHERE id=? AND status='pending'"
+    ).bind(id).first<JsonRecord>();
+    if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
+    if (decision === "approved") {
+      const linked = await env.DB.prepare("SELECT id FROM agentPolicies WHERE clientId=? LIMIT 1")
+        .bind(Number(requestRow.clientId)).first();
+      if (linked) return trpcError("Este cliente possui apólice vinculada. Exclua ou transfira a apólice antes de aprovar.");
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(Number(requestRow.clientId)),
+        env.DB.prepare("DELETE FROM crmClients WHERE id=?").bind(Number(requestRow.clientId)),
+      ]);
+    }
+    await env.DB.prepare(
+      "UPDATE clientDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?"
+    ).bind(decision, adminEmail.toLowerCase(), String(input.adminNote || "").trim() || null, id).run();
+    return trpcResult({ success: true });
   }
   if (name === "crm.updatePortfolioClient") {
     if (!["admin", "both"].includes(accountType))

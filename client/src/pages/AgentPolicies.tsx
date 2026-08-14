@@ -64,6 +64,30 @@ const spreadsheetDate = (value: string) => {
   const us = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
   return us ? `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}` : "";
 };
+export const spreadsheetBirthDate = (value: string) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  // Excel may expose a date-formatted cell as its internal day serial when the
+  // author saved the cell with a General/custom format (34618 = 10/11/1994).
+  if (/^\d{4,5}(?:\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial >= 1 && serial <= 100000) {
+      const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000);
+      return `${String(date.getUTCMonth() + 1).padStart(2, "0")}/${String(date.getUTCDate()).padStart(2, "0")}/${date.getUTCFullYear()}`;
+    }
+  }
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[2].padStart(2, "0")}/${iso[3].padStart(2, "0")}/${iso[1]}`;
+  const us = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})/);
+  if (us) {
+    const year = us[3].length === 2 ? Number(us[3]) + (Number(us[3]) > 30 ? 1900 : 2000) : Number(us[3]);
+    return `${us[1].padStart(2, "0")}/${us[2].padStart(2, "0")}/${year}`;
+  }
+  const named = new Date(text);
+  if (!Number.isNaN(named.getTime()))
+    return `${String(named.getUTCMonth() + 1).padStart(2, "0")}/${String(named.getUTCDate()).padStart(2, "0")}/${named.getUTCFullYear()}`;
+  return text;
+};
 const spreadsheetStatus = (value: string): SpreadsheetRow["policyStatus"] => {
   const normalized = cleanHeader(value);
   if (normalized.includes("lapse")) return "lapse";
@@ -91,7 +115,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
       clientName: spreadsheetValue(row, ["nome completo", "nome cliente", "client name", "cliente", "nome"]),
       clientEmail: spreadsheetValue(row, ["e mail", "email"]),
       clientPhone: spreadsheetValue(row, ["telefone", "celular", "phone", "whatsapp"]),
-      birthDate: spreadsheetValue(row, ["data nascimento", "nascimento", "date of birth", "dob"]),
+      birthDate: spreadsheetBirthDate(spreadsheetValue(row, ["data nascimento", "nascimento", "date of birth", "dob"])),
       policyNumber: spreadsheetValue(row, ["numero apolice", "apolice numero", "policy number", "apolice"]),
       product: spreadsheetValue(row, ["tipo apolice", "produto", "product"]),
       policyStatus: spreadsheetStatus(spreadsheetValue(row, ["status apolice", "policy status", "status"])),
@@ -169,7 +193,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
       clientName,
       clientEmail: rightValue(["email", "e mail"], personalStart, personalEnd),
       clientPhone: rightValue(["telefone", "celular", "phone", "whatsapp"], personalStart, personalEnd),
-      birthDate: rightValue(["data de nascimento", "data nascimento", "date of birth", "dob"], personalStart, personalEnd),
+      birthDate: spreadsheetBirthDate(rightValue(["data de nascimento", "data nascimento", "date of birth", "dob"], personalStart, personalEnd)),
       policyNumber, product, policyStatus: "active" as const,
       premiumAmount, premiumFrequency, targetPremium,
       points: Math.round(targetPremium), coverageAmount,
