@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, Search, Upload, ShieldCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, FileSpreadsheet, Search, Upload, ShieldCheck, X } from "lucide-react";
 import { extractApplicationDate } from "../../../shared/pcSheet";
 type PolicyForm = {
   clientName: string;
@@ -38,6 +38,59 @@ const empty: PolicyForm = {
   issuedAt: "",
 };
 const money = (v: string) => Number(v.replace(/[$,]/g, "")) || 0;
+type SpreadsheetRow = PolicyForm & {
+  policyStatus: "active" | "lapse" | "declined" | "cancelled";
+};
+const cleanHeader = (value: string) =>
+  value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const spreadsheetValue = (row: Record<string, unknown>, aliases: string[]) => {
+  const entries = Object.entries(row).map(([key, value]) => [cleanHeader(key), String(value ?? "").trim()] as const);
+  for (const alias of aliases) {
+    const found = entries.find(([key]) => key === alias || key.includes(alias));
+    if (found?.[1]) return found[1];
+  }
+  return "";
+};
+const spreadsheetDate = (value: string) => {
+  const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const us = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  return us ? `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}` : "";
+};
+const spreadsheetStatus = (value: string): SpreadsheetRow["policyStatus"] => {
+  const normalized = cleanHeader(value);
+  if (normalized.includes("lapse")) return "lapse";
+  if (normalized.includes("recus") || normalized.includes("declin")) return "declined";
+  if (normalized.includes("cancel")) return "cancelled";
+  return "active";
+};
+export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[]> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const source = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
+  return source.map(row => {
+    const premiumAmount = money(spreadsheetValue(row, ["premium", "premio", "valor premium"]));
+    const frequency = spreadsheetValue(row, ["frequencia", "frequency", "modal"]);
+    const suppliedTarget = money(spreadsheetValue(row, ["target premium", "premium anual"]));
+    const targetPremium = suppliedTarget || (/mensal|monthly/i.test(frequency) ? premiumAmount * 12 : 0);
+    const suppliedPoints = money(spreadsheetValue(row, ["pontos", "points"]));
+    return {
+      clientName: spreadsheetValue(row, ["nome completo", "nome cliente", "client name", "cliente", "nome"]),
+      clientEmail: spreadsheetValue(row, ["e mail", "email"]),
+      clientPhone: spreadsheetValue(row, ["telefone", "celular", "phone", "whatsapp"]),
+      birthDate: spreadsheetValue(row, ["data nascimento", "nascimento", "date of birth", "dob"]),
+      policyNumber: spreadsheetValue(row, ["numero apolice", "apolice numero", "policy number", "apolice"]),
+      product: spreadsheetValue(row, ["tipo apolice", "produto", "product"]),
+      policyStatus: spreadsheetStatus(spreadsheetValue(row, ["status apolice", "policy status", "status"])),
+      premiumAmount, premiumFrequency: frequency, targetPremium,
+      points: Math.round(suppliedPoints || targetPremium),
+      coverageAmount: money(spreadsheetValue(row, ["valor cobertura", "cobertura", "coverage", "face amount"])),
+      beneficiaries: spreadsheetValue(row, ["beneficiarios", "beneficiario", "beneficiaries"]),
+      issuedAt: spreadsheetDate(spreadsheetValue(row, ["data aplicacao", "application date", "date esigned", "data emissao"])),
+    } satisfies SpreadsheetRow;
+  }).filter(row => row.clientName);
+}
 export async function readPcSheet(file: File) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -476,6 +529,78 @@ export function PcSheetUpload() {
             : "O cadastro é salvo automaticamente assim que o PC Sheet termina de ser lido."}
         </p>
       </div>
+    </Card>
+  );
+}
+export function SpreadsheetUpload() {
+  const [rows, setRows] = useState<SpreadsheetRow[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [reading, setReading] = useState(false);
+  const importer = trpc.agent.importSpreadsheet.useMutation();
+  const utils = trpc.useUtils();
+  const clear = () => { setRows([]); setFileName(""); };
+  const readFile = async (file: File) => {
+    setReading(true);
+    try {
+      const parsed = await readClientSpreadsheet(file);
+      if (!parsed.length) throw new Error("Nenhuma coluna de nome foi encontrada");
+      setRows(parsed);
+      setFileName(file.name);
+      toast.success(`${parsed.length} cadastro(s) identificado(s). Confira antes de importar.`);
+    } catch (error) {
+      clear();
+      toast.error(error instanceof Error ? error.message : "Não foi possível ler a planilha");
+    } finally {
+      setReading(false);
+    }
+  };
+  return (
+    <Card className="border-gold/20 bg-[#0b1524] p-6">
+      <div className="rounded-xl border border-dashed border-emerald-400/40 bg-emerald-500/5 p-6 text-center">
+        <FileSpreadsheet className="mx-auto text-emerald-300" />
+        <p className="mt-3 font-bold">Importar clientes por Excel</p>
+        <p className="mx-auto mt-1 max-w-2xl text-xs text-gray-400">
+          Aceita .xlsx, .xls e .csv. Use uma linha por cliente. O sistema cria novos cadastros e apenas completa campos vazios dos já existentes; os dados do PC Sheet têm prioridade.
+        </p>
+        <Input
+          className="mx-auto mt-4 max-w-md"
+          type="file"
+          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+          disabled={reading || importer.isPending}
+          onChange={event => { const file = event.target.files?.[0]; if (file) void readFile(file); event.currentTarget.value = ""; }}
+        />
+        <p className="mt-3 text-xs text-gray-500">
+          Colunas reconhecidas: Nome, E-mail, Telefone, Nascimento, Nº da apólice, Produto, Status, Premium, Frequência, Target Premium, Pontos, Cobertura, Beneficiários e Data da aplicação.
+        </p>
+      </div>
+      {rows.length > 0 && (
+        <div className="mt-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><p className="font-bold text-gold">Conferência antes da importação</p><p className="text-sm text-gray-400">{fileName} · {rows.length} linha(s)</p></div>
+            <Button type="button" variant="outline" size="sm" onClick={clear}><X className="mr-2 h-4 w-4" />Cancelar</Button>
+          </div>
+          <div className="max-h-72 overflow-auto rounded-xl border border-white/10">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="sticky top-0 bg-[#101d30] text-gray-300"><tr><th className="p-3">Cliente</th><th className="p-3">Contato</th><th className="p-3">Apólice</th><th className="p-3">Status</th><th className="p-3">Premium</th><th className="p-3">Cobertura</th></tr></thead>
+              <tbody>{rows.map((row, index) => <tr key={`${row.clientName}-${index}`} className="border-t border-white/10"><td className="p-3 font-semibold">{row.clientName}</td><td className="p-3 text-gray-400">{row.clientEmail || row.clientPhone || "—"}</td><td className="p-3">{row.policyNumber || "Somente cliente"}</td><td className="p-3">{{ active: "Ativa", lapse: "Lapse", declined: "Recusada", cancelled: "Cancelada" }[row.policyStatus]}</td><td className="p-3">${row.premiumAmount.toFixed(2)}</td><td className="p-3">${row.coverageAmount.toLocaleString()}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <Button
+            className="w-full bg-gold text-black"
+            disabled={importer.isPending}
+            onClick={async () => {
+              try {
+                const result = await importer.mutateAsync({ rows });
+                await Promise.all([utils.agent.listPolicies.invalidate(), utils.agent.listClients.invalidate(), utils.agent.dashboard.invalidate()]);
+                toast.success(`${result.createdClients} cliente(s) criado(s), ${result.updatedClients} completado(s), ${result.createdPolicies} apólice(s) criada(s) e ${result.updatedPolicies} completada(s).`);
+                clear();
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Não foi possível importar a planilha");
+              }
+            }}
+          >{importer.isPending ? "Importando e conferindo duplicidades..." : `Importar ${rows.length} cadastro(s)`}</Button>
+        </div>
+      )}
     </Card>
   );
 }

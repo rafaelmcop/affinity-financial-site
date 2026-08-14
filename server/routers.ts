@@ -848,6 +848,74 @@ export const appRouter = router({
           tasksCreated: followUps.length,
         };
       }),
+    importSpreadsheet: adminProcedure
+      .input(z.object({ rows: z.array(z.object({
+        clientName: z.string().min(1),
+        clientEmail: z.string().email().optional().or(z.literal("")),
+        clientPhone: z.string().optional(), birthDate: z.string().optional(),
+        policyNumber: z.string().optional(), product: z.string().optional(),
+        policyStatus: z.enum(["active", "lapse", "declined", "cancelled"]).default("active"),
+        premiumAmount: z.number().min(0).default(0), premiumFrequency: z.string().optional(),
+        targetPremium: z.number().min(0).default(0), points: z.number().int().min(0).default(0),
+        coverageAmount: z.number().min(0).default(0), beneficiaries: z.string().optional(), issuedAt: z.string().optional(),
+      })).min(1).max(500) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const owner = ctx.adminEmail.toLowerCase();
+        let createdClients = 0, updatedClients = 0, createdPolicies = 0, updatedPolicies = 0;
+        for (const row of input.rows) {
+          const email = (row.clientEmail || "").trim().toLowerCase();
+          const candidates = await db.select().from(crmClients).where(eq(crmClients.assignedAdminEmail, owner));
+          let client = candidates.find(item => email && item.email?.toLowerCase() === email)
+            || candidates.find(item => item.name.trim().toLowerCase() === row.clientName.trim().toLowerCase());
+          const birth = parseAmericanBirthDate(row.birthDate);
+          if (client) {
+            await db.update(crmClients).set({
+              email: client.email || email || null, phone: client.phone || row.clientPhone || null,
+              whatsapp: client.whatsapp || row.clientPhone || null, birthDate: client.birthDate || birth?.date || null,
+            }).where(eq(crmClients.id, client.id));
+            updatedClients++;
+          } else {
+            const inserted = await db.insert(crmClients).values({
+              name: row.clientName.trim(), email: email || null, phone: row.clientPhone || null,
+              whatsapp: row.clientPhone || null, birthDate: birth?.date || null, status: "client",
+              source: "Planilha Excel", assignedAdminEmail: owner,
+            }).$returningId();
+            [client] = await db.select().from(crmClients).where(eq(crmClients.id, inserted[0].id)).limit(1);
+            createdClients++;
+          }
+          const number = (row.policyNumber || "").trim();
+          if (!number) continue;
+          const [policy] = await db.select().from(agentPolicies).where(and(eq(agentPolicies.agentEmail, owner), eq(agentPolicies.policyNumber, number))).limit(1);
+          if (policy) {
+            await db.update(agentPolicies).set({
+              clientId: policy.clientId || client.id, clientEmail: policy.clientEmail || email || null,
+              clientPhone: policy.clientPhone || row.clientPhone || null, birthDate: policy.birthDate || birth?.date || null,
+              product: policy.product || row.product || null,
+              premiumAmount: Number(policy.premiumAmount || 0) > 0 ? policy.premiumAmount : row.premiumAmount.toFixed(2),
+              premiumFrequency: policy.premiumFrequency || row.premiumFrequency || null,
+              targetPremium: Number(policy.targetPremium || 0) > 0 ? policy.targetPremium : row.targetPremium.toFixed(2),
+              points: Number(policy.points || 0) > 0 ? policy.points : row.points,
+              coverageAmount: Number(policy.coverageAmount || 0) > 0 ? policy.coverageAmount : row.coverageAmount.toFixed(2),
+              beneficiaries: policy.beneficiaries || row.beneficiaries || null,
+              issuedAt: policy.issuedAt || (row.issuedAt ? new Date(`${row.issuedAt}T12:00:00Z`) : null),
+            }).where(eq(agentPolicies.id, policy.id));
+            updatedPolicies++;
+          } else {
+            await db.insert(agentPolicies).values({
+              agentEmail: owner, clientId: client.id, clientName: row.clientName.trim(), clientEmail: email || null,
+              clientPhone: row.clientPhone || null, birthDate: birth?.date || null, policyNumber: number,
+              status: row.policyStatus, product: row.product || null, premiumAmount: row.premiumAmount.toFixed(2),
+              premiumFrequency: row.premiumFrequency || null, targetPremium: row.targetPremium.toFixed(2), points: row.points,
+              coverageAmount: row.coverageAmount.toFixed(2), beneficiaries: row.beneficiaries || null,
+              issuedAt: row.issuedAt ? new Date(`${row.issuedAt}T12:00:00Z`) : null,
+            });
+            createdPolicies++;
+          }
+        }
+        return { success: true, createdClients, updatedClients, createdPolicies, updatedPolicies };
+      }),
     listTasks: adminProcedure.query(async ({ ctx }) => {
       const db = await (await import("./db")).getDb();
       if (!db) throw new Error("Database not available");

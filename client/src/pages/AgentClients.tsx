@@ -5,6 +5,7 @@ import {
   ArrowUp,
   AlertTriangle,
   Edit2,
+  FileSpreadsheet,
   Mail,
   Plus,
   RefreshCw,
@@ -20,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { missingClientProfileFields } from "../../../shared/clientProfile";
+import { readClientSpreadsheet } from "./AgentPolicies";
 
 type Status =
   | "new"
@@ -108,7 +110,8 @@ export default function AgentClients() {
     policies = trpc.agent.listPolicies.useQuery();
   const saveClient = trpc.agent.saveClient.useMutation(),
     remove = trpc.agent.deleteClient.useMutation(),
-    updatePolicy = trpc.agent.updatePolicyDetails.useMutation();
+    updatePolicy = trpc.agent.updatePolicyDetails.useMutation(),
+    importSpreadsheet = trpc.agent.importSpreadsheet.useMutation();
   const emails = trpc.agent.clientEmails.useQuery(
       { clientId: selectedId || 0 },
       { enabled: Boolean(selectedId), refetchInterval: 15000 }
@@ -117,6 +120,7 @@ export default function AgentClients() {
     syncInbox = trpc.agent.syncInbox.useMutation(),
     markRead = trpc.agent.markClientEmailsRead.useMutation();
   const conversationEnd = useRef<HTMLDivElement>(null);
+  const spreadsheetInput = useRef<HTMLInputElement>(null);
   const rows = clients.data || [],
     selected = rows.find(client => client.id === selectedId),
     selectedPolicies = (policies.data || []).filter(
@@ -516,9 +520,39 @@ export default function AgentClients() {
                       Faltando: {missingFields.join(", ")}.
                     </p>
                   </div>
-                  <Button className="shrink-0 bg-amber-400 text-black hover:bg-amber-300" onClick={() => edit(selected)}>
-                    <Edit2 className="mr-2 h-4 w-4" /> Completar dados do cliente
-                  </Button>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button variant="outline" className="border-amber-300/50 text-amber-100 hover:bg-amber-300/10" disabled={importSpreadsheet.isPending} onClick={() => spreadsheetInput.current?.click()}>
+                      <FileSpreadsheet className="mr-2 h-4 w-4" /> Completar com Excel
+                    </Button>
+                    <input
+                      ref={spreadsheetInput}
+                      className="hidden"
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={async event => {
+                        const file = event.target.files?.[0];
+                        event.currentTarget.value = "";
+                        if (!file) return;
+                        try {
+                          const parsed = await readClientSpreadsheet(file);
+                          const selectedEmail = String(selected.email || primaryPolicy?.clientEmail || "").trim().toLowerCase();
+                          const selectedName = String(selected.name || "").trim().toLowerCase();
+                          const match = parsed.find(row => selectedEmail && row.clientEmail.trim().toLowerCase() === selectedEmail)
+                            || parsed.find(row => row.clientName.trim().toLowerCase() === selectedName)
+                            || (parsed.length === 1 ? parsed[0] : undefined);
+                          if (!match) throw new Error("Não foi possível identificar este cliente na planilha");
+                          const result = await importSpreadsheet.mutateAsync({ rows: [match] });
+                          await Promise.all([clients.refetch(), policies.refetch()]);
+                          toast.success(`Planilha conferida: ${result.updatedClients + result.updatedPolicies} cadastro(s) completado(s).`);
+                        } catch (error) {
+                          toast.error(error instanceof Error ? error.message : "Não foi possível usar esta planilha");
+                        }
+                      }}
+                    />
+                    <Button className="bg-amber-400 text-black hover:bg-amber-300" onClick={() => edit(selected)}>
+                      <Edit2 className="mr-2 h-4 w-4" /> Completar manualmente
+                    </Button>
+                  </div>
                 </div>
               )}
               <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

@@ -1,5 +1,5 @@
 import AgentSidebar from "@/components/AgentSidebar";
-import { PcSheetUpload } from "./AgentPolicies";
+import { PcSheetUpload, SpreadsheetUpload } from "./AgentPolicies";
 
 export default function AgentTasks() {
   return (
@@ -12,7 +12,7 @@ export default function AgentTasks() {
           </p>
           <h1 className="mt-2 text-3xl font-bold">Tarefas</h1>
           <p className="mt-2 text-gray-400">
-            Importe PC Sheets e transforme os dados das apólices em cadastros organizados.
+            Importe PC Sheets ou planilhas e transforme os dados em cadastros organizados.
           </p>
         </div>
         <section className="space-y-4">
@@ -23,6 +23,15 @@ export default function AgentTasks() {
             </p>
           </div>
           <PcSheetUpload />
+        </section>
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-2xl font-bold text-gold">Importar planilha Excel</h2>
+            <p className="mt-1 text-sm text-gray-400">
+              Cadastre clientes sem PC Sheet ou complete informações que estejam faltando.
+            </p>
+          </div>
+          <SpreadsheetUpload />
         </section>
       </main>
     </div>

@@ -29,6 +29,18 @@ const AFFILIATE_COOKIE = "affinity_affiliate_session";
 
 type JsonRecord = Record<string, unknown>;
 
+function normalizeBirthDate(value: unknown) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso)
+    return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const american = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (american)
+    return `${american[3]}-${american[1].padStart(2, "0")}-${american[2].padStart(2, "0")}`;
+  return "";
+}
+
 function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
   return new Response(JSON.stringify(body), {
     status,
@@ -1466,6 +1478,65 @@ async function runProcedure(
       automationCount: 4,
       tasksCreated: followUps.length,
     });
+  }
+  if (name === "agent.importSpreadsheet") {
+    const owner = adminEmail.toLowerCase();
+    const rows = Array.isArray(input.rows) ? input.rows.slice(0, 500) : [];
+    if (!rows.length) return trpcError("A planilha não possui linhas válidas");
+    let createdClients = 0, updatedClients = 0, createdPolicies = 0, updatedPolicies = 0;
+    for (const raw of rows) {
+      const row = (raw || {}) as JsonRecord;
+      const clientName = String(row.clientName || "").trim();
+      if (!clientName) continue;
+      const email = String(row.clientEmail || "").trim().toLowerCase();
+      const phone = String(row.clientPhone || "").trim();
+      const birthDate = normalizeBirthDate(row.birthDate) || null;
+      let client = email
+        ? await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1").bind(owner, email).first<JsonRecord>()
+        : null;
+      if (!client)
+        client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(name)=lower(?) LIMIT 1").bind(owner, clientName).first<JsonRecord>();
+      let clientId: number;
+      if (client) {
+        clientId = Number(client.id);
+        await env.DB.prepare(
+          "UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+        ).bind(email || null, phone || null, phone || null, birthDate, clientId, owner).run();
+        updatedClients++;
+      } else {
+        const result = await env.DB.prepare(
+          "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail) VALUES (?,?,?,?,?,'client','Planilha Excel',?)"
+        ).bind(clientName, email || null, phone || null, phone || null, birthDate, owner).run();
+        clientId = Number(result.meta.last_row_id);
+        createdClients++;
+      }
+      const policyNumber = String(row.policyNumber || "").trim();
+      if (!policyNumber) continue;
+      const policy = await env.DB.prepare(
+        "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=? LIMIT 1"
+      ).bind(owner, policyNumber).first<JsonRecord>();
+      const product = String(row.product || "").trim() || null;
+      const frequency = String(row.premiumFrequency || "").trim() || null;
+      const beneficiaries = String(row.beneficiaries || "").trim() || null;
+      const issuedAt = String(row.issuedAt || "").trim() || null;
+      const premium = Math.max(0, Number(row.premiumAmount || 0));
+      const target = Math.max(0, Number(row.targetPremium || 0));
+      const points = Math.max(0, Math.round(Number(row.points || 0)));
+      const coverage = Math.max(0, Number(row.coverageAmount || 0));
+      if (policy) {
+        await env.DB.prepare(
+          "UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),birthDate=COALESCE(birthDate,?),product=COALESCE(NULLIF(product,''),?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,premiumFrequency=COALESCE(NULLIF(premiumFrequency,''),?),targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),issuedAt=COALESCE(issuedAt,?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+        ).bind(clientId, email || null, phone || null, birthDate, product, premium, frequency, target, points, coverage, beneficiaries, issuedAt, Number(policy.id), owner).run();
+        updatedPolicies++;
+      } else {
+        const status = ["active", "lapse", "declined", "cancelled"].includes(String(row.policyStatus)) ? String(row.policyStatus) : "active";
+        await env.DB.prepare(
+          "INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,birthDate,policyNumber,status,product,premiumAmount,premiumFrequency,targetPremium,points,coverageAmount,beneficiaries,issuedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+        ).bind(owner, clientId, clientName, email || null, phone || null, birthDate, policyNumber, status, product, premium, frequency, target, points, coverage, beneficiaries, issuedAt).run();
+        createdPolicies++;
+      }
+    }
+    return trpcResult({ success: true, createdClients, updatedClients, createdPolicies, updatedPolicies });
   }
   if (name === "agent.listTasks") {
     const owner = adminEmail.toLowerCase();
