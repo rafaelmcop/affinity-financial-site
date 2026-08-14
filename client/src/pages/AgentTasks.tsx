@@ -17,9 +17,9 @@ export default function AgentTasks() {
         </div>
         <section className="space-y-4">
           <div>
-            <h2 className="text-2xl font-bold text-gold">Enviar PC Sheet</h2>
+            <h2 className="text-2xl font-bold text-gold">Enviar PC Sheet ou ficha Excel</h2>
             <p className="mt-1 text-sm text-gray-400">
-              Importe a apólice e crie o cadastro do cliente automaticamente.
+              Envie PDF, Excel ou CSV. O sistema escolhe o leitor correto e cria o cadastro automaticamente.
             </p>
           </div>
           <PcSheetUpload />

@@ -412,25 +412,41 @@ export function PcSheetUpload() {
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
   const save = trpc.agent.savePcSheet.useMutation();
+  const importSpreadsheet = trpc.agent.importSpreadsheet.useMutation();
   const utils = trpc.useUtils();
   return (
     <Card className="border-gold/20 bg-[#0b1524] p-6">
       <div className="rounded-xl border border-dashed border-gold/40 bg-black/30 p-6 text-center">
         <Upload className="mx-auto text-gold" />
-        <p className="mt-3 font-bold">Selecione um PC Sheet em PDF</p>
+        <p className="mt-3 font-bold">Selecione um PC Sheet em PDF ou uma ficha em Excel</p>
         <p className="mt-1 text-xs text-gray-400">
-          A leitura acontece neste navegador. Dados bancários, SSN e informações
-          médicas são ignorados.
+          O sistema identifica automaticamente PDF, Excel ou CSV. Dados bancários,
+          SSN e informações médicas são ignorados.
         </p>
         <Input
           className="mx-auto mt-4 max-w-md"
           type="file"
-          accept="application/pdf"
+          accept=".pdf,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
           onChange={async e => {
             const file = e.target.files?.[0];
             if (!file) return;
+            e.currentTarget.value = "";
             setLoading(true);
             try {
+              const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+              if (!isPdf) {
+                const rows = await readClientSpreadsheet(file);
+                if (!rows.length) throw new Error("Não foi possível identificar nenhum cliente nesta planilha");
+                setForm({ ...empty, ...rows[0] });
+                const result = await importSpreadsheet.mutateAsync({ rows });
+                await Promise.all([
+                  utils.agent.listPolicies.invalidate(),
+                  utils.agent.listClients.invalidate(),
+                  utils.agent.dashboard.invalidate(),
+                ]);
+                toast.success(`${rows.length} cadastro(s) identificado(s) e salvos. ${result.createdClients} cliente(s) criado(s) e ${result.updatedClients} completado(s).`);
+                return;
+              }
               const extracted = await readPcSheet(file);
               setForm(extracted);
               const filled = Object.values(extracted).filter(
@@ -452,15 +468,15 @@ export function PcSheetUpload() {
                   `${filled} campos extraídos e salvos automaticamente. ${result.automationCount ?? 0} mensagens e acompanhamentos programados.`
                 );
               }
-            } catch {
-              toast.error("Não foi possível ler e salvar este PDF");
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Não foi possível ler e salvar este arquivo");
             } finally {
               setLoading(false);
             }
           }}
         />
         {loading && (
-          <p className="mt-3 text-sm text-gold">Lendo documento...</p>
+          <p className="mt-3 text-sm text-gold">Lendo e salvando arquivo...</p>
         )}
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
