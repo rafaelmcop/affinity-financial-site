@@ -20,4 +20,9 @@ describe("Flex Life review automation", () => {
     expect(isFlexLifeProduct("Flex Life II")).toBe(true);
     expect(isFlexLifeProduct("Secure Whole Life")).toBe(false);
   });
+
+  it("exposes overdue notice dates so the next morning run can send them", () => {
+    const dates = flexLifeReviewDates("2024-01-10T12:00:00Z");
+    expect(dates?.noticeAt.toISOString().slice(0, 10) < "2026-08-14").toBe(true);
+  });
 });

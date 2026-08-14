@@ -1408,7 +1408,7 @@ async function runProcedure(
       ],
       ...(reviewDates
         ? [[
-            `Revisão de apólice Flex Life nº ${policyNumber} — ${clientName}`,
+            `${reviewDates.reviewAt < now ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${policyNumber} — ${clientName}`,
             reviewDates.reviewAt.toISOString(),
           ] as [string, string]]
         : []),
@@ -1452,7 +1452,7 @@ async function runProcedure(
     for (const policy of flexPolicies.results) {
       const dates = flexLifeReviewDates(String(policy.issuedAt));
       if (!dates) continue;
-      const title = `Revisão de apólice Flex Life nº ${String(policy.policyNumber)} — ${String(policy.clientName)}`;
+      const title = `${dates.reviewAt.getTime() < Date.now() ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${String(policy.policyNumber)} — ${String(policy.clientName)}`;
       await env.DB.prepare(
         "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=?)"
       )
@@ -3587,7 +3587,8 @@ async function runMessageAutomations(env: Env) {
         const reviewDates = flexLifeReviewDates(String(policy.issuedAt));
         if (!reviewDates) continue;
         const noticeDay = reviewDates.noticeAt.toISOString().slice(0, 10);
-        if (noticeDay !== `${year}-${eastern.month}-${eastern.day}`) continue;
+        const today = `${year}-${eastern.month}-${eastern.day}`;
+        if (noticeDay > today) continue;
         if (!automation.clientId) {
           const customized = await env.DB.prepare(
             "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND clientId=? AND isActive=1 LIMIT 1"
@@ -3600,17 +3601,17 @@ async function runMessageAutomations(env: Env) {
           if (customized) continue;
         }
         const sentKey = `flex-life-review-${policy.policyId}`;
-        const taskTitle = `Revisão de apólice Flex Life nº ${String(policy.policyNumber)} — ${String(policy.name)}`;
+        const taskTitle = `${reviewDates.reviewAt.toISOString().slice(0, 10) < today ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${String(policy.policyNumber)} — ${String(policy.name)}`;
         const existingTask = await env.DB.prepare(
-          "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
+          "SELECT id,createdAt FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
         )
           .bind(
             String(automation.agentEmail).toLowerCase(),
             Number(policy.clientId),
             taskTitle
           )
-          .first();
-        if (!existingTask)
+          .first<JsonRecord>();
+        if (!existingTask) {
           await env.DB.prepare(
             "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,?)"
           )
@@ -3621,6 +3622,13 @@ async function runMessageAutomations(env: Env) {
               reviewDates.reviewAt.toISOString()
             )
             .run();
+          if (noticeDay < today) continue;
+        } else if (
+          noticeDay < today &&
+          String(existingTask.createdAt || "").slice(0, 10) >= today
+        ) {
+          continue;
+        }
         if (!policy.email) continue;
         const sent = await env.DB.prepare(
           "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"

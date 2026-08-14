@@ -770,7 +770,7 @@ export const appRouter = router({
           },
           ...(reviewDates
             ? [{
-                title: `Revisão de apólice Flex Life nº ${input.policyNumber} — ${input.clientName}`,
+                title: `${reviewDates.reviewAt < now ? "⚠️ Revisão atrasada" : "Revisão de apólice"} Flex Life nº ${input.policyNumber} — ${input.clientName}`,
                 dueAt: reviewDates.reviewAt,
               }]
             : []),
