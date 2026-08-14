@@ -4,6 +4,18 @@ import {
   DEFAULT_PAYMENT_RETURN_MESSAGE,
   DEFAULT_PAYMENT_RETURN_SUBJECT,
 } from "../shared/paymentReturnTemplate";
+import {
+  DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+  DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+  LEGACY_POLICY_REVIEW_MESSAGE,
+  flexLifeReviewDates,
+  isFlexLifeProduct,
+} from "../shared/flexLifeReviewTemplate";
+import {
+  DEFAULT_THANKSGIVING_MESSAGE,
+  DEFAULT_THANKSGIVING_SUBJECT,
+  LEGACY_THANKSGIVING_MESSAGES,
+} from "../shared/thanksgivingTemplate";
 import bcrypt from "bcryptjs";
 import {
   emailHtml,
@@ -1338,8 +1350,8 @@ async function runProcedure(
       [
         "thanksgiving",
         "Feliz Dia de Ação de Graças",
-        "Feliz Dia de Ação de Graças, {nome}!",
-        "Olá {nome}, neste Dia de Ação de Graças desejamos muita união, gratidão e bons momentos para você e sua família. Conte sempre conosco.",
+        DEFAULT_THANKSGIVING_SUBJECT,
+        DEFAULT_THANKSGIVING_MESSAGE,
       ],
       [
         "christmas",
@@ -1355,12 +1367,25 @@ async function runProcedure(
       ],
       [
         "policy_anniversary",
-        "Revisão anual da apólice",
-        "Sua apólice completa mais um ano",
-        "Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.",
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
       ],
     ];
     for (const [occasion, title, subject, message] of defaultMessages) {
+      if (occasion === "policy_anniversary")
+        await env.DB.prepare(
+          "UPDATE scheduledMessages SET title=?,subject=?,message=? WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND message=?"
+        )
+          .bind(title, subject, message, owner, LEGACY_POLICY_REVIEW_MESSAGE)
+          .run();
+      if (occasion === "thanksgiving")
+        for (const legacyMessage of LEGACY_THANKSGIVING_MESSAGES)
+          await env.DB.prepare(
+            "UPDATE scheduledMessages SET subject=?,message=? WHERE lower(agentEmail)=? AND occasion='thanksgiving' AND message=?"
+          )
+            .bind(subject, message, owner, legacyMessage)
+            .run();
       await env.DB.prepare(
         "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT ?,?,'email',?,?,'all',?,1 WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion=? AND title IS NOT NULL)"
       )
@@ -1368,6 +1393,10 @@ async function runProcedure(
         .run();
     }
     const now = new Date();
+    const reviewDates =
+      isFlexLifeProduct(input.product) && String(input.issuedAt || "").trim()
+        ? flexLifeReviewDates(`${String(input.issuedAt).trim()}T12:00:00Z`)
+        : null;
     const followUps: Array<[string, string]> = [
       [
         `Confirmar boas-vindas e entrega da apólice de ${clientName}`,
@@ -1377,6 +1406,12 @@ async function runProcedure(
         `Revisar a apólice ${policyNumber} com ${clientName}`,
         new Date(now.getTime() + 30 * 86400000).toISOString(),
       ],
+      ...(reviewDates
+        ? [[
+            `Revisão de apólice Flex Life nº ${policyNumber} — ${clientName}`,
+            reviewDates.reviewAt.toISOString(),
+          ] as [string, string]]
+        : []),
     ];
     for (const [title, dueAt] of followUps) {
       const exists = await env.DB.prepare(
@@ -1404,14 +1439,38 @@ async function runProcedure(
       success: true,
       clientId,
       automationCount: 4,
-      tasksCreated: 2,
+      tasksCreated: followUps.length,
     });
   }
   if (name === "agent.listTasks") {
+    const owner = adminEmail.toLowerCase();
+    const flexPolicies = await env.DB.prepare(
+      "SELECT p.policyNumber,p.clientId,p.clientName,p.issuedAt FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND lower(coalesce(p.product,'')) LIKE '%flex%life%'"
+    )
+      .bind(owner)
+      .all<JsonRecord>();
+    for (const policy of flexPolicies.results) {
+      const dates = flexLifeReviewDates(String(policy.issuedAt));
+      if (!dates) continue;
+      const title = `Revisão de apólice Flex Life nº ${String(policy.policyNumber)} — ${String(policy.clientName)}`;
+      await env.DB.prepare(
+        "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) SELECT ?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=?)"
+      )
+        .bind(
+          owner,
+          Number(policy.clientId),
+          title,
+          dates.reviewAt.toISOString(),
+          owner,
+          Number(policy.clientId),
+          title
+        )
+        .run();
+    }
     const rows = await env.DB.prepare(
       "SELECT * FROM agentTasks WHERE lower(agentEmail)=? ORDER BY status,dueAt"
     )
-      .bind(adminEmail.toLowerCase())
+      .bind(owner)
       .all<JsonRecord>();
     return trpcResult(
       rows.results.map(row => ({ ...row, id: Number(row.id) }))
@@ -1452,6 +1511,12 @@ async function runProcedure(
         "Olá {nome}, feliz aniversário! Desejo um dia muito especial, com saúde, felicidade e muitas conquistas.",
       ],
       [
+        "thanksgiving",
+        "Feliz Dia de Ação de Graças",
+        DEFAULT_THANKSGIVING_SUBJECT,
+        DEFAULT_THANKSGIVING_MESSAGE,
+      ],
+      [
         "christmas",
         "Feliz Natal",
         "Feliz Natal, {nome}!",
@@ -1465,11 +1530,33 @@ async function runProcedure(
       ],
       [
         "policy_anniversary",
-        "Revisão anual da apólice",
-        "Sua apólice completa mais um ano",
-        "Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.",
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
       ],
     ];
+    await env.DB.prepare(
+      "UPDATE scheduledMessages SET title=?,subject=?,message=? WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND message=?"
+    )
+      .bind(
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+        owner,
+        LEGACY_POLICY_REVIEW_MESSAGE
+      )
+      .run();
+    for (const legacyMessage of LEGACY_THANKSGIVING_MESSAGES)
+      await env.DB.prepare(
+        "UPDATE scheduledMessages SET subject=?,message=? WHERE lower(agentEmail)=? AND occasion='thanksgiving' AND message=?"
+      )
+        .bind(
+          DEFAULT_THANKSGIVING_SUBJECT,
+          DEFAULT_THANKSGIVING_MESSAGE,
+          owner,
+          legacyMessage
+        )
+        .run();
     for (const [occasion, title, subject, message] of defaults) {
       const exists = await env.DB.prepare(
         "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion=? AND title IS NOT NULL LIMIT 1"
@@ -3432,9 +3519,23 @@ async function runMessageAutomations(env: Env) {
       `${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`
     ).getDay() === 4;
   if (isMorningRun)
-    await env.DB.prepare(
-      "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email','Revisão anual da apólice','Sua apólice completa mais um ano','all','Olá {nome}, sua apólice completa mais um ano. Este é um ótimo momento para analisarmos se sua proteção ainda acompanha suas necessidades. Entre em contato conosco ou agende uma reunião diretamente aqui: {agenda}. Estamos à sua disposição para revisar sua apólice.',1 FROM agentPolicies p WHERE NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
-    ).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE scheduledMessages SET title=?,subject=?,message=? WHERE occasion='policy_anniversary' AND message=?"
+      ).bind(
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+        LEGACY_POLICY_REVIEW_MESSAGE
+      ),
+      env.DB.prepare(
+        "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT DISTINCT lower(p.agentEmail),'policy_anniversary','email',?,?,'all',?,1 FROM agentPolicies p WHERE lower(coalesce(p.product,'')) LIKE '%flex%life%' AND NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(p.agentEmail) AND m.occasion='policy_anniversary' AND m.title IS NOT NULL)"
+      ).bind(
+        "Revisão de apólice Flex Life",
+        DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+        DEFAULT_FLEX_LIFE_REVIEW_MESSAGE
+      ),
+    ]);
   const automations = await env.DB.prepare(
     "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
   ).all<JsonRecord>();
@@ -3454,14 +3555,15 @@ async function runMessageAutomations(env: Env) {
     const personalizeAgent = (value: unknown) =>
       escapeAutomationHtml(value)
         .replaceAll("{agente_nome}", agentName)
-        .replaceAll("{agente_telefone}", agentPhone);
+        .replaceAll("{agente_telefone}", agentPhone)
+        .replaceAll("{agente}", agentName)
+        .replaceAll("{telefone do agente}", agentPhone);
     if (occasion !== "custom" && !isMorningRun) continue;
     if (occasion === "policy_anniversary") {
       let policySql =
-        "SELECT p.id policyId,p.policyNumber,p.clientId,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND strftime('%m-%d',p.issuedAt)=?";
+        "SELECT p.id policyId,p.policyNumber,p.clientId,p.issuedAt,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND lower(coalesce(p.product,'')) LIKE '%flex%life%'";
       const policyBinds: unknown[] = [
         String(automation.agentEmail).toLowerCase(),
-        `${eastern.month}-${eastern.day}`,
       ];
       if (automation.clientId) {
         policySql += " AND c.id=?";
@@ -3482,6 +3584,10 @@ async function runMessageAutomations(env: Env) {
         .bind(...policyBinds)
         .all<JsonRecord>();
       for (const policy of policies.results) {
+        const reviewDates = flexLifeReviewDates(String(policy.issuedAt));
+        if (!reviewDates) continue;
+        const noticeDay = reviewDates.noticeAt.toISOString().slice(0, 10);
+        if (noticeDay !== `${year}-${eastern.month}-${eastern.day}`) continue;
         if (!automation.clientId) {
           const customized = await env.DB.prepare(
             "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='policy_anniversary' AND clientId=? AND isActive=1 LIMIT 1"
@@ -3493,8 +3599,8 @@ async function runMessageAutomations(env: Env) {
             .first();
           if (customized) continue;
         }
-        const sentKey = `policy-anniversary-${policy.policyId}-${year}`;
-        const taskTitle = `Aniversário da apólice ${String(policy.policyNumber)} — revisar com ${String(policy.name)} (${year})`;
+        const sentKey = `flex-life-review-${policy.policyId}`;
+        const taskTitle = `Revisão de apólice Flex Life nº ${String(policy.policyNumber)} — ${String(policy.name)}`;
         const existingTask = await env.DB.prepare(
           "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND clientId=? AND title=? LIMIT 1"
         )
@@ -3506,12 +3612,13 @@ async function runMessageAutomations(env: Env) {
           .first();
         if (!existingTask)
           await env.DB.prepare(
-            "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,CURRENT_TIMESTAMP)"
+            "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,?)"
           )
             .bind(
               String(automation.agentEmail).toLowerCase(),
               Number(policy.clientId),
-              taskTitle
+              taskTitle,
+              reviewDates.reviewAt.toISOString()
             )
             .run();
         if (!policy.email) continue;
@@ -3527,18 +3634,31 @@ async function runMessageAutomations(env: Env) {
         const body = personalizeAgent(automation.message)
           .replaceAll("{nome}", safeName)
           .replaceAll(
+            "{apolice numero}",
+            escapeAutomationHtml(policy.policyNumber)
+          )
+          .replaceAll(
             "{agenda}",
             `<a href="${scheduleUrl}">agendar uma reunião para analisar sua apólice</a>`
           );
+        const subject = personalizeAgent(
+          automation.subject || automation.title
+        )
+          .replaceAll("{nome}", safeName)
+          .replaceAll(
+            "{apolice numero}",
+            escapeAutomationHtml(policy.policyNumber)
+          );
+        const historyBody = body.replaceAll("**", "");
         try {
-          await sendAgentEmail(env, String(automation.agentEmail), {
+          const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
-            subject: personalizeAgent(
-              automation.subject || automation.title
-            ).replaceAll("{nome}", safeName),
+            subject,
             html: emailHtml(
               personalizeAgent(automation.title || "Revisão anual"),
-              `<p>${body.replaceAll("\n", "<br>")}</p>`
+              `<p>${body
+                .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+                .replaceAll("\n", "<br>")}</p>`
             ),
           });
           await env.DB.batch([
@@ -3549,8 +3669,19 @@ async function runMessageAutomations(env: Env) {
               "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
             ).bind(
               Number(policy.clientId),
-              `Convite automático para revisão anual da apólice ${String(policy.policyNumber)} enviado`,
+              `Convite automático para revisão Flex Life da apólice ${String(policy.policyNumber)} enviado`,
               String(automation.agentEmail)
+            ),
+            env.DB.prepare(
+              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+            ).bind(
+              String(automation.agentEmail).toLowerCase(),
+              Number(policy.clientId),
+              String(sentMail.messageId || "") || null,
+              subject,
+              historyBody,
+              String(automation.agentEmail).toLowerCase(),
+              String(policy.email)
             ),
           ]);
         } catch (error) {

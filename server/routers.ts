@@ -29,6 +29,12 @@ import {
   DEFAULT_PAYMENT_RETURN_MESSAGE,
   DEFAULT_PAYMENT_RETURN_SUBJECT,
 } from "../shared/paymentReturnTemplate";
+import {
+  DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+  DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+  flexLifeReviewDates,
+  isFlexLifeProduct,
+} from "../shared/flexLifeReviewTemplate";
 
 const strongPassword = z
   .string()
@@ -749,6 +755,10 @@ export const appRouter = router({
             .where(eq(agentPolicies.id, policy.id));
         else await db.insert(agentPolicies).values(values);
         const now = new Date();
+        const reviewDates =
+          isFlexLifeProduct(input.product) && input.issuedAt
+            ? flexLifeReviewDates(`${input.issuedAt}T12:00:00Z`)
+            : null;
         const followUps = [
           {
             title: `Confirmar boas-vindas e entrega da apólice de ${input.clientName}`,
@@ -758,6 +768,12 @@ export const appRouter = router({
             title: `Revisar a apólice ${input.policyNumber} com ${input.clientName}`,
             dueAt: new Date(now.getTime() + 30 * 86400000),
           },
+          ...(reviewDates
+            ? [{
+                title: `Revisão de apólice Flex Life nº ${input.policyNumber} — ${input.clientName}`,
+                dueAt: reviewDates.reviewAt,
+              }]
+            : []),
         ];
         await db.insert(agentTasks).values(
           followUps.map(task => ({
@@ -772,11 +788,34 @@ export const appRouter = router({
           content: `PC Sheet processado. Apólice ${input.policyNumber} vinculada e acompanhamentos preparados.`,
           createdBy: owner,
         });
+        if (reviewDates) {
+          const [reviewTemplate] = await db
+            .select({ id: scheduledMessages.id })
+            .from(scheduledMessages)
+            .where(
+              and(
+                eq(scheduledMessages.agentEmail, owner),
+                eq(scheduledMessages.occasion, "policy_anniversary")
+              )
+            )
+            .limit(1);
+          if (!reviewTemplate)
+            await db.insert(scheduledMessages).values({
+              agentEmail: owner,
+              occasion: "policy_anniversary",
+              channel: "email",
+              title: "Revisão de apólice Flex Life",
+              subject: DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
+              audience: "all",
+              message: DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
+              isActive: 1,
+            });
+        }
         return {
           success: true,
           clientId: client.id,
           automationCount: 4,
-          tasksCreated: 2,
+          tasksCreated: followUps.length,
         };
       }),
     listTasks: adminProcedure.query(async ({ ctx }) => {

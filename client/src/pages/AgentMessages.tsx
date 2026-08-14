@@ -53,7 +53,7 @@ const labels: Record<Occasion, string> = {
   thanksgiving: "Dia de Ação de Graças",
   christmas: "Natal",
   new_year: "Ano-Novo",
-  policy_anniversary: "Aniversário da apólice",
+  policy_anniversary: "Revisão Flex Life (13 meses)",
   monthly: "Início do mês",
   custom: "Data personalizada",
 };
@@ -91,7 +91,9 @@ export function ScheduledMessagesPanel({
   const previewMessage = (value: unknown) =>
     String(value || "")
       .replaceAll("{agente_nome}", profile?.name || session.name || "Nome do agente")
-      .replaceAll("{agente_telefone}", profile?.phone || profile?.whatsapp || "Telefone do agente");
+      .replaceAll("{agente_telefone}", profile?.phone || profile?.whatsapp || "Telefone do agente")
+      .replaceAll("{agente}", profile?.name || session.name || "Nome do agente")
+      .replaceAll("{telefone do agente}", profile?.phone || profile?.whatsapp || "Telefone do agente");
   const formRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!form) return;
@@ -208,7 +210,7 @@ export function ScheduledMessagesPanel({
           </h1>
           <p className="mt-2 text-sm text-gray-400">
             Crie mensagens sob demanda ou automáticas, individuais, em grupo ou coletivas. Os envios programados usam 8:30 AM como horário padrão pelo e-mail particular configurado no portal.
-            Use <b>{"{nome}"}</b> para o cliente. O nome e telefone do agente são preenchidos automaticamente.
+            Use <b>{"{nome}"}</b> para o cliente. Nos modelos de revisão Flex Life, use também <b>{"{apolice numero}"}</b>, <b>{"{agente}"}</b> e <b>{"{telefone do agente}"}</b>. Os dados são preenchidos automaticamente.
           </p>
         </div>
         <Button className="bg-gold text-black" onClick={newMessage}>
@@ -241,7 +243,7 @@ export function ScheduledMessagesPanel({
               <option value="thanksgiving">Dia de Ação de Graças</option>
               <option value="christmas">Natal</option>
               <option value="new_year">Ano-Novo</option>
-              {scope !== "collective" && <option value="policy_anniversary">Aniversário da apólice</option>}
+              {scope !== "collective" && <option value="policy_anniversary">Revisão Flex Life (1 ano e 1 mês)</option>}
               <option value="monthly">Início do mês</option>
               <option value="custom">Data personalizada</option>
             </select>
@@ -527,6 +529,7 @@ export default function AgentMessages() {
   const saveTemplate = trpc.agent.savePaymentReturnTemplate.useMutation();
   const [templateSubject, setTemplateSubject] = useState(DEFAULT_PAYMENT_RETURN_SUBJECT);
   const [templateMessage, setTemplateMessage] = useState(DEFAULT_PAYMENT_RETURN_MESSAGE);
+  const [editingPaymentTemplate, setEditingPaymentTemplate] = useState(false);
   useEffect(() => {
     if (!template.data) return;
     setTemplateSubject(template.data.subject);
@@ -536,11 +539,25 @@ export default function AgentMessages() {
     <div className="min-h-screen bg-black text-white lg:pl-64">
       <AgentSidebar />
       <main className="mx-auto max-w-5xl px-4 py-8">
-        <Card className="mb-8 space-y-4 border-gold/30 bg-[#0b1524] p-6">
-          <div><p className="text-sm font-bold uppercase tracking-[.2em] text-gold">Modelo automático</p><h1 className="mt-2 text-2xl font-bold">Pagamento devolvido</h1><p className="mt-2 text-sm text-gray-400">Este texto é enviado quando o sistema identifica com segurança o cliente e a apólice. Use <b>{"{cliente}"}</b>, <b>{"{agente}"}</b> e <b>{"{telefone}"}</b> para preencher os dados automaticamente.</p></div>
-          <label className="block text-sm text-gray-300">Assunto<Input className="mt-2" value={templateSubject} onChange={event => setTemplateSubject(event.target.value)} /></label>
-          <label className="block text-sm text-gray-300">Mensagem<textarea className="mt-2 min-h-80 w-full rounded-md border border-white/20 bg-black p-4 text-sm leading-relaxed text-white" value={templateMessage} onChange={event => setTemplateMessage(event.target.value)} /></label>
-          <div className="flex flex-wrap gap-2"><Button className="bg-gold text-black" disabled={saveTemplate.isPending || !templateSubject.trim() || !templateMessage.trim()} onClick={async () => { try { await saveTemplate.mutateAsync({ subject: templateSubject, message: templateMessage }); await template.refetch(); toast.success("Modelo de pagamento devolvido salvo"); } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível salvar o modelo"); } }}>Salvar modelo</Button><Button variant="outline" onClick={() => { setTemplateSubject(DEFAULT_PAYMENT_RETURN_SUBJECT); setTemplateMessage(DEFAULT_PAYMENT_RETURN_MESSAGE); }}>Restaurar padrão</Button></div>
+        <Card className="mb-8 border-gold/30 bg-[#0b1524] p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <span className="rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300">Ativa</span>
+              <h2 className="mt-3 text-lg font-bold text-gold">Pagamento devolvido</h2>
+              <p className="mt-2 text-xs uppercase tracking-wider text-gray-500">Modelo automático · E-mail individual</p>
+              <p className="mt-3 text-sm font-semibold text-white">{templateSubject}</p>
+              {!editingPaymentTemplate && <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-gray-300">{templateMessage}</p>}
+            </div>
+            <Button size="icon" variant="outline" aria-label="Editar modelo de pagamento devolvido" onClick={() => setEditingPaymentTemplate(open => !open)}>
+              <Edit2 size={16} />
+            </Button>
+          </div>
+          {editingPaymentTemplate && <div className="mt-5 space-y-4 border-t border-white/10 pt-5">
+            <p className="text-sm text-gray-400">Este texto é enviado quando o sistema identifica com segurança o cliente e a apólice. Use <b>{"{cliente}"}</b>, <b>{"{agente}"}</b> e <b>{"{telefone}"}</b> para preencher os dados automaticamente.</p>
+            <label className="block text-sm text-gray-300">Assunto<Input className="mt-2" value={templateSubject} onChange={event => setTemplateSubject(event.target.value)} /></label>
+            <label className="block text-sm text-gray-300">Mensagem<textarea className="mt-2 min-h-72 w-full rounded-md border border-white/20 bg-black p-4 text-sm leading-relaxed text-white" value={templateMessage} onChange={event => setTemplateMessage(event.target.value)} /></label>
+            <div className="flex flex-wrap gap-2"><Button className="bg-gold text-black" disabled={saveTemplate.isPending || !templateSubject.trim() || !templateMessage.trim()} onClick={async () => { try { await saveTemplate.mutateAsync({ subject: templateSubject, message: templateMessage }); await template.refetch(); setEditingPaymentTemplate(false); toast.success("Modelo de pagamento devolvido salvo"); } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível salvar o modelo"); } }}>Salvar modelo</Button><Button variant="outline" onClick={() => { setTemplateSubject(DEFAULT_PAYMENT_RETURN_SUBJECT); setTemplateMessage(DEFAULT_PAYMENT_RETURN_MESSAGE); }}>Restaurar padrão</Button><Button variant="ghost" onClick={() => setEditingPaymentTemplate(false)}>Cancelar</Button></div>
+          </div>}
         </Card>
         <ScheduledMessagesPanel />
       </main>
