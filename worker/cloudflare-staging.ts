@@ -679,14 +679,18 @@ async function runProcedure(
     const email = String(input.email ?? "")
       .trim()
       .toLowerCase();
-    const role = String(input.role ?? "").trim();
+    const city = String(input.city ?? "").trim();
+    const state = String(input.state ?? "").trim().toUpperCase();
+    const agentId = Number(input.agentId);
     const quote = String(input.quote ?? "").trim();
     const rating = Number(input.rating);
     const language = String(input.language ?? "pt");
     if (
       nameValue.length < 2 ||
       !email.includes("@") ||
-      role.length < 2 ||
+      city.length < 2 ||
+      !/^[A-Z]{2}$/.test(state) ||
+      !Number.isInteger(agentId) || agentId <= 0 ||
       quote.length < 20 ||
       rating < 1 ||
       rating > 5 ||
@@ -705,15 +709,22 @@ async function runProcedure(
         "TOO_MANY_REQUESTS",
         429
       );
+    const agent = await env.DB.prepare("SELECT email FROM adminAccounts WHERE id=? AND status='approved' AND isActive=1 AND accountType IN ('agent','both') LIMIT 1").bind(agentId).first<JsonRecord>();
+    if (!agent) return trpcError("Selecione um agente válido.");
     await env.DB.prepare(
-      "INSERT INTO testimonials (name, email, role, quote, rating, source, language, mediaType, isActive) VALUES (?, ?, ?, ?, ?, 'client', ?, 'image', 0)"
+      "INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client',?,'image',0)"
     )
-      .bind(nameValue, email, role, quote, rating, language)
+      .bind(nameValue, email, `${city}, ${state}`, city, state, String(agent.email).toLowerCase(), quote, rating, language)
       .run();
     return trpcResult({
       success: true,
       message: "Avaliação enviada para aprovação.",
     });
+  }
+
+  if (name === "testimonials.getAgentOptions") {
+    const rows = await env.DB.prepare("SELECT id,name FROM adminAccounts WHERE status='approved' AND isActive=1 AND accountType IN ('agent','both') ORDER BY name").all<JsonRecord>();
+    return trpcResult(rows.results.map(row => ({ id: Number(row.id), name: String(row.name) })));
   }
 
   if (name === "affiliate.register") {
@@ -1479,6 +1490,20 @@ async function runProcedure(
       tasksCreated: followUps.length,
     });
   }
+  if (name === "agent.listAssignedReviews") {
+    const result = await env.DB.prepare("SELECT * FROM testimonials WHERE source='client' AND lower(agentEmail)=? ORDER BY createdAt DESC")
+      .bind(adminEmail.toLowerCase()).all<JsonRecord>();
+    return trpcResult(result.results.map(normalizeTestimonial));
+  }
+
+  if (name === "agent.decideAssignedReview") {
+    const id = Number(input.id), decision = String(input.decision || "");
+    if (!id || !["approved", "rejected"].includes(decision)) return trpcError("Decisão inválida.");
+    await env.DB.prepare("UPDATE testimonials SET agentDecision=?,agentReviewedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND source='client' AND lower(agentEmail)=?")
+      .bind(decision, id, adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
+  }
+
   if (name === "agent.importSpreadsheet") {
     const owner = adminEmail.toLowerCase();
     const rows = Array.isArray(input.rows) ? input.rows.slice(0, 500) : [];
@@ -3468,13 +3493,16 @@ async function runProcedure(
     if (mediaUrlChanged && !isValidMediaUrl(mediaUrl, mediaType))
       return trpcError("O endereço da mídia não é válido.");
     await env.DB.prepare(
-      "UPDATE testimonials SET name=?, role=?, quote=?, email=?, rating=?, amountReceived=?, mediaUrl=?, mediaType=?, language=?, thumbnailUrl=?, updatedAt=CURRENT_TIMESTAMP WHERE id=?"
+      "UPDATE testimonials SET name=?,role=?,quote=?,email=?,city=?,state=?,agentEmail=?,rating=?,amountReceived=?,mediaUrl=?,mediaType=?,language=?,thumbnailUrl=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
     )
       .bind(
         input.name ?? current.name,
         input.role ?? current.role,
         input.quote ?? current.quote,
         input.email ?? current.email,
+        input.city ?? current.city,
+        input.state ?? current.state,
+        input.agentEmail ?? current.agentEmail,
         input.rating ?? current.rating,
         amountReceived,
         mediaUrl || null,
@@ -3488,6 +3516,14 @@ async function runProcedure(
       success: true,
       message: "Depoimento atualizado com sucesso!",
     });
+  }
+
+  if (name === "testimonials.setAdminDecision") {
+    const id = Number(input.id), decision = String(input.decision || "");
+    if (!id || !["approved", "rejected"].includes(decision)) return trpcError("Decisão inválida.");
+    await env.DB.prepare("UPDATE testimonials SET adminDecision=?,isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND source='client'")
+      .bind(decision, decision === "approved" ? 1 : 0, id).run();
+    return trpcResult({ success: true });
   }
 
   if (name === "testimonials.toggleActive") {

@@ -37,7 +37,14 @@ const empty: PolicyForm = {
   beneficiaries: "",
   issuedAt: "",
 };
-const money = (v: string) => Number(v.replace(/[$,]/g, "")) || 0;
+const money = (v: string) => {
+  const cleaned = v.replace(/[$,\s]/g, "").toLowerCase();
+  const value = Number(cleaned.replace(/[km]$/, ""));
+  if (!Number.isFinite(value)) return 0;
+  if (cleaned.endsWith("m")) return value * 1_000_000;
+  if (cleaned.endsWith("k")) return value * 1_000;
+  return value;
+};
 type SpreadsheetRow = PolicyForm & {
   policyStatus: "active" | "lapse" | "declined" | "cancelled";
 };
@@ -67,9 +74,10 @@ const spreadsheetStatus = (value: string): SpreadsheetRow["policyStatus"] => {
 export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[]> {
   const XLSX = await import("xlsx");
   const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const source = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "", raw: false });
-  return source.map(row => {
+  const tableRows = workbook.SheetNames.flatMap(sheetName =>
+    XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "", raw: false })
+  );
+  const fromTable = tableRows.map(row => {
     const premiumAmount = money(spreadsheetValue(row, ["premium", "premio", "valor premium"]));
     const frequency = spreadsheetValue(row, ["frequencia", "frequency", "modal"]);
     const suppliedTarget = money(spreadsheetValue(row, ["target premium", "premium anual"]));
@@ -90,6 +98,93 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
       issuedAt: spreadsheetDate(spreadsheetValue(row, ["data aplicacao", "application date", "date esigned", "data emissao"])),
     } satisfies SpreadsheetRow;
   }).filter(row => row.clientName);
+
+  // Algumas fichas cadastrais são formulários visuais: os rótulos e valores
+  // ficam espalhados pela planilha, em vez de formarem uma tabela com cabeçalho.
+  const fromForms = workbook.SheetNames.flatMap(sheetName => {
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], {
+      header: 1, defval: "", raw: false,
+    }).map(row => row.map(value => String(value ?? "").trim()));
+    const normalized = matrix.map(row => row.map(cleanHeader));
+    const findCell = (aliases: string[], startRow = 0, endRow = matrix.length) => {
+      for (let row = startRow; row < Math.min(endRow, matrix.length); row += 1) {
+        for (let col = 0; col < (normalized[row]?.length || 0); col += 1) {
+          const cell = normalized[row][col];
+          if (aliases.some(alias => cell === alias || cell.includes(alias))) return { row, col };
+        }
+      }
+      return undefined;
+    };
+    const rightValue = (aliases: string[], startRow = 0, endRow = matrix.length, maxDistance = 4) => {
+      const cell = findCell(aliases, startRow, endRow);
+      if (!cell) return "";
+      for (let distance = 1; distance <= maxDistance; distance += 1) {
+        const value = matrix[cell.row]?.[cell.col + distance]?.trim();
+        if (value) return value;
+      }
+      return "";
+    };
+    const belowValue = (aliases: string[], maxRows = 4) => {
+      const cell = findCell(aliases);
+      if (!cell) return "";
+      for (let distance = 1; distance <= maxRows; distance += 1) {
+        const value = matrix[cell.row + distance]?.[cell.col]?.trim();
+        if (value) return value;
+      }
+      return "";
+    };
+    const personalSection = findCell(["dados pessoais"]);
+    const beneficiarySection = findCell(["beneficiarios"]);
+    const personalStart = personalSection ? personalSection.row + 1 : 0;
+    const personalEnd = beneficiarySection?.row ?? matrix.length;
+    const clientName = rightValue(["nome completo"], personalStart, personalEnd);
+    if (!clientName) return [];
+
+    const premiumAmount = money(belowValue(["premium", "premio"]));
+    const premiumFrequency = rightValue(["frequencia", "frequency", "modal"], 0, personalStart);
+    const targetPremium = /mensal|monthly/i.test(premiumFrequency) ? premiumAmount * 12 : 0;
+    const productRows = matrix.slice(0, personalStart).filter(row => row.some(value => /\(\s*x\s*\)/i.test(value)));
+    const productText = productRows.flat().join(" ");
+    const product = /term|temporar/i.test(productText) ? "Term Life"
+      : /iul|indexad/i.test(productText) ? "IUL"
+      : /whole\s*life|vida inteira/i.test(productText) ? "Whole Life" : "";
+    const beneficiaryStart = beneficiarySection?.row ?? matrix.length;
+    const beneficiaries: string[] = [];
+    for (let row = beneficiaryStart; row < Math.min(beneficiaryStart + 12, matrix.length); row += 1) {
+      const nameLabel = normalized[row]?.findIndex(value => value === "nome completo");
+      if (nameLabel === undefined || nameLabel < 0) continue;
+      const name = matrix[row].slice(nameLabel + 1, nameLabel + 5).find(Boolean) || "";
+      const relationship = matrix[row + 1]?.slice(0, 6).filter(Boolean).at(-1) || "";
+      if (name) beneficiaries.push(relationship ? `${name} (${relationship})` : name);
+    }
+    const applicationDate = rightValue(["data da proposta", "data aplicacao", "application date"], 0, personalStart)
+      || belowValue(["data da proposta", "data aplicacao", "application date"], 2);
+    const policyNumber = belowValue(["apolice n", "numero apolice", "policy number"]);
+    const coverageAmount = money(belowValue(["valor da apolice", "valor cobertura", "coverage", "face amount"]));
+    return [{
+      clientName,
+      clientEmail: rightValue(["email", "e mail"], personalStart, personalEnd),
+      clientPhone: rightValue(["telefone", "celular", "phone", "whatsapp"], personalStart, personalEnd),
+      birthDate: rightValue(["data de nascimento", "data nascimento", "date of birth", "dob"], personalStart, personalEnd),
+      policyNumber, product, policyStatus: "active" as const,
+      premiumAmount, premiumFrequency, targetPremium,
+      points: Math.round(targetPremium), coverageAmount,
+      beneficiaries: beneficiaries.join("; "),
+      issuedAt: spreadsheetDate(applicationDate),
+    } satisfies SpreadsheetRow];
+  });
+
+  const all = [...fromTable, ...fromForms];
+  const unique = new Map<string, SpreadsheetRow>();
+  for (const row of all) {
+    const key = `${cleanHeader(row.clientName)}|${row.policyNumber.toLowerCase()}`;
+    const current = unique.get(key);
+    unique.set(key, current ? {
+      ...current,
+      ...Object.fromEntries(Object.entries(row).map(([field, value]) => [field, value || current[field as keyof SpreadsheetRow]])),
+    } as SpreadsheetRow : row);
+  }
+  return Array.from(unique.values());
 }
 export async function readPcSheet(file: File) {
   const pdfjs = await import("pdfjs-dist");

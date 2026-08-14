@@ -355,6 +355,16 @@ export const testimonials = mysqlTable("testimonials", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   role: varchar("role", { length: 255 }).notNull(),
+  city: varchar("city", { length: 120 }),
+  state: varchar("state", { length: 2 }),
+  agentEmail: varchar("agentEmail", { length: 320 }),
+  agentDecision: mysqlEnum("agentDecision", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
+  agentReviewedAt: timestamp("agentReviewedAt"),
+  adminDecision: mysqlEnum("adminDecision", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
   quote: text("quote").notNull(),
   email: varchar("email", { length: 320 }),
   rating: int("rating").default(5).notNull(),

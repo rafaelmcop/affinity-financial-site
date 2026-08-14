@@ -1280,6 +1280,29 @@ export const appRouter = router({
           .where(eq(adminAccounts.email, ctx.adminEmail.toLowerCase()));
         return { success: true };
       }),
+    listAssignedReviews: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      return db.select().from(testimonials).where(and(
+        eq(testimonials.source, "client"),
+        eq(testimonials.agentEmail, ctx.adminEmail.toLowerCase())
+      ));
+    }),
+    decideAssignedReview: adminProcedure
+      .input(z.object({ id: z.number(), decision: z.enum(["approved", "rejected"]) }))
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(testimonials).set({
+          agentDecision: input.decision,
+          agentReviewedAt: new Date(),
+        }).where(and(
+          eq(testimonials.id, input.id),
+          eq(testimonials.source, "client"),
+          eq(testimonials.agentEmail, ctx.adminEmail.toLowerCase())
+        ));
+        return { success: true };
+      }),
   }),
 
   admin: router({
@@ -3129,12 +3152,26 @@ export const appRouter = router({
   notification: notificationRouter,
 
   testimonials: router({
+    getAgentOptions: publicProcedure.query(async () => {
+      const db = await (await import("./db")).getDb();
+      if (!db) return [];
+      const rows = await db.select({ id: adminAccounts.id, name: adminAccounts.name })
+        .from(adminAccounts)
+        .where(and(
+          eq(adminAccounts.status, "approved"),
+          eq(adminAccounts.isActive, 1),
+          inArray(adminAccounts.accountType, ["agent", "both"])
+        ));
+      return rows;
+    }),
     submitReview: publicProcedure
       .input(
         z.object({
           name: z.string().trim().min(2).max(120),
           email: z.string().trim().email().max(320),
-          role: z.string().trim().min(2).max(120),
+          city: z.string().trim().min(2).max(120),
+          state: z.string().length(2),
+          agentId: z.number().int().positive(),
           quote: z.string().trim().min(20).max(1500),
           rating: z.number().int().min(1).max(5),
           language: z.enum(["pt", "en", "es"]).default("pt"),
@@ -3149,10 +3186,20 @@ export const appRouter = router({
           24 * 60 * 60 * 1000
         );
         const { createTestimonial } = await import("./db");
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        const [agent] = await db.select({ email: adminAccounts.email }).from(adminAccounts)
+          .where(and(eq(adminAccounts.id, input.agentId), eq(adminAccounts.status, "approved"), eq(adminAccounts.isActive, 1))).limit(1);
+        if (!agent) throw new Error("Selecione um agente válido.");
         await createTestimonial({
           name: input.name,
           email: input.email.toLowerCase(),
-          role: input.role,
+          role: `${input.city}, ${input.state}`,
+          city: input.city,
+          state: input.state.toUpperCase(),
+          agentEmail: agent.email.toLowerCase(),
+          agentDecision: "pending",
+          adminDecision: "pending",
           quote: input.quote,
           rating: input.rating,
           source: "client",
@@ -3189,6 +3236,9 @@ export const appRouter = router({
           role: z.string().min(1),
           quote: z.string().min(1),
           email: z.string().email().optional(),
+          city: z.string().optional(),
+          state: z.string().length(2).optional(),
+          agentEmail: z.string().email().optional(),
           rating: z.number().int().min(1).max(5).optional(),
           amountReceived: z.number().min(0).max(9999999999.99).default(0),
           mediaUrl: z.string().optional(),
@@ -3219,6 +3269,18 @@ export const appRouter = router({
         return { success: true, message: "Depoimento adicionado com sucesso!" };
       }),
 
+    setAdminDecision: adminProcedure
+      .input(z.object({ id: z.number(), decision: z.enum(["approved", "rejected"]) }))
+      .mutation(async ({ input }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db.update(testimonials).set({
+          adminDecision: input.decision,
+          isActive: input.decision === "approved" ? 1 : 0,
+        }).where(and(eq(testimonials.id, input.id), eq(testimonials.source, "client")));
+        return { success: true };
+      }),
+
     update: adminProcedure
       .input(
         z.object({
@@ -3227,6 +3289,9 @@ export const appRouter = router({
           role: z.string().optional(),
           quote: z.string().optional(),
           email: z.string().email().optional(),
+          city: z.string().optional(),
+          state: z.string().length(2).optional(),
+          agentEmail: z.string().email().optional(),
           rating: z.number().int().min(1).max(5).optional(),
           amountReceived: z.number().min(0).max(9999999999.99).optional(),
           mediaUrl: z.string().optional(),

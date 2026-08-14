@@ -9,6 +9,7 @@ import {
   MessagesSquare,
   ChevronRight,
   ChevronDown,
+  Star,
 } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
@@ -19,6 +20,7 @@ const items = [
   ["Clientes", "/agentes/clientes", Contact],
   ["Apólices", "/agentes/apolices", FileText],
   ["Tarefas", "/agentes/tarefas", ListTodo],
+  ["Avaliações", "/agentes/avaliacoes", Star],
   ["Configurações", "/agentes/configuracoes", Settings],
 ] as const;
 export default function AgentSidebar() {
@@ -30,6 +32,8 @@ export default function AgentSidebar() {
     refetchInterval: 30000,
   });
   const incompleteProfiles = dashboard.data?.profileAlerts?.length || 0;
+  const reviews = trpc.agent.listAssignedReviews.useQuery(undefined, { refetchInterval: 30000 });
+  const pendingReviews = (reviews.data || []).filter(review => review.agentDecision === "pending").length;
   return (
     <>
     <aside className="w-full border-r border-gold/20 bg-[#0f1f36] text-white lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:overflow-y-auto">
@@ -82,6 +86,9 @@ export default function AgentSidebar() {
               <span className="min-w-6 rounded-full bg-amber-400 px-2 py-0.5 text-center text-xs font-black text-black">
                 {incompleteProfiles > 99 ? "99+" : incompleteProfiles}
               </span>
+            )}
+            {href === "/agentes/avaliacoes" && pendingReviews > 0 && (
+              <span className="min-w-6 rounded-full bg-amber-400 px-2 py-0.5 text-center text-xs font-black text-black">{pendingReviews > 99 ? "99+" : pendingReviews}</span>
             )}
           </button>
         ))}

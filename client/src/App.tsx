@@ -18,6 +18,7 @@ import AdminCrm from "./pages/AdminCrm";
 import AdminAgentPortfolio from "./pages/AdminAgentPortfolio";
 import ReviewPage from "./pages/ReviewPage";
 import AdminReviews from "./pages/AdminReviews";
+import AgentReviews from "./pages/AgentReviews";
 import AgentLogin from "./pages/AgentLogin";
 import AdminAffiliateLeads from "./pages/AdminAffiliateLeads";
 import AgentDashboard from "./pages/AgentDashboard";
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/admin/affiliates" component={AdminUsers} />
       <Route path="/admin/testimonials" component={AdminTestimonials} />
       <Route path="/admin/avaliacoes" component={AdminReviews} />
+      <Route path="/agentes/avaliacoes" component={AgentReviews} />
       <Route path="/admin/administradores" component={AdminUsers} />
       <Route path="/admin/usuarios" component={AdminUsers} />
       <Route path="/admin/crm">{() => <AdminCrm />}</Route>
