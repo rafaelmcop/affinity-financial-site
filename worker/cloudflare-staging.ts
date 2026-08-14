@@ -1,5 +1,9 @@
 import { isValidMediaUrl } from "../shared/videoUrl";
 import { missingClientProfileFields } from "../shared/clientProfile";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "../shared/paymentReturnTemplate";
 import bcrypt from "bcryptjs";
 import {
   emailHtml,
@@ -1674,6 +1678,25 @@ async function runProcedure(
           }
         : null
     );
+  }
+  if (name === "agent.getPaymentReturnTemplate") {
+    const row = await env.DB.prepare(
+      "SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=?"
+    ).bind(adminEmail.toLowerCase()).first<JsonRecord>();
+    return trpcResult({
+      subject: row?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT,
+      message: row?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE,
+    });
+  }
+  if (name === "agent.savePaymentReturnTemplate") {
+    const subject = String(input.subject || "").trim();
+    const message = String(input.message || "").trim();
+    if (!subject || subject.length > 500 || !message || message.length > 10000)
+      return trpcError("Revise o assunto e a mensagem");
+    await env.DB.prepare(
+      "UPDATE agentEmailSettings SET paymentReturnSubject=?,paymentReturnMessage=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
+    ).bind(subject, message, adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
   }
   if (name === "agent.saveEmailSettings") {
     const owner = adminEmail.toLowerCase(),

@@ -25,6 +25,10 @@ import { getSessionCookieOptions } from "./_core/cookies";
 import { enforceRateLimit } from "./rateLimit";
 import { isValidMediaUrl } from "../shared/videoUrl";
 import { missingClientProfileFields } from "../shared/clientProfile";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "../shared/paymentReturnTemplate";
 
 const strongPassword = z
   .string()
@@ -966,6 +970,41 @@ export const appRouter = router({
           }
         : null;
     }),
+    getPaymentReturnTemplate: adminProcedure.query(async ({ ctx }) => {
+      const db = await (await import("./db")).getDb();
+      if (!db) throw new Error("Database not available");
+      const [row] = await db
+        .select({
+          subject: agentEmailSettings.paymentReturnSubject,
+          message: agentEmailSettings.paymentReturnMessage,
+        })
+        .from(agentEmailSettings)
+        .where(eq(agentEmailSettings.agentEmail, ctx.adminEmail.toLowerCase()))
+        .limit(1);
+      return {
+        subject: row?.subject || DEFAULT_PAYMENT_RETURN_SUBJECT,
+        message: row?.message || DEFAULT_PAYMENT_RETURN_MESSAGE,
+      };
+    }),
+    savePaymentReturnTemplate: adminProcedure
+      .input(
+        z.object({
+          subject: z.string().trim().min(1).max(500),
+          message: z.string().trim().min(1).max(10000),
+        })
+      )
+      .mutation(async ({ input, ctx }) => {
+        const db = await (await import("./db")).getDb();
+        if (!db) throw new Error("Database not available");
+        await db
+          .update(agentEmailSettings)
+          .set({
+            paymentReturnSubject: input.subject,
+            paymentReturnMessage: input.message,
+          })
+          .where(eq(agentEmailSettings.agentEmail, ctx.adminEmail.toLowerCase()));
+        return { success: true };
+      }),
     saveEmailSettings: adminProcedure
       .input(
         z.object({

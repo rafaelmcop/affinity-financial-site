@@ -3,6 +3,10 @@ import { Buffer } from "node:buffer";
 import { simpleParser } from "mailparser";
 import { decryptSmtpPassword, emailHtml, sendAgentEmail } from "./cloudflare-email";
 import { classifyPaymentNotice, extractPolicyNumbers, normalizePolicyNumber } from "../shared/paymentNotice";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "../shared/paymentReturnTemplate";
 
 type Row = Record<string, unknown>;
 type Statement = {
@@ -38,6 +42,19 @@ const escapeHtml = (value: unknown) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+
+const personalizeTemplate = (
+  value: unknown,
+  client: string,
+  agent: string,
+  phone: string
+) =>
+  String(value || "")
+    .replaceAll("{cliente}", client)
+    .replaceAll("{agente}", agent)
+    .replaceAll("{Agente}", agent)
+    .replaceAll("{telefone}", phone)
+    .replaceAll("{telefone do agente}", phone);
 
 async function handlePaymentNotice(
   env: Env,
@@ -93,11 +110,22 @@ async function handlePaymentNotice(
   const agent = await env.DB.prepare(
     "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
   ).bind(owner).first<Row>();
-  const clientName = escapeHtml(match.name || "cliente");
-  const agentName = escapeHtml(agent?.name || config.fromName || "Seu agente Affinity");
-  const agentPhone = escapeHtml(agent?.phone || agent?.whatsapp || "(857) 421-8325");
-  const subjectToClient = "Atualização importante sobre sua apólice";
-  const message = `Oi ${String(match.name || "")}, tudo bem?\n\nEstou entrando em contato para avisar que o pagamento da sua apólice acabou retornando.\n\nAssim que possível, por favor, me ligue para verificarmos isso juntos. Se preferir, você também pode reagendar o pagamento diretamente pelo aplicativo.\n\nÉ importante regularizarmos o pagamento para manter sua apólice em dia. Qualquer dúvida ou se precisar de ajuda, pode contar comigo.\n\nUm abraço,\n\n${String(agent?.name || config.fromName || "Seu agente Affinity")}\nAffinity Financial Consulting\n${String(agent?.phone || agent?.whatsapp || "(857) 421-8325")}\nwww.affinityfc.org`;
+  const clearClientName = String(match.name || "cliente");
+  const clearAgentName = String(agent?.name || config.fromName || "Seu agente Affinity");
+  const clearAgentPhone = String(agent?.phone || agent?.whatsapp || "(857) 421-8325");
+  const subjectToClient = personalizeTemplate(
+    config.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT,
+    clearClientName,
+    clearAgentName,
+    clearAgentPhone
+  );
+  const message = personalizeTemplate(
+    config.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE,
+    clearClientName,
+    clearAgentName,
+    clearAgentPhone
+  );
+  const safeMessage = escapeHtml(message).replaceAll("\n", "<br>");
   const reservation = await env.DB.prepare(
     "INSERT OR IGNORE INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,'Processando aviso de pagamento','Processando aviso de pagamento',?,?,CURRENT_TIMESTAMP,'central')"
   ).bind(owner, Number(match.clientId), externalId, String(config.fromEmail || owner), String(match.email)).run() as Row;
@@ -106,10 +134,7 @@ async function handlePaymentNotice(
     const sent = await sendAgentEmail(env, owner, {
       to: String(match.email),
       subject: subjectToClient,
-      html: emailHtml(
-        subjectToClient,
-        `<p>Oi ${clientName}, tudo bem?</p><p>Estou entrando em contato para avisar que o pagamento da sua apólice acabou retornando.</p><p>Assim que possível, por favor, me ligue para verificarmos isso juntos. Se preferir, você também pode reagendar o pagamento diretamente pelo aplicativo.</p><p>É importante regularizarmos o pagamento para manter sua apólice em dia. Qualquer dúvida ou se precisar de ajuda, pode contar comigo.</p><p>Um abraço,</p><p><strong>${agentName}</strong><br>Affinity Financial Consulting<br>📞 ${agentPhone}<br>🌐 <a href="https://www.affinityfc.org">www.affinityfc.org</a></p>`
-      ),
+      html: emailHtml(escapeHtml(subjectToClient), `<p>${safeMessage}</p>`),
     });
     await env.DB.batch([
       env.DB.prepare(

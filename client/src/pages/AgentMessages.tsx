@@ -6,6 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "@shared/paymentReturnTemplate";
 
 type Occasion =
   | "birthday"
@@ -519,10 +523,25 @@ export function ScheduledMessagesPanel({
 }
 
 export default function AgentMessages() {
+  const template = trpc.agent.getPaymentReturnTemplate.useQuery();
+  const saveTemplate = trpc.agent.savePaymentReturnTemplate.useMutation();
+  const [templateSubject, setTemplateSubject] = useState(DEFAULT_PAYMENT_RETURN_SUBJECT);
+  const [templateMessage, setTemplateMessage] = useState(DEFAULT_PAYMENT_RETURN_MESSAGE);
+  useEffect(() => {
+    if (!template.data) return;
+    setTemplateSubject(template.data.subject);
+    setTemplateMessage(template.data.message);
+  }, [template.data]);
   return (
     <div className="min-h-screen bg-black text-white lg:pl-64">
       <AgentSidebar />
       <main className="mx-auto max-w-5xl px-4 py-8">
+        <Card className="mb-8 space-y-4 border-gold/30 bg-[#0b1524] p-6">
+          <div><p className="text-sm font-bold uppercase tracking-[.2em] text-gold">Modelo automático</p><h1 className="mt-2 text-2xl font-bold">Pagamento devolvido</h1><p className="mt-2 text-sm text-gray-400">Este texto é enviado quando o sistema identifica com segurança o cliente e a apólice. Use <b>{"{cliente}"}</b>, <b>{"{agente}"}</b> e <b>{"{telefone}"}</b> para preencher os dados automaticamente.</p></div>
+          <label className="block text-sm text-gray-300">Assunto<Input className="mt-2" value={templateSubject} onChange={event => setTemplateSubject(event.target.value)} /></label>
+          <label className="block text-sm text-gray-300">Mensagem<textarea className="mt-2 min-h-80 w-full rounded-md border border-white/20 bg-black p-4 text-sm leading-relaxed text-white" value={templateMessage} onChange={event => setTemplateMessage(event.target.value)} /></label>
+          <div className="flex flex-wrap gap-2"><Button className="bg-gold text-black" disabled={saveTemplate.isPending || !templateSubject.trim() || !templateMessage.trim()} onClick={async () => { try { await saveTemplate.mutateAsync({ subject: templateSubject, message: templateMessage }); await template.refetch(); toast.success("Modelo de pagamento devolvido salvo"); } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível salvar o modelo"); } }}>Salvar modelo</Button><Button variant="outline" onClick={() => { setTemplateSubject(DEFAULT_PAYMENT_RETURN_SUBJECT); setTemplateMessage(DEFAULT_PAYMENT_RETURN_MESSAGE); }}>Restaurar padrão</Button></div>
+        </Card>
         <ScheduledMessagesPanel />
       </main>
     </div>

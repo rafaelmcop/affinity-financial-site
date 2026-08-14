@@ -223,6 +223,8 @@ export const agentEmailSettings = mysqlTable("agentEmailSettings", {
   imapPort: int("imapPort").default(993).notNull(),
   imapUser: varchar("imapUser", { length: 320 }),
   lastImapSyncAt: timestamp("lastImapSyncAt"),
+  paymentReturnSubject: varchar("paymentReturnSubject", { length: 500 }),
+  paymentReturnMessage: text("paymentReturnMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
