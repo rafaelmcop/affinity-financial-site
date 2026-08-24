@@ -50014,6 +50014,8 @@ var init_paymentNotice = __esm({
 // worker/icloud-email.ts
 var icloud_email_exports = {};
 __export(icloud_email_exports, {
+  manageIcloudFolder: () => manageIcloudFolder,
+  moveIcloudEmail: () => moveIcloudEmail,
   syncAllIcloudInboxes: () => syncAllIcloudInboxes,
   syncIcloudInbox: () => syncIcloudInbox
 });
@@ -50147,6 +50149,58 @@ function sanitizeMailboxHtml(value, attachments = []) {
     .replace(/\s+(?:href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\1/gi, "")
     .slice(0, 8e5);
 }
+async function openAgentImap(env, owner) {
+  const config = await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+  if (!config) throw new Error("Configure o e-mail do agente primeiro");
+  const password = await decryptSmtpPassword(String(config.password), env.JWT_SECRET);
+  const socket = connect({ hostname: String(config.imapHost || "imap.mail.me.com"), port: Number(config.imapPort || 993) }, { secureTransport: "on" });
+  const client = new ImapConnection(socket);
+  await client.open();
+  await client.command("F1", `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`);
+  return { client, config };
+}
+function parseImapFolders(text) {
+  const folders = [];
+  const pattern = /(?:^|\r\n)\* LIST \(([^)]*)\) (?:"[^"]*"|NIL) (?:"((?:[^"\\]|\\.)*)"|([^\r\n]+))/gi;
+  let match;
+  while (match = pattern.exec(String(text || ""))) {
+    if (/\\Noselect/i.test(match[1])) continue;
+    const name = String(match[2] || match[3] || "").trim().replace(/^"|"$/g, "").replace(/\\"/g, '"');
+    if (name) folders.push(name);
+  }
+  return [...new Set(folders)];
+}
+async function syncIcloudFolderList(env, owner, client, tag = "F2") {
+  const result = await client.command(tag, 'LIST "" "*"');
+  const hidden = /^(INBOX|Sent|Sent Messages|Deleted Messages|Trash|Junk|Junk E-mail|Spam)$/i;
+  for (const providerName of parseImapFolders(result.text).filter((value) => !hidden.test(value))) {
+    await env.DB.prepare("INSERT INTO agentMailboxFolders (agentEmail,name,providerName,isProvider) VALUES (?,?,?,1) ON CONFLICT(agentEmail,name) DO UPDATE SET providerName=excluded.providerName,isProvider=1").bind(owner, providerName, providerName).run();
+  }
+}
+async function manageIcloudFolder(env, agentEmail, action, currentName, nextName = "") {
+  const owner = agentEmail.toLowerCase();
+  const { client } = await openAgentImap(env, owner);
+  try {
+    if (action === "create") await client.command("F2", `CREATE ${quoteImap(nextName)}`);
+    else if (action === "rename") await client.command("F2", `RENAME ${quoteImap(currentName)} ${quoteImap(nextName)}`);
+    else if (action === "delete") await client.command("F2", `DELETE ${quoteImap(currentName)}`);
+    else throw new Error("Ação de pasta inválida");
+  } finally { await client.close(); }
+}
+async function moveIcloudEmail(env, agentEmail, uid, sourceFolder, destinationFolder) {
+  if (!uid) return;
+  const owner = agentEmail.toLowerCase();
+  const { client } = await openAgentImap(env, owner);
+  try {
+    await client.command("M2", `SELECT ${quoteImap(sourceFolder)}`);
+    try { await client.command("M3", `UID MOVE ${uid} ${quoteImap(destinationFolder)}`); }
+    catch (error) {
+      await client.command("M4", `UID COPY ${uid} ${quoteImap(destinationFolder)}`);
+      await client.command("M5", `UID STORE ${uid} +FLAGS.SILENT (\\Deleted)`);
+      await client.command("M6", "EXPUNGE");
+    }
+  } finally { await client.close(); }
+}
 async function syncIcloudInbox(env, agentEmail) {
   const owner = agentEmail.toLowerCase();
   const config = await env.DB.prepare(
@@ -50173,6 +50227,8 @@ async function syncIcloudInbox(env, agentEmail) {
       `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`
     );
     await client.command("A2", "SELECT INBOX");
+    try { await syncIcloudFolderList(env, owner, client, "A2F"); } catch (error) { console.error("icloud_folder_sync_failed", owner, error); }
+    await client.command("A2I", "SELECT INBOX");
     const previousSync = config.lastImapSyncAt ? new Date(String(config.lastImapSyncAt).replace(" ", "T") + "Z") : null;
     const thirtyDaysAgo = Date.now() - 30 * 864e5;
     const since = new Date(previousSync && !Number.isNaN(previousSync.getTime()) ? Math.max(thirtyDaysAgo, previousSync.getTime() - 2 * 864e5) : thirtyDaysAgo);
@@ -50321,6 +50377,11 @@ var init_icloud_email = __esm({
     personalizeTemplate = /* @__PURE__ */ __name((value, client, agent, phone, policyNumber = "") => String(value || "").replaceAll("{cliente}", client).replaceAll("{agente}", agent).replaceAll("{Agente}", agent).replaceAll("{telefone}", phone).replaceAll("{telefone do agente}", phone).replaceAll("{apolice}", policyNumber).replaceAll("{apolice numero}", policyNumber), "personalizeTemplate");
     __name(handlePaymentNotice, "handlePaymentNotice");
     __name(sanitizeMailboxHtml, "sanitizeMailboxHtml");
+    __name(openAgentImap, "openAgentImap");
+    __name(parseImapFolders, "parseImapFolders");
+    __name(syncIcloudFolderList, "syncIcloudFolderList");
+    __name(manageIcloudFolder, "manageIcloudFolder");
+    __name(moveIcloudEmail, "moveIcloudEmail");
     quoteImap = /* @__PURE__ */ __name((value) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`, "quoteImap");
     ImapConnection = class {
       constructor(socket) {
@@ -53815,9 +53876,9 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.mailboxFolders") {
     const owner = adminEmail.toLowerCase();
-    const rows = await env.DB.prepare("SELECT f.id,f.name,COUNT(m.id) AS total FROM agentMailboxFolders f LEFT JOIN agentMailboxEmails m ON m.folderId=f.id AND lower(m.agentEmail)=? AND m.deletedAt IS NULL WHERE lower(f.agentEmail)=? GROUP BY f.id,f.name ORDER BY lower(f.name)").bind(owner, owner).all();
+    const rows = await env.DB.prepare("SELECT f.id,f.name,f.providerName,f.isProvider,COUNT(m.id) AS total FROM agentMailboxFolders f LEFT JOIN agentMailboxEmails m ON m.folderId=f.id AND lower(m.agentEmail)=? AND m.deletedAt IS NULL WHERE lower(f.agentEmail)=? GROUP BY f.id,f.name,f.providerName,f.isProvider ORDER BY lower(f.name)").bind(owner, owner).all();
     const trash = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND deletedAt IS NOT NULL").bind(owner).first();
-    return trpcResult({ folders: rows.results.map((row) => ({ id: Number(row.id), name: String(row.name), total: Number(row.total || 0) })), trash: Number(trash?.total || 0) });
+    return trpcResult({ folders: rows.results.map((row) => ({ id: Number(row.id), name: String(row.name), providerName: String(row.providerName || row.name), isProvider: Boolean(row.isProvider), total: Number(row.total || 0) })), trash: Number(trash?.total || 0) });
   }
   if (name === "agent.createMailboxFolder") {
     const owner = adminEmail.toLowerCase();
@@ -53825,7 +53886,9 @@ Detalhes: ${details}` : ""}`;
     if (!folderName) return trpcError("Informe o nome da pasta");
     if (["entrada", "enviados", "lixeira"].includes(folderName.toLowerCase())) return trpcError("Este nome é reservado pelo sistema");
     try {
-      await env.DB.prepare("INSERT INTO agentMailboxFolders (agentEmail,name) VALUES (?,?)").bind(owner, folderName).run();
+      const { manageIcloudFolder: manageIcloudFolder2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
+      await manageIcloudFolder2(env, owner, "create", "", folderName);
+      await env.DB.prepare("INSERT INTO agentMailboxFolders (agentEmail,name,providerName,isProvider) VALUES (?,?,?,1)").bind(owner, folderName, folderName).run();
     } catch (error) {
       if (String(error).includes("UNIQUE")) return trpcError("Você já possui uma pasta com este nome");
       throw error;
@@ -53837,15 +53900,21 @@ Detalhes: ${details}` : ""}`;
     const id = Number(input.id || 0);
     const folderName = String(input.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
     if (!id || !folderName) return trpcError("Revise o nome da pasta");
-    const result = await env.DB.prepare("UPDATE agentMailboxFolders SET name=? WHERE id=? AND lower(agentEmail)=?").bind(folderName, id, owner).run();
+    const existing = await env.DB.prepare("SELECT providerName,name FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
+    if (!existing) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    const { manageIcloudFolder: manageIcloudFolder2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
+    await manageIcloudFolder2(env, owner, "rename", String(existing.providerName || existing.name), folderName);
+    const result = await env.DB.prepare("UPDATE agentMailboxFolders SET name=?,providerName=?,isProvider=1 WHERE id=? AND lower(agentEmail)=?").bind(folderName, folderName, id, owner).run();
     if (!Number(result.meta?.changes || 0)) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
   if (name === "agent.deleteMailboxFolder") {
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
-    const folder = await env.DB.prepare("SELECT id FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
+    const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
     if (!folder) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    const { manageIcloudFolder: manageIcloudFolder2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
+    await manageIcloudFolder2(env, owner, "delete", String(folder.providerName || folder.name));
     await env.DB.batch([
       env.DB.prepare("UPDATE agentMailboxEmails SET folderId=NULL WHERE folderId=? AND lower(agentEmail)=?").bind(id, owner),
       env.DB.prepare("DELETE FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner)
@@ -53857,8 +53926,14 @@ Detalhes: ${details}` : ""}`;
     const id = Number(input.id || 0);
     const folderId = input.folderId == null ? null : Number(input.folderId);
     if (folderId) {
-      const folder = await env.DB.prepare("SELECT id FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(folderId, owner).first();
+      const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(folderId, owner).first();
       if (!folder) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+      const message = await env.DB.prepare("SELECT m.imapUid,m.direction,f.providerName AS sourceProvider FROM agentMailboxEmails m LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=?").bind(owner, id, owner).first();
+      if (message?.imapUid) {
+        const source = String(message.sourceProvider || (message.direction === "sent" ? "Sent Messages" : "INBOX"));
+        const { moveIcloudEmail: moveIcloudEmail2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
+        await moveIcloudEmail2(env, owner, String(message.imapUid), source, String(folder.providerName || folder.name));
+      }
     }
     const result = await env.DB.prepare("UPDATE agentMailboxEmails SET folderId=?,deletedAt=NULL WHERE id=? AND lower(agentEmail)=?").bind(folderId, id, owner).run();
     if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
