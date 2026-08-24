@@ -50126,6 +50126,27 @@ Ap\xF3lice n\xBA {apolice}`;
   }
   return { actionStatus: "sent", actionDetail: "Modelo enviado automaticamente ao cliente", policyNumber: clearPolicyNumber, clientId: Number(resolvedMatch.clientId) };
 }
+function sanitizeMailboxHtml(value, attachments = []) {
+  let html = String(value || "");
+  if (!html) return null;
+  let embeddedBytes = 0;
+  for (const attachment of attachments) {
+    const cid = String(attachment.contentId || attachment.cid || "").replace(/[<>]/g, "").trim();
+    const content = attachment.content;
+    const contentType = String(attachment.contentType || "").toLowerCase();
+    const size = Number(attachment.size || content?.length || 0);
+    if (!cid || !content || !contentType.startsWith("image/") || size > 2e5 || embeddedBytes + size > 5e5) continue;
+    const data = `data:${contentType};base64,${Buffer2.from(content).toString("base64")}`;
+    html = html.replace(new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"), data);
+    embeddedBytes += size;
+  }
+  return html
+    .replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|meta|base)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+    .replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|meta|base)\b[^>]*\/?\s*>/gi, "")
+    .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/\s+(?:href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\1/gi, "")
+    .slice(0, 8e5);
+}
 async function syncIcloudInbox(env, agentEmail) {
   const owner = agentEmail.toLowerCase();
   const config = await env.DB.prepare(
@@ -50184,10 +50205,11 @@ async function syncIcloudInbox(env, agentEmail) {
       const externalId = parsed.messageId || `icloud:${owner}:${uid}`;
       const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
       if (!body) continue;
+      const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
       const topic = classifyMailboxTopic(String(parsed.subject || ""), body);
       await env.DB.prepare(
-        "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,sentAt,paymentStatus,actionStatus,actionDetail,topic) VALUES (?,?,?,?, 'received',?,?,?,?,?,?,?,?,?)"
+        "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,paymentStatus,actionStatus,actionDetail,topic) VALUES (?,?,?,?, 'received',?,?,?,?,?,?,?,?,?,?)"
       ).bind(
         owner,
         customer ? Number(customer.id) : null,
@@ -50197,12 +50219,14 @@ async function syncIcloudInbox(env, agentEmail) {
         String(config.fromEmail || owner),
         String(parsed.subject || "Sem assunto"),
         body,
+        htmlBody,
         (parsed.date || /* @__PURE__ */ new Date()).toISOString(),
         paymentKind,
         paymentKind === "attention" ? "processing" : null,
         paymentKind === "attention" ? "Aguardando identificação e ação automática" : null,
         topic
       ).run();
+      if (htmlBody) await env.DB.prepare("UPDATE agentMailboxEmails SET htmlBody=coalesce(htmlBody,?) WHERE lower(agentEmail)=? AND externalId=? AND direction='received'").bind(htmlBody, owner, externalId).run();
       if (!customer) {
         if (paymentKind === "attention") {
           const paymentResult = await handlePaymentNotice(env, owner, config, uid, parsed);
@@ -50252,13 +50276,15 @@ async function syncIcloudInbox(env, agentEmail) {
         if (!recipient) continue;
         const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
         if (!body) continue;
+        const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
         const customer = customerByEmail.get(recipient);
         const subject = String(parsed.subject || "Sem assunto");
         const externalId = parsed.messageId || `icloud-sent:${owner}:${uid}`;
         const topic = classifyMailboxTopic(subject, body);
         await env.DB.prepare(
-          "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'sent','Sincronizado da pasta Enviados',?)"
-        ).bind(owner, customer ? Number(customer.id) : null, externalId, String(uid), String(config.fromEmail || owner), recipient, subject, body, (parsed.date || /* @__PURE__ */ new Date()).toISOString(), topic).run();
+          "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,?,'sent',?,?,?,?,?,?,CURRENT_TIMESTAMP,'sent','Sincronizado da pasta Enviados',?)"
+        ).bind(owner, customer ? Number(customer.id) : null, externalId, String(uid), String(config.fromEmail || owner), recipient, subject, body, htmlBody, (parsed.date || /* @__PURE__ */ new Date()).toISOString(), topic).run();
+        if (htmlBody) await env.DB.prepare("UPDATE agentMailboxEmails SET htmlBody=coalesce(htmlBody,?) WHERE lower(agentEmail)=? AND externalId=? AND direction='sent'").bind(htmlBody, owner, externalId).run();
       }
     }
     await env.DB.prepare(
@@ -50294,6 +50320,7 @@ var init_icloud_email = __esm({
     escapeHtml = /* @__PURE__ */ __name((value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"), "escapeHtml");
     personalizeTemplate = /* @__PURE__ */ __name((value, client, agent, phone, policyNumber = "") => String(value || "").replaceAll("{cliente}", client).replaceAll("{agente}", agent).replaceAll("{Agente}", agent).replaceAll("{telefone}", phone).replaceAll("{telefone do agente}", phone).replaceAll("{apolice}", policyNumber).replaceAll("{apolice numero}", policyNumber), "personalizeTemplate");
     __name(handlePaymentNotice, "handlePaymentNotice");
+    __name(sanitizeMailboxHtml, "sanitizeMailboxHtml");
     quoteImap = /* @__PURE__ */ __name((value) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`, "quoteImap");
     ImapConnection = class {
       constructor(socket) {
@@ -53749,21 +53776,27 @@ Detalhes: ${details}` : ""}`;
   if (name === "agent.mailbox") {
     const owner = adminEmail.toLowerCase();
     const topicFolders = ["returned_payment", "exams", "extra_information", "documents", "underwriting"];
-    const folder = ["inbox", "sent", ...topicFolders].includes(String(input.folder || "")) ? String(input.folder) : "inbox";
+    const folder = ["inbox", "sent", "trash", "custom", ...topicFolders].includes(String(input.folder || "")) ? String(input.folder) : "inbox";
+    const folderId = Number(input.folderId || 0);
     const search = String(input.search || "").trim().toLowerCase().slice(0, 120);
     let where = "lower(m.agentEmail)=?";
     const binds = [owner];
-    if (folder === "inbox") where += " AND m.direction='received'";
-    if (folder === "sent") where += " AND m.direction='sent'";
-    if (topicFolders.includes(folder)) { where += " AND m.topic=?"; binds.push(folder); }
+    if (folder === "trash") where += " AND m.deletedAt IS NOT NULL";
+    else {
+      where += " AND m.deletedAt IS NULL";
+      if (folder === "inbox") where += " AND m.direction='received' AND m.folderId IS NULL";
+      if (folder === "sent") where += " AND m.direction='sent' AND m.folderId IS NULL";
+      if (folder === "custom") { where += " AND m.folderId=?"; binds.push(folderId); }
+      if (topicFolders.includes(folder)) { where += " AND m.topic=?"; binds.push(folder); }
+    }
     if (search) {
       where += " AND (lower(m.subject) LIKE ? OR lower(m.fromEmail) LIKE ? OR lower(m.toEmail) LIKE ? OR lower(m.body) LIKE ? OR lower(coalesce(c.name,'')) LIKE ? OR lower(coalesce(m.policyNumber,'')) LIKE ?)";
       const pattern = `%${search}%`;
       binds.push(pattern, pattern, pattern, pattern, pattern, pattern);
     }
     const rows = await env.DB.prepare(
-      `SELECT m.*,c.name AS clientName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? WHERE ${where} ORDER BY datetime(m.sentAt) DESC,m.id DESC LIMIT 300`
-    ).bind(owner, ...binds).all();
+      `SELECT m.id,m.agentEmail,m.clientId,m.externalId,m.imapUid,m.direction,m.fromEmail,m.toEmail,m.subject,m.body,m.sentAt,m.readAt,m.paymentStatus,m.actionStatus,m.actionDetail,m.policyNumber,m.topic,m.folderId,m.deletedAt,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE ${where} ORDER BY datetime(m.sentAt) DESC,m.id DESC LIMIT 300`
+    ).bind(owner, owner, ...binds).all();
     const unread = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner).first();
     const topicRows = await env.DB.prepare("SELECT coalesce(topic,'general') AS topic,COUNT(*) AS total,SUM(CASE WHEN direction='received' AND readAt IS NULL THEN 1 ELSE 0 END) AS unread FROM agentMailboxEmails WHERE lower(agentEmail)=? GROUP BY coalesce(topic,'general')").bind(owner).all();
     const topicCounts = Object.fromEntries(topicRows.results.map((row) => [String(row.topic), { total: Number(row.total || 0), unread: Number(row.unread || 0) }]));
@@ -53772,6 +53805,78 @@ Detalhes: ${details}` : ""}`;
       unread: Number(unread?.total || 0),
       topicCounts
     });
+  }
+  if (name === "agent.mailboxMessage") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const row = await env.DB.prepare("SELECT m.*,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? LIMIT 1").bind(owner, owner, id, owner).first();
+    if (!row) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    return trpcResult({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null });
+  }
+  if (name === "agent.mailboxFolders") {
+    const owner = adminEmail.toLowerCase();
+    const rows = await env.DB.prepare("SELECT f.id,f.name,COUNT(m.id) AS total FROM agentMailboxFolders f LEFT JOIN agentMailboxEmails m ON m.folderId=f.id AND lower(m.agentEmail)=? AND m.deletedAt IS NULL WHERE lower(f.agentEmail)=? GROUP BY f.id,f.name ORDER BY lower(f.name)").bind(owner, owner).all();
+    const trash = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND deletedAt IS NOT NULL").bind(owner).first();
+    return trpcResult({ folders: rows.results.map((row) => ({ id: Number(row.id), name: String(row.name), total: Number(row.total || 0) })), trash: Number(trash?.total || 0) });
+  }
+  if (name === "agent.createMailboxFolder") {
+    const owner = adminEmail.toLowerCase();
+    const folderName = String(input.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+    if (!folderName) return trpcError("Informe o nome da pasta");
+    if (["entrada", "enviados", "lixeira"].includes(folderName.toLowerCase())) return trpcError("Este nome é reservado pelo sistema");
+    try {
+      await env.DB.prepare("INSERT INTO agentMailboxFolders (agentEmail,name) VALUES (?,?)").bind(owner, folderName).run();
+    } catch (error) {
+      if (String(error).includes("UNIQUE")) return trpcError("Você já possui uma pasta com este nome");
+      throw error;
+    }
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.renameMailboxFolder") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const folderName = String(input.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
+    if (!id || !folderName) return trpcError("Revise o nome da pasta");
+    const result = await env.DB.prepare("UPDATE agentMailboxFolders SET name=? WHERE id=? AND lower(agentEmail)=?").bind(folderName, id, owner).run();
+    if (!Number(result.meta?.changes || 0)) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.deleteMailboxFolder") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const folder = await env.DB.prepare("SELECT id FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
+    if (!folder) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    await env.DB.batch([
+      env.DB.prepare("UPDATE agentMailboxEmails SET folderId=NULL WHERE folderId=? AND lower(agentEmail)=?").bind(id, owner),
+      env.DB.prepare("DELETE FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner)
+    ]);
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.moveMailboxEmail") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const folderId = input.folderId == null ? null : Number(input.folderId);
+    if (folderId) {
+      const folder = await env.DB.prepare("SELECT id FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(folderId, owner).first();
+      if (!folder) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    }
+    const result = await env.DB.prepare("UPDATE agentMailboxEmails SET folderId=?,deletedAt=NULL WHERE id=? AND lower(agentEmail)=?").bind(folderId, id, owner).run();
+    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.deleteMailboxEmail") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const result = await env.DB.prepare("UPDATE agentMailboxEmails SET deletedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(id, owner).run();
+    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.restoreMailboxEmail") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const result = await env.DB.prepare("UPDATE agentMailboxEmails SET deletedAt=NULL,folderId=NULL WHERE id=? AND lower(agentEmail)=?").bind(id, owner).run();
+    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    return trpcResult({ success: true });
   }
   if (name === "agent.mailboxClients") {
     const rows = await env.DB.prepare("SELECT id,name,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND trim(email)<>'' ORDER BY name").bind(adminEmail.toLowerCase()).all();
