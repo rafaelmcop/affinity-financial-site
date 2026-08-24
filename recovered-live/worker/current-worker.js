@@ -49976,6 +49976,15 @@ ${body}`.toLowerCase();
     return "confirmed";
   return "review";
 }
+function classifyMailboxTopic(subject, body) {
+  const text = `${subject}\n${body}`.toLowerCase();
+  if (classifyPaymentNotice(subject, body) === "attention") return "returned_payment";
+  if (/(medical exam|paramed|laborator|blood draw|urine sample|exam request|exame|laborat[oó]rio|coleta de sangue|muestra de sangre|examen m[eé]dico)/i.test(text)) return "exams";
+  if (/(additional information|more information|information required|outstanding requirement|pending requirement|informações adicionais|informacao adicional|informa[cç][aã]o pendente|documentaci[oó]n adicional|informaci[oó]n adicional)/i.test(text)) return "extra_information";
+  if (/(document|signature|e-?sign|illustration|form required|arquivo|documento|assinatura|formul[aá]rio|firma pendiente)/i.test(text)) return "documents";
+  if (/(underwriting|policy status|approved|declined|issued|decision|subscri[cç][aã]o|status da ap[oó]lice|ap[oó]lice emitida|evaluaci[oó]n|p[oó]liza emitida)/i.test(text)) return "underwriting";
+  return "general";
+}
 function extractPolicyNumbers(subject, body) {
   const text = `${subject}
 ${body}`;
@@ -49997,6 +50006,7 @@ var init_paymentNotice = __esm({
     "use strict";
     normalizePolicyNumber = /* @__PURE__ */ __name((value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), "normalizePolicyNumber");
     __name(classifyPaymentNotice, "classifyPaymentNotice");
+    __name(classifyMailboxTopic, "classifyMailboxTopic");
     __name(extractPolicyNumbers, "extractPolicyNumbers");
   }
 });
@@ -50142,7 +50152,9 @@ async function syncIcloudInbox(env, agentEmail) {
       `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`
     );
     await client.command("A2", "SELECT INBOX");
-    const since = new Date(Date.now() - 30 * 864e5);
+    const previousSync = config.lastImapSyncAt ? new Date(String(config.lastImapSyncAt).replace(" ", "T") + "Z") : null;
+    const thirtyDaysAgo = Date.now() - 30 * 864e5;
+    const since = new Date(previousSync && !Number.isNaN(previousSync.getTime()) ? Math.max(thirtyDaysAgo, previousSync.getTime() - 2 * 864e5) : thirtyDaysAgo);
     const customers = await env.DB.prepare(
       "SELECT id,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND trim(email)<>''"
     ).bind(owner).all();
@@ -50150,7 +50162,6 @@ async function syncIcloudInbox(env, agentEmail) {
       customers.results.map((row) => [cleanAddress(String(row.email)), row])
     );
     const uidSet = /* @__PURE__ */ new Set();
-    const paymentUidSet = /* @__PURE__ */ new Set();
     let sequence = 3;
     const allInboxSearch = await client.command(
       `A${sequence++}`,
@@ -50158,31 +50169,7 @@ async function syncIcloudInbox(env, agentEmail) {
     );
     const allInboxLine = allInboxSearch.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
     for (const uid of allInboxLine.trim().split(/\s+/).filter(Boolean)) uidSet.add(uid);
-    for (const email of customerByEmail.keys()) {
-      const search = await client.command(
-        `A${sequence++}`,
-        `UID SEARCH SINCE ${imapDate(since)} FROM ${quoteImap(email)}`
-      );
-      const line = search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
-      for (const uid of line.trim().split(/\s+/).filter(Boolean)) uidSet.add(uid);
-    }
-    const paymentSince = new Date(Date.now() - 30 * 864e5);
-    for (const keyword of ["payment", "premium", "billing", "pagamento", "returned", "return", "draft", "NSF", "declined", "failed", "ACH", "reversal", "past due"]) {
-      const search = await client.command(
-        `A${sequence++}`,
-        `UID SEARCH SINCE ${imapDate(paymentSince)} SUBJECT ${quoteImap(keyword)}`
-      );
-      const line = search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
-      for (const uid of line.trim().split(/\s+/).filter(Boolean)) paymentUidSet.add(uid);
-    }
-    const pendingPaymentTasks = await env.DB.prepare(
-      "SELECT title FROM agentTasks WHERE lower(agentEmail)=? AND status='pending' AND title LIKE '[Pagamento %'"
-    ).bind(owner).all();
-    for (const task of pendingPaymentTasks.results) {
-      const uid = String(task.title || "").match(/^\[Pagamento\s+(\d+)\]/)?.[1];
-      if (uid) paymentUidSet.add(uid);
-    }
-    const uids = [.../* @__PURE__ */ new Set([...uidSet, ...paymentUidSet])].slice(-150);
+    const uids = [...uidSet].slice(-250);
     for (const uid of uids) {
       const fetched = await client.command(
         `A${sequence++}`,
@@ -50198,8 +50185,9 @@ async function syncIcloudInbox(env, agentEmail) {
       const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
       if (!body) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
+      const topic = classifyMailboxTopic(String(parsed.subject || ""), body);
       await env.DB.prepare(
-        "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,sentAt,paymentStatus,actionStatus,actionDetail) VALUES (?,?,?,?, 'received',?,?,?,?,?,?,?,?)"
+        "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,sentAt,paymentStatus,actionStatus,actionDetail,topic) VALUES (?,?,?,?, 'received',?,?,?,?,?,?,?,?,?)"
       ).bind(
         owner,
         customer ? Number(customer.id) : null,
@@ -50212,7 +50200,8 @@ async function syncIcloudInbox(env, agentEmail) {
         (parsed.date || /* @__PURE__ */ new Date()).toISOString(),
         paymentKind,
         paymentKind === "attention" ? "processing" : null,
-        paymentKind === "attention" ? "Aguardando identificação e ação automática" : null
+        paymentKind === "attention" ? "Aguardando identificação e ação automática" : null,
+        topic
       ).run();
       if (!customer) {
         if (paymentKind === "attention") {
@@ -50239,6 +50228,38 @@ async function syncIcloudInbox(env, agentEmail) {
         (parsed.date || /* @__PURE__ */ new Date()).toISOString()
       ).run();
       imported++;
+    }
+    let sentFolderSelected = false;
+    for (const folderName of ["Sent Messages", "Sent", "INBOX.Sent"]) {
+      try {
+        await client.command(`A${sequence++}`, `SELECT ${quoteImap(folderName)}`);
+        sentFolderSelected = true;
+        break;
+      } catch (error) {
+        console.info("icloud_sent_folder_not_found", owner, folderName);
+      }
+    }
+    if (sentFolderSelected) {
+      const sentSearch = await client.command(`A${sequence++}`, `UID SEARCH SINCE ${imapDate(since)}`);
+      const sentLine = sentSearch.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
+      const sentUids = sentLine.trim().split(/\s+/).filter(Boolean).slice(-250);
+      for (const uid of sentUids) {
+        const fetched = await client.command(`A${sequence++}`, `UID FETCH ${uid} (BODY.PEEK[])`);
+        const source = extractLiteral(fetched.bytes);
+        if (!source) continue;
+        const parsed = await (0, import_mailparser.simpleParser)(Buffer2.from(source));
+        const recipient = cleanAddress(String(parsed.to?.value?.[0]?.address || parsed.to?.text || ""));
+        if (!recipient) continue;
+        const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
+        if (!body) continue;
+        const customer = customerByEmail.get(recipient);
+        const subject = String(parsed.subject || "Sem assunto");
+        const externalId = parsed.messageId || `icloud-sent:${owner}:${uid}`;
+        const topic = classifyMailboxTopic(subject, body);
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'sent','Sincronizado da pasta Enviados',?)"
+        ).bind(owner, customer ? Number(customer.id) : null, externalId, String(uid), String(config.fromEmail || owner), recipient, subject, body, (parsed.date || /* @__PURE__ */ new Date()).toISOString(), topic).run();
+      }
     }
     await env.DB.prepare(
       "UPDATE agentEmailSettings SET lastImapSyncAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
@@ -53727,13 +53748,14 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.mailbox") {
     const owner = adminEmail.toLowerCase();
-    const folder = ["inbox", "sent", "payment"].includes(String(input.folder || "")) ? String(input.folder) : "inbox";
+    const topicFolders = ["returned_payment", "exams", "extra_information", "documents", "underwriting"];
+    const folder = ["inbox", "sent", ...topicFolders].includes(String(input.folder || "")) ? String(input.folder) : "inbox";
     const search = String(input.search || "").trim().toLowerCase().slice(0, 120);
     let where = "lower(m.agentEmail)=?";
     const binds = [owner];
     if (folder === "inbox") where += " AND m.direction='received'";
     if (folder === "sent") where += " AND m.direction='sent'";
-    if (folder === "payment") where += " AND m.paymentStatus IS NOT NULL";
+    if (topicFolders.includes(folder)) { where += " AND m.topic=?"; binds.push(folder); }
     if (search) {
       where += " AND (lower(m.subject) LIKE ? OR lower(m.fromEmail) LIKE ? OR lower(m.toEmail) LIKE ? OR lower(m.body) LIKE ? OR lower(coalesce(c.name,'')) LIKE ? OR lower(coalesce(m.policyNumber,'')) LIKE ?)";
       const pattern = `%${search}%`;
@@ -53743,11 +53765,12 @@ Detalhes: ${details}` : ""}`;
       `SELECT m.*,c.name AS clientName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? WHERE ${where} ORDER BY datetime(m.sentAt) DESC,m.id DESC LIMIT 300`
     ).bind(owner, ...binds).all();
     const unread = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner).first();
-    const paymentPending = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND paymentStatus='attention' AND coalesce(actionStatus,'')<>'sent'").bind(owner).first();
+    const topicRows = await env.DB.prepare("SELECT coalesce(topic,'general') AS topic,COUNT(*) AS total,SUM(CASE WHEN direction='received' AND readAt IS NULL THEN 1 ELSE 0 END) AS unread FROM agentMailboxEmails WHERE lower(agentEmail)=? GROUP BY coalesce(topic,'general')").bind(owner).all();
+    const topicCounts = Object.fromEntries(topicRows.results.map((row) => [String(row.topic), { total: Number(row.total || 0), unread: Number(row.unread || 0) }]));
     return trpcResult({
       items: rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null })),
       unread: Number(unread?.total || 0),
-      paymentPending: Number(paymentPending?.total || 0)
+      topicCounts
     });
   }
   if (name === "agent.mailboxClients") {
@@ -53796,7 +53819,8 @@ Detalhes: ${details}` : ""}`;
       references: inReplyTo ? [inReplyTo] : void 0
     });
     const externalId = String(sent.messageId || `portal:${owner}:${Date.now()}`);
-    const statements = [env.DB.prepare("INSERT INTO agentMailboxEmails (agentEmail,clientId,externalId,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail) VALUES (?,?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'sent','Enviado diretamente pelo portal')").bind(owner, clientId, externalId, String(config.fromEmail), recipient, subject, body)];
+    const topic = classifyMailboxTopic(subject, body);
+    const statements = [env.DB.prepare("INSERT INTO agentMailboxEmails (agentEmail,clientId,externalId,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'sent','Enviado diretamente pelo portal',?)").bind(owner, clientId, externalId, String(config.fromEmail), recipient, subject, body, topic)];
     if (clientId) {
       statements.push(env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')").bind(owner, clientId, externalId, subject, body, String(config.fromEmail), recipient));
       statements.push(env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)").bind(clientId, `E-mail enviado pelo portal: ${subject}`, owner));

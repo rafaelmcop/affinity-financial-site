@@ -14,6 +14,8 @@
   }
   function notify(message, type = 'ok') { const box = $('notice'); box.textContent = message; box.className = `notice show ${type}`; setTimeout(() => box.className = 'notice', 6000); }
   function date(value) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? String(value || '') : parsed.toLocaleString('pt-BR'); }
+  const topicLabels = {returned_payment:'Pagamento retornado',exams:'Exame solicitado',extra_information:'Informações adicionais',documents:'Documento ou assinatura',underwriting:'Análise e status',general:'Geral'};
+  function topic(email) { const value=email.topic || 'general'; return value === 'general' ? '' : `<span class="topic ${escape(value)}">${escape(topicLabels[value] || 'Geral')}</span>`; }
   function status(email) {
     if (!email.paymentStatus) return '';
     if (email.actionStatus === 'sent') return '<span class="pill sent">Aviso enviado automaticamente</span>';
@@ -24,7 +26,7 @@
   function renderList() {
     const list = $('list');
     if (!state.items.length) { list.innerHTML = '<div class="empty">Nenhuma mensagem encontrada nesta pasta.</div>'; return; }
-    list.innerHTML = state.items.map(item => `<button class="email-row ${item.readAt || item.direction === 'sent' ? '' : 'unread'} ${state.selected?.id === item.id ? 'active' : ''}" data-id="${item.id}"><div class="who">${item.direction === 'received' ? escape(item.fromEmail) : `Para: ${escape(item.toEmail)}`}</div><div class="subject">${escape(item.subject)}</div><div class="preview">${escape(item.clientName || item.body)}</div><time>${escape(date(item.sentAt))}</time></button>`).join('');
+    list.innerHTML = state.items.map(item => `<button class="email-row ${item.readAt || item.direction === 'sent' ? '' : 'unread'} ${state.selected?.id === item.id ? 'active' : ''}" data-id="${item.id}"><div class="who">${item.direction === 'received' ? escape(item.fromEmail) : `Para: ${escape(item.toEmail)}`}</div><div class="subject">${escape(item.subject)}</div><div class="preview">${escape(item.clientName || item.body)}</div>${topic(item)} <time>${escape(date(item.sentAt))}</time></button>`).join('');
     list.querySelectorAll('[data-id]').forEach(button => button.onclick = () => openMessage(Number(button.dataset.id)));
   }
   async function openMessage(id) {
@@ -32,7 +34,7 @@
     if (!state.selected) return;
     if (state.selected.direction === 'received' && !state.selected.readAt) { await api('agent.markMailboxRead', {id}, true); state.selected.readAt = new Date().toISOString(); load(false); }
     const item = state.selected;
-    $('detail').innerHTML = `<button class="back" id="back">← Voltar</button><div class="eyebrow">${item.direction === 'received' ? 'Recebido' : 'Enviado'}</div><h2>${escape(item.subject)}</h2><div class="meta"><span class="pill">De: ${escape(item.fromEmail)}</span><span class="pill">Para: ${escape(item.toEmail)}</span>${item.clientName ? `<span class="pill">Cliente: ${escape(item.clientName)}</span>` : ''}${item.policyNumber ? `<span class="pill">Apólice: ${escape(item.policyNumber)}</span>` : ''}${status(item)}</div>${item.actionDetail ? `<p class="muted"><strong>Ação do sistema:</strong> ${escape(item.actionDetail)}</p>` : ''}<p class="muted">${escape(date(item.sentAt))}</p><div class="body">${escape(item.body)}</div><div class="actions"><button class="primary" id="reply">Responder</button></div>`;
+    $('detail').innerHTML = `<button class="back" id="back">← Voltar</button><div class="eyebrow">${item.direction === 'received' ? 'Recebido' : 'Enviado'}</div><h2>${escape(item.subject)}</h2><div class="meta"><span class="pill">De: ${escape(item.fromEmail)}</span><span class="pill">Para: ${escape(item.toEmail)}</span>${item.clientName ? `<span class="pill">Cliente: ${escape(item.clientName)}</span>` : ''}${item.policyNumber ? `<span class="pill">Apólice: ${escape(item.policyNumber)}</span>` : ''}${topic(item)}${status(item)}</div>${item.actionDetail ? `<p class="muted"><strong>Ação do sistema:</strong> ${escape(item.actionDetail)}</p>` : ''}<p class="muted">${escape(date(item.sentAt))}</p><div class="body">${escape(item.body)}</div><div class="actions"><button class="primary" id="reply">Responder</button></div>`;
     $('reply').onclick = () => compose(item);
     const back = $('back'); if (back) back.onclick = () => { $('detail').classList.remove('mobile-open'); $('list').classList.remove('mobile-hidden'); };
     $('detail').classList.add('mobile-open'); $('list').classList.add('mobile-hidden'); renderList();
@@ -42,7 +44,9 @@
     try {
       const data = await api('agent.mailbox', {folder: state.folder, search: $('search').value});
       state.items = data.items || []; renderList();
-      for (const [id,value] of [['unread',data.unread],['side-unread',data.unread],['payment-count',data.paymentPending]]) { const badge=$(id); badge.textContent=value; badge.hidden=!value; }
+      for (const [id,value] of [['unread',data.unread],['side-unread',data.unread]]) { const badge=$(id); badge.textContent=value; badge.hidden=!value; }
+      for (const key of ['returned_payment','exams','extra_information','documents','underwriting']) { const badge=$(`count-${key}`); const value=data.topicCounts?.[key]?.total || 0; badge.textContent=value; badge.hidden=!value; }
+      $('last-update').textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · atualização automática a cada 5 minutos`;
     } catch (error) { $('list').innerHTML = `<div class="empty">${escape(error.message)}</div>`; }
   }
   function compose(reply = null) {
@@ -54,6 +58,7 @@
       $('account-label').textContent = `${me.name || 'Agente'} · ${me.email}`;
       state.clients = await api('agent.mailboxClients'); $('client').innerHTML = '<option value="">Selecione um dos seus clientes</option>' + state.clients.map(client => `<option value="${client.id}">${escape(client.name)} — ${escape(client.email)}</option>`).join('');
       await load();
+      setInterval(() => load(false), 300000);
     } catch (error) { notify(error.message, 'error'); }
   }
   document.querySelectorAll('[data-folder]').forEach(button => button.onclick = () => { state.folder=button.dataset.folder; document.querySelectorAll('[data-folder]').forEach(item=>item.classList.toggle('primary',item===button)); state.selected=null; $('detail').innerHTML='<div class="empty">Selecione uma mensagem para ler.</div>'; load(); });
