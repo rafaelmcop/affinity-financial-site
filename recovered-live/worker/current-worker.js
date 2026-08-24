@@ -56076,6 +56076,10 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-email.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
+    if (url.pathname === "/agentes/configuracoes-email") {
+      url.pathname = "/agent-email-settings.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
     if (!url.pathname.startsWith("/api/trpc/")) {
       const privateShell = /^\/(admin|agentes|afiliados)(\/|$)/.test(
         url.pathname

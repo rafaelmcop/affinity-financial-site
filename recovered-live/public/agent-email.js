@@ -20,16 +20,13 @@
   function setFolder(folder, folderId = null) {
     state.folder=folder; state.folderId=folderId; state.selected=null;
     document.querySelectorAll('[data-folder]').forEach(item=>item.classList.toggle('primary',item.dataset.folder===folder && folder!=='custom'));
-    document.querySelectorAll('.folder-open').forEach(item=>item.classList.toggle('active',Number(item.dataset.id)===Number(folderId)));
+    $('folder-select').value=folder==='custom'?`custom:${folderId}`:folder;
     $('detail').innerHTML='<div class="empty">Selecione uma mensagem para ler.</div>'; load();
   }
   async function loadFolders() {
     const data=await api('agent.mailboxFolders'); state.folders=data.folders || [];
-    $('trash-count').textContent=data.trash || 0; $('trash-count').hidden=!data.trash;
-    $('folders').innerHTML=state.folders.length ? state.folders.map(folder=>`<span class="folder-chip"><button class="folder-open ${state.folder==='custom'&&state.folderId===folder.id?'active':''}" data-id="${folder.id}">${escape(folder.name)}${folder.total?` (${folder.total})`:''}</button><button class="folder-edit" data-edit="${folder.id}" title="Renomear pasta">✎</button><button class="folder-edit" data-remove="${folder.id}" title="Excluir pasta">×</button></span>`).join('') : '<span class="muted">Nenhuma pasta pessoal</span>';
-    document.querySelectorAll('.folder-open').forEach(button=>button.onclick=()=>setFolder('custom',Number(button.dataset.id)));
-    document.querySelectorAll('[data-edit]').forEach(button=>button.onclick=async()=>{const folder=state.folders.find(item=>item.id===Number(button.dataset.edit));const value=prompt('Novo nome da pasta:',folder?.name||'');if(!value)return;try{await api('agent.renameMailboxFolder',{id:folder.id,name:value},true);await loadFolders();notify('Pasta renomeada.')}catch(error){notify(error.message,'error')}});
-    document.querySelectorAll('[data-remove]').forEach(button=>button.onclick=async()=>{const folder=state.folders.find(item=>item.id===Number(button.dataset.remove));if(!folder||!confirm(`Excluir a pasta “${folder.name}”? As mensagens voltarão para Entrada ou Enviados.`))return;try{await api('agent.deleteMailboxFolder',{id:folder.id},true);if(state.folderId===folder.id)setFolder('inbox');await loadFolders();notify('Pasta removida sem apagar as mensagens.')}catch(error){notify(error.message,'error')}});
+    $('folder-select').innerHTML=`<option value="inbox">Entrada</option><option value="sent">Enviados</option>${state.folders.map(folder=>`<option value="custom:${folder.id}">${escape(folder.name)}${folder.total?` (${folder.total})`:''}</option>`).join('')}<option value="trash">Lixeira${data.trash?` (${data.trash})`:''}</option>`;
+    $('folder-select').value=state.folder==='custom'?`custom:${state.folderId}`:state.folder;
   }
   function status(email) {
     if (!email.paymentStatus) return '';
@@ -88,7 +85,7 @@
     } catch (error) { notify(error.message, 'error'); }
   }
   document.querySelectorAll('[data-folder]').forEach(button => button.onclick = () => setFolder(button.dataset.folder));
-  $('new-folder').onclick=async()=>{const value=prompt('Nome da nova pasta:');if(!value)return;try{await api('agent.createMailboxFolder',{name:value},true);await loadFolders();notify('Pasta criada.')}catch(error){notify(error.message,'error')}};
+  $('folder-select').onchange=()=>{const value=$('folder-select').value;if(value.startsWith('custom:'))setFolder('custom',Number(value.split(':')[1]));else setFolder(value)};
   let searchTimer; $('search').oninput = () => { clearTimeout(searchTimer); searchTimer=setTimeout(load,350); };
   $('sync').onclick = async () => { const button=$('sync'); button.disabled=true; button.textContent='Verificando…'; try { const result=await api('agent.syncInbox',{},true); notify(`${result.imported || 0} mensagem(ns) verificada(s).`); await load(); } catch(error){notify(error.message,'error')} finally{button.disabled=false;button.textContent='↻ Verificar e-mails agora'} };
   $('compose').onclick = () => compose(); $('cancel').onclick = () => $('modal').classList.remove('open'); $('client').onchange = () => { const client=state.clients.find(item=>item.id===Number($('client').value)); $('to').value=client?.email||''; };
