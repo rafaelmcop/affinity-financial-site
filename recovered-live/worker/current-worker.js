@@ -52828,6 +52828,7 @@ function secureResponse(response, options = {}) {
   );
   secured.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   if (options.privateData) {
+    secured.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
     secured.headers.set("Cache-Control", "private, no-store, max-age=0");
     secured.headers.set("Pragma", "no-cache");
     secured.headers.set("Vary", "Cookie, Authorization");
