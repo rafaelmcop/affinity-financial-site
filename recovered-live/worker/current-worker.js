@@ -53778,7 +53778,8 @@ Detalhes: ${details}` : ""}`;
       env.DB.prepare(
         `SELECT COUNT(*) AS total,
         SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active,
-        SUM(CASE WHEN status='active' THEN CAST(ROUND(COALESCE(points,0)) AS INTEGER) ELSE 0 END) AS score
+        SUM(CASE WHEN status='active' THEN CAST(ROUND(COALESCE(points,0)) AS INTEGER) ELSE 0 END) AS score,
+        SUM(CAST(ROUND(COALESCE(points,0)) AS INTEGER)) AS lifetimeScore
        FROM agentPolicies WHERE lower(agentEmail)=?`
       ).bind(owner)
     ]);
@@ -53803,6 +53804,7 @@ Detalhes: ${details}` : ""}`;
       tasks,
       pendingTasks: tasks.length,
       score: Number(policyStats?.score || 0),
+      lifetimeScore: Number(policyStats?.lifetimeScore || 0),
       newMessages: Number(unread?.total || 0),
       incompleteProfileCount: profileAlerts.length,
       notifications: notifications.map((row) => ({
@@ -53845,7 +53847,8 @@ Detalhes: ${details}` : ""}`;
       followUps: Number(tasksQuery.results?.[0]?.total || 0),
       policyCount: policies.length,
       activePolicyCount: activePolicies.length,
-      score: activePolicies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0)
+      score: activePolicies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0),
+      lifetimeScore: policies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0)
     });
   }
   if (name === "agent.listPolicies") {
