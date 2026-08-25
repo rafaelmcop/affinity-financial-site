@@ -8,6 +8,13 @@
     if (mutation) { options.method = 'POST'; options.body = JSON.stringify({json: input}); }
     else url += `?input=${encodeURIComponent(JSON.stringify({json: input}))}`;
     const response = await fetch(url, options);
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const detail = (await response.text()).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      throw new Error(response.status >= 500
+        ? 'A atualização do e-mail demorou além do limite. Tente novamente em alguns instantes.'
+        : (detail.slice(0, 180) || 'O servidor devolveu uma resposta inesperada.'));
+    }
     const payload = await response.json();
     if (payload.error) throw new Error(payload.error.json?.message || 'Não foi possível concluir a operação');
     return payload.result?.data?.json;

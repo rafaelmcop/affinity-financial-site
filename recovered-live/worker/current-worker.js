@@ -50246,7 +50246,14 @@ async function syncIcloudInbox(env, agentEmail) {
     );
     const allInboxLine = allInboxSearch.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
     for (const uid of allInboxLine.trim().split(/\s+/).filter(Boolean)) uidSet.add(uid);
-    const uids = [...uidSet].slice(-250);
+    const knownInbox = await env.DB.prepare(
+      "SELECT imapUid FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND imapUid IS NOT NULL"
+    ).bind(owner).all();
+    const knownInboxUids = new Set(knownInbox.results.map((row) => String(row.imapUid)));
+    // Do not download and parse messages that are already in D1. Keeping each
+    // request to a small batch also prevents the Worker from exceeding its
+    // execution limit when an account contains hundreds of messages.
+    const uids = [...uidSet].filter((uid) => !knownInboxUids.has(String(uid))).slice(-20);
     for (const uid of uids) {
       const fetched = await client.command(
         `A${sequence++}`,
@@ -50322,7 +50329,11 @@ async function syncIcloudInbox(env, agentEmail) {
     if (sentFolderSelected) {
       const sentSearch = await client.command(`A${sequence++}`, `UID SEARCH SINCE ${imapDate(since)}`);
       const sentLine = sentSearch.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1] || "";
-      const sentUids = sentLine.trim().split(/\s+/).filter(Boolean).slice(-250);
+      const knownSent = await env.DB.prepare(
+        "SELECT imapUid FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='sent' AND imapUid IS NOT NULL"
+      ).bind(owner).all();
+      const knownSentUids = new Set(knownSent.results.map((row) => String(row.imapUid)));
+      const sentUids = sentLine.trim().split(/\s+/).filter(Boolean).filter((uid) => !knownSentUids.has(String(uid))).slice(-20);
       for (const uid of sentUids) {
         const fetched = await client.command(`A${sequence++}`, `UID FETCH ${uid} (BODY.PEEK[])`);
         const source = extractLiteral(fetched.bytes);
