@@ -53755,13 +53755,13 @@ Detalhes: ${details}` : ""}`;
       try { completed = JSON.parse(String(application.applicationData || "{}")); } catch {}
       try { protectedData = JSON.parse(await decryptSmtpPassword(String(application.sensitiveData || ""), env.JWT_SECRET)); } catch {}
       const all = { ...application, ...completed, ...protectedData };
+      all.existingInsurance = String(all.existingInsurance || "Não").trim();
       const required = {clientName:"nome completo",clientEmail:"e-mail",clientPhone:"telefone",birthDate:"data de nascimento",address:"endereço",city:"cidade",state:"estado",zipCode:"ZIP Code",birthCountry:"país de nascimento",gender:"sexo",maritalStatus:"estado civil",ssn:"SSN/ITIN",passportNumber:"passaporte",driverHasLicense:"informação sobre Driver's License",height:"altura",weight:"peso",employer:"empresa",industry:"área profissional",occupation:"ocupação",employmentLength:"tempo de trabalho",weeklyIncome:"renda semanal",monthlyFixedExpenses:"gastos fixos mensais",bankName:"banco",routingNumber:"routing number",accountNumber:"account number",seenDoctor:"consulta médica",tobacco:"histórico de fumo",hasMedicalCondition:"informação sobre doença ou diagnóstico",usesMedication:"informação sobre medicamentos",fatherLiving:"situação do pai",motherLiving:"situação da mãe",productInterest:"produto",coverageRequested:"cobertura",premiumBudget:"premium",existingInsurance:"seguro existente"};
       const missing = Object.entries(required).filter(([key])=>all[key]===null||all[key]===void 0||String(all[key]).trim()==="").map(([,label])=>label);
       if (String(all.driverHasLicense||"").toLowerCase() === "sim" && (!String(all.driverLicenseNumber||"").trim() || !String(all.driverLicenseState||"").trim())) missing.push("número e estado da Driver's License");
       if (String(all.hasMedicalCondition||"").toLowerCase() === "sim" && !String(all.medicalDetails||"").trim()) missing.push("qual doença ou diagnóstico");
       if (String(all.usesMedication||"").toLowerCase() === "sim" && !String(all.medications||"").trim()) missing.push("quais medicamentos e dosagens");
       if (String(all.seenDoctor||"").toLowerCase() === "sim" && (!String(all.lastDoctorVisit||"").trim() || !String(all.physicianName||"").trim())) missing.push("mês da consulta e médico ou hospital");
-      if (String(all.existingInsurance||"").toLowerCase() === "sim" && (!String(all.existingInsuranceCompany||"").trim() || !String(all.existingCoverage||"").trim() || !String(all.existingLivingBenefits||"").trim())) missing.push("dados do seguro de vida existente");
       for (const parent of ["father","mother"]) {
         const living = String(all[`${parent}Living`]||"").toLowerCase();
         if (living === "sim" && !String(all[`${parent}Age`]??"").trim()) missing.push(`idade atual ${parent==="father"?"do pai":"da mãe"}`);
