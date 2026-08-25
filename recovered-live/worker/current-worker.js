@@ -52925,9 +52925,11 @@ async function getAdminAccess(email, env) {
   const account = await env.DB.prepare(
     "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive FROM adminAccounts WHERE lower(email)=?"
   ).bind(email.toLowerCase()).first();
+  const role = email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "master" : String(account?.adminRole ?? "standard");
   return {
     account,
-    role: email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "master" : String(account?.adminRole ?? "standard")
+    role,
+    isMaster: role === "master"
   };
 }
 __name(getAdminAccess, "getAdminAccess");
@@ -53788,10 +53790,17 @@ Detalhes: ${details}` : ""}`;
       if (reason.length < 5) return trpcError("Explique o motivo com pelo menos 5 caracteres");
       const application = await env.DB.prepare("SELECT id,clientName FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first();
       if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      if (accountType === "both") {
+        await env.DB.batch([
+          env.DB.prepare("DELETE FROM applicationDeletionRequests WHERE applicationId=?").bind(id),
+          env.DB.prepare("DELETE FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id, owner)
+        ]);
+        return trpcResult({ success: true, deleted: true, requiresApproval: false });
+      }
       const pending = await env.DB.prepare("SELECT id FROM applicationDeletionRequests WHERE applicationId=? AND status='pending'").bind(id).first();
       if (pending) return trpcError("Esta solicitação já está aguardando o administrador");
       await env.DB.prepare("INSERT INTO applicationDeletionRequests (applicationId,agentEmail,applicationName,reason) VALUES (?,?,?,?)").bind(id,owner,String(application.clientName||"Aplicação"),reason).run();
-      return trpcResult({ success: true });
+      return trpcResult({ success: true, deleted: false, requiresApproval: true });
     }
   }
   if (name === "agent.dashboard") {
@@ -53970,6 +53979,19 @@ Detalhes: ${details}` : ""}`;
     if (!client) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     const reason = String(input.reason || "").trim();
     if (reason.length < 5) return trpcError("Informe o motivo da solicita\xE7\xE3o");
+    if (accountType === "both") {
+      const linked = await env.DB.prepare("SELECT id FROM agentPolicies WHERE clientId=? LIMIT 1").bind(id).first();
+      if (linked) return trpcError("Este cliente possui apólice vinculada. Exclua ou transfira a apólice antes de excluir o cliente.");
+      await env.DB.batch([
+        env.DB.prepare("DELETE FROM clientDeletionRequests WHERE clientId=?").bind(id),
+        env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
+        env.DB.prepare("DELETE FROM agentTasks WHERE clientId=?").bind(id),
+        env.DB.prepare("DELETE FROM scheduledMessages WHERE clientId=?").bind(id),
+        env.DB.prepare("DELETE FROM clientEmails WHERE clientId=?").bind(id),
+        env.DB.prepare("DELETE FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(id, owner)
+      ]);
+      return trpcResult({ success: true, deleted: true, requiresApproval: false });
+    }
     const pending = await env.DB.prepare(
       "SELECT id FROM clientDeletionRequests WHERE clientId=? AND status='pending' LIMIT 1"
     ).bind(id).first();
@@ -53977,7 +53999,7 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare(
       "INSERT INTO clientDeletionRequests (clientId,agentEmail,clientName,reason) VALUES (?,?,?,?)"
     ).bind(id, owner, String(client.name || "Cliente"), reason).run();
-    return trpcResult({ success: true });
+    return trpcResult({ success: true, deleted: false, requiresApproval: true });
   }
   if (name === "agent.listClientDeletionRequests") {
     const rows = await env.DB.prepare(
