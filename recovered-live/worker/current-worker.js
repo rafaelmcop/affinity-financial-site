@@ -55128,6 +55128,7 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (name === "admin.getStats") {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,applicationId INTEGER NOT NULL,agentEmail TEXT NOT NULL,applicationName TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
     const results = await env.DB.batch([
       env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending FROM affiliates"),
       env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending, SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) approved FROM policies"),
@@ -55135,7 +55136,7 @@ Affinity Financial Consulting`,
       env.DB.prepare("SELECT COUNT(DISTINCT email) total FROM (SELECT lower(email) email FROM adminAccounts WHERE status='pending' UNION ALL SELECT lower(email) email FROM affiliates WHERE status='pending')"),
       env.DB.prepare("SELECT COUNT(*) total FROM affiliateReferrals WHERE status='pending'"),
       env.DB.prepare("SELECT COUNT(*) total FROM testimonials WHERE source='client' AND adminDecision='pending'"),
-      env.DB.prepare("SELECT COUNT(*) total FROM clientDeletionRequests WHERE status='pending'")
+      env.DB.prepare("SELECT (SELECT COUNT(*) FROM clientDeletionRequests WHERE status='pending') + (SELECT COUNT(*) FROM applicationDeletionRequests WHERE status='pending') AS total")
     ]);
     const [affiliates, policies, commissions, pendingUsers, pendingLeads, pendingReviews, pendingClientDeletions] = results.map((result) => result.results?.[0]);
     return trpcResult({
