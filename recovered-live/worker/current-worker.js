@@ -53537,6 +53537,35 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("UPDATE passwordResetTokens SET used=1 WHERE id=?").bind(row.id).run();
     return trpcResult({ success: true, userType: row.userType });
   }
+  if (name === "applications.verifyCode" || name === "applications.clientSave") {
+    const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase();
+    const row = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
+    if (!row || !/^[A-Z0-9]{8}$/.test(code)) return trpcError("Código inválido", "UNAUTHORIZED", 401);
+    if (row.status === "completed") return trpcError("Esta aplicação já foi concluída");
+    if (name === "applications.verifyCode") {
+      let extra = {}, sensitive = {};
+      try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
+      try { sensitive = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)); } catch {}
+      return trpcResult({ success: true, application: { ...extra, ...sensitive, clientName: row.clientName, clientEmail: row.clientEmail, clientPhone: row.clientPhone, birthDate: row.birthDate, address: row.address, city: row.city, state: row.state, zipCode: row.zipCode } });
+    }
+    const payload = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : {};
+    const clientName = String(payload.clientName || "").trim(), clientEmail = String(payload.clientEmail || "").trim().toLowerCase();
+    if (!clientName) return trpcError("Informe seu nome completo");
+    if (!validEmail(clientEmail)) return trpcError("Informe um e-mail válido");
+    const sensitiveKeys = new Set(["ssn","passportNumber","driverLicenseNumber","bankName","routingNumber","accountNumber","medicalDetails","medications","physicianName"]), extra = {}, sensitive = {};
+    try { Object.assign(extra, JSON.parse(String(row.applicationData || "{}"))); } catch {}
+    try { Object.assign(sensitive, JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET))); } catch {}
+    for (const [key,value] of Object.entries(payload)) (sensitiveKeys.has(key) ? sensitive : extra)[key] = value;
+    const reviewCity = String(payload.reviewCity || "").trim(), reviewState = String(payload.reviewState || "").trim().toUpperCase(), reviewQuote = String(payload.reviewQuote || "").trim(), reviewRating = Number(payload.reviewRating || 0);
+    if (!reviewCity || !/^[A-Z]{2}$/.test(reviewState) || !Number.isInteger(reviewRating) || reviewRating < 1 || reviewRating > 5 || reviewQuote.length < 20) return trpcError("A avaliação do atendimento é obrigatória");
+    if (!extra.reviewSubmitted) {
+      await env.DB.prepare("INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client','pt','image',0)").bind(clientName,clientEmail,`${reviewCity}, ${reviewState}`,reviewCity,reviewState,String(row.agentEmail).toLowerCase(),reviewQuote,reviewRating).run();
+      extra.reviewSubmitted = true;
+    }
+    const encrypted = await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET);
+    await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND accessCode=?").bind(clientName,clientEmail||null,String(payload.clientPhone||"").trim()||null,String(payload.birthDate||"").trim()||null,String(payload.address||"").trim()||null,String(payload.city||"").trim()||null,String(payload.state||"").trim()||null,String(payload.zipCode||"").trim()||null,JSON.stringify(extra),encrypted,id,code).run();
+    return trpcResult({ success: true, message: "Informações enviadas ao seu agente." });
+  }
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail)
     return trpcError("Acesso administrativo necess\xE1rio", "UNAUTHORIZED", 401);
@@ -53567,6 +53596,7 @@ Detalhes: ${details}` : ""}`;
     "admin.setInternalUserStatus": "Alterou o status de um usu\xE1rio",
     "admin.setInternalPortalAccess": "Alterou os acessos de um usu\xE1rio",
     "admin.updateAffiliateUser": "Alterou dados de um afiliado",
+    "admin.deleteApplication": "Excluiu uma aplicação",
     "admin.approveAffiliate": "Aprovou um afiliado",
     "admin.rejectAffiliate": "Recusou um afiliado",
     "admin.blockAffiliate": "Bloqueou um afiliado",
@@ -53579,6 +53609,116 @@ Detalhes: ${details}` : ""}`;
   if (auditedAction) {
     const targetId = String(input.clientId ?? input.affiliateId ?? input.id ?? input.email ?? input.agentEmail ?? "").trim() || null;
     await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)").bind(adminEmail.toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
+  }
+  if (name === "admin.deleteApplication") {
+    if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplicações", "FORBIDDEN", 403);
+    const result = await env.DB.prepare("DELETE FROM agentApplications WHERE id=?").bind(Number(input.id || 0)).run();
+    if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+    return trpcResult({ success: true });
+  }
+  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication"].includes(name)) {
+    const owner = adminEmail.toLowerCase();
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agentEmail TEXT NOT NULL,
+      clientName TEXT NOT NULL,
+      clientEmail TEXT,
+      clientPhone TEXT,
+      birthDate TEXT,
+      address TEXT,
+      city TEXT,
+      state TEXT,
+      zipCode TEXT,
+      maritalStatus TEXT,
+      occupation TEXT,
+      annualIncome REAL DEFAULT 0,
+      beneficiaryName TEXT,
+      beneficiaryRelationship TEXT,
+      beneficiaryPercentage REAL DEFAULT 100,
+      productInterest TEXT,
+      coverageRequested REAL DEFAULT 0,
+      premiumBudget REAL DEFAULT 0,
+      applicationReason TEXT,
+      notes TEXT,
+      applicationData TEXT,
+      sensitiveData TEXT,
+      accessCode TEXT,
+      status TEXT NOT NULL DEFAULT 'draft',
+      matchedPolicyId INTEGER,
+      submittedAt TEXT,
+      completedAt TEXT,
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+    for (const column of ["applicationData TEXT", "sensitiveData TEXT", "accessCode TEXT"]) {
+      try { await env.DB.prepare(`ALTER TABLE agentApplications ADD COLUMN ${column}`).run(); } catch {}
+    }
+    await env.DB.prepare("CREATE INDEX IF NOT EXISTS agentApplications_owner_status ON agentApplications(agentEmail,status)").run();
+    if (name === "agent.listApplications") {
+      await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
+      await env.DB.prepare(`UPDATE agentApplications AS a SET
+        status='completed',
+        matchedPolicyId=(SELECT p.id FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId
+          WHERE lower(p.agentEmail)=lower(a.agentEmail)
+          AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
+            OR lower(trim(c.name))=lower(trim(a.clientName))) ORDER BY p.id DESC LIMIT 1),
+        completedAt=CURRENT_TIMESTAMP,
+        updatedAt=CURRENT_TIMESTAMP
+        WHERE lower(a.agentEmail)=? AND a.status='submitted'
+        AND EXISTS (SELECT 1 FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId
+          WHERE lower(p.agentEmail)=lower(a.agentEmail)
+          AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
+            OR lower(trim(c.name))=lower(trim(a.clientName))))`).bind(owner).run();
+      const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount
+        FROM agentApplications a LEFT JOIN agentPolicies p ON p.id=a.matchedPolicyId
+        WHERE lower(a.agentEmail)=? ORDER BY CASE a.status WHEN 'submitted' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,a.updatedAt DESC`).bind(owner).all();
+      return trpcResult(rows.results.map((row) => {
+        let extra = {};
+        try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
+        delete row.sensitiveData;
+        delete row.applicationData;
+        return { ...row, ...extra, id: Number(row.id) };
+      }));
+    }
+    if (name === "agent.getApplication") {
+      const row = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id || 0), owner).first();
+      if (!row) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      let extra = {}, sensitive = {};
+      try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
+      try { sensitive = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)); } catch {}
+      delete row.applicationData;
+      delete row.sensitiveData;
+      return trpcResult({ ...row, ...extra, ...sensitive, id: Number(row.id) });
+    }
+    if (name === "agent.saveApplication") {
+      const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
+      const clientEmail = String(input.clientEmail || "").trim().toLowerCase();
+      if (!clientName) return trpcError("Informe o nome completo do cliente");
+      if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail válido");
+      const sensitiveKeys = new Set(["ssn","passportNumber","residentCardNumber","visaNumber","driverLicenseNumber","bankName","routingNumber","accountNumber","medicalDetails","medications","physicianName","physicianAddress","healthHistory"]);
+      const extra = {}, sensitive = {};
+      const supplied = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : input;
+      for (const [key,value] of Object.entries(supplied)) {
+        if (["id","clientName","clientEmail","clientPhone"].includes(key)) continue;
+        (sensitiveKeys.has(key) ? sensitive : extra)[key] = value;
+      }
+      const encryptedSensitive = Object.keys(sensitive).length ? await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET) : null;
+      const values = [clientName,clientEmail||null,String(input.clientPhone||"").trim()||null,String(input.birthDate||"").trim()||null,String(input.address||"").trim()||null,String(input.city||"").trim()||null,String(input.state||"").trim()||null,String(input.zipCode||"").trim()||null,String(input.maritalStatus||"").trim()||null,String(input.occupation||"").trim()||null,Number(input.annualIncome||0),String(input.beneficiaryName||"").trim()||null,String(input.beneficiaryRelationship||"").trim()||null,Number(input.beneficiaryPercentage||100),String(input.productInterest||"").trim()||null,Number(input.coverageRequested||0),Number(input.premiumBudget||0),String(input.applicationReason||"").trim()||null,String(input.notes||"").trim()||null,JSON.stringify(extra),encryptedSensitive];
+      if (id) {
+        const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?`).bind(...values,id,owner).run();
+        if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+        return trpcResult({ success: true, id });
+      }
+      const accessCode = Array.from(crypto.getRandomValues(new Uint8Array(4)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,8).toUpperCase();
+      const inserted = await env.DB.prepare(`INSERT INTO agentApplications (agentEmail,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,maritalStatus,occupation,annualIncome,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget,applicationReason,notes,applicationData,sensitiveData,accessCode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(owner,...values,accessCode).run();
+      return trpcResult({ success: true, id: Number(inserted.meta.last_row_id), accessCode });
+    }
+    if (name === "agent.submitApplication") {
+      const id = Number(input.id || 0);
+      const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status='draft'").bind(id,owner).run();
+      if (!result.meta.changes) return trpcError("Salve o rascunho antes de submeter");
+      return trpcResult({ success: true });
+    }
   }
   if (name === "agent.dashboard") {
     const owner = adminEmail.toLowerCase();
