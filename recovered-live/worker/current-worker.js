@@ -53661,7 +53661,13 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso administrativo necess\xE1rio", "UNAUTHORIZED", 401);
   const adminAccess = await getAdminAccess(adminEmail, env);
   const accountType = String(adminAccess.account?.accountType || "admin");
-  if (name.startsWith("agent.") && !["agent", "both"].includes(accountType))
+  const adminMailboxProcedures = new Set([
+    "agent.mailbox", "agent.mailboxMessage", "agent.mailboxFolders", "agent.createMailboxFolder",
+    "agent.renameMailboxFolder", "agent.deleteMailboxFolder", "agent.moveMailboxEmail",
+    "agent.completeMailboxEmail", "agent.deleteMailboxEmail", "agent.restoreMailboxEmail",
+    "agent.mailboxClients", "agent.markMailboxRead", "agent.sendMailboxEmail", "agent.syncInbox"
+  ]);
+  if (name.startsWith("agent.") && !["agent", "both"].includes(accountType) && !adminMailboxProcedures.has(name))
     return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
   if (name.startsWith("admin.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
@@ -53716,7 +53722,10 @@ Detalhes: ${details}` : ""}`;
       try { await env.DB.prepare(`ALTER TABLE careerApplications ADD COLUMN ${column}`).run(); } catch {}
     }
     const pending = await env.DB.prepare("SELECT COUNT(*) AS total FROM careerApplications WHERE status='new'").first();
-    if (name === "careers.access") return trpcResult({ allowed: true, pendingCount: Number(pending?.total || 0) });
+    if (name === "careers.access") {
+      const unread = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL AND deletedAt IS NULL").bind(adminEmail.toLowerCase()).first();
+      return trpcResult({ allowed: true, pendingCount: Number(pending?.total || 0), unreadEmails: Number(unread?.total || 0) });
+    }
     if (name === "careers.list") {
       const rows = await env.DB.prepare("SELECT * FROM careerApplications ORDER BY CASE WHEN status='new' THEN 0 WHEN status='reviewing' THEN 1 ELSE 2 END, datetime(createdAt) DESC, id DESC").all();
       return trpcResult({ applications: rows.results || [], pendingCount: Number(pending?.total || 0) });
@@ -56481,6 +56490,10 @@ var cloudflare_staging_default = {
     }
     if (url.pathname === "/agentes/configuracoes-email") {
       url.pathname = "/agent-email-settings.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
+    if (url.pathname === "/admin/email") {
+      url.pathname = "/agent-email.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
     if (url.pathname === "/agent-applications" || url.pathname === "/agent-applications.html") {

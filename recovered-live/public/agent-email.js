@@ -1,4 +1,5 @@
 (() => {
+  const adminMode = location.pathname.startsWith('/admin/');
   const state = { folder: 'inbox', folderId: null, items: [], selected: null, clients: [], folders: [], replyToId: null, lastUnread: null, audioReady: false };
   const $ = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
@@ -90,8 +91,9 @@
   }
   async function init() {
     try {
-      const me = await api('auth.me'); if (!me || !['agent','both'].includes(me.accountType)) { location.href='/agentes/login'; return; }
-      $('account-label').textContent = `${me.name || 'Agente'} · ${me.email}`;
+      const me = await api('auth.me'); const allowed=adminMode?['admin','both'].includes(me?.accountType):['agent','both'].includes(me?.accountType); if (!me || !allowed) { location.href=adminMode?'/admin/login':'/agentes/login'; return; }
+      if(adminMode){document.title='E-mail | Administração';const side=document.querySelector('aside.side');if(side)side.innerHTML='<div class="brand">Affinity Financial<small>Administração</small></div><nav class="nav"><a href="/admin/dashboard">Início</a><a href="/admin/usuarios">Usuários</a><a href="/candidaturas.html?portal=admin">Candidaturas</a><a class="active" href="/admin/email">E-mail <span id="side-unread" class="badge" hidden></span></a><a href="/admin/smtp-config">Configurar e-mail</a><a href="/">Site principal</a></nav>';const mobile=document.querySelector('.mobile-head a');if(mobile){mobile.href='/admin/dashboard';mobile.textContent='← Administração'}const folderLink=document.querySelector('.folder-picker a');if(folderLink){folderLink.href='/admin/smtp-config';folderLink.textContent='Configurar esta conta de e-mail'}}
+      $('account-label').textContent = `${me.name || (adminMode?'Administrador':'Agente')} · ${me.email}`;
       state.clients = await api('agent.mailboxClients'); $('client').innerHTML = '<option value="">Selecione um dos seus clientes</option>' + state.clients.map(client => `<option value="${client.id}">${escape(client.name)} — ${escape(client.email)}</option>`).join('');
       await loadFolders();
       await load();

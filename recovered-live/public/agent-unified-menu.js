@@ -1,5 +1,6 @@
 (() => {
   const path = location.pathname.replace(/\/$/, '') || '/';
+  if (path.startsWith('/admin/')) return;
   const matches = (...items) => items.some((item) => path === item || path.startsWith(item + '/'));
   let side = document.querySelector('aside.side');
   if (!side) {
