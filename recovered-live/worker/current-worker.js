@@ -53556,25 +53556,20 @@ Detalhes: ${details}` : ""}`;
     try { Object.assign(extra, JSON.parse(String(row.applicationData || "{}"))); } catch {}
     try { Object.assign(sensitive, JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET))); } catch {}
     for (const [key,value] of Object.entries(payload)) (sensitiveKeys.has(key) ? sensitive : extra)[key] = value;
-    const reviewCity = String(payload.reviewCity || "").trim(), reviewState = String(payload.reviewState || "").trim().toUpperCase(), reviewQuote = String(payload.reviewQuote || "").trim(), reviewRating = Number(payload.reviewRating || 0);
-    if (!reviewCity || !/^[A-Z]{2}$/.test(reviewState) || !Number.isInteger(reviewRating) || reviewRating < 1 || reviewRating > 5 || reviewQuote.length < 20) return trpcError("A avaliação do atendimento é obrigatória");
-    if (!extra.reviewSubmitted) {
-      await env.DB.prepare("INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client','pt','image',0)").bind(clientName,clientEmail,`${reviewCity}, ${reviewState}`,reviewCity,reviewState,String(row.agentEmail).toLowerCase(),reviewQuote,reviewRating).run();
-      extra.reviewSubmitted = true;
-    }
     const encrypted = await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET);
     await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND accessCode=?").bind(clientName,clientEmail||null,String(payload.clientPhone||"").trim()||null,String(payload.birthDate||"").trim()||null,String(payload.address||"").trim()||null,String(payload.city||"").trim()||null,String(payload.state||"").trim()||null,String(payload.zipCode||"").trim()||null,JSON.stringify(extra),encrypted,id,code).run();
     return trpcResult({ success: true, message: "Informações enviadas ao seu agente." });
   }
   if (name === "reviewInvites.get" || name === "reviewInvites.submit") {
-    const token = String(input.token || "").trim();
+    const token = String(input.token || "").trim(), accessCode = String(input.code || "").trim().toUpperCase();
     const invite = await env.DB.prepare("SELECT * FROM reviewInvites WHERE token=? AND usedAt IS NULL").bind(token).first();
     if (!invite) return trpcError("Este convite é inválido ou já foi utilizado", "NOT_FOUND", 404);
-    if (name === "reviewInvites.get") return trpcResult({ clientName: invite.clientName || "", clientEmail: invite.clientEmail || "" });
-    const clientName = String(input.name || invite.clientName || "").trim(), email = String(input.email || invite.clientEmail || "").trim().toLowerCase(), city = String(input.city || "").trim(), state = String(input.state || "").trim().toUpperCase(), quote = String(input.quote || "").trim(), rating = Number(input.rating || 0);
-    if (clientName.length < 2 || !validEmail(email) || city.length < 2 || !/^[A-Z]{2}$/.test(state) || !Number.isInteger(rating) || rating < 1 || rating > 5 || quote.length < 20) return trpcError("Preencha todos os campos da avaliação");
+    if (invite.accessCode && accessCode !== String(invite.accessCode).toUpperCase()) return trpcError("Código de acesso incorreto", "UNAUTHORIZED", 401);
+    if (name === "reviewInvites.get") return trpcResult({ clientName: invite.clientName || "" });
+    const clientName = String(invite.clientName || "Cliente").trim(), email = String(invite.clientEmail || "").trim().toLowerCase(), city = String(invite.city || "").trim(), state = String(invite.state || "").trim().toUpperCase(), quote = String(input.quote || "").trim(), rating = Number(input.rating || 0);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5 || quote.length < 10) return trpcError("Escolha de 1 a 5 estrelas e deixe uma mensagem sobre seu atendimento");
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client','pt','image',0)").bind(clientName,email,`${city}, ${state}`,city,state,String(invite.agentEmail).toLowerCase(),quote,rating),
+      env.DB.prepare("INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client','pt','image',0)").bind(clientName,email||null,[city,state].filter(Boolean).join(', '),city||null,state||null,String(invite.agentEmail).toLowerCase(),quote,rating),
       env.DB.prepare("UPDATE reviewInvites SET usedAt=CURRENT_TIMESTAMP WHERE id=? AND usedAt IS NULL").bind(Number(invite.id))
     ]);
     return trpcResult({ success: true });
@@ -53625,10 +53620,12 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)").bind(adminEmail.toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
   }
   if (name === "agent.createReviewInvite") {
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+    for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
-    await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token) VALUES (?,?,?,?)").bind(adminEmail.toLowerCase(),String(input.clientName||"").trim()||null,String(input.clientEmail||"").trim().toLowerCase()||null,token).run();
-    return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token}` });
+    const accessCode = Array.from(crypto.getRandomValues(new Uint8Array(3)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,6).toUpperCase();
+    await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(),String(input.clientName||"").trim()||null,String(input.clientEmail||"").trim().toLowerCase()||null,token,accessCode).run();
+    return trpcResult({ token, accessCode, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token}` });
   }
   if (name === "admin.deleteApplication") {
     if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplicações", "FORBIDDEN", 403);
@@ -53686,6 +53683,8 @@ Detalhes: ${details}` : ""}`;
       requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       reviewedAt TEXT
     )`).run();
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+    for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
     if (name === "agent.listApplications") {
       await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
       await env.DB.prepare(`UPDATE agentApplications AS a SET
@@ -53702,7 +53701,9 @@ Detalhes: ${details}` : ""}`;
           AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
             OR lower(trim(c.name))=lower(trim(a.clientName))))`).bind(owner).run();
       const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount,
-        EXISTS(SELECT 1 FROM applicationDeletionRequests d WHERE d.applicationId=a.id AND d.status='pending') AS deletionPending
+        EXISTS(SELECT 1 FROM applicationDeletionRequests d WHERE d.applicationId=a.id AND d.status='pending') AS deletionPending,
+        (SELECT token FROM reviewInvites r WHERE r.applicationId=a.id AND r.usedAt IS NULL ORDER BY r.id DESC LIMIT 1) AS reviewToken,
+        (SELECT accessCode FROM reviewInvites r WHERE r.applicationId=a.id AND r.usedAt IS NULL ORDER BY r.id DESC LIMIT 1) AS reviewAccessCode
         FROM agentApplications a LEFT JOIN agentPolicies p ON p.id=a.matchedPolicyId
         WHERE lower(a.agentEmail)=? ORDER BY CASE a.status WHEN 'submitted' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,a.updatedAt DESC`).bind(owner).all();
       return trpcResult(rows.results.map((row) => {
@@ -53772,7 +53773,15 @@ Detalhes: ${details}` : ""}`;
       if (missing.length) return trpcError(`Complete antes de concluir: ${[...new Set(missing)].join(", ")}`);
       const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status='draft'").bind(id,owner).run();
       if (!result.meta.changes) return trpcError("Salve o rascunho antes de submeter");
-      return trpcResult({ success: true });
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+      for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+      let invite = await env.DB.prepare("SELECT token,accessCode FROM reviewInvites WHERE applicationId=? AND usedAt IS NULL ORDER BY id DESC LIMIT 1").bind(id).first();
+      if (!invite) {
+        const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join(""), accessCode = Array.from(crypto.getRandomValues(new Uint8Array(3)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,6).toUpperCase();
+        await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode,city,state,applicationId) VALUES (?,?,?,?,?,?,?,?)").bind(owner,String(all.clientName||"Cliente"),String(all.clientEmail||"").toLowerCase()||null,token,accessCode,String(all.city||"")||null,String(all.state||"").toUpperCase()||null,id).run();
+        invite = { token, accessCode };
+      }
+      return trpcResult({ success: true, reviewInvite: { link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${invite.token}`, accessCode: invite.accessCode } });
     }
     if (name === "agent.requestApplicationDeletion") {
       const id = Number(input.id || 0), reason = String(input.reason || "").trim();
