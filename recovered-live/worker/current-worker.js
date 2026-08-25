@@ -53576,6 +53576,29 @@ Detalhes: ${details}` : ""}`;
     ]);
     return trpcResult({ success: true });
   }
+  if (name === "address.search") {
+    const query = String(input.query || "").trim().slice(0, 180);
+    if (query.length < 6) return trpcResult([]);
+    const lookup = new URL("https://geocoding.geo.census.gov/geocoder/locations/onelineaddress");
+    lookup.searchParams.set("address", query);
+    lookup.searchParams.set("benchmark", "Public_AR_Current");
+    lookup.searchParams.set("format", "json");
+    try {
+      const response = await fetch(lookup, { headers: { accept: "application/json" } });
+      if (!response.ok) return trpcResult([]);
+      const data = await response.json();
+      const matches = Array.isArray(data?.result?.addressMatches) ? data.result.addressMatches : [];
+      return trpcResult(matches.slice(0, 6).map((match) => ({
+        full: String(match?.matchedAddress || ""),
+        street: String(match?.matchedAddress || "").split(",")[0] || query,
+        city: String(match?.addressComponents?.city || ""),
+        state: String(match?.addressComponents?.state || ""),
+        zip: String(match?.addressComponents?.zip || "")
+      })).filter((match) => match.full));
+    } catch {
+      return trpcResult([]);
+    }
+  }
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail)
     return trpcError("Acesso administrativo necess\xE1rio", "UNAUTHORIZED", 401);
@@ -53760,6 +53783,7 @@ Detalhes: ${details}` : ""}`;
       all.existingInsurance = String(all.existingInsurance || "Não").trim();
       const required = {clientName:"nome completo",clientEmail:"e-mail",clientPhone:"telefone",birthDate:"data de nascimento",address:"endereço",city:"cidade",state:"estado",zipCode:"ZIP Code",birthCountry:"país de nascimento",gender:"sexo",maritalStatus:"estado civil",ssn:"SSN/ITIN",passportNumber:"passaporte",driverHasLicense:"informação sobre Driver's License",height:"altura",weight:"peso",employer:"empresa",industry:"área profissional",occupation:"ocupação",employmentLength:"tempo de trabalho",weeklyIncome:"renda semanal",monthlyFixedExpenses:"gastos fixos mensais",bankName:"banco",routingNumber:"routing number",accountNumber:"account number",seenDoctor:"consulta médica",tobacco:"histórico de fumo",hasMedicalCondition:"informação sobre doença ou diagnóstico",usesMedication:"informação sobre medicamentos",fatherLiving:"situação do pai",motherLiving:"situação da mãe",productInterest:"produto",coverageRequested:"cobertura",premiumBudget:"premium",existingInsurance:"seguro existente"};
       const missing = Object.entries(required).filter(([key])=>all[key]===null||all[key]===void 0||String(all[key]).trim()==="").map(([,label])=>label);
+      if (String(all.bornInUSA||"") === "Sim" && !String(all.birthState||"").trim()) missing.push("estado onde nasceu");
       if (String(all.driverHasLicense||"").toLowerCase() === "sim" && (!String(all.driverLicenseNumber||"").trim() || !String(all.driverLicenseState||"").trim())) missing.push("número e estado da Driver's License");
       if (String(all.hasMedicalCondition||"").toLowerCase() === "sim" && !String(all.medicalDetails||"").trim()) missing.push("qual doença ou diagnóstico");
       if (String(all.usesMedication||"").toLowerCase() === "sim" && !String(all.medications||"").trim()) missing.push("quais medicamentos e dosagens");
