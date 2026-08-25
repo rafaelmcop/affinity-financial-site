@@ -54866,6 +54866,7 @@ Affinity Financial Consulting`,
           monthNumber
         ).run();
     }
+    await env.DB.prepare("UPDATE scheduledMessages SET scheduledAt=NULL WHERE lower(agentEmail)=? AND occasion='monthly' AND scheduledAt IS NOT NULL").bind(owner).run();
     const rows = await env.DB.prepare(
       "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND (title IS NOT NULL OR occasion='custom') ORDER BY scheduledAt"
     ).bind(adminEmail.toLowerCase()).all();
@@ -54900,7 +54901,9 @@ Affinity Financial Consulting`,
       } catch {
         recipientCount = null;
       }
-      const recurring = { birthday: "Em cada anivers\xE1rio, 8:30 AM", thanksgiving: "No Dia de A\xE7\xE3o de Gra\xE7as, 8:30 AM", christmas: "Em 25 de dezembro, 8:30 AM", new_year: "Em 1\xBA de janeiro, 8:30 AM", policy_anniversary: "15 dias antes da revis\xE3o Flex Life, 8:30 AM", monthly: "No primeiro dia do m\xEAs, 8:30 AM" };
+      const monthNames = ["", "janeiro", "fevereiro", "mar\xE7o", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+      const monthlyDate = Number(row.monthNumber) >= 1 && Number(row.monthNumber) <= 12 ? `Todo dia 1\xBA de ${monthNames[Number(row.monthNumber)]}, 8:30 AM` : "M\xEAs de refer\xEAncia pendente";
+      const recurring = { birthday: "Em cada anivers\xE1rio, 8:30 AM", thanksgiving: "No Dia de A\xE7\xE3o de Gra\xE7as, 8:30 AM", christmas: "Em 25 de dezembro, 8:30 AM", new_year: "Em 1\xBA de janeiro, 8:30 AM", policy_anniversary: "15 dias antes da revis\xE3o Flex Life, 8:30 AM", monthly: monthlyDate };
       return { id: `scheduled-${row.id}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : recipientCount ? `${recipientCount} destinat\xE1rio(s)` : String(row.audience) === "all" ? "Todos os clientes eleg\xEDveis" : "Grupo selecionado", recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "scheduled", date: row.scheduledAt || recurring[String(row.occasion)] || "Programa\xE7\xE3o autom\xE1tica", errorMessage: null };
     });
     const sentAutomation = (deliveries.results || []).map((row) => ({ id: `automation-${row.id}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "sent", date: row.sentAt, errorMessage: null }));
@@ -54909,38 +54912,44 @@ Affinity Financial Consulting`,
     return trpcResult([...upcoming, ...failed, ...sentAutomation, ...sentDirect]);
   }
   if (name === "agent.scheduleMessage") {
+    const occasion = String(input.occasion);
+    const monthNumber = Number(input.monthNumber || 0);
+    if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
     await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt,monthNumber) VALUES (?,?,?,'email',?,?,?,?,?,?,?,?)"
     ).bind(
       adminEmail.toLowerCase(),
       input.clientId || null,
-      String(input.occasion),
+      occasion,
       String(input.title ?? "Automa\xE7\xE3o"),
       String(input.subject ?? "Mensagem da Affinity Financial"),
       String(input.audience ?? "individual"),
       String(input.recipientGroup ?? "") || null,
       Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null,
       String(input.message ?? "").trim(),
-      input.scheduledAt || null,
-      Number(input.monthNumber || 0) || null
+      occasion === "monthly" ? null : input.scheduledAt || null,
+      occasion === "monthly" ? monthNumber : null
     ).run();
     if (input.deliveryMode === "immediate") await runMessageAutomations(env);
     return trpcResult({ success: true });
   }
   if (name === "agent.updateMessage") {
+    const occasion = String(input.occasion);
+    const monthNumber = Number(input.monthNumber || 0);
+    if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
     await env.DB.prepare(
       "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,monthNumber=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
     ).bind(
       input.clientId || null,
-      String(input.occasion),
+      occasion,
       String(input.title),
       String(input.subject),
       String(input.audience),
       String(input.recipientGroup ?? "") || null,
       Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null,
       String(input.message),
-      input.scheduledAt || null,
-      Number(input.monthNumber || 0) || null,
+      occasion === "monthly" ? null : input.scheduledAt || null,
+      occasion === "monthly" ? monthNumber : null,
       input.isActive ? 1 : 0,
       Number(input.id),
       adminEmail.toLowerCase()
