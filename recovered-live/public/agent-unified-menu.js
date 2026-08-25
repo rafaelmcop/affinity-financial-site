@@ -16,7 +16,7 @@
     <details ${matches('/agent-applications','/agentes/clientes')?'open':''}><summary>Aplicações <span>›</span></summary><div class="agent-sub"><a${active(matches('/agent-applications'))} href="/agent-applications">Novas aplicações</a><a${active(matches('/agentes/clientes'))} href="/agentes/clientes">Aplicações concluídas</a></div></details>
     <a${active(matches('/agentes/email'))} href="/agentes/email">E-mail <b id="unified-email-badge" class="agent-menu-badge" hidden></b></a>
     <a${active(matches('/agentes/apolices'))} href="/agentes/apolices">Apólices</a><a${active(matches('/agentes/tarefas'))} href="/agentes/tarefas">Tarefas</a><a${active(matches('/agentes/avaliacoes'))} href="/agentes/avaliacoes">Avaliações</a>
-    <a${active(matches('/agent-review-invites.html'))} href="/agent-review-invites.html">Solicitar avaliação</a><a${active(matches('/agentes/configuracoes'))} href="/agentes/configuracoes">Configurações</a>
+    <a${active(matches('/agent-review-invites.html'))} href="/agent-review-invites.html">Solicitar avaliação</a><span id="agent-careers-slot"></span><a${active(matches('/agentes/configuracoes'))} href="/agentes/configuracoes">Configurações</a>
     <div class="agent-menu-divider"></div><a href="/">Site principal</a><button id="agent-unified-logout" type="button">Sair</button></nav>`;
   const style = document.createElement('style');
   style.id = 'agent-unified-menu-style';
@@ -25,4 +25,5 @@
   side.querySelector('.agent-menu-toggle')?.addEventListener('click', () => side.classList.toggle('menu-open'));
   document.getElementById('agent-unified-logout')?.addEventListener('click', async () => { try { await fetch('/api/auth.logout',{method:'POST',credentials:'include'}); } catch {} localStorage.removeItem('agentUser'); localStorage.removeItem('agentToken'); location.href='/agentes/login'; });
   fetch('/api/agent.pendingCounts',{credentials:'include'}).then((r)=>r.ok?r.json():null).then((data)=>{const count=Number(data?.unreadEmails??data?.emails??0),badge=document.getElementById('unified-email-badge');if(badge&&count>0){badge.textContent=count>99?'99+':String(count);badge.hidden=false;}}).catch(()=>{});
+  fetch('/api/trpc/careers.access?input='+encodeURIComponent(JSON.stringify({json:{}})),{credentials:'include'}).then((r)=>r.ok?r.json():null).then((data)=>{const info=data?.result?.data?.json,slot=document.getElementById('agent-careers-slot');if(!slot||!info?.allowed)return;const link=document.createElement('a');link.href='/candidaturas.html?portal=agent';link.className=matches('/candidaturas.html')?'active':'';link.innerHTML='Candidaturas'+(Number(info.pendingCount)>0?` <b class="agent-menu-badge">${Number(info.pendingCount)>99?'99+':Number(info.pendingCount)}</b>`:'');slot.replaceWith(link);}).catch(()=>{});
 })();

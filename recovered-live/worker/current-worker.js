@@ -53665,6 +53665,8 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
   if (name.startsWith("admin.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
+  if (name.startsWith("careers.") && !["admin", "both"].includes(accountType))
+    return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
   await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(adminEmail.toLowerCase()).run();
   const auditedActions = {
     "agent.saveClient": "Criou ou alterou um cliente",
@@ -53700,6 +53702,33 @@ Detalhes: ${details}` : ""}`;
   if (auditedAction) {
     const targetId = String(input.clientId ?? input.affiliateId ?? input.id ?? input.email ?? input.agentEmail ?? "").trim() || null;
     await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)").bind(adminEmail.toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
+  }
+  if (["careers.access", "careers.list", "careers.updateStatus"].includes(name)) {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS careerApplications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL,email TEXT NOT NULL,phone TEXT NOT NULL,
+      workType TEXT NOT NULL,legallyAuthorized INTEGER NOT NULL DEFAULT 1,authorizationType TEXT NOT NULL,
+      salesExperience INTEGER NOT NULL DEFAULT 0,experienceDetails TEXT,languages TEXT NOT NULL,
+      startAvailability TEXT NOT NULL,contactTime TEXT NOT NULL,performanceBased INTEGER NOT NULL DEFAULT 0,
+      motivation TEXT NOT NULL,source TEXT,status TEXT NOT NULL DEFAULT 'new',adminNotes TEXT,reviewedBy TEXT,
+      reviewedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+    for (const column of ["adminNotes TEXT", "reviewedBy TEXT", "reviewedAt TEXT"]) {
+      try { await env.DB.prepare(`ALTER TABLE careerApplications ADD COLUMN ${column}`).run(); } catch {}
+    }
+    const pending = await env.DB.prepare("SELECT COUNT(*) AS total FROM careerApplications WHERE status='new'").first();
+    if (name === "careers.access") return trpcResult({ allowed: true, pendingCount: Number(pending?.total || 0) });
+    if (name === "careers.list") {
+      const rows = await env.DB.prepare("SELECT * FROM careerApplications ORDER BY CASE WHEN status='new' THEN 0 WHEN status='reviewing' THEN 1 ELSE 2 END, datetime(createdAt) DESC, id DESC").all();
+      return trpcResult({ applications: rows.results || [], pendingCount: Number(pending?.total || 0) });
+    }
+    const id = Number(input.id || 0), status = String(input.status || "").trim();
+    const allowedStatuses = new Set(["new", "reviewing", "contacted", "interview", "approved", "rejected", "archived"]);
+    if (!id || !allowedStatuses.has(status)) return trpcError("Candidatura ou situação inválida");
+    const adminNotes = String(input.adminNotes || "").trim().slice(0, 3000) || null;
+    const result = await env.DB.prepare("UPDATE careerApplications SET status=?,adminNotes=?,reviewedBy=?,reviewedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(status,adminNotes,adminEmail.toLowerCase(),id).run();
+    if (!result.meta.changes) return trpcError("Candidatura não encontrada", "NOT_FOUND", 404);
+    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,'Atualizou uma candidatura','careerApplication',?)").bind(adminEmail.toLowerCase(),String(id)).run();
+    return trpcResult({ success: true });
   }
   if (name === "agent.createReviewInvite") {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
