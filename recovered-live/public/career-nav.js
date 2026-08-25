@@ -9,9 +9,15 @@
       link.href='/trabalhe-conosco.html';link.dataset.careerNav='true';link.textContent=labels[language()];link.className=contact.className;
       contact.insertAdjacentElement('afterend',link);
     });
-    document.querySelectorAll('[data-career-nav]').forEach(link=>link.textContent=labels[language()]);
+    document.querySelectorAll('[data-career-nav]').forEach(link=>{
+      const label=labels[language()];
+      if(link.textContent!==label)link.textContent=label;
+    });
   }
   install();
   const observer=new MutationObserver(install);observer.observe(document.documentElement,{childList:true,subtree:true});
-  window.addEventListener('storage',()=>{const link=document.querySelector('[data-career-nav]');if(link)link.textContent=labels[language()]});
+  window.addEventListener('storage',()=>document.querySelectorAll('[data-career-nav]').forEach(link=>{
+    const label=labels[language()];
+    if(link.textContent!==label)link.textContent=label;
+  }));
 })();
