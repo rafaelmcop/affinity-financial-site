@@ -53734,6 +53734,26 @@ Detalhes: ${details}` : ""}`;
     }
     if (name === "agent.submitApplication") {
       const id = Number(input.id || 0);
+      const application = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first();
+      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      let completed = {}, protectedData = {};
+      try { completed = JSON.parse(String(application.applicationData || "{}")); } catch {}
+      try { protectedData = JSON.parse(await decryptSmtpPassword(String(application.sensitiveData || ""), env.JWT_SECRET)); } catch {}
+      const all = { ...application, ...completed, ...protectedData };
+      const required = {clientName:"nome completo",clientEmail:"e-mail",clientPhone:"telefone",birthDate:"data de nascimento",address:"endereço",city:"cidade",state:"estado",zipCode:"ZIP Code",birthCountry:"país de nascimento",gender:"sexo",maritalStatus:"estado civil",ssn:"SSN/ITIN",passportNumber:"passaporte",driverHasLicense:"informação sobre Driver's License",height:"altura",weight:"peso",employer:"empresa",industry:"área profissional",occupation:"ocupação",employmentLength:"tempo de trabalho",weeklyIncome:"renda semanal",monthlyFixedExpenses:"gastos fixos mensais",bankName:"banco",routingNumber:"routing number",accountNumber:"account number",seenDoctor:"consulta médica",lastDoctorVisit:"data da consulta",physicianName:"médico ou hospital",tobacco:"histórico de fumo",hasMedicalCondition:"informação sobre doença ou diagnóstico",usesMedication:"informação sobre medicamentos",fatherLiving:"situação do pai",motherLiving:"situação da mãe",productInterest:"produto",coverageRequested:"cobertura",premiumBudget:"premium",deathBenefitOption:"benefício por morte",riders:"riders",applicationState:"estado da aplicação",applicationReason:"objetivo da proteção",existingInsurance:"seguro existente",riskDetails:"informações de risco",notes:"observações"};
+      const missing = Object.entries(required).filter(([key])=>all[key]===null||all[key]===void 0||String(all[key]).trim()==="").map(([,label])=>label);
+      if (String(all.driverHasLicense||"").toLowerCase() === "sim" && (!String(all.driverLicenseNumber||"").trim() || !String(all.driverLicenseState||"").trim())) missing.push("número e estado da Driver's License");
+      if (String(all.hasMedicalCondition||"").toLowerCase() === "sim" && !String(all.medicalDetails||"").trim()) missing.push("qual doença ou diagnóstico");
+      if (String(all.usesMedication||"").toLowerCase() === "sim" && !String(all.medications||"").trim()) missing.push("quais medicamentos e dosagens");
+      for (const parent of ["father","mother"]) {
+        const living = String(all[`${parent}Living`]||"").toLowerCase();
+        if (living === "sim" && !String(all[`${parent}Age`]??"").trim()) missing.push(`idade atual ${parent==="father"?"do pai":"da mãe"}`);
+        if (living === "não" && (!String(all[`${parent}DeathAge`]??"").trim() || !String(all[`${parent}DeathReason`]??"").trim())) missing.push(`idade e motivo do falecimento ${parent==="father"?"do pai":"da mãe"}`);
+      }
+      if (!Array.isArray(all.beneficiaries) || !all.beneficiaries.length || all.beneficiaries.some((b)=>!b.name||!b.relationship||!b.birthDate||String(b.percentage??"").trim()==="")) missing.push("beneficiário completo");
+      if (!Array.isArray(all.contacts) || !all.contacts.length || all.contacts.some((c)=>!c.name||!c.relationship||!c.phone)) missing.push("contato de emergência completo");
+      if (!Array.isArray(all.attachments) || !all.attachments.length) missing.push("documento ou foto");
+      if (missing.length) return trpcError(`Complete antes de concluir: ${[...new Set(missing)].join(", ")}`);
       const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status='draft'").bind(id,owner).run();
       if (!result.meta.changes) return trpcError("Salve o rascunho antes de submeter");
       return trpcResult({ success: true });
