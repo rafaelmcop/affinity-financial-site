@@ -1,5 +1,5 @@
 (() => {
-  const state = { folder: 'inbox', folderId: null, items: [], selected: null, clients: [], folders: [], replyToId: null };
+  const state = { folder: 'inbox', folderId: null, items: [], selected: null, clients: [], folders: [], replyToId: null, lastUnread: null, audioReady: false };
   const $ = id => document.getElementById(id);
   const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
   async function api(name, input = {}, mutation = false) {
@@ -20,6 +20,10 @@
     return payload.result?.data?.json;
   }
   function notify(message, type = 'ok') { const box = $('notice'); box.textContent = message; box.className = `notice show ${type}`; setTimeout(() => box.className = 'notice', 6000); }
+  let audioContext;
+  function unlockAudio(){try{audioContext ||= new (window.AudioContext||window.webkitAudioContext)();audioContext.resume();state.audioReady=true}catch{}}
+  function playNewEmailSound(){if(!state.audioReady)return;try{const now=audioContext.currentTime,gain=audioContext.createGain();gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.16,now+.02);gain.gain.exponentialRampToValueAtTime(.0001,now+.7);gain.connect(audioContext.destination);[[659,0,.18],[880,.22,.32]].forEach(([frequency,delay,duration])=>{const oscillator=audioContext.createOscillator();oscillator.type='sine';oscillator.frequency.value=frequency;oscillator.connect(gain);oscillator.start(now+delay);oscillator.stop(now+delay+duration)});}catch{}}
+  document.addEventListener('pointerdown',unlockAudio,{once:true});document.addEventListener('keydown',unlockAudio,{once:true});
   function date(value) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? String(value || '') : parsed.toLocaleString('pt-BR'); }
   const topicLabels = {returned_payment:'Pagamento retornado',exams:'Exame solicitado',extra_information:'Informações adicionais',documents:'Documento ou assinatura',underwriting:'Análise e status',general:'Geral'};
   function topic(email) { const value=email.topic || 'general'; return value === 'general' ? '' : `<span class="topic ${escape(value)}">${escape(topicLabels[value] || 'Geral')}</span>`; }
@@ -57,9 +61,11 @@
     const item = state.selected;
     const visualBody=item.htmlBody?'<iframe class="email-frame" id="email-frame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>':`<div class="body">${escape(item.body)}</div>`;
     const deleted=Boolean(item.deletedAt);
-    $('detail').innerHTML = `<button class="back" id="back">← Voltar</button><div class="eyebrow">${item.direction === 'received' ? 'Recebido' : 'Enviado'}</div><h2>${escape(item.subject)}</h2><div class="meta"><span class="pill">De: ${escape(item.fromEmail)}</span><span class="pill">Para: ${escape(item.toEmail)}</span>${item.clientName ? `<span class="pill">Cliente: ${escape(item.clientName)}</span>` : ''}${item.policyNumber ? `<span class="pill">Apólice: ${escape(item.policyNumber)}</span>` : ''}${item.folderName?`<span class="pill">Pasta: ${escape(item.folderName)}</span>`:''}${topic(item)}${status(item)}</div>${item.actionDetail ? `<p class="muted"><strong>Ação do sistema:</strong> ${escape(item.actionDetail)}</p>` : ''}<p class="muted">${escape(date(item.sentAt))}</p>${visualBody}<div class="actions"><button class="primary" id="reply">Responder</button>${deleted?'<button id="restore">Restaurar</button>':`<select id="move-folder">${folderOptions(item.folderId)}</select><button id="move">Mover</button><button class="danger" id="delete-message">Excluir</button>`}</div>`;
+    const providerEmail=/national\s*life|nationallife|nlgroup|five\s*rings|fiverings|core\s*bridge|corebridge|aig\.com/i.test(`${item.fromEmail||''} ${item.subject||''}`);
+    $('detail').innerHTML = `<button class="back" id="back">← Voltar</button><div class="eyebrow">${item.direction === 'received' ? 'Recebido' : 'Enviado'}</div><h2>${escape(item.subject)}</h2><div class="meta"><span class="pill">De: ${escape(item.fromEmail)}</span><span class="pill">Para: ${escape(item.toEmail)}</span>${item.clientName ? `<span class="pill">Cliente: ${escape(item.clientName)}</span>` : ''}${item.policyNumber ? `<span class="pill">Apólice: ${escape(item.policyNumber)}</span>` : ''}${item.folderName?`<span class="pill">Pasta: ${escape(item.folderName)}</span>`:''}${topic(item)}${status(item)}</div>${item.actionDetail ? `<p class="muted"><strong>Ação do sistema:</strong> ${escape(item.actionDetail)}</p>` : ''}<p class="muted">${escape(date(item.sentAt))}</p>${visualBody}<div class="actions"><button class="primary" id="reply">Responder</button>${!deleted&&item.direction==='received'&&providerEmail?'<button class="primary" id="complete-message">✓ Pronto</button>':''}${deleted?'<button id="restore">Restaurar</button>':`<select id="move-folder">${folderOptions(item.folderId)}</select><button id="move">Mover</button><button class="danger" id="delete-message">Excluir</button>`}</div>`;
     if (item.htmlBody) { const frame=$('email-frame'); frame.srcdoc=`<!doctype html><meta name="viewport" content="width=device-width"><base target="_blank"><style>body{font-family:Arial,sans-serif;color:#111;background:#fff;padding:14px;overflow-wrap:anywhere}img{max-width:100%;height:auto}table{max-width:100%}</style>${item.htmlBody}`; }
     $('reply').onclick = () => compose(item);
+    if ($('complete-message')) $('complete-message').onclick=async()=>{const button=$('complete-message');button.disabled=true;button.textContent='Arquivando…';try{const result=await api('agent.completeMailboxEmail',{id:item.id},true);notify(`Concluído e movido para ${result.folderName}.`);state.selected=null;$('detail').innerHTML='<div class="empty">Selecione uma mensagem para ler.</div>';await Promise.all([load(),loadFolders()]);}catch(error){notify(error.message,'error');button.disabled=false;button.textContent='✓ Pronto'}};
     if (deleted) $('restore').onclick=async()=>{try{await api('agent.restoreMailboxEmail',{id:item.id},true);notify('Mensagem restaurada.');state.selected=null;await Promise.all([load(),loadFolders()]);}catch(error){notify(error.message,'error')}};
     else {
       $('move').onclick=async()=>{try{const value=$('move-folder').value;await api('agent.moveMailboxEmail',{id:item.id,folderId:value?Number(value):null},true);notify(value?'Mensagem armazenada na pasta.':'Mensagem devolvida à pasta principal.');state.selected=null;await Promise.all([load(),loadFolders()]);}catch(error){notify(error.message,'error')}};
@@ -73,6 +79,7 @@
     try {
       const data = await api('agent.mailbox', {folder: state.folder, folderId: state.folderId, search: $('search').value});
       state.items = data.items || []; renderList();
+      const unread=Number(data.unread||0);if(state.lastUnread!==null&&unread>state.lastUnread)playNewEmailSound();state.lastUnread=unread;
       for (const [id,value] of [['unread',data.unread],['side-unread',data.unread]]) { const badge=$(id); badge.textContent=value; badge.hidden=!value; }
       for (const key of ['returned_payment','exams','extra_information','documents','underwriting']) { const badge=$(`count-${key}`); const value=data.topicCounts?.[key]?.total || 0; badge.textContent=value; badge.hidden=!value; }
       $('last-update').textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · atualização automática a cada 5 minutos`;

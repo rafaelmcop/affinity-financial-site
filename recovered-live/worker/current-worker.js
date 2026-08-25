@@ -54129,6 +54129,25 @@ Detalhes: ${details}` : ""}`;
     if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
+  if (name === "agent.completeMailboxEmail") {
+    const owner = adminEmail.toLowerCase();
+    const id = Number(input.id || 0);
+    const message = await env.DB.prepare("SELECT m.id,m.imapUid,m.direction,m.fromEmail,m.subject,m.body,m.actionDetail,f.providerName AS sourceProvider FROM agentMailboxEmails m LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? AND m.deletedAt IS NULL LIMIT 1").bind(owner,id,owner).first();
+    if (!message) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    const identity = `${message.subject || ""} ${message.body || ""} ${message.actionDetail || ""} ${message.fromEmail || ""}`.toLowerCase();
+    const targetName = /national\s*life|nationallife|nlgroup/.test(identity) ? "NLG" : /five\s*rings|fiverings/.test(identity) ? "Five Rings" : /core\s*bridge|corebridge|aig\.com/.test(identity) ? "Corebridge" : "";
+    if (!targetName) return trpcError("Não foi possível identificar automaticamente a companhia deste e-mail");
+    const folderPattern = targetName === "NLG" ? "%nlg%" : targetName === "Five Rings" ? "%five%ring%" : "%corebridge%";
+    const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE lower(agentEmail)=? AND (lower(name) LIKE ? OR lower(providerName) LIKE ?) ORDER BY CASE WHEN lower(name)=lower(?) THEN 0 ELSE 1 END LIMIT 1").bind(owner,folderPattern,folderPattern,targetName).first();
+    if (!folder) return trpcError(`A pasta ${targetName} já deve existir nas configurações do e-mail antes de concluir`);
+    if (message.imapUid) {
+      const source = String(message.sourceProvider || (message.direction === "sent" ? "Sent Messages" : "INBOX"));
+      const { moveIcloudEmail: moveIcloudEmail2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
+      await moveIcloudEmail2(env, owner, String(message.imapUid), source, String(folder.providerName || folder.name));
+    }
+    await env.DB.prepare("UPDATE agentMailboxEmails SET folderId=?,readAt=COALESCE(readAt,CURRENT_TIMESTAMP),deletedAt=NULL WHERE id=? AND lower(agentEmail)=?").bind(Number(folder.id),id,owner).run();
+    return trpcResult({ success: true, folderName: String(folder.name || targetName) });
+  }
   if (name === "agent.deleteMailboxEmail") {
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
