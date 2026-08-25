@@ -53489,6 +53489,60 @@ Detalhes: ${details}` : ""}`;
       });
     }
   }
+  if (name === "careers.submit") {
+    const safeCareerText = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+    const applicantName = String(input.name || "").trim().slice(0, 140);
+    const email = String(input.email || "").trim().toLowerCase().slice(0, 180);
+    const phone = String(input.phone || "").trim().slice(0, 40);
+    const workType = String(input.workType || "").trim().slice(0, 40);
+    const legallyAuthorized = String(input.legallyAuthorized || "").trim();
+    const authorizationType = String(input.authorizationType || "").trim().slice(0, 80);
+    const salesExperience = String(input.salesExperience || "").trim();
+    const experienceDetails = String(input.experienceDetails || "").trim().slice(0, 1500);
+    const languages = String(input.languages || "").trim().slice(0, 300);
+    const startAvailability = String(input.startAvailability || "").trim().slice(0, 80);
+    const contactTime = String(input.contactTime || "").trim().slice(0, 80);
+    const performanceBased = String(input.performanceBased || "").trim();
+    const motivation = String(input.motivation || "").trim().slice(0, 2000);
+    const source = String(input.source || "").trim().slice(0, 300);
+    if (String(input.website || "").trim()) return trpcResult({ success: true });
+    if (applicantName.length < 3 || !validEmail(email) || phone.replace(/\D/g, "").length < 10) return trpcError("Informe nome, e-mail e telefone válidos");
+    if (!["Full-time", "Part-time", "Estou aberto(a) aos dois"].includes(workType)) return trpcError("Selecione a oportunidade desejada");
+    if (legallyAuthorized !== "Sim") return trpcError("É obrigatório ter autorização legal válida para trabalhar nos Estados Unidos");
+    if (!["Employment Authorization Document (EAD)", "Green Card", "Cidadania americana"].includes(authorizationType)) return trpcError("Informe o tipo de autorização de trabalho");
+    if (!["Sim", "Não"].includes(salesExperience) || !languages || !startAvailability || !contactTime || !["Sim", "Não"].includes(performanceBased) || motivation.length < 20) return trpcError("Conclua todas as perguntas obrigatórias");
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS careerApplications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      workType TEXT NOT NULL,
+      legallyAuthorized INTEGER NOT NULL DEFAULT 1,
+      authorizationType TEXT NOT NULL,
+      salesExperience INTEGER NOT NULL DEFAULT 0,
+      experienceDetails TEXT,
+      languages TEXT NOT NULL,
+      startAvailability TEXT NOT NULL,
+      contactTime TEXT NOT NULL,
+      performanceBased INTEGER NOT NULL DEFAULT 0,
+      motivation TEXT NOT NULL,
+      source TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+    const recent = await env.DB.prepare("SELECT id FROM careerApplications WHERE lower(email)=? AND createdAt>=datetime('now','-10 minutes') LIMIT 1").bind(email).first();
+    if (!recent) {
+      await env.DB.prepare("INSERT INTO careerApplications (name,email,phone,workType,legallyAuthorized,authorizationType,salesExperience,experienceDetails,languages,startAvailability,contactTime,performanceBased,motivation,source) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?)").bind(applicantName,email,phone,workType,authorizationType,salesExperience === "Sim" ? 1 : 0,experienceDetails||null,languages,startAvailability,contactTime,performanceBased === "Sim" ? 1 : 0,motivation,source||null).run();
+      await sendEmailIfConfigured(env, {
+        to: "info@affinityfc.org",
+        replyTo: email,
+        subject: `Nova candidatura: ${applicantName} — ${workType}`,
+        html: emailHtml("Nova candidatura — Trabalhe conosco", `<p><b>Nome:</b> ${safeCareerText(applicantName)}</p><p><b>E-mail:</b> ${safeCareerText(email)}<br><b>Telefone:</b> ${safeCareerText(phone)}<br><b>Interesse:</b> ${safeCareerText(workType)}<br><b>Autorização:</b> ${safeCareerText(authorizationType)}<br><b>Experiência em vendas:</b> ${safeCareerText(salesExperience)}<br><b>Idiomas:</b> ${safeCareerText(languages)}<br><b>Disponibilidade:</b> ${safeCareerText(startAvailability)}<br><b>Melhor horário:</b> ${safeCareerText(contactTime)}<br><b>Confortável com metas:</b> ${safeCareerText(performanceBased)}</p><p><b>Experiência:</b><br>${safeCareerText(experienceDetails || "Não informada")}</p><p><b>Motivação:</b><br>${safeCareerText(motivation)}</p><p><b>Origem:</b> ${safeCareerText(source || "Não informada")}</p>`)
+      });
+    }
+    return trpcResult({ success: true, message: "Recebemos suas informações. Entraremos em contato." });
+  }
   if (name === "passwordReset.requestReset") {
     const email = String(input.email ?? "").trim().toLowerCase();
     const userType = input.userType === "admin" ? "admin" : "affiliate";
