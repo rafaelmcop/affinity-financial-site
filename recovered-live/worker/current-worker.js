@@ -52824,7 +52824,7 @@ function secureResponse(response, options = {}) {
   secured.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   secured.headers.set(
     "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=()"
+    "camera=(self), microphone=(), geolocation=()"
   );
   secured.headers.set("Cross-Origin-Opener-Policy", "same-origin");
   if (options.privateData) {
