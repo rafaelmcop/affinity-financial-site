@@ -56250,6 +56250,10 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-email-settings.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
+    if (url.pathname === "/agent-applications" || url.pathname === "/agent-applications.html") {
+      url.pathname = "/agent-applications.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
     if (!url.pathname.startsWith("/api/trpc/")) {
       const privateShell = /^\/(admin|agentes|afiliados)(\/|$)/.test(
         url.pathname
