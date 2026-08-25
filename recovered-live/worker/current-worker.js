@@ -53592,6 +53592,7 @@ Detalhes: ${details}` : ""}`;
   const auditedActions = {
     "agent.saveClient": "Criou ou alterou um cliente",
     "agent.requestClientDeletion": "Solicitou a exclus\xE3o de um cliente",
+    "agent.requestApplicationDeletion": "Solicitou a exclusão de uma aplicação",
     "agent.updatePolicyDetails": "Alterou uma ap\xF3lice",
     "agent.deletePolicy": "Excluiu uma ap\xF3lice",
     "agent.importPcSheet": "Importou um PC Sheet",
@@ -53635,7 +53636,7 @@ Detalhes: ${details}` : ""}`;
     if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication"].includes(name)) {
+  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion"].includes(name)) {
     const owner = adminEmail.toLowerCase();
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53673,6 +53674,18 @@ Detalhes: ${details}` : ""}`;
       try { await env.DB.prepare(`ALTER TABLE agentApplications ADD COLUMN ${column}`).run(); } catch {}
     }
     await env.DB.prepare("CREATE INDEX IF NOT EXISTS agentApplications_owner_status ON agentApplications(agentEmail,status)").run();
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS applicationDeletionRequests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      applicationId INTEGER NOT NULL,
+      agentEmail TEXT NOT NULL,
+      applicationName TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      adminNote TEXT,
+      reviewedBy TEXT,
+      requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      reviewedAt TEXT
+    )`).run();
     if (name === "agent.listApplications") {
       await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
       await env.DB.prepare(`UPDATE agentApplications AS a SET
@@ -53688,7 +53701,8 @@ Detalhes: ${details}` : ""}`;
           WHERE lower(p.agentEmail)=lower(a.agentEmail)
           AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
             OR lower(trim(c.name))=lower(trim(a.clientName))))`).bind(owner).run();
-      const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount
+      const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount,
+        EXISTS(SELECT 1 FROM applicationDeletionRequests d WHERE d.applicationId=a.id AND d.status='pending') AS deletionPending
         FROM agentApplications a LEFT JOIN agentPolicies p ON p.id=a.matchedPolicyId
         WHERE lower(a.agentEmail)=? ORDER BY CASE a.status WHEN 'submitted' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,a.updatedAt DESC`).bind(owner).all();
       return trpcResult(rows.results.map((row) => {
@@ -53740,22 +53754,34 @@ Detalhes: ${details}` : ""}`;
       try { completed = JSON.parse(String(application.applicationData || "{}")); } catch {}
       try { protectedData = JSON.parse(await decryptSmtpPassword(String(application.sensitiveData || ""), env.JWT_SECRET)); } catch {}
       const all = { ...application, ...completed, ...protectedData };
-      const required = {clientName:"nome completo",clientEmail:"e-mail",clientPhone:"telefone",birthDate:"data de nascimento",address:"endereço",city:"cidade",state:"estado",zipCode:"ZIP Code",birthCountry:"país de nascimento",gender:"sexo",maritalStatus:"estado civil",ssn:"SSN/ITIN",passportNumber:"passaporte",driverHasLicense:"informação sobre Driver's License",height:"altura",weight:"peso",employer:"empresa",industry:"área profissional",occupation:"ocupação",employmentLength:"tempo de trabalho",weeklyIncome:"renda semanal",monthlyFixedExpenses:"gastos fixos mensais",bankName:"banco",routingNumber:"routing number",accountNumber:"account number",seenDoctor:"consulta médica",lastDoctorVisit:"data da consulta",physicianName:"médico ou hospital",tobacco:"histórico de fumo",hasMedicalCondition:"informação sobre doença ou diagnóstico",usesMedication:"informação sobre medicamentos",fatherLiving:"situação do pai",motherLiving:"situação da mãe",productInterest:"produto",coverageRequested:"cobertura",premiumBudget:"premium",deathBenefitOption:"benefício por morte",riders:"riders",applicationState:"estado da aplicação",applicationReason:"objetivo da proteção",existingInsurance:"seguro existente",riskDetails:"informações de risco",notes:"observações"};
+      const required = {clientName:"nome completo",clientEmail:"e-mail",clientPhone:"telefone",birthDate:"data de nascimento",address:"endereço",city:"cidade",state:"estado",zipCode:"ZIP Code",birthCountry:"país de nascimento",gender:"sexo",maritalStatus:"estado civil",ssn:"SSN/ITIN",passportNumber:"passaporte",driverHasLicense:"informação sobre Driver's License",height:"altura",weight:"peso",employer:"empresa",industry:"área profissional",occupation:"ocupação",employmentLength:"tempo de trabalho",weeklyIncome:"renda semanal",monthlyFixedExpenses:"gastos fixos mensais",bankName:"banco",routingNumber:"routing number",accountNumber:"account number",seenDoctor:"consulta médica",tobacco:"histórico de fumo",hasMedicalCondition:"informação sobre doença ou diagnóstico",usesMedication:"informação sobre medicamentos",fatherLiving:"situação do pai",motherLiving:"situação da mãe",productInterest:"produto",coverageRequested:"cobertura",premiumBudget:"premium",existingInsurance:"seguro existente"};
       const missing = Object.entries(required).filter(([key])=>all[key]===null||all[key]===void 0||String(all[key]).trim()==="").map(([,label])=>label);
       if (String(all.driverHasLicense||"").toLowerCase() === "sim" && (!String(all.driverLicenseNumber||"").trim() || !String(all.driverLicenseState||"").trim())) missing.push("número e estado da Driver's License");
       if (String(all.hasMedicalCondition||"").toLowerCase() === "sim" && !String(all.medicalDetails||"").trim()) missing.push("qual doença ou diagnóstico");
       if (String(all.usesMedication||"").toLowerCase() === "sim" && !String(all.medications||"").trim()) missing.push("quais medicamentos e dosagens");
+      if (String(all.seenDoctor||"").toLowerCase() === "sim" && (!String(all.lastDoctorVisit||"").trim() || !String(all.physicianName||"").trim())) missing.push("mês da consulta e médico ou hospital");
+      if (String(all.existingInsurance||"").toLowerCase() === "sim" && (!String(all.existingInsuranceCompany||"").trim() || !String(all.existingCoverage||"").trim() || !String(all.existingLivingBenefits||"").trim())) missing.push("dados do seguro de vida existente");
       for (const parent of ["father","mother"]) {
         const living = String(all[`${parent}Living`]||"").toLowerCase();
         if (living === "sim" && !String(all[`${parent}Age`]??"").trim()) missing.push(`idade atual ${parent==="father"?"do pai":"da mãe"}`);
         if (living === "não" && (!String(all[`${parent}DeathAge`]??"").trim() || !String(all[`${parent}DeathReason`]??"").trim())) missing.push(`idade e motivo do falecimento ${parent==="father"?"do pai":"da mãe"}`);
       }
       if (!Array.isArray(all.beneficiaries) || !all.beneficiaries.length || all.beneficiaries.some((b)=>!b.name||!b.relationship||!b.birthDate||String(b.percentage??"").trim()==="")) missing.push("beneficiário completo");
-      if (!Array.isArray(all.contacts) || !all.contacts.length || all.contacts.some((c)=>!c.name||!c.relationship||!c.phone)) missing.push("contato de emergência completo");
+      else if (Math.abs(all.beneficiaries.reduce((sum,b)=>sum+Number(b.percentage||0),0)-100) > 0.001) missing.push("percentuais dos beneficiários devem somar exatamente 100%");
       if (!Array.isArray(all.attachments) || !all.attachments.length) missing.push("documento ou foto");
       if (missing.length) return trpcError(`Complete antes de concluir: ${[...new Set(missing)].join(", ")}`);
       const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status='draft'").bind(id,owner).run();
       if (!result.meta.changes) return trpcError("Salve o rascunho antes de submeter");
+      return trpcResult({ success: true });
+    }
+    if (name === "agent.requestApplicationDeletion") {
+      const id = Number(input.id || 0), reason = String(input.reason || "").trim();
+      if (reason.length < 5) return trpcError("Explique o motivo com pelo menos 5 caracteres");
+      const application = await env.DB.prepare("SELECT id,clientName FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first();
+      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      const pending = await env.DB.prepare("SELECT id FROM applicationDeletionRequests WHERE applicationId=? AND status='pending'").bind(id).first();
+      if (pending) return trpcError("Esta solicitação já está aguardando o administrador");
+      await env.DB.prepare("INSERT INTO applicationDeletionRequests (applicationId,agentEmail,applicationName,reason) VALUES (?,?,?,?)").bind(id,owner,String(application.clientName||"Aplicação"),reason).run();
       return trpcResult({ success: true });
     }
   }
@@ -55760,17 +55786,28 @@ Affinity Financial Consulting`,
   if (name === "crm.listClientDeletionRequests") {
     if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-    const rows = await env.DB.prepare(
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,applicationId INTEGER NOT NULL,agentEmail TEXT NOT NULL,applicationName TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
+    const [rows, applications] = await Promise.all([env.DB.prepare(
       "SELECT r.*,a.name agentName FROM clientDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC"
-    ).all();
-    return trpcResult(rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })));
+    ).all(), env.DB.prepare("SELECT r.*,a.name agentName FROM applicationDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC").all()]);
+    return trpcResult([
+      ...rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })),
+      ...applications.results.map((row) => ({ ...row, id: `application-${row.id}`, clientId: Number(row.applicationId), clientName: `Aplicação: ${row.applicationName}`, entityType: "application" }))
+    ].sort((a,b)=>(a.status==="pending"?-1:1)-(b.status==="pending"?-1:1) || String(b.requestedAt).localeCompare(String(a.requestedAt))));
   }
   if (name === "crm.reviewClientDeletionRequest") {
     if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-    const id = Number(input.id), decision = String(input.decision || "");
+    const rawId = String(input.id || ""), isApplication = rawId.startsWith("application-"), id = Number(isApplication ? rawId.slice(12) : rawId), decision = String(input.decision || "");
     if (!id || !["approved", "rejected"].includes(decision))
       return trpcError("Decis\xE3o inv\xE1lida");
+    if (isApplication) {
+      const requestRow = await env.DB.prepare("SELECT * FROM applicationDeletionRequests WHERE id=? AND status='pending'").bind(id).first();
+      if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
+      if (decision === "approved") await env.DB.prepare("DELETE FROM agentApplications WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.applicationId),String(requestRow.agentEmail)).run();
+      await env.DB.prepare("UPDATE applicationDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision,adminEmail.toLowerCase(),String(input.adminNote||"").trim()||null,id).run();
+      return trpcResult({ success: true });
+    }
     const requestRow = await env.DB.prepare(
       "SELECT * FROM clientDeletionRequests WHERE id=? AND status='pending'"
     ).bind(id).first();
