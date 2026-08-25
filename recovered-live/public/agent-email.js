@@ -80,8 +80,8 @@
       const data = await api('agent.mailbox', {folder: state.folder, folderId: state.folderId, search: $('search').value});
       state.items = data.items || []; renderList();
       const unread=Number(data.unread||0);if(state.lastUnread!==null&&unread>state.lastUnread)playNewEmailSound();state.lastUnread=unread;
-      for (const [id,value] of [['unread',data.unread],['side-unread',data.unread]]) { const badge=$(id); badge.textContent=value; badge.hidden=!value; }
-      for (const key of ['returned_payment','exams','extra_information','documents','underwriting']) { const badge=$(`count-${key}`); const value=data.topicCounts?.[key]?.total || 0; badge.textContent=value; badge.hidden=!value; }
+      for (const id of ['unread','side-unread','unified-email-badge']) { const badge=$(id); if (!badge) continue; const value=Number(data.unread||0); badge.textContent=value>99?'99+':String(value); badge.hidden=!value; }
+      for (const key of ['returned_payment','exams','extra_information','documents','underwriting']) { const badge=$(`count-${key}`); if (!badge) continue; const value=data.topicCounts?.[key]?.total || 0; badge.textContent=value; badge.hidden=!value; }
       $('last-update').textContent = `Atualizado às ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · atualização automática a cada 5 minutos`;
     } catch (error) { $('list').innerHTML = `<div class="empty">${escape(error.message)}</div>`; }
   }
