@@ -53796,7 +53796,6 @@ Detalhes: ${details}` : ""}`;
       }
       if (!Array.isArray(all.beneficiaries) || !all.beneficiaries.length || all.beneficiaries.some((b)=>!b.name||!b.relationship||!b.birthDate||String(b.percentage??"").trim()==="")) missing.push("beneficiário completo");
       else if (Math.abs(all.beneficiaries.reduce((sum,b)=>sum+Number(b.percentage||0),0)-100) > 0.001) missing.push("percentuais dos beneficiários devem somar exatamente 100%");
-      if (!Array.isArray(all.attachments) || !all.attachments.length) missing.push("documento ou foto");
       if (missing.length) return trpcError(`Complete antes de concluir: ${[...new Set(missing)].join(", ")}`);
       const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status='draft'").bind(id,owner).run();
       if (!result.meta.changes) return trpcError("Salve o rascunho antes de submeter");
