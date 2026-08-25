@@ -16,7 +16,7 @@
     <details ${matches('/agent-applications','/agentes/clientes')?'open':''}><summary>Aplicações <span>›</span></summary><div class="agent-sub"><a${active(matches('/agent-applications'))} href="/agent-applications">Novas aplicações</a><a${active(matches('/agentes/clientes'))} href="/agentes/clientes">Aplicações concluídas</a></div></details>
     <a${active(matches('/agentes/email'))} href="/agentes/email">E-mail <b id="unified-email-badge" class="agent-menu-badge" hidden></b></a>
     <a${active(matches('/agentes/apolices'))} href="/agentes/apolices">Apólices</a><a${active(matches('/agentes/tarefas'))} href="/agentes/tarefas">Tarefas</a><a${active(matches('/agentes/avaliacoes'))} href="/agentes/avaliacoes">Avaliações</a>
-    <a${active(matches('/agentes/solicitar-avaliacao'))} href="/agentes/solicitar-avaliacao">Solicitar avaliação</a><a${active(matches('/agentes/configuracoes'))} href="/agentes/configuracoes">Configurações</a>
+    <a${active(matches('/agent-review-invites.html'))} href="/agent-review-invites.html">Solicitar avaliação</a><a${active(matches('/agentes/configuracoes'))} href="/agentes/configuracoes">Configurações</a>
     <div class="agent-menu-divider"></div><a href="/">Site principal</a><button id="agent-unified-logout" type="button">Sair</button></nav>`;
   const style = document.createElement('style');
   style.id = 'agent-unified-menu-style';
