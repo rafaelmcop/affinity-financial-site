@@ -56636,7 +56636,7 @@ function extractFiveRingsEmailCode(subject, body) {
 __name(extractFiveRingsEmailCode, "extractFiveRingsEmailCode");
 async function newestFiveRingsEmailCode(env, agentEmail, since) {
   const messages = await env.DB.prepare(
-    "SELECT id,subject,body,sentAt FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND datetime(sentAt)>=datetime(?,'-2 minutes') AND (lower(coalesce(fromEmail,'')) LIKE '%fiverings%' OR lower(coalesce(subject,'')) LIKE '%five rings%' OR lower(coalesce(body,'')) LIKE '%five rings%') ORDER BY datetime(sentAt) DESC,id DESC LIMIT 10"
+    "SELECT id,subject,body,sentAt FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND datetime(sentAt)>=datetime(?,'-2 minutes') AND (lower(coalesce(fromEmail,'')) LIKE '%fiverings%' OR lower(coalesce(fromEmail,''))='notifications@mga360.com' OR lower(coalesce(subject,'')) LIKE '%five rings%' OR lower(coalesce(subject,'')) LIKE '%2-step verification code%' OR lower(coalesce(body,'')) LIKE '%five rings%') ORDER BY datetime(sentAt) DESC,id DESC LIMIT 10"
   ).bind(agentEmail, since).all();
   for (const message of messages.results || []) {
     const code = extractFiveRingsEmailCode(message.subject, message.body);
