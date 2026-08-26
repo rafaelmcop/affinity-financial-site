@@ -56598,11 +56598,12 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    const emailSync = Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
+      (module) => module.syncAllIcloudInboxes(env)
+    );
     const jobs = [
       runMessageAutomations(env),
-      Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
-        (module) => module.syncAllIcloudInboxes(env)
-      )
+      emailSync.then(() => syncPendingFiveRingsCodes(env))
     ];
     if (controller.cron === "15 11 * * *") jobs.push(syncAllFiveRingsConnections(env));
     ctx.waitUntil(
@@ -56610,6 +56611,61 @@ var cloudflare_staging_default = {
     );
   }
 };
+async function runFiveRingsSyncAsAgent(env, agentEmail) {
+  const session = await createSession({ type: "admin", email: agentEmail }, env, 900);
+  const request = new Request("https://www.affinityfc.org/api/trpc/agent.syncFiveRings", {
+    method: "POST",
+    headers: {
+      cookie: `${ADMIN_COOKIE}=${session}`,
+      "content-type": "application/json"
+    },
+    body: JSON.stringify({ json: {} })
+  });
+  return runProcedure("agent.syncFiveRings", {}, request, env);
+}
+__name(runFiveRingsSyncAsAgent, "runFiveRingsSyncAsAgent");
+function extractFiveRingsEmailCode(subject, body) {
+  const text = `${subject || ""}\n${body || ""}`.replace(/\s+/g, " ");
+  const contextual = text.match(/(?:verification|security|one[- ]time|login|access|confirmation|c[oó]digo|code|otp)[^0-9]{0,60}([0-9]{4,10})/i);
+  if (contextual) return contextual[1];
+  const standalone = text.match(/(?:^|\D)([0-9]{6})(?:\D|$)/);
+  return standalone?.[1] || "";
+}
+__name(extractFiveRingsEmailCode, "extractFiveRingsEmailCode");
+async function syncPendingFiveRingsCodes(env) {
+  const pending = await env.DB.prepare(
+    "SELECT lower(agentEmail) AS agentEmail,encryptedChallenge,updatedAt FROM agentFiveRingsConnections WHERE status='pending' AND encryptedChallenge IS NOT NULL"
+  ).all();
+  for (const connection of pending.results || []) {
+    const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
+    if (!agentEmail) continue;
+    try {
+      const messages = await env.DB.prepare(
+        "SELECT id,subject,body,sentAt FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND datetime(sentAt)>=datetime(?,'-2 minutes') AND (lower(coalesce(fromEmail,'')) LIKE '%fiverings%' OR lower(coalesce(subject,'')) LIKE '%five rings%' OR lower(coalesce(body,'')) LIKE '%five rings%') ORDER BY datetime(sentAt) DESC,id DESC LIMIT 10"
+      ).bind(agentEmail, connection.updatedAt).all();
+      let code = "";
+      for (const message of messages.results || []) {
+        code = extractFiveRingsEmailCode(message.subject, message.body);
+        if (code) break;
+      }
+      if (!code) continue;
+      const challenge = JSON.parse(await decryptSmtpPassword(String(connection.encryptedChallenge), env.JWT_SECRET));
+      const result = await submitFiveRingsCode(challenge, code);
+      const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
+      await env.DB.prepare(
+        "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
+      ).bind(encryptedSession, agentEmail).run();
+      await runFiveRingsSyncAsAgent(env, agentEmail);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "five_rings_automatic_code_error",
+        agentEmail,
+        message: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  }
+}
+__name(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
 async function syncAllFiveRingsConnections(env) {
   const connections = await env.DB.prepare(
     "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE status='connected' AND encryptedSession IS NOT NULL"
@@ -56618,16 +56674,7 @@ async function syncAllFiveRingsConnections(env) {
     const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
     if (!agentEmail) continue;
     try {
-      const session = await createSession({ type: "admin", email: agentEmail }, env, 900);
-      const request = new Request("https://www.affinityfc.org/api/trpc/agent.syncFiveRings", {
-        method: "POST",
-        headers: {
-          cookie: `${ADMIN_COOKIE}=${session}`,
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({ json: {} })
-      });
-      await runProcedure("agent.syncFiveRings", {}, request, env);
+      await runFiveRingsSyncAsAgent(env, agentEmail);
     } catch (error) {
       console.error(JSON.stringify({
         event: "five_rings_daily_sync_error",
