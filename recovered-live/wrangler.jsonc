@@ -30,7 +30,7 @@
     "head_sampling_rate": 1,
   },
   "triggers": {
-    "crons": ["*/5 * * * *"],
+    "crons": ["*/5 * * * *", "15 11 * * *"],
   },
   "routes": [
     {

@@ -52372,7 +52372,7 @@ function mergeFiveRingsCookies(current, headers) {
 }
 __name(mergeFiveRingsCookies, "mergeFiveRingsCookies");
 function fiveRingsCodeField(html) {
-  return [...html.matchAll(/<input\b[^>]*name=["']([^"']+)["'][^>]*>/gi)].map((match) => match[1]).find((name) => name !== "_token" && /(code|otp|verification|two.?factor|mfa)/i.test(name));
+  return [...html.matchAll(/<input\b[^>]*>/gi)].filter((match) => !/type=["']hidden["']/i.test(match[0])).map((match) => match[0].match(/name=["']([^"']+)["']/i)?.[1]).find((name) => name && name !== "_token" && /(code|otp|verification|two.?factor|mfa)/i.test(name));
 }
 __name(fiveRingsCodeField, "fiveRingsCodeField");
 function fiveRingsEmailChoice(html) {
@@ -52500,13 +52500,13 @@ async function submitFiveRingsCode(challenge, code) {
     const value = hidden[0].match(/value=["']([^"']*)["']/i)?.[1] || "";
     if (name) body.set(name, value);
   }
-  for (const checkbox of form[2].matchAll(/<input\b[^>]*type=["']checkbox["'][^>]*>/gi)) {
+  for (const checkbox of form[2].matchAll(/<input\b[^>]*type=["'](?:checkbox|radio)["'][^>]*>/gi)) {
     const control = checkbox[0];
     const name = control.match(/name=["']([^"']+)["']/i)?.[1];
     const value = control.match(/value=["']([^"']*)["']/i)?.[1] || "1";
     const id = control.match(/id=["']([^"']+)["']/i)?.[1] || "";
     const label = id ? form[2].match(new RegExp(`<label\\b[^>]*for=["']${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>([\\s\\S]*?)<\\/label>`, "i"))?.[1] || "" : "";
-    if (name && /(remember|trust|device|browser|confiar)/i.test(`${name} ${id} ${fiveRingsText(label)}`))
+    if (name && /(remember|trust|trusted|device|browser|confiar|remember me)/i.test(`${name} ${id} ${fiveRingsText(label)}`))
       body.set(name, value);
   }
   const submit = [...form[2].matchAll(/<(?:button|input)\b[^>]*(?:type=["']submit["'])[^>]*>/gi)].map((match) => match[0]).find((control) => /name=["'][^"']+["']/i.test(control));
@@ -52527,6 +52527,14 @@ async function submitFiveRingsCode(challenge, code) {
     body
   });
   cookies = mergeFiveRingsCookies(cookies, response.headers);
+  const responseHtml = response.status >= 200 && response.status < 300 ? await response.text() : "";
+  if (response.ok && responseHtml && !fiveRingsCodeField(responseHtml) && !/name=["']password["']/i.test(responseHtml)) {
+    return {
+      title: responseHtml.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() || "Five Rings",
+      sections: fiveRingsSections(responseHtml, base),
+      session: { cookies, url: response.url || action.toString(), html: responseHtml }
+    };
+  }
   const location = response.headers.get("location") || challenge.url;
   const destination = new URL(location, base);
   if (destination.origin !== base) throw new Error("O portal retornou um endere\xE7o inesperado");
@@ -56589,17 +56597,47 @@ var cloudflare_staging_default = {
       );
     }
   },
-  async scheduled(_controller, env, ctx) {
+  async scheduled(controller, env, ctx) {
+    const jobs = [
+      runMessageAutomations(env),
+      Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
+        (module) => module.syncAllIcloudInboxes(env)
+      )
+    ];
+    if (controller.cron === "15 11 * * *") jobs.push(syncAllFiveRingsConnections(env));
     ctx.waitUntil(
-      Promise.all([
-        runMessageAutomations(env),
-        Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
-          (module) => module.syncAllIcloudInboxes(env)
-        )
-      ]).then(() => void 0)
+      Promise.all(jobs).then(() => void 0)
     );
   }
 };
+async function syncAllFiveRingsConnections(env) {
+  const connections = await env.DB.prepare(
+    "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE status='connected' AND encryptedSession IS NOT NULL"
+  ).all();
+  for (const connection of connections.results || []) {
+    const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
+    if (!agentEmail) continue;
+    try {
+      const session = await createSession({ type: "admin", email: agentEmail }, env, 900);
+      const request = new Request("https://www.affinityfc.org/api/trpc/agent.syncFiveRings", {
+        method: "POST",
+        headers: {
+          cookie: `${ADMIN_COOKIE}=${session}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({ json: {} })
+      });
+      await runProcedure("agent.syncFiveRings", {}, request, env);
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "five_rings_daily_sync_error",
+        agentEmail,
+        message: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  }
+}
+__name(syncAllFiveRingsConnections, "syncAllFiveRingsConnections");
 function escapeAutomationHtml(value) {
   return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
