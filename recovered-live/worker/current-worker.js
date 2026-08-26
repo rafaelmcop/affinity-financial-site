@@ -55145,6 +55145,8 @@ Affinity Financial Consulting`,
         await env.DB.prepare(
           "UPDATE agentFiveRingsConnections SET status='pending',encryptedChallenge=?,encryptedSession=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
         ).bind(encryptedChallenge, owner).run();
+        const confirmed = await waitForFiveRingsEmailCode(env, owner, login.challenge);
+        if (confirmed) return runFiveRingsSyncAsAgent(env, owner);
         return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0 });
       }
       const records = await readFiveRingsRecords(login.session, login.sections);
@@ -56632,6 +56634,47 @@ function extractFiveRingsEmailCode(subject, body) {
   return standalone?.[1] || "";
 }
 __name(extractFiveRingsEmailCode, "extractFiveRingsEmailCode");
+async function newestFiveRingsEmailCode(env, agentEmail, since) {
+  const messages = await env.DB.prepare(
+    "SELECT id,subject,body,sentAt FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND datetime(sentAt)>=datetime(?,'-2 minutes') AND (lower(coalesce(fromEmail,'')) LIKE '%fiverings%' OR lower(coalesce(subject,'')) LIKE '%five rings%' OR lower(coalesce(body,'')) LIKE '%five rings%') ORDER BY datetime(sentAt) DESC,id DESC LIMIT 10"
+  ).bind(agentEmail, since).all();
+  for (const message of messages.results || []) {
+    const code = extractFiveRingsEmailCode(message.subject, message.body);
+    if (code) return code;
+  }
+  return "";
+}
+__name(newestFiveRingsEmailCode, "newestFiveRingsEmailCode");
+async function acceptFiveRingsEmailCode(env, agentEmail, challenge, since) {
+  await syncIcloudInbox(env, agentEmail);
+  const code = await newestFiveRingsEmailCode(env, agentEmail, since);
+  if (!code) return false;
+  const result = await submitFiveRingsCode(challenge, code);
+  const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
+  await env.DB.prepare(
+    "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
+  ).bind(encryptedSession, agentEmail).run();
+  return true;
+}
+__name(acceptFiveRingsEmailCode, "acceptFiveRingsEmailCode");
+async function waitForFiveRingsEmailCode(env, agentEmail, challenge) {
+  const startedAt = new Date().toISOString();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    if (attempt) await new Promise((resolve) => setTimeout(resolve, 5e3));
+    try {
+      if (await acceptFiveRingsEmailCode(env, agentEmail, challenge, startedAt)) return true;
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "five_rings_five_second_code_error",
+        agentEmail,
+        attempt: attempt + 1,
+        message: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  }
+  return false;
+}
+__name(waitForFiveRingsEmailCode, "waitForFiveRingsEmailCode");
 async function syncPendingFiveRingsCodes(env) {
   const pending = await env.DB.prepare(
     "SELECT lower(agentEmail) AS agentEmail,encryptedChallenge,updatedAt FROM agentFiveRingsConnections WHERE status='pending' AND encryptedChallenge IS NOT NULL"
@@ -56640,21 +56683,8 @@ async function syncPendingFiveRingsCodes(env) {
     const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
     if (!agentEmail) continue;
     try {
-      const messages = await env.DB.prepare(
-        "SELECT id,subject,body,sentAt FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND datetime(sentAt)>=datetime(?,'-2 minutes') AND (lower(coalesce(fromEmail,'')) LIKE '%fiverings%' OR lower(coalesce(subject,'')) LIKE '%five rings%' OR lower(coalesce(body,'')) LIKE '%five rings%') ORDER BY datetime(sentAt) DESC,id DESC LIMIT 10"
-      ).bind(agentEmail, connection.updatedAt).all();
-      let code = "";
-      for (const message of messages.results || []) {
-        code = extractFiveRingsEmailCode(message.subject, message.body);
-        if (code) break;
-      }
-      if (!code) continue;
       const challenge = JSON.parse(await decryptSmtpPassword(String(connection.encryptedChallenge), env.JWT_SECRET));
-      const result = await submitFiveRingsCode(challenge, code);
-      const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
-      await env.DB.prepare(
-        "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
-      ).bind(encryptedSession, agentEmail).run();
+      if (!await acceptFiveRingsEmailCode(env, agentEmail, challenge, connection.updatedAt)) continue;
       await runFiveRingsSyncAsAgent(env, agentEmail);
     } catch (error) {
       console.error(JSON.stringify({
