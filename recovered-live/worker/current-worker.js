@@ -54229,7 +54229,7 @@ Detalhes: ${details}` : ""}`;
       if (folder === "inbox") where += " AND m.direction='received' AND m.folderId IS NULL";
       if (folder === "sent") where += " AND m.direction='sent' AND m.folderId IS NULL";
       if (folder === "custom") { where += " AND m.folderId=?"; binds.push(folderId); }
-      if (topicFolders.includes(folder)) { where += " AND m.topic=?"; binds.push(folder); }
+      if (topicFolders.includes(folder)) { where += " AND m.topic=? AND m.folderId IS NULL"; binds.push(folder); }
     }
     if (search) {
       where += " AND (lower(m.subject) LIKE ? OR lower(m.fromEmail) LIKE ? OR lower(m.toEmail) LIKE ? OR lower(m.body) LIKE ? OR lower(coalesce(c.name,'')) LIKE ? OR lower(coalesce(m.policyNumber,'')) LIKE ?)";
@@ -54239,8 +54239,8 @@ Detalhes: ${details}` : ""}`;
     const rows = await env.DB.prepare(
       `SELECT m.id,m.agentEmail,m.clientId,m.externalId,m.imapUid,m.direction,m.fromEmail,m.toEmail,m.subject,m.body,m.sentAt,m.readAt,m.paymentStatus,m.actionStatus,m.actionDetail,m.policyNumber,m.topic,m.folderId,m.deletedAt,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE ${where} ORDER BY datetime(m.sentAt) DESC,m.id DESC LIMIT 300`
     ).bind(owner, owner, ...binds).all();
-    const unread = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner).first();
-    const topicRows = await env.DB.prepare("SELECT coalesce(topic,'general') AS topic,COUNT(*) AS total,SUM(CASE WHEN direction='received' AND readAt IS NULL THEN 1 ELSE 0 END) AS unread FROM agentMailboxEmails WHERE lower(agentEmail)=? GROUP BY coalesce(topic,'general')").bind(owner).all();
+    const unread = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL AND deletedAt IS NULL AND folderId IS NULL").bind(owner).first();
+    const topicRows = await env.DB.prepare("SELECT coalesce(topic,'general') AS topic,COUNT(*) AS total,SUM(CASE WHEN direction='received' AND readAt IS NULL THEN 1 ELSE 0 END) AS unread FROM agentMailboxEmails WHERE lower(agentEmail)=? AND deletedAt IS NULL AND folderId IS NULL GROUP BY coalesce(topic,'general')").bind(owner).all();
     const topicCounts = Object.fromEntries(topicRows.results.map((row) => [String(row.topic), { total: Number(row.total || 0), unread: Number(row.unread || 0) }]));
     return trpcResult({
       items: rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null })),
