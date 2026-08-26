@@ -53991,6 +53991,27 @@ Detalhes: ${details}` : ""}`;
       followUps: tasks.filter((row) => row.status === "pending" && row.dueAt).length
     });
   }
+  if (name === "agent.paymentCase") {
+    const owner = adminEmail.toLowerCase(), taskId = Number(input.taskId || 0);
+    const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
+    if (!task) return trpcError("Pendência de pagamento não encontrada", "NOT_FOUND", 404);
+    const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
+    const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
+    const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+    const policyNumber = normalizePolicyNumber(String(mailbox?.policyNumber || ""));
+    let policy = policyNumber ? policies.results.find((row) => normalizePolicyNumber(String(row.policyNumber || "")) === policyNumber) : null;
+    const clientId = Number(task.clientId || mailbox?.clientId || policy?.clientId || 0);
+    if (!policy && clientId) policy = policies.results.find((row) => Number(row.clientId) === clientId) || null;
+    const client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
+    const history = clientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all() : { results: [] };
+    return trpcResult({
+      task: { ...task, id: Number(task.id), clientId: clientId || null },
+      client: client ? { ...client, id: Number(client.id) } : null,
+      policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId) } : null,
+      notice: mailbox ? { id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
+      history: (history.results || []).map((row) => ({ ...row, id: Number(row.id) }))
+    });
+  }
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
     const [clientsQuery, policiesQuery, reviewsQuery, internalQuery, messagesQuery, tasksQuery] = await env.DB.batch([
@@ -56504,6 +56525,10 @@ var cloudflare_staging_default = {
     }
     if (url.pathname === "/admin/email") {
       url.pathname = "/agent-email.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
+    if (url.pathname === "/agentes/caso-pagamento") {
+      url.pathname = "/agent-payment-case.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
     if (url.pathname === "/agent-applications" || url.pathname === "/agent-applications.html") {
