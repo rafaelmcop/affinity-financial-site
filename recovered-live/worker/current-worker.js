@@ -53996,7 +53996,7 @@ Detalhes: ${details}` : ""}`;
     const [clientsQuery, policiesQuery, reviewsQuery, internalQuery, messagesQuery, tasksQuery] = await env.DB.batch([
       env.DB.prepare("SELECT id,name,email,phone,birthDate FROM crmClients WHERE lower(assignedAdminEmail)=?").bind(owner),
       env.DB.prepare("SELECT clientId,status,policyNumber,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner),
-      env.DB.prepare("SELECT COUNT(*) AS total FROM testimonials WHERE source='client' AND lower(agentEmail)=? AND agentDecision='pending'").bind(owner),
+      env.DB.prepare("SELECT COUNT(*) AS total FROM testimonials WHERE source='client' AND lower(agentEmail)=? AND agentDecision='pending' AND adminDecision='pending'").bind(owner),
       env.DB.prepare("SELECT COUNT(*) AS total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(owner),
       env.DB.prepare("SELECT COUNT(*) AS total FROM clientEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner),
       env.DB.prepare("SELECT COUNT(*) AS total FROM agentTasks WHERE lower(agentEmail)=? AND status='pending' AND dueAt IS NOT NULL AND title NOT LIKE '%Revis\xE3o de ap\xF3lice%Flex Life%' AND title NOT LIKE 'Revisar a ap\xF3lice %'").bind(owner)
@@ -54594,6 +54594,7 @@ Detalhes: ${details}` : ""}`;
     });
   }
   if (name === "agent.listAssignedReviews") {
+    await env.DB.prepare("UPDATE testimonials SET agentDecision=adminDecision,agentReviewedAt=COALESCE(agentReviewedAt,updatedAt),updatedAt=CURRENT_TIMESTAMP WHERE source='client' AND lower(agentEmail)=? AND agentDecision='pending' AND adminDecision IN ('approved','rejected')").bind(adminEmail.toLowerCase()).run();
     const result = await env.DB.prepare("SELECT * FROM testimonials WHERE source='client' AND lower(agentEmail)=? ORDER BY createdAt DESC").bind(adminEmail.toLowerCase()).all();
     return trpcResult(result.results.map(normalizeTestimonial));
   }
@@ -56460,7 +56461,7 @@ Affinity Financial Consulting`,
   if (name === "testimonials.setAdminDecision") {
     const id = Number(input.id), decision = String(input.decision || "");
     if (!id || !["approved", "rejected"].includes(decision)) return trpcError("Decis\xE3o inv\xE1lida.");
-    await env.DB.prepare("UPDATE testimonials SET adminDecision=?,isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND source='client' AND adminDecision='pending'").bind(decision, decision === "approved" ? 1 : 0, id).run();
+    await env.DB.prepare("UPDATE testimonials SET adminDecision=?,agentDecision=CASE WHEN agentDecision='pending' THEN ? ELSE agentDecision END,agentReviewedAt=CASE WHEN agentDecision='pending' THEN CURRENT_TIMESTAMP ELSE agentReviewedAt END,isActive=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND source='client' AND adminDecision='pending'").bind(decision, decision, decision === "approved" ? 1 : 0, id).run();
     return trpcResult({ success: true });
   }
   if (name === "testimonials.toggleActive") {
