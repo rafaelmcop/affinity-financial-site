@@ -53195,7 +53195,11 @@ async function calendlyRequest(token, path, options = {}) {
   const response = await fetch(`https://api.calendly.com${path}`, { ...options, headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", ...(options.headers || {}) } });
   const text = await response.text();
   let data = {}; try { data = text ? JSON.parse(text) : {}; } catch {}
-  if (!response.ok) throw new Error(String(data?.message || data?.title || `Calendly respondeu ${response.status}`));
+  if (!response.ok) {
+    const required = Array.isArray(data?.required_scopes) ? data.required_scopes.join(", ") : "";
+    const detail = required ? ` Permissões necessárias: ${required}.` : "";
+    throw new Error(`${String(data?.message || data?.title || `Calendly respondeu ${response.status}`)}${detail}`);
+  }
   return data;
 }
 __name(calendlyRequest, "calendlyRequest");
