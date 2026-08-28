@@ -50317,7 +50317,7 @@ async function syncIcloudInbox(env, agentEmail) {
       imported++;
     }
     let sentFolderSelected = false;
-    for (const folderName of ["Sent Messages", "Sent", "INBOX.Sent"]) {
+    for (const folderName of ["Sent Messages", "Sent", "INBOX.Sent", "[Gmail]/Sent Mail", "[Gmail]/Enviados"]) {
       try {
         await client.command(`A${sequence++}`, `SELECT ${quoteImap(folderName)}`);
         sentFolderSelected = true;
@@ -50364,7 +50364,7 @@ async function syncIcloudInbox(env, agentEmail) {
 }
 async function syncAllIcloudInboxes(env) {
   const rows = await env.DB.prepare(
-    "SELECT agentEmail FROM agentEmailSettings WHERE lower(imapHost)='imap.mail.me.com'"
+    "SELECT agentEmail FROM agentEmailSettings WHERE imapHost IS NOT NULL AND trim(imapHost)<>'' AND imapUser IS NOT NULL AND trim(imapUser)<>''"
   ).all();
   for (const row of rows.results) {
     try {
@@ -52644,7 +52644,15 @@ function normalizeFiveRingsRecord(row) {
   const rawStatus = fiveRingsValue(row, [/policy status/, /^status$/]).toLowerCase();
   const status = /lapse/.test(rawStatus) ? "lapse" : /surrender|resgat/.test(rawStatus) ? "surrendered" : /declin|reject|recus/.test(rawStatus) ? "declined" : /cancel|terminat/.test(rawStatus) ? "cancelled" : /active|in.?force|vigente/.test(rawStatus) ? "active" : "inactive";
   const annualPremium = fiveRingsMoney(fiveRingsValue(row, [/annual.?premium/]));
-  const detailUrl = Object.values(row).map((value) => value.match(/href=["'](https:\/\/portal\.fiveringsfinancial\.com\/account\/policies\/[0-9a-f-]+)/i)?.[1]).find(Boolean) || fiveRingsValue(row, [/^detail url$/]);
+  const absoluteLinks = Object.values(row).flatMap((value) => [...String(value || "").matchAll(/href=["']([^"']+)/gi)].map((match) => {
+    try {
+      return new URL(match[1], "https://portal.fiveringsfinancial.com").toString();
+    } catch {
+      return "";
+    }
+  })).filter(Boolean);
+  const detailUrl = absoluteLinks.find((value) => /\/account\/policies\/[0-9a-z-]+/i.test(value)) || fiveRingsValue(row, [/^detail url$/]);
+  const clientDetailUrl = absoluteLinks.find((value) => /\/account\/clients\/[0-9a-z-]+/i.test(value)) || fiveRingsValue(row, [/^client detail url$/]);
   return {
     clientName,
     email: validEmail(email) ? email : "",
@@ -52662,12 +52670,14 @@ function normalizeFiveRingsRecord(row) {
     issuedAt: fiveRingsValue(row, [/application.?date/]),
     birthDate: normalizeBirthDate(fiveRingsValue(row, [/birth.?date/, /date.?of.?birth/])),
     address: fiveRingsValue(row, [/primary.?address/, /^address$/]),
-    detailUrl: String(detailUrl || "")
+    beneficiaries: fiveRingsValue(row, [/beneficiar/]),
+    detailUrl: String(detailUrl || ""),
+    clientDetailUrl: String(clientDetailUrl || "")
   };
 }
 __name(normalizeFiveRingsRecord, "normalizeFiveRingsRecord");
 function fiveRingsDataTableUrl(path, columns) {
-  const params = new URLSearchParams({ draw: "1", start: "0", length: "500", "search[value]": "", "search[regex]": "false" });
+  const params = new URLSearchParams({ draw: "1", start: "0", length: "2000", "search[value]": "", "search[regex]": "false" });
   columns.forEach((column, index) => {
     params.set(`columns[${index}][data]`, column);
     params.set(`columns[${index}][name]`, "");
@@ -52676,11 +52686,6 @@ function fiveRingsDataTableUrl(path, columns) {
     params.set(`columns[${index}][search][value]`, "");
     params.set(`columns[${index}][search][regex]`, "false");
   });
-  if (path === "policies") {
-    params.set("filters[group]", "new_business");
-    params.set("filters[preset]", "total");
-    params.set("filters[subgroup]", "all");
-  }
   return `https://portal.fiveringsfinancial.com/account/${path}/data?${params}`;
 }
 __name(fiveRingsDataTableUrl, "fiveRingsDataTableUrl");
@@ -52742,17 +52747,34 @@ async function readFiveRingsRecords(session, sections) {
     }
     return rows.map((row) => normalizeFiveRingsRecord(row));
   })];
-  const details = await Promise.allSettled(all.filter((record) => record.detailUrl).slice(0, 24).map(async (record) => {
-    const response = await fiveRingsFetch(record.detailUrl, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
+  const detailItems = all.flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => ({ record, url }))).filter((item, index, entries) => entries.findIndex((other) => other.url === item.url) === index);
+  const selectedDetails = [
+    ...detailItems.filter((item) => /\/account\/clients\//i.test(item.url)).slice(0, 120),
+    ...detailItems.filter((item) => /\/account\/policies\//i.test(item.url)).slice(0, 120)
+  ];
+  const details = await Promise.allSettled(selectedDetails.map(async ({ record, url }) => {
+    const response = await fiveRingsFetch(url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
     if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return record;
     const detail = normalizeFiveRingsRecord(fiveRingsDataListRecord(await response.text()));
-    return { ...record, ...Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== "" && value !== 0)) };
+    return { ...record, ...Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== "" && value !== 0)), detailUrl: record.detailUrl, clientDetailUrl: record.clientDetailUrl };
   }));
   const enriched = details.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
   if (enriched.length) {
-    const byUrl = new Map(enriched.map((record) => [record.detailUrl, record]));
-    all = all.map((record) => byUrl.get(record.detailUrl) || record);
+    const byUrl = new Map(enriched.flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => [url, record])));
+    all = all.map((record) => byUrl.get(record.detailUrl) || byUrl.get(record.clientDetailUrl) || record);
   }
+  const clientDetails = new Map();
+  for (const record of all) {
+    const nameKey = String(record.clientName || "").trim().toLowerCase();
+    if (!nameKey) continue;
+    const current = clientDetails.get(nameKey) || {};
+    clientDetails.set(nameKey, { ...current, ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0)) });
+  }
+  all = all.map((record) => {
+    const client = clientDetails.get(String(record.clientName || "").trim().toLowerCase());
+    if (!client) return record;
+    return { ...client, ...record, ...Object.fromEntries(Object.entries(client).filter(([key, value]) => ["email", "phone", "birthDate", "address", "beneficiaries", "clientDetailUrl"].includes(key) && value !== "" && value !== 0)) };
+  });
   const unique = /* @__PURE__ */ new Map();
   for (const record of all) {
     if (!record.clientName) continue;
@@ -54174,7 +54196,7 @@ Detalhes: ${details}` : ""}`;
     ).bind(clientId, adminEmail.toLowerCase()).first();
     if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     const rows = await env.DB.prepare(
-      "SELECT * FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' AND deletedAt IS NULL ORDER BY sentAt ASC,id ASC"
+      "SELECT *,CASE WHEN visibility='automation' THEN 1 ELSE 0 END AS isAutomatic FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client') IN ('client','automation') AND deletedAt IS NULL ORDER BY sentAt ASC,id ASC"
     ).bind(clientId, adminEmail.toLowerCase()).all();
     return trpcResult(
       rows.results.map((row) => ({
@@ -54999,6 +55021,7 @@ Affinity Financial Consulting`,
     ).bind(adminEmail.toLowerCase()).first();
     return trpcResult(
       row ? {
+        provider: /gmail\.com$/i.test(String(row.imapHost || "")) ? "gmail" : /mail\.me\.com$/i.test(String(row.imapHost || "")) ? "icloud" : "custom",
         host: row.host,
         port: Number(row.port),
         secure: Number(row.secure) === 1,
@@ -55128,10 +55151,10 @@ Affinity Financial Consulting`,
           const existing = existingPolicy;
           const targetPremium = record.targetPremium || (record.premiumAmount ? record.premiumAmount * 12 : 0), points = Math.max(0, Math.round(targetPremium));
           if (existing) {
-            await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, Number(existing.id), owner).run();
+            await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
             updatedPolicies2 += 1;
           } else {
-            await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount).run();
+            await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
             importedPolicies2 += 1;
           }
         }
@@ -55182,13 +55205,13 @@ Affinity Financial Consulting`,
         const points = Math.max(0, Math.round(targetPremium));
         if (existing) {
           await env.DB.prepare(
-            "UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
-          ).bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, Number(existing.id), owner).run();
+            "UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
+          ).bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
           updatedPolicies += 1;
         } else {
           await env.DB.prepare(
-            "INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
-          ).bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount).run();
+            "INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+          ).bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
           importedPolicies += 1;
         }
       }
@@ -56851,12 +56874,12 @@ async function runMessageAutomations(env) {
               String(automation.agentEmail)
             ),
             env.DB.prepare(
-              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'automation')"
             ).bind(
               String(automation.agentEmail).toLowerCase(),
               Number(policy.clientId),
               String(sentMail.messageId || "") || null,
-              subject,
+              `Automático · ${subject}`,
               historyBody,
               String(automation.agentEmail).toLowerCase(),
               String(policy.email)
@@ -56936,28 +56959,26 @@ async function runMessageAutomations(env) {
             "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
           ).bind(Number(automation.id), Number(client.id), sentKey)
         ];
-        const individual = String(automation.audience || "all") === "individual" || Boolean(automation.clientId) || ["birthday", "policy_anniversary"].includes(occasion);
-        if (individual)
-          statements.push(
-            env.DB.prepare(
-              "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
-            ).bind(
-              Number(client.id),
-              `E-mail autom\xE1tico enviado: ${personalize(automation.title)}`,
-              String(automation.agentEmail)
-            ),
-            env.DB.prepare(
-              "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
-            ).bind(
-              String(automation.agentEmail).toLowerCase(),
-              Number(client.id),
-              String(sentMail.messageId || "") || null,
-              personalize(automation.subject || automation.title),
-              personalize(automation.message),
-              String(automation.agentEmail).toLowerCase(),
-              String(client.email)
-            )
-          );
+        statements.push(
+          env.DB.prepare(
+            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+          ).bind(
+            Number(client.id),
+            `E-mail autom\xE1tico enviado: ${personalize(automation.title)}`,
+            String(automation.agentEmail)
+          ),
+          env.DB.prepare(
+            "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'automation')"
+          ).bind(
+            String(automation.agentEmail).toLowerCase(),
+            Number(client.id),
+            String(sentMail.messageId || "") || null,
+            `Automático · ${personalize(automation.subject || automation.title)}`,
+            personalize(automation.message),
+            String(automation.agentEmail).toLowerCase(),
+            String(client.email)
+          )
+        );
         await env.DB.batch(statements);
       } catch (error) {
         await env.DB.prepare("INSERT INTO crmDeliveryLogs (agentEmail,messageId,clientId,clientName,recipientEmail,subject,status,errorMessage) VALUES (?,?,?,?,?,?,'failed',?)").bind(String(automation.agentEmail).toLowerCase(), Number(automation.id), Number(client.id), String(client.name || "Cliente"), String(client.email || ""), personalize(automation.subject || automation.title), String(error instanceof Error ? error.message : error).slice(0, 1e3)).run();
