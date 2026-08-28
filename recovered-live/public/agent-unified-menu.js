@@ -15,6 +15,7 @@
     <a${active(matches('/agentes/dashboard'))} href="/agentes/dashboard">Início</a>
     <details ${matches('/agentes/crm','/agentes/mensagens')?'open':''}><summary>CRM <span>›</span></summary><div class="agent-sub"><a${active(matches('/agentes/crm'))} href="/agentes/crm">Clientes e acompanhamento</a><a${active(matches('/agentes/mensagens'))} href="/agentes/mensagens">Mensagens e automações</a></div></details>
     <details ${matches('/agent-applications','/agentes/clientes')?'open':''}><summary>Aplicações <span>›</span></summary><div class="agent-sub"><a${active(matches('/agent-applications'))} href="/agent-applications">Novas aplicações</a><a${active(matches('/agentes/clientes'))} href="/agentes/clientes">Aplicações concluídas</a></div></details>
+    <a${active(matches('/agentes/agenda'))} href="/agentes/agenda">Agenda</a>
     <a${active(matches('/agentes/email'))} href="/agentes/email">E-mail <b id="unified-email-badge" class="agent-menu-badge" hidden></b></a>
     <a${active(matches('/agentes/apolices'))} href="/agentes/apolices">Apólices</a><a${active(matches('/agentes/tarefas'))} href="/agentes/tarefas">Tarefas</a><a${active(matches('/agentes/avaliacoes'))} href="/agentes/avaliacoes">Avaliações</a>
     <a${active(matches('/agent-review-invites.html'))} href="/agent-review-invites.html">Solicitar avaliação</a><span id="agent-careers-slot"></span><a${active(matches('/agentes/configuracoes'))} href="/agentes/configuracoes">Configurações</a>

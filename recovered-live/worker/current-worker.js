@@ -53181,6 +53181,65 @@ async function localizeTestimonials(rows, target, env) {
   }
 }
 __name(localizeTestimonials, "localizeTestimonials");
+async function ensureCalendlyTables(env) {
+  await env.DB.batch([
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agentCalendlyConnections (agentEmail TEXT PRIMARY KEY,encryptedToken TEXT NOT NULL,userUri TEXT,organizationUri TEXT,schedulingUrl TEXT,status TEXT NOT NULL DEFAULT 'connected',lastSyncAt TEXT,lastError TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS calendlyMeetings (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,eventUri TEXT NOT NULL,inviteeUri TEXT,eventName TEXT,inviteeName TEXT,inviteeEmail TEXT,inviteePhone TEXT,startTime TEXT,endTime TEXT,status TEXT NOT NULL DEFAULT 'active',locationType TEXT,meetingUrl TEXT,cancelUrl TEXT,rescheduleUrl TEXT,clientId INTEGER,questionsJson TEXT,lastSyncedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(agentEmail,eventUri,inviteeUri))"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agentPublicProfiles (agentEmail TEXT PRIMARY KEY,slug TEXT NOT NULL UNIQUE,headline TEXT,bio TEXT,sinceYear INTEGER,photoUrl TEXT,calendlyUrl TEXT,isPublished INTEGER NOT NULL DEFAULT 1,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+  ]);
+}
+__name(ensureCalendlyTables, "ensureCalendlyTables");
+function calendlyUuid(uri) { return String(uri || "").split("/").filter(Boolean).pop() || ""; }
+__name(calendlyUuid, "calendlyUuid");
+async function calendlyRequest(token, path, options = {}) {
+  const response = await fetch(`https://api.calendly.com${path}`, { ...options, headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", ...(options.headers || {}) } });
+  const text = await response.text();
+  let data = {}; try { data = text ? JSON.parse(text) : {}; } catch {}
+  if (!response.ok) throw new Error(String(data?.message || data?.title || `Calendly respondeu ${response.status}`));
+  return data;
+}
+__name(calendlyRequest, "calendlyRequest");
+async function syncCalendlyForAgent(env, agentEmail) {
+  await ensureCalendlyTables(env);
+  const connection = await env.DB.prepare("SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first();
+  if (!connection) throw new Error("Calendly ainda não foi conectado");
+  const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
+  const minimum = new Date(Date.now() - 45 * 864e5).toISOString();
+  const maximum = new Date(Date.now() + 370 * 864e5).toISOString();
+  const params = new URLSearchParams({ user: String(connection.userUri), min_start_time: minimum, max_start_time: maximum, count: "100", sort: "start_time:desc" });
+  const events = await calendlyRequest(token, `/scheduled_events?${params}`);
+  let saved = 0;
+  for (const event of (events.collection || []).slice(0, 100)) {
+    const eventId = calendlyUuid(event.uri);
+    if (!eventId) continue;
+    const invitees = await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(eventId)}/invitees?count=100`);
+    for (const invitee of invitees.collection || []) {
+      const answers = Array.isArray(invitee.questions_and_answers) ? invitee.questions_and_answers : [];
+      const answerText = answers.map((item) => `${item.question || ""}: ${item.answer || ""}`).join("\n");
+      const phone = String(invitee.text_reminder_number || answers.find((item) => /phone|telefone|teléfono|whatsapp/i.test(String(item.question || "")))?.answer || "").trim();
+      const email = String(invitee.email || "").trim().toLowerCase();
+      let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1").bind(agentEmail.toLowerCase(), email).first() : null;
+      if (!client && phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ','') LIKE ? LIMIT 1").bind(agentEmail.toLowerCase(), `%${phone.replace(/\D/g, "").slice(-10)}%`).first();
+      if (!client && (email || phone)) {
+        const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,status,source,assignedAdminEmail,notes) VALUES (?,?,?,'new','Calendly',?,?)").bind(String(invitee.name || "Contato Calendly"), email || null, phone || null, agentEmail.toLowerCase(), answerText || null).run();
+        client = { id: Number(inserted.meta.last_row_id) };
+      }
+      const location = event.location || {};
+      const meetingUrl = String(location.join_url || location.location || "");
+      await env.DB.prepare("INSERT INTO calendlyMeetings (agentEmail,eventUri,inviteeUri,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,status,locationType,meetingUrl,cancelUrl,rescheduleUrl,clientId,questionsJson,lastSyncedAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,eventUri,inviteeUri) DO UPDATE SET eventName=excluded.eventName,inviteeName=excluded.inviteeName,inviteeEmail=excluded.inviteeEmail,inviteePhone=excluded.inviteePhone,startTime=excluded.startTime,endTime=excluded.endTime,status=excluded.status,locationType=excluded.locationType,meetingUrl=excluded.meetingUrl,cancelUrl=excluded.cancelUrl,rescheduleUrl=excluded.rescheduleUrl,clientId=coalesce(calendlyMeetings.clientId,excluded.clientId),questionsJson=excluded.questionsJson,lastSyncedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP").bind(agentEmail.toLowerCase(), String(event.uri), String(invitee.uri || ""), String(event.name || "Reunião"), String(invitee.name || "Cliente"), email || null, phone || null, String(event.start_time || ""), String(event.end_time || ""), String(invitee.status || event.status || "active"), String(location.type || ""), meetingUrl || null, String(invitee.cancel_url || ""), String(invitee.reschedule_url || ""), Number(client?.id || 0) || null, JSON.stringify(answers)).run();
+      saved += 1;
+    }
+  }
+  await env.DB.prepare("UPDATE agentCalendlyConnections SET status='connected',lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).run();
+  return { saved };
+}
+__name(syncCalendlyForAgent, "syncCalendlyForAgent");
+async function syncAllCalendlyConnections(env) {
+  await ensureCalendlyTables(env);
+  const rows = await env.DB.prepare("SELECT agentEmail FROM agentCalendlyConnections WHERE status='connected'").all();
+  for (const row of rows.results || []) try { await syncCalendlyForAgent(env, String(row.agentEmail)); } catch (error) { await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0,500), String(row.agentEmail).toLowerCase()).run(); }
+}
+__name(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 async function runProcedure(name, input, request, env) {
   if (name === "system.ping") return trpcResult("pong");
   if (name === "auth.me") {
@@ -53685,6 +53744,24 @@ Detalhes: ${details}` : ""}`;
     } catch {
       return trpcResult([]);
     }
+  }
+  if (name === "calendly.publicProfile") {
+    await ensureCalendlyTables(env);
+    const slug = String(input.slug || "").trim().toLowerCase();
+    const row = await env.DB.prepare("SELECT p.slug,p.headline,p.bio,p.sinceYear,p.photoUrl,p.calendlyUrl,a.name,a.phone,a.whatsapp,a.contactEmail FROM agentPublicProfiles p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.slug=? AND p.isPublished=1 AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') LIMIT 1").bind(slug).first();
+    return trpcResult(row || null);
+  }
+  if (name === "calendly.contactAgent") {
+    await ensureCalendlyTables(env);
+    const slug = String(input.slug || "").trim().toLowerCase(), clientName = String(input.name || "").trim(), email = String(input.email || "").trim().toLowerCase(), phone = String(input.phone || "").trim(), message = String(input.message || "").trim();
+    if (!clientName || (!validEmail(email) && !phone) || !message) return trpcError("Informe nome, mensagem e pelo menos um contato");
+    const agent = await env.DB.prepare("SELECT p.agentEmail,a.name,a.contactEmail,a.email FROM agentPublicProfiles p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.slug=? AND p.isPublished=1 AND a.isActive=1 LIMIT 1").bind(slug).first();
+    if (!agent) return trpcError("Consultor não encontrado", "NOT_FOUND", 404);
+    let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=lower(?) AND lower(email)=? LIMIT 1").bind(String(agent.agentEmail),email).first() : null;
+    if (!client) { const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,status,source,assignedAdminEmail,notes) VALUES (?,?,?,'new','Perfil público',?,?)").bind(clientName,email||null,phone||null,String(agent.agentEmail).toLowerCase(),message).run(); client={id:Number(inserted.meta.last_row_id)}; }
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'note',?,?)").bind(Number(client.id),`Contato pelo perfil público: ${message}`,email||phone).run();
+    await sendEmailIfConfigured(env,{to:String(agent.contactEmail||agent.email),subject:`Novo contato pelo seu perfil: ${clientName}`,html:emailHtml("Novo contato no site",`<p><strong>${escapeAutomationHtml(clientName)}</strong> enviou uma mensagem pelo seu perfil.</p><p>${escapeAutomationHtml(message)}</p><p>E-mail: ${escapeAutomationHtml(email||"Não informado")}<br>Telefone: ${escapeAutomationHtml(phone||"Não informado")}</p>`)});
+    return trpcResult({success:true});
   }
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail)
@@ -55306,6 +55383,59 @@ Affinity Financial Consulting`,
     ).bind(adminEmail.toLowerCase()).first();
     return trpcResult(row || null);
   }
+  if (name === "agent.getCalendly") {
+    await ensureCalendlyTables(env);
+    const owner = adminEmail.toLowerCase();
+    const connection = await env.DB.prepare("SELECT schedulingUrl,status,lastSyncAt,lastError FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(owner).first();
+    const profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
+    return trpcResult({ connection: connection ? { ...connection, connected: true } : null, profile: profile || null });
+  }
+  if (name === "agent.connectCalendly") {
+    await ensureCalendlyTables(env);
+    const owner = adminEmail.toLowerCase(), token = String(input.token || "").trim();
+    if (token.length < 20) return trpcError("Cole um token válido do Calendly");
+    try {
+      const me = await calendlyRequest(token, "/users/me");
+      const resource = me.resource || {};
+      const encrypted = await encryptSmtpPassword(token, env.JWT_SECRET);
+      await env.DB.prepare("INSERT INTO agentCalendlyConnections (agentEmail,encryptedToken,userUri,organizationUri,schedulingUrl,status,updatedAt) VALUES (?,?,?,?,?,'connected',CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET encryptedToken=excluded.encryptedToken,userUri=excluded.userUri,organizationUri=excluded.organizationUri,schedulingUrl=excluded.schedulingUrl,status='connected',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, encrypted, String(resource.uri || ""), String(resource.current_organization || ""), String(resource.scheduling_url || input.schedulingUrl || "")).run();
+      const current = await env.DB.prepare("SELECT slug FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
+      if (!current) {
+        const account = await env.DB.prepare("SELECT name FROM adminAccounts WHERE lower(email)=?").bind(owner).first();
+        const base = String(account?.name || owner.split('@')[0]).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'consultor';
+        let slug = base, suffix = 1; while (await env.DB.prepare("SELECT 1 FROM agentPublicProfiles WHERE slug=?").bind(slug).first()) slug = `${base}-${++suffix}`;
+        await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,calendlyUrl) VALUES (?,?,?,'',?)").bind(owner, slug, "Consultor financeiro", String(resource.scheduling_url || input.schedulingUrl || "")).run();
+      } else if (resource.scheduling_url) await env.DB.prepare("UPDATE agentPublicProfiles SET calendlyUrl=coalesce(nullif(calendlyUrl,''),?),updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(resource.scheduling_url),owner).run();
+      const sync = await syncCalendlyForAgent(env, owner);
+      return trpcResult({ success: true, ...sync });
+    } catch (error) { return trpcError(`Não foi possível conectar: ${String(error?.message || error)}`); }
+  }
+  if (name === "agent.disconnectCalendly") {
+    await ensureCalendlyTables(env);
+    await env.DB.prepare("DELETE FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.syncCalendly") {
+    try { return trpcResult({ success: true, ...(await syncCalendlyForAgent(env, adminEmail.toLowerCase())) }); }
+    catch (error) { return trpcError(String(error?.message || error)); }
+  }
+  if (name === "agent.calendlyMeetings") {
+    await ensureCalendlyTables(env);
+    const rows = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE lower(agentEmail)=? ORDER BY datetime(startTime) DESC LIMIT 250").bind(adminEmail.toLowerCase()).all();
+    return trpcResult((rows.results || []).map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId || 0) || null })));
+  }
+  if (name === "agent.cancelCalendlyMeeting") {
+    await ensureCalendlyTables(env);
+    const owner = adminEmail.toLowerCase(), meeting = await env.DB.prepare("SELECT m.*,c.encryptedToken FROM calendlyMeetings m JOIN agentCalendlyConnections c ON lower(c.agentEmail)=lower(m.agentEmail) WHERE m.id=? AND lower(m.agentEmail)=?").bind(Number(input.id),owner).first();
+    if (!meeting) return trpcError("Reunião não encontrada", "NOT_FOUND", 404);
+    try { const token = await decryptSmtpPassword(String(meeting.encryptedToken),env.JWT_SECRET); await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(calendlyUuid(meeting.eventUri))}/cancellation`, { method:'POST', body:JSON.stringify({ reason:String(input.reason || 'Cancelado pelo agente') }) }); await env.DB.prepare("UPDATE calendlyMeetings SET status='canceled',updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(Number(input.id)).run(); return trpcResult({success:true}); } catch(error) { return trpcError(String(error?.message || error)); }
+  }
+  if (name === "agent.savePublicProfile") {
+    await ensureCalendlyTables(env);
+    const owner = adminEmail.toLowerCase(), slug = String(input.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
+    if (slug.length < 3) return trpcError("Escolha um endereço com pelo menos 3 caracteres");
+    try { await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,sinceYear,photoUrl,calendlyUrl,isPublished,updatedAt) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET slug=excluded.slug,headline=excluded.headline,bio=excluded.bio,sinceYear=excluded.sinceYear,photoUrl=excluded.photoUrl,calendlyUrl=excluded.calendlyUrl,isPublished=excluded.isPublished,updatedAt=CURRENT_TIMESTAMP").bind(owner,slug,String(input.headline||'Consultor financeiro').slice(0,140),String(input.bio||'').slice(0,2000),Number(input.sinceYear||0)||null,String(input.photoUrl||'').trim()||null,String(input.calendlyUrl||'').trim()||null,input.isPublished===false?0:1).run(); return trpcResult({success:true,url:`https://www.affinityfc.org/consultor/${slug}`}); } catch(error) { return trpcError(String(error).includes('UNIQUE')?'Este endereço já está sendo usado por outro agente':'Não foi possível salvar o perfil'); }
+  }
   if (name === "agent.updateProfile") {
     const profileName = String(input.name ?? "").trim(), contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
     if (!profileName || contactEmail && !validEmail(contactEmail))
@@ -56556,6 +56686,18 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-email-settings.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
+    if (url.pathname === "/agendar") {
+      url.pathname = "/schedule.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
+    }
+    if (url.pathname === "/agentes/agenda") {
+      url.pathname = "/agent-calendar.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
+    if (/^\/consultor\/[a-z0-9-]+\/?$/i.test(url.pathname)) {
+      url.pathname = "/agent-public-profile.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
+    }
     if (url.pathname === "/admin/email") {
       url.pathname = "/agent-email.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
@@ -56628,7 +56770,8 @@ var cloudflare_staging_default = {
     );
     const jobs = [
       runMessageAutomations(env),
-      emailSync.then(() => syncPendingFiveRingsCodes(env))
+      emailSync.then(() => syncPendingFiveRingsCodes(env)),
+      syncAllCalendlyConnections(env)
     ];
     if (controller.cron === "15 11 * * *") jobs.push(syncAllFiveRingsConnections(env));
     ctx.waitUntil(
