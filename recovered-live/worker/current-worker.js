@@ -53205,6 +53205,39 @@ function calendlyPhoneFrom(value) {
   return "";
 }
 __name(calendlyPhoneFrom, "calendlyPhoneFrom");
+function calendlyPhoneFromAnswers(answers) {
+  if (!Array.isArray(answers)) return "";
+  const phoneLabel = /phone|telefone|tel[eé]fono|whatsapp|mobile|cell|celular|m[oó]vel|n[uú]mero.*(?:contato|contact)|contact.*number/i;
+  const values = answers.map((item) => {
+    const answer = Array.isArray(item?.answer) ? item.answer.join(" ") : String(item?.answer || "");
+    return { question: String(item?.question || ""), answer: answer.trim() };
+  });
+  const labeled = values.find((item) => phoneLabel.test(item.question) && item.answer.replace(/\D/g, "").length >= 10);
+  if (labeled) return labeled.answer;
+  const phoneLike = values.find((item) => {
+    const digits = item.answer.replace(/\D/g, "");
+    return digits.length >= 10 && digits.length <= 15 && /[()+.\-\s]/.test(item.answer);
+  });
+  return phoneLike?.answer || "";
+}
+__name(calendlyPhoneFromAnswers, "calendlyPhoneFromAnswers");
+async function backfillStoredCalendlyPhones(env, agentEmail) {
+  const rows = await env.DB.prepare("SELECT id,clientId,questionsJson FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))='' AND trim(coalesce(questionsJson,'')) NOT IN ('','[]') ORDER BY id DESC LIMIT 1000").bind(agentEmail.toLowerCase()).all();
+  let updated = 0;
+  for (const row of rows.results || []) {
+    let answers = [];
+    try { answers = JSON.parse(String(row.questionsJson || "[]")); } catch {}
+    const phone = calendlyPhoneFromAnswers(answers);
+    if (!phone) continue;
+    await env.DB.prepare("UPDATE calendlyMeetings SET inviteePhone=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(phone, Number(row.id)).run();
+    if (Number(row.clientId || 0)) {
+      await env.DB.prepare("UPDATE crmClients SET phone=CASE WHEN trim(coalesce(phone,''))='' THEN ? ELSE phone END,whatsapp=CASE WHEN trim(coalesce(whatsapp,''))='' THEN ? ELSE whatsapp END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(phone, phone, Number(row.clientId), agentEmail.toLowerCase()).run();
+    }
+    updated += 1;
+  }
+  return updated;
+}
+__name(backfillStoredCalendlyPhones, "backfillStoredCalendlyPhones");
 async function calendlyRequest(token, path, options = {}) {
   const response = await fetch(`https://api.calendly.com${path}`, { ...options, headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", ...(options.headers || {}) } });
   const text = await response.text();
@@ -53236,17 +53269,27 @@ async function schedulePolicyWelcome(env, agentEmail, clientId, clientName, poli
   return true;
 }
 __name(schedulePolicyWelcome, "schedulePolicyWelcome");
-async function syncCalendlyForAgent(env, agentEmail) {
+async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   await ensureCalendlyTables(env);
+  let phonesUpdated = await backfillStoredCalendlyPhones(env, agentEmail);
   const connection = await env.DB.prepare("SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first();
   if (!connection) throw new Error("Calendly ainda não foi conectado");
   const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
-  const minimum = new Date(Date.now() - 1 * 864e5).toISOString();
+  const minimum = new Date(Date.now() - (options.backfill ? 730 : 1) * 864e5).toISOString();
   const maximum = new Date(Date.now() + 370 * 864e5).toISOString();
-  const params = new URLSearchParams({ user: String(connection.userUri), min_start_time: minimum, max_start_time: maximum, count: "12", sort: "start_time:asc" });
-  const events = await calendlyRequest(token, `/scheduled_events?${params}`);
+  const baseParams = new URLSearchParams({ user: String(connection.userUri), min_start_time: minimum, max_start_time: maximum, count: "100", sort: "start_time:desc" });
+  const eventRows = [];
+  let nextPageToken = "";
+  for (let page = 0; page < (options.backfill ? 20 : 2); page += 1) {
+    const params = new URLSearchParams(baseParams);
+    if (nextPageToken) params.set("page_token", nextPageToken);
+    const payload = await calendlyRequest(token, `/scheduled_events?${params}`);
+    eventRows.push(...(Array.isArray(payload.collection) ? payload.collection : []));
+    nextPageToken = String(payload.pagination?.next_page_token || "");
+    if (!nextPageToken) break;
+  }
   let saved = 0;
-  for (const event of (events.collection || []).slice(0, 12)) {
+  for (const event of eventRows) {
     const eventId = calendlyUuid(event.uri);
     if (!eventId) continue;
     const invitees = await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(eventId)}/invitees?count=100`);
@@ -53259,7 +53302,7 @@ async function syncCalendlyForAgent(env, agentEmail) {
       } catch {}
       const answers = Array.isArray(invitee.questions_and_answers) ? invitee.questions_and_answers : [];
       const answerText = answers.map((item) => `${item.question || ""}: ${item.answer || ""}`).join("\n");
-      const phoneAnswer = answers.find((item) => /phone|telefone|teléfono|whatsapp|mobile|cell|celular|móvel|número.*contato|contact.*number/i.test(String(item.question || "")))?.answer || answers.find((item) => String(item.answer || "").replace(/\D/g, "").length >= 10 && String(item.answer || "").replace(/\D/g, "").length <= 15)?.answer;
+      const phoneAnswer = calendlyPhoneFromAnswers(answers);
       const email = String(invitee.email || "").trim().toLowerCase();
       let phone = String(invitee.text_reminder_number || phoneAnswer || calendlyPhoneFrom(invitee) || "").trim();
       if (!phone && email) try {
@@ -53272,14 +53315,18 @@ async function syncCalendlyForAgent(env, agentEmail) {
         const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,status,source,assignedAdminEmail,notes) VALUES (?,?,?,'new','Calendly',?,?)").bind(String(invitee.name || "Contato Calendly"), email || null, phone || null, agentEmail.toLowerCase(), answerText || null).run();
         client = { id: Number(inserted.meta.last_row_id) };
       }
+      if (client && phone) {
+        const updated = await env.DB.prepare("UPDATE crmClients SET phone=CASE WHEN trim(coalesce(phone,''))='' THEN ? ELSE phone END,whatsapp=CASE WHEN trim(coalesce(whatsapp,''))='' THEN ? ELSE whatsapp END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=? AND (trim(coalesce(phone,''))='' OR trim(coalesce(whatsapp,''))='')").bind(phone, phone, Number(client.id), agentEmail.toLowerCase()).run();
+        phonesUpdated += Number(updated.meta?.changes || 0);
+      }
       const location = event.location || {};
       const meetingUrl = String(location.join_url || location.location || "");
-      await env.DB.prepare("INSERT INTO calendlyMeetings (agentEmail,eventUri,inviteeUri,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,status,locationType,meetingUrl,cancelUrl,rescheduleUrl,clientId,questionsJson,lastSyncedAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,eventUri,inviteeUri) DO UPDATE SET eventName=excluded.eventName,inviteeName=excluded.inviteeName,inviteeEmail=excluded.inviteeEmail,inviteePhone=excluded.inviteePhone,startTime=excluded.startTime,endTime=excluded.endTime,status=excluded.status,locationType=excluded.locationType,meetingUrl=excluded.meetingUrl,cancelUrl=excluded.cancelUrl,rescheduleUrl=excluded.rescheduleUrl,clientId=coalesce(calendlyMeetings.clientId,excluded.clientId),questionsJson=excluded.questionsJson,lastSyncedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP").bind(agentEmail.toLowerCase(), String(event.uri), String(invitee.uri || ""), String(event.name || "Reunião"), String(invitee.name || "Cliente"), email || null, phone || null, String(event.start_time || ""), String(event.end_time || ""), String(invitee.status || event.status || "active"), String(location.type || ""), meetingUrl || null, String(invitee.cancel_url || ""), String(invitee.reschedule_url || ""), Number(client?.id || 0) || null, JSON.stringify(answers)).run();
+      await env.DB.prepare("INSERT INTO calendlyMeetings (agentEmail,eventUri,inviteeUri,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,status,locationType,meetingUrl,cancelUrl,rescheduleUrl,clientId,questionsJson,lastSyncedAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,eventUri,inviteeUri) DO UPDATE SET eventName=excluded.eventName,inviteeName=excluded.inviteeName,inviteeEmail=excluded.inviteeEmail,inviteePhone=COALESCE(NULLIF(excluded.inviteePhone,''),calendlyMeetings.inviteePhone),startTime=excluded.startTime,endTime=excluded.endTime,status=excluded.status,locationType=excluded.locationType,meetingUrl=excluded.meetingUrl,cancelUrl=excluded.cancelUrl,rescheduleUrl=excluded.rescheduleUrl,clientId=coalesce(calendlyMeetings.clientId,excluded.clientId),questionsJson=CASE WHEN excluded.questionsJson='[]' THEN calendlyMeetings.questionsJson ELSE excluded.questionsJson END,lastSyncedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP").bind(agentEmail.toLowerCase(), String(event.uri), String(invitee.uri || ""), String(event.name || "Reunião"), String(invitee.name || "Cliente"), email || null, phone || null, String(event.start_time || ""), String(event.end_time || ""), String(invitee.status || event.status || "active"), String(location.type || ""), meetingUrl || null, String(invitee.cancel_url || ""), String(invitee.reschedule_url || ""), Number(client?.id || 0) || null, JSON.stringify(answers)).run();
       saved += 1;
     }
   }
   await env.DB.prepare("UPDATE agentCalendlyConnections SET status='connected',lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).run();
-  return { saved };
+  return { saved, phonesUpdated };
 }
 __name(syncCalendlyForAgent, "syncCalendlyForAgent");
 async function syncAllCalendlyConnections(env) {
@@ -55469,7 +55516,7 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (name === "agent.syncCalendly") {
-    try { return trpcResult({ success: true, ...(await syncCalendlyForAgent(env, adminEmail.toLowerCase())) }); }
+    try { return trpcResult({ success: true, ...(await syncCalendlyForAgent(env, adminEmail.toLowerCase(), { backfill: true })) }); }
     catch (error) { return trpcError(String(error?.message || error)); }
   }
   if (name === "agent.calendlyMeetings") {
