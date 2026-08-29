@@ -53280,7 +53280,7 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   const baseParams = new URLSearchParams({ user: String(connection.userUri), min_start_time: minimum, max_start_time: maximum, count: "100", sort: "start_time:desc" });
   const eventRows = [];
   let nextPageToken = "";
-  for (let page = 0; page < (options.backfill ? 20 : 2); page += 1) {
+  for (let page = 0; page < (options.backfill ? 3 : 2); page += 1) {
     const params = new URLSearchParams(baseParams);
     if (nextPageToken) params.set("page_token", nextPageToken);
     const payload = await calendlyRequest(token, `/scheduled_events?${params}`);
@@ -53331,8 +53331,11 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
 __name(syncCalendlyForAgent, "syncCalendlyForAgent");
 async function syncAllCalendlyConnections(env) {
   await ensureCalendlyTables(env);
-  const rows = await env.DB.prepare("SELECT agentEmail FROM agentCalendlyConnections WHERE status='connected'").all();
-  for (const row of rows.results || []) try { await syncCalendlyForAgent(env, String(row.agentEmail)); } catch (error) { await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0,500), String(row.agentEmail).toLowerCase()).run(); }
+  const rows = await env.DB.prepare("SELECT agentEmail,lastSyncAt FROM agentCalendlyConnections WHERE status='connected'").all();
+  for (const row of rows.results || []) try {
+    const needsPhoneBackfill = !row.lastSyncAt || String(row.lastSyncAt) < "2026-08-29 01:02:00";
+    await syncCalendlyForAgent(env, String(row.agentEmail), { backfill: needsPhoneBackfill });
+  } catch (error) { await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0,500), String(row.agentEmail).toLowerCase()).run(); }
 }
 __name(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 async function runProcedure(name, input, request, env) {
