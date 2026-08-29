@@ -1,4 +1,7 @@
 (() => {
+  // Integração movida para /agentes/configuracoes-agenda.
+  // Mantido como arquivo neutro para clientes que ainda tenham o HTML antigo em cache.
+  return;
   if (location.pathname !== "/agentes/configuracoes") return;
 
   const api = async (name, input = {}, method = "GET") => {

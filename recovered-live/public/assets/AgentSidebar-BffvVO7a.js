@@ -252,7 +252,7 @@ function E() {
                 className: "mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3",
                 children: [
                   ["Perfil e dados pessoais", "/agentes/configuracoes#perfil"],
-                  ["Agenda e Calendly", "/agentes/agenda#configurar-agenda"],
+                  ["Agenda e Calendly", "/agentes/configuracoes-agenda"],
                   ["Página pública do agente", "/agentes/pagina-publica"],
                   ["E-mail", "/agentes/configuracoes#email"],
                   ["Five Rings", "/agentes/configuracoes#five-rings"],
