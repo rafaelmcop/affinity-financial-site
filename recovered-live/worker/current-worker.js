@@ -53187,6 +53187,12 @@ async function ensureCalendlyTables(env) {
     env.DB.prepare("CREATE TABLE IF NOT EXISTS calendlyMeetings (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,eventUri TEXT NOT NULL,inviteeUri TEXT,eventName TEXT,inviteeName TEXT,inviteeEmail TEXT,inviteePhone TEXT,startTime TEXT,endTime TEXT,status TEXT NOT NULL DEFAULT 'active',locationType TEXT,meetingUrl TEXT,cancelUrl TEXT,rescheduleUrl TEXT,clientId INTEGER,questionsJson TEXT,lastSyncedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(agentEmail,eventUri,inviteeUri))"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agentPublicProfiles (agentEmail TEXT PRIMARY KEY,slug TEXT NOT NULL UNIQUE,headline TEXT,bio TEXT,sinceYear INTEGER,photoUrl TEXT,calendlyUrl TEXT,isPublished INTEGER NOT NULL DEFAULT 1,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
   ]);
+  const profileColumns = ["jobTitle TEXT", "companies TEXT", "specialties TEXT", "professionalHistory TEXT", "education TEXT", "licenses TEXT", "languages TEXT", "achievements TEXT", "website TEXT", "linkedInUrl TEXT", "instagramUrl TEXT", "facebookUrl TEXT", "additionalInfo TEXT"];
+  const existingColumns = new Set(((await env.DB.prepare("PRAGMA table_info(agentPublicProfiles)").all()).results || []).map((column) => String(column.name)));
+  for (const definition of profileColumns) {
+    const columnName = definition.split(" ")[0];
+    if (!existingColumns.has(columnName)) try { await env.DB.prepare(`ALTER TABLE agentPublicProfiles ADD COLUMN ${definition}`).run(); } catch {}
+  }
 }
 __name(ensureCalendlyTables, "ensureCalendlyTables");
 function calendlyUuid(uri) { return String(uri || "").split("/").filter(Boolean).pop() || ""; }
@@ -53936,7 +53942,7 @@ Detalhes: ${details}` : ""}`;
   if (name === "calendly.publicProfile") {
     await ensureCalendlyTables(env);
     const slug = String(input.slug || "").trim().toLowerCase();
-    const row = await env.DB.prepare("SELECT p.slug,p.headline,p.bio,p.sinceYear,p.photoUrl,p.calendlyUrl,a.name,a.phone,a.whatsapp,a.contactEmail FROM agentPublicProfiles p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.slug=? AND p.isPublished=1 AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') LIMIT 1").bind(slug).first();
+    const row = await env.DB.prepare("SELECT p.slug,p.headline,p.bio,p.sinceYear,p.photoUrl,p.calendlyUrl,p.jobTitle,p.companies,p.specialties,p.professionalHistory,p.education,p.licenses,p.languages,p.achievements,p.website,p.linkedInUrl,p.instagramUrl,p.facebookUrl,p.additionalInfo,a.name,a.phone,a.whatsapp,a.contactEmail FROM agentPublicProfiles p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.slug=? AND p.isPublished=1 AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') LIMIT 1").bind(slug).first();
     return trpcResult(row || null);
   }
   if (name === "calendly.contactAgent") {
@@ -55584,6 +55590,13 @@ Affinity Financial Consulting`,
     const profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
     return trpcResult({ connection: connection ? { ...connection, connected: true } : null, profile: profile || null });
   }
+  if (name === "agent.getPublicProfile") {
+    await ensureCalendlyTables(env);
+    const owner = adminEmail.toLowerCase();
+    const profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
+    const account = await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail FROM adminAccounts WHERE lower(email)=?").bind(owner).first();
+    return trpcResult({ profile: profile || null, account: account || null });
+  }
   if (name === "agent.connectCalendly") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), token = String(input.token || "").trim();
@@ -55701,7 +55714,11 @@ Affinity Financial Consulting`,
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), slug = String(input.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
     if (slug.length < 3) return trpcError("Escolha um endereço com pelo menos 3 caracteres");
-    try { await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,sinceYear,photoUrl,calendlyUrl,isPublished,updatedAt) VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET slug=excluded.slug,headline=excluded.headline,bio=excluded.bio,sinceYear=excluded.sinceYear,photoUrl=excluded.photoUrl,calendlyUrl=excluded.calendlyUrl,isPublished=excluded.isPublished,updatedAt=CURRENT_TIMESTAMP").bind(owner,slug,String(input.headline||'Consultor financeiro').slice(0,140),String(input.bio||'').slice(0,2000),Number(input.sinceYear||0)||null,String(input.photoUrl||'').trim()||null,String(input.calendlyUrl||'').trim()||null,input.isPublished===false?0:1).run(); return trpcResult({success:true,url:`https://www.affinityfc.org/consultor/${slug}`}); } catch(error) { return trpcError(String(error).includes('UNIQUE')?'Este endereço já está sendo usado por outro agente':'Não foi possível salvar o perfil'); }
+    try {
+      const text = (value, limit = 4000) => String(value || "").trim().slice(0, limit) || null;
+      await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET slug=excluded.slug,headline=excluded.headline,bio=excluded.bio,sinceYear=excluded.sinceYear,photoUrl=excluded.photoUrl,calendlyUrl=excluded.calendlyUrl,jobTitle=excluded.jobTitle,companies=excluded.companies,specialties=excluded.specialties,professionalHistory=excluded.professionalHistory,education=excluded.education,licenses=excluded.licenses,languages=excluded.languages,achievements=excluded.achievements,website=excluded.website,linkedInUrl=excluded.linkedInUrl,instagramUrl=excluded.instagramUrl,facebookUrl=excluded.facebookUrl,additionalInfo=excluded.additionalInfo,isPublished=excluded.isPublished,updatedAt=CURRENT_TIMESTAMP").bind(owner, slug, text(input.headline, 180) || "Consultor financeiro", text(input.bio), Number(input.sinceYear || 0) || null, text(input.photoUrl, 500000), text(input.calendlyUrl, 1000), text(input.jobTitle, 180), text(input.companies, 2000), text(input.specialties, 2000), text(input.professionalHistory, 6000), text(input.education, 3000), text(input.licenses, 3000), text(input.languages, 1000), text(input.achievements, 3000), text(input.website, 1000), text(input.linkedInUrl, 1000), text(input.instagramUrl, 1000), text(input.facebookUrl, 1000), text(input.additionalInfo, 6000), input.isPublished === false ? 0 : 1).run();
+      return trpcResult({ success: true, url: `https://www.affinityfc.org/consultor/${slug}` });
+    } catch(error) { return trpcError(String(error).includes('UNIQUE')?'Este endereço já está sendo usado por outro agente':'Não foi possível salvar o perfil'); }
   }
   if (name === "agent.updateProfile") {
     const profileName = String(input.name ?? "").trim(), contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
@@ -56996,6 +57013,10 @@ var cloudflare_staging_default = {
     }
     if (url.pathname === "/agentes/agenda") {
       url.pathname = "/agent-calendar.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
+    if (url.pathname === "/agentes/pagina-publica") {
+      url.pathname = "/agent-public-profile-settings.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
     if (/^\/consultor\/[a-z0-9-]+\/?$/i.test(url.pathname)) {

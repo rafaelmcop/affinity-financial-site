@@ -8,8 +8,6 @@ $("connect-card").querySelector("p")?.after(permissionGuide);
 document
   .querySelectorAll("#connect-card,#connected-card")
   .forEach(node => node.classList.add("hidden"));
-const profileCard = document.querySelector(".grid .card:first-child");
-if (profileCard) profileCard.classList.add("hidden");
 const agendaGrid = document.querySelector(".grid");
 if (agendaGrid) agendaGrid.style.gridTemplateColumns = "1fr";
 async function api(name, input = {}, method = "GET") {
@@ -488,25 +486,6 @@ $("copy-client").onclick = async () => {
     notice("Dados do cliente copiados.");
   } catch {
     notice("Não foi possível copiar automaticamente.", true);
-  }
-};
-$("save-profile").onclick = async () => {
-  try {
-    const payload = {
-      slug: $("slug").value,
-      headline: $("headline").value,
-      sinceYear: $("sinceYear").value,
-      bio: $("bio").value,
-      photoUrl: $("photoUrl").value,
-      calendlyUrl: $("calendlyUrl").value,
-      isPublished: $("published").checked,
-    };
-    const result = await api("agent.savePublicProfile", payload, "POST");
-    notice("Perfil público salvo.");
-    $("open-profile").href = result.url;
-    $("open-profile").classList.remove("hidden");
-  } catch (e) {
-    notice(e.message, true);
   }
 };
 load();

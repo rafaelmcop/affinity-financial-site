@@ -253,7 +253,7 @@ function E() {
                 children: [
                   ["Perfil e dados pessoais", "/agentes/configuracoes#perfil"],
                   ["Agenda e Calendly", "/agentes/agenda#configurar-agenda"],
-                  ["Página pública do agente", "/agentes/agenda#perfil-publico"],
+                  ["Página pública do agente", "/agentes/pagina-publica"],
                   ["E-mail", "/agentes/configuracoes#email"],
                   ["Five Rings", "/agentes/configuracoes#five-rings"],
                   ["WhatsApp", "/agentes/configuracoes#whatsapp"],
