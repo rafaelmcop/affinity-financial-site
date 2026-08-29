@@ -53317,6 +53317,20 @@ function nextEastern830ISOString() {
   return new Date(Date.UTC(Number(targetDay.slice(0, 4)), Number(targetDay.slice(5, 7)) - 1, Number(targetDay.slice(8, 10)), 8, 30) - offsetMinutes * 6e4).toISOString();
 }
 __name(nextEastern830ISOString, "nextEastern830ISOString");
+function easternTodayBoundsISOString() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).reduce((result, part) => { if (part.type !== "literal") result[part.type] = part.value; return result; }, {});
+  const localToday = `${parts.year}-${parts.month}-${parts.day}`;
+  const nextDay = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1)).toISOString().slice(0, 10);
+  const toUtcMidnight = (day) => {
+    const offsetName = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(`${day}T12:00:00Z`)).find((part) => part.type === "timeZoneName")?.value || "GMT-5";
+    const match = offsetName.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+    const offsetMinutes = match ? (match[1] === "+" ? 1 : -1) * (Number(match[2]) * 60 + Number(match[3] || 0)) : -300;
+    return new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) - offsetMinutes * 6e4).toISOString();
+  };
+  return { start: toUtcMidnight(localToday), end: toUtcMidnight(nextDay) };
+}
+__name(easternTodayBoundsISOString, "easternTodayBoundsISOString");
 async function schedulePolicyWelcome(env, agentEmail, clientId, clientName, policyNumber) {
   const existing = await env.DB.prepare("SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND clientId=? AND occasion='custom' AND title='Boas-vindas à Affinity' LIMIT 1").bind(String(agentEmail).toLowerCase(), Number(clientId)).first();
   if (existing) return false;
@@ -54219,7 +54233,8 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.dashboard") {
     const owner = adminEmail.toLowerCase();
-    const [policiesQuery, tasksQuery, clientsQuery, notificationsQuery, unreadQuery, policyStatsQuery] = await env.DB.batch([
+    const today = easternTodayBoundsISOString();
+    const [policiesQuery, tasksQuery, clientsQuery, notificationsQuery, unreadQuery, policyStatsQuery, meetingsQuery] = await env.DB.batch([
       env.DB.prepare(
         "SELECT id,clientId,status,policyNumber,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?"
       ).bind(owner),
@@ -54239,7 +54254,10 @@ Detalhes: ${details}` : ""}`;
         SUM(CASE WHEN status='active' THEN CAST(ROUND(COALESCE(points,0)) AS INTEGER) ELSE 0 END) AS score,
         SUM(CAST(ROUND(COALESCE(points,0)) AS INTEGER)) AS lifetimeScore
        FROM agentPolicies WHERE lower(agentEmail)=?`
-      ).bind(owner)
+      ).bind(owner),
+      env.DB.prepare(
+        "SELECT id,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,meetingUrl,clientId FROM calendlyMeetings WHERE lower(agentEmail)=? AND lower(coalesce(status,'active')) NOT IN ('canceled','cancelled') AND datetime(startTime)>=datetime(?) AND datetime(startTime)<datetime(?) ORDER BY datetime(startTime),id"
+      ).bind(owner, today.start, today.end)
     ]);
     const policies = policiesQuery.results || [];
     const tasks = tasksQuery.results || [];
@@ -54247,14 +54265,7 @@ Detalhes: ${details}` : ""}`;
     const notifications = notificationsQuery.results || [];
     const unread = unreadQuery.results?.[0];
     const policyStats = policyStatsQuery.results?.[0];
-    const profileAlerts = clients.map((client) => ({
-      clientId: Number(client.id),
-      clientName: String(client.name || "Cliente"),
-      missing: missingClientProfileFields(
-        client,
-        policies.filter((policy) => Number(policy.clientId) === Number(client.id))
-      )
-    })).filter((alert) => alert.missing.length > 0);
+    const todayMeetings = meetingsQuery.results || [];
     return trpcResult({
       policies,
       policyCount: Number(policyStats?.total || 0),
@@ -54264,13 +54275,15 @@ Detalhes: ${details}` : ""}`;
       score: Number(policyStats?.score || 0),
       lifetimeScore: Number(policyStats?.lifetimeScore || 0),
       newMessages: Number(unread?.total || 0),
-      incompleteProfileCount: profileAlerts.length,
+      incompleteProfileCount: 0,
       notifications: notifications.map((row) => ({
         ...row,
         id: Number(row.id),
         clientId: Number(row.clientId)
       })),
-      profileAlerts,
+      profileAlerts: [],
+      todayMeetingCount: todayMeetings.length,
+      todayMeetings: todayMeetings.map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId || 0) || null })),
       followUps: tasks.filter((row) => row.status === "pending" && row.dueAt).length
     });
   }

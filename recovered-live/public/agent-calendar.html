@@ -1,1 +1,361 @@
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Agenda | Portal do Agente</title><style>:root{--gold:#dfb934;--navy:#0f223b;--card:#0b1728;--line:#293b52;--muted:#9ca8b8}*{box-sizing:border-box}body{margin:0;background:#000;color:#fff;font:15px Arial,sans-serif}.main{margin-left:260px;padding:38px;max-width:1400px}.eyebrow{color:var(--gold);font-weight:900;letter-spacing:.16em;text-transform:uppercase;font-size:12px}h1{font-size:40px;margin:8px 0}.muted{color:var(--muted);line-height:1.55}.card{margin-top:20px;background:var(--card);border:1px solid var(--line);border-radius:17px;padding:22px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}label{display:block;margin:13px 0;color:#d5dbe4}input,textarea,select{display:block;width:100%;margin-top:7px;padding:12px;border:1px solid #33465d;border-radius:9px;background:#030a13;color:#fff}textarea{min-height:120px;resize:vertical}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}button,.button{border:1px solid var(--line);border-radius:9px;background:#101f32;color:#fff;padding:11px 15px;font-weight:800;cursor:pointer;text-decoration:none}.primary{background:var(--gold);border-color:var(--gold);color:#050505}.danger{color:#fecaca;border-color:#7f1d1d}.notice{display:none;margin:15px 0;padding:12px;border-radius:9px}.notice.show{display:block;background:#14532d66;color:#bbf7d0}.notice.error{background:#7f1d1d66;color:#fecaca}.meeting{display:grid;grid-template-columns:minmax(190px,.6fr) 1fr auto;gap:18px;align-items:center;padding:17px 0;border-top:1px solid #23364d}.meeting:first-child{border-top:0}.when{font-weight:900;color:var(--gold)}.person strong{display:block;font-size:17px}.person span{display:block;color:var(--muted);margin-top:5px}.pill{display:inline-block;padding:4px 8px;border-radius:99px;background:#14532d;color:#bbf7d0;font-size:11px;font-weight:900}.message-composer{grid-column:1/-1;border:1px solid #43536a;border-radius:13px;background:#07111f;padding:16px}.message-composer textarea{min-height:250px;line-height:1.55}.message-tabs{display:flex;flex-wrap:wrap;gap:8px}.message-tabs button.active{background:var(--gold);border-color:var(--gold);color:#050505}.message-help{margin:10px 0 0;color:var(--muted);font-size:13px}.client-dialog{width:min(460px,calc(100% - 30px));border:1px solid #52647b;border-radius:18px;background:#0b1728;color:#fff;padding:0;box-shadow:0 24px 90px #000}.client-dialog::backdrop{background:#000b;backdrop-filter:blur(4px)}.dialog-body{padding:24px}.dialog-body h2{margin:0 0 18px;color:var(--gold)}.client-detail{margin:10px 0;padding:13px;border-radius:10px;background:#050d18}.client-detail small{display:block;color:var(--muted);margin-bottom:5px}.client-detail strong{font-size:16px;word-break:break-word}.hidden{display:none!important}.connection{display:flex;justify-content:space-between;gap:20px;align-items:center}@media(max-width:900px){.main{margin:0;padding:22px 16px}.grid{grid-template-columns:1fr}.meeting{grid-template-columns:1fr}.connection{align-items:flex-start;flex-direction:column}h1{font-size:32px}}</style></head><body><main class="main"><div class="eyebrow">Calendly + CRM</div><h1>Minha agenda</h1><p class="muted">Reuniões, contatos e links do Zoom em um só lugar. Cada agente conecta somente a própria conta.</p><div id="notice" class="notice"></div><section id="connect-card" class="card hidden"><h2>Conectar meu Calendly</h2><p class="muted">Cole seu Personal Access Token do Calendly. Ele será guardado criptografado e não ficará visível depois.</p><label>Token pessoal<input id="token" type="password" autocomplete="off" placeholder="Token do Calendly"></label><button id="connect" class="primary">Conectar minha agenda</button></section><section id="connected-card" class="card hidden"><div class="connection"><div><h2>Calendly conectado</h2><p class="muted" id="sync-state"></p></div><div class="actions"><button id="sync" class="primary">Atualizar agenda</button><button id="disconnect" class="danger">Desconectar</button></div></div></section><div class="grid"><section class="card"><h2>Meu perfil público</h2><p class="muted">Este será seu link pessoal para clientes.</p><label>Endereço do perfil<div style="display:flex;align-items:center;gap:6px"><span>affinityfc.org/consultor/</span><input id="slug"></div></label><label>Título profissional<input id="headline" placeholder="Consultor financeiro"></label><label>Trabalho como consultor desde<input id="sinceYear" type="number" min="1950" max="2100" placeholder="2020"></label><label>Apresentação<textarea id="bio" placeholder="Conte sua experiência e como ajuda seus clientes"></textarea></label><label>URL da foto<input id="photoUrl" type="url" placeholder="https://..."></label><label>Link do Calendly<input id="calendlyUrl" type="url" placeholder="https://calendly.com/seu-usuario"></label><label><input id="published" type="checkbox" checked style="display:inline;width:auto;margin-right:8px">Perfil público ativo</label><div class="actions"><button id="save-profile" class="primary">Salvar perfil</button><a id="open-profile" class="button hidden" target="_blank">Abrir meu perfil</a></div></section><section class="card"><h2>Próximas reuniões</h2><p class="muted">Sincronização automática a cada 5 minutos. Abra uma reunião para preparar o lembrete ou a segunda chamada.</p><div id="meetings"><p class="muted">Carregando…</p></div></section></div></main><dialog id="client-dialog" class="client-dialog"><div class="dialog-body"><h2>Dados do cliente</h2><div class="client-detail"><small>Nome</small><strong id="client-dialog-name">—</strong></div><div class="client-detail"><small>E-mail</small><strong id="client-dialog-email">—</strong></div><div class="client-detail"><small>Telefone</small><strong id="client-dialog-phone">—</strong></div><div class="actions"><button id="copy-client" class="primary">Copiar dados</button><button id="close-client">Fechar</button></div></div></dialog><script src="/agent-calendar.js?v=20260828-3" defer></script><script src="/agent-unified-menu.js?v=20260828-1" defer></script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Agenda | Portal do Agente</title>
+    <style>
+      :root {
+        --gold: #dfb934;
+        --navy: #0f223b;
+        --card: #0b1728;
+        --line: #293b52;
+        --muted: #9ca8b8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #000;
+        color: #fff;
+        font:
+          15px Arial,
+          sans-serif;
+      }
+      .main {
+        margin-left: 260px;
+        padding: 38px;
+        max-width: 1400px;
+      }
+      .eyebrow {
+        color: var(--gold);
+        font-weight: 900;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+      h1 {
+        font-size: 40px;
+        margin: 8px 0;
+      }
+      .muted {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+      .card {
+        margin-top: 20px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 17px;
+        padding: 22px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+      }
+      label {
+        display: block;
+        margin: 13px 0;
+        color: #d5dbe4;
+      }
+      input,
+      textarea,
+      select {
+        display: block;
+        width: 100%;
+        margin-top: 7px;
+        padding: 12px;
+        border: 1px solid #33465d;
+        border-radius: 9px;
+        background: #030a13;
+        color: #fff;
+      }
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 16px;
+      }
+      button,
+      .button {
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: #101f32;
+        color: #fff;
+        padding: 11px 15px;
+        font-weight: 800;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .primary {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: #050505;
+      }
+      .danger {
+        color: #fecaca;
+        border-color: #7f1d1d;
+      }
+      .notice {
+        display: none;
+        margin: 15px 0;
+        padding: 12px;
+        border-radius: 9px;
+      }
+      .notice.show {
+        display: block;
+        background: #14532d66;
+        color: #bbf7d0;
+      }
+      .notice.error {
+        background: #7f1d1d66;
+        color: #fecaca;
+      }
+      .meeting {
+        display: grid;
+        grid-template-columns: minmax(190px, 0.6fr) 1fr auto;
+        gap: 18px;
+        align-items: center;
+        padding: 17px 0;
+        border-top: 1px solid #23364d;
+      }
+      .meeting:first-child {
+        border-top: 0;
+      }
+      .when {
+        font-weight: 900;
+        color: var(--gold);
+      }
+      .person strong {
+        display: block;
+        font-size: 17px;
+      }
+      .person span {
+        display: block;
+        color: var(--muted);
+        margin-top: 5px;
+      }
+      .pill {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 99px;
+        background: #14532d;
+        color: #bbf7d0;
+        font-size: 11px;
+        font-weight: 900;
+      }
+      .message-composer {
+        grid-column: 1/-1;
+        border: 1px solid #43536a;
+        border-radius: 13px;
+        background: #07111f;
+        padding: 16px;
+      }
+      .message-composer textarea {
+        min-height: 250px;
+        line-height: 1.55;
+      }
+      .message-tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .message-tabs button.active {
+        background: var(--gold);
+        border-color: var(--gold);
+        color: #050505;
+      }
+      .message-help {
+        margin: 10px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .client-dialog {
+        width: min(460px, calc(100% - 30px));
+        border: 1px solid #52647b;
+        border-radius: 18px;
+        background: #0b1728;
+        color: #fff;
+        padding: 0;
+        box-shadow: 0 24px 90px #000;
+      }
+      .client-dialog::backdrop {
+        background: #000b;
+        backdrop-filter: blur(4px);
+      }
+      .dialog-body {
+        padding: 24px;
+      }
+      .dialog-body h2 {
+        margin: 0 0 18px;
+        color: var(--gold);
+      }
+      .client-detail {
+        margin: 10px 0;
+        padding: 13px;
+        border-radius: 10px;
+        background: #050d18;
+      }
+      .client-detail small {
+        display: block;
+        color: var(--muted);
+        margin-bottom: 5px;
+      }
+      .client-detail strong {
+        font-size: 16px;
+        word-break: break-word;
+      }
+      .hidden {
+        display: none !important;
+      }
+      .connection {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        align-items: center;
+      }
+      @media (max-width: 900px) {
+        .main {
+          margin: 0;
+          padding: 22px 16px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .meeting {
+          grid-template-columns: 1fr;
+        }
+        .connection {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        h1 {
+          font-size: 32px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="main">
+      <div class="eyebrow">Calendly + CRM</div>
+      <h1>Minha agenda</h1>
+      <p class="muted">
+        Reuniões, contatos e links do Zoom em um só lugar. Cada agente conecta
+        somente a própria conta.
+      </p>
+      <div id="notice" class="notice"></div>
+      <div id="configurar-agenda"></div>
+      <section id="connect-card" class="card hidden">
+        <h2>Conectar meu Calendly</h2>
+        <p class="muted">
+          Cole seu Personal Access Token do Calendly. Ele será guardado
+          criptografado e não ficará visível depois.
+        </p>
+        <label
+          >Token pessoal<input
+            id="token"
+            type="password"
+            autocomplete="off"
+            placeholder="Token do Calendly" /></label
+        ><button id="connect" class="primary">Conectar minha agenda</button>
+      </section>
+      <section id="connected-card" class="card hidden">
+        <div class="connection">
+          <div>
+            <h2>Calendly conectado</h2>
+            <p class="muted" id="sync-state"></p>
+          </div>
+          <div class="actions">
+            <button id="sync" class="primary">Atualizar agenda</button
+            ><button id="disconnect" class="danger">Desconectar</button>
+          </div>
+        </div>
+      </section>
+      <div class="grid">
+        <section id="perfil-publico" class="card">
+          <h2>Meu perfil público</h2>
+          <p class="muted">Este será seu link pessoal para clientes.</p>
+          <label
+            >Endereço do perfil
+            <div style="display: flex; align-items: center; gap: 6px">
+              <span>affinityfc.org/consultor/</span
+              ><input id="slug" /></div></label
+          ><label
+            >Título profissional<input
+              id="headline"
+              placeholder="Consultor financeiro" /></label
+          ><label
+            >Trabalho como consultor desde<input
+              id="sinceYear"
+              type="number"
+              min="1950"
+              max="2100"
+              placeholder="2020" /></label
+          ><label
+            >Apresentação<textarea
+              id="bio"
+              placeholder="Conte sua experiência e como ajuda seus clientes"
+            ></textarea></label
+          ><label
+            >URL da foto<input
+              id="photoUrl"
+              type="url"
+              placeholder="https://..." /></label
+          ><label
+            >Link do Calendly<input
+              id="calendlyUrl"
+              type="url"
+              placeholder="https://calendly.com/seu-usuario" /></label
+          ><label
+            ><input
+              id="published"
+              type="checkbox"
+              checked
+              style="display: inline; width: auto; margin-right: 8px"
+            />Perfil público ativo</label
+          >
+          <div class="actions">
+            <button id="save-profile" class="primary">Salvar perfil</button
+            ><a id="open-profile" class="button hidden" target="_blank"
+              >Abrir meu perfil</a
+            >
+          </div>
+        </section>
+        <section class="card">
+          <h2>Próximas reuniões</h2>
+          <p class="muted">
+            Sincronização automática a cada 5 minutos. Abra uma reunião para
+            preparar o lembrete ou a segunda chamada.
+          </p>
+          <div id="meetings"><p class="muted">Carregando…</p></div>
+        </section>
+      </div>
+    </main>
+    <dialog id="client-dialog" class="client-dialog">
+      <div class="dialog-body">
+        <h2>Dados do cliente</h2>
+        <div class="client-detail">
+          <small>Nome</small><strong id="client-dialog-name">—</strong>
+        </div>
+        <div class="client-detail">
+          <small>E-mail</small><strong id="client-dialog-email">—</strong>
+        </div>
+        <div class="client-detail">
+          <small>Telefone</small><strong id="client-dialog-phone">—</strong>
+        </div>
+        <div class="actions">
+          <button id="copy-client" class="primary">Copiar dados</button
+          ><button id="close-client">Fechar</button>
+        </div>
+      </div>
+    </dialog>
+    <script src="/agent-calendar.js?v=20260828-3" defer></script>
+    <script src="/agent-unified-menu.js?v=20260828-2" defer></script>
+  </body>
+</html>
