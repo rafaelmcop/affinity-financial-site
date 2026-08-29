@@ -53238,6 +53238,63 @@ async function backfillStoredCalendlyPhones(env, agentEmail) {
   return updated;
 }
 __name(backfillStoredCalendlyPhones, "backfillStoredCalendlyPhones");
+function sourceEmail(value) { return String(value || "").trim().toLowerCase(); }
+__name(sourceEmail, "sourceEmail");
+function sourcePhone(value) { const digits = String(value || "").replace(/\D/g, ""); return digits.length >= 10 ? digits.slice(-10) : ""; }
+__name(sourcePhone, "sourcePhone");
+function sourceValue(rows, field) {
+  for (const row of rows) {
+    const value = row?.[field];
+    if (value !== null && value !== void 0 && String(value).trim() !== "" && Number(value) !== 0) return value;
+  }
+  return null;
+}
+__name(sourceValue, "sourceValue");
+async function mergeClientSourcesForAgent(env, agentEmail) {
+  const owner = String(agentEmail || "").trim().toLowerCase();
+  const [clientResult, applicationResult, policyResult, meetingResult] = await Promise.all([
+    env.DB.prepare("SELECT id,name,email,phone,whatsapp,birthDate,address FROM crmClients WHERE lower(assignedAdminEmail)=?").bind(owner).all(),
+    env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget FROM agentApplications WHERE lower(agentEmail)=?").bind(owner).all(),
+    env.DB.prepare("SELECT id,clientId,clientName,clientEmail,clientPhone,birthDate,policyNumber,product,premiumAmount,coverageAmount,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all(),
+    env.DB.prepare("SELECT id,clientId,inviteeName,inviteeEmail,inviteePhone FROM calendlyMeetings WHERE lower(agentEmail)=?").bind(owner).all()
+  ]);
+  const clients = clientResult.results || [], applications = applicationResult.results || [], policies = policyResult.results || [], meetings = meetingResult.results || [];
+  const emailMap = new Map(), phoneMap = new Map();
+  const addMatch = (map, key, row) => { if (!key) return; const list = map.get(key) || []; list.push(row); map.set(key, list); };
+  for (const row of applications) { addMatch(emailMap, sourceEmail(row.clientEmail), { ...row, sourceType: "application" }); addMatch(phoneMap, sourcePhone(row.clientPhone), { ...row, sourceType: "application" }); }
+  for (const row of policies) { addMatch(emailMap, sourceEmail(row.clientEmail), { ...row, sourceType: "policy" }); addMatch(phoneMap, sourcePhone(row.clientPhone), { ...row, sourceType: "policy" }); }
+  for (const row of meetings) { addMatch(emailMap, sourceEmail(row.inviteeEmail), { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }); addMatch(phoneMap, sourcePhone(row.inviteePhone), { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }); }
+  let clientsUpdated = 0, policiesUpdated = 0, applicationsUpdated = 0;
+  for (const client of clients) {
+    const matches = [...(emailMap.get(sourceEmail(client.email)) || []), ...(phoneMap.get(sourcePhone(client.phone)) || [])].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
+    if (!matches.length) continue;
+    const prioritized = matches.sort((a, b) => ({ application: 0, policy: 1, calendly: 2 }[a.sourceType] - ({ application: 0, policy: 1, calendly: 2 }[b.sourceType])));
+    const app = prioritized.find((row) => row.sourceType === "application");
+    const composedAddress = app ? [app.address, app.city, app.state, app.zipCode].filter((value) => String(value || "").trim()).join(", ") : "";
+    const email = client.email || sourceValue(prioritized, "clientEmail");
+    const phone = client.phone || sourceValue(prioritized, "clientPhone");
+    const whatsapp = client.whatsapp || phone;
+    const birthDate = client.birthDate || sourceValue(prioritized, "birthDate");
+    const address = client.address || composedAddress || null;
+    const changed = email !== client.email || phone !== client.phone || whatsapp !== client.whatsapp || birthDate !== client.birthDate || address !== client.address;
+    if (changed) {
+      await env.DB.prepare("UPDATE crmClients SET email=?,phone=?,whatsapp=?,birthDate=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(email || null, phone || null, whatsapp || null, birthDate || null, address || null, Number(client.id), owner).run();
+      clientsUpdated += 1;
+    }
+    for (const policy of prioritized.filter((row) => row.sourceType === "policy")) {
+      if (policy.clientId && policy.clientEmail && policy.clientPhone && policy.birthDate) continue;
+      const result = await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),birthDate=COALESCE(NULLIF(birthDate,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(Number(client.id), email || null, phone || null, birthDate || null, Number(policy.id), owner).run();
+      policiesUpdated += Number(result.meta?.changes || 0);
+    }
+    for (const application of prioritized.filter((row) => row.sourceType === "application")) {
+      if (application.clientEmail && application.clientPhone && application.birthDate) continue;
+      const result = await env.DB.prepare("UPDATE agentApplications SET clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),birthDate=COALESCE(NULLIF(birthDate,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(email || null, phone || null, birthDate || null, Number(application.id), owner).run();
+      applicationsUpdated += Number(result.meta?.changes || 0);
+    }
+  }
+  return { clientsUpdated, policiesUpdated, applicationsUpdated };
+}
+__name(mergeClientSourcesForAgent, "mergeClientSourcesForAgent");
 async function calendlyRequest(token, path, options = {}) {
   const response = await fetch(`https://api.calendly.com${path}`, { ...options, headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", ...(options.headers || {}) } });
   const text = await response.text();
@@ -53272,29 +53329,47 @@ __name(schedulePolicyWelcome, "schedulePolicyWelcome");
 async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   await ensureCalendlyTables(env);
   let phonesUpdated = await backfillStoredCalendlyPhones(env, agentEmail);
+  await mergeClientSourcesForAgent(env, agentEmail);
   const connection = await env.DB.prepare("SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first();
   if (!connection) throw new Error("Calendly ainda não foi conectado");
   const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
-  const minimum = new Date(Date.now() - (options.backfill ? 730 : 1) * 864e5).toISOString();
-  const maximum = new Date(Date.now() + 370 * 864e5).toISOString();
-  const baseParams = new URLSearchParams({ user: String(connection.userUri), min_start_time: minimum, max_start_time: maximum, count: "100", sort: "start_time:desc" });
+  const now = Date.now();
+  const day = 864e5;
+  const ranges = options.backfill ? [[-365, -5], [-5, 350]] : [[-1, 350]];
   const eventRows = [];
-  let nextPageToken = "";
-  for (let page = 0; page < (options.backfill ? 3 : 2); page += 1) {
-    const params = new URLSearchParams(baseParams);
-    if (nextPageToken) params.set("page_token", nextPageToken);
-    const payload = await calendlyRequest(token, `/scheduled_events?${params}`);
-    eventRows.push(...(Array.isArray(payload.collection) ? payload.collection : []));
-    nextPageToken = String(payload.pagination?.next_page_token || "");
-    if (!nextPageToken) break;
+  let successfulRanges = 0;
+  for (const [startDay, endDay] of ranges) {
+    const baseParams = new URLSearchParams({ user: String(connection.userUri), min_start_time: new Date(now + startDay * day).toISOString(), max_start_time: new Date(now + endDay * day).toISOString(), count: "100", sort: "start_time:desc" });
+    let nextPageToken = "";
+    for (let page = 0; page < (options.backfill ? 3 : 2); page += 1) {
+      const params = new URLSearchParams(baseParams);
+      if (nextPageToken) params.set("page_token", nextPageToken);
+      let payload;
+      try { payload = await calendlyRequest(token, `/scheduled_events?${params}`); }
+      catch (error) {
+        console.warn(JSON.stringify({ event: "calendly_range_skipped", agentEmail, startDay, endDay, message: String(error?.message || error) }));
+        break;
+      }
+      successfulRanges += 1;
+      eventRows.push(...(Array.isArray(payload.collection) ? payload.collection : []));
+      nextPageToken = String(payload.pagination?.next_page_token || "");
+      if (!nextPageToken) break;
+    }
   }
+  if (!successfulRanges) throw new Error("O Calendly não aceitou nenhum dos períodos solicitados");
+  const completedMeetingResult = options.backfill ? await env.DB.prepare("SELECT eventUri,inviteeUri FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))<>''").bind(agentEmail.toLowerCase()).all() : { results: [] };
+  const completedMeetingKeys = new Set((completedMeetingResult.results || []).map((row) => `${String(row.eventUri)}|${String(row.inviteeUri || "")}`));
+  const pendingMeetingResult = options.backfill ? await env.DB.prepare("SELECT DISTINCT eventUri FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))=''").bind(agentEmail.toLowerCase()).all() : { results: [] };
+  const pendingEventUris = new Set((pendingMeetingResult.results || []).map((row) => String(row.eventUri || "")));
+  const eventsToProcess = options.backfill && pendingEventUris.size ? eventRows.filter((event) => pendingEventUris.has(String(event.uri || ""))).slice(0, 20) : eventRows.slice(0, options.backfill ? 20 : eventRows.length);
   let saved = 0;
-  for (const event of eventRows) {
+  for (const event of eventsToProcess) {
     const eventId = calendlyUuid(event.uri);
     if (!eventId) continue;
     const invitees = await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(eventId)}/invitees?count=100`);
     for (const listedInvitee of invitees.collection || []) {
       const inviteeId = calendlyUuid(listedInvitee.uri);
+      if (options.backfill && inviteeId && completedMeetingKeys.has(`${String(event.uri)}|${String(listedInvitee.uri || "")}`)) continue;
       let invitee = listedInvitee;
       if (inviteeId) try {
         const detail = await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(eventId)}/invitees/${encodeURIComponent(inviteeId)}`);
@@ -53326,7 +53401,8 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
     }
   }
   await env.DB.prepare("UPDATE agentCalendlyConnections SET status='connected',lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).run();
-  return { saved, phonesUpdated };
+  const merged = await mergeClientSourcesForAgent(env, agentEmail);
+  return { saved, phonesUpdated, ...merged };
 }
 __name(syncCalendlyForAgent, "syncCalendlyForAgent");
 async function syncAllCalendlyConnections(env) {
@@ -54079,10 +54155,12 @@ Detalhes: ${details}` : ""}`;
       if (id) {
         const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?`).bind(...values,id,owner).run();
         if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+        await mergeClientSourcesForAgent(env, owner);
         return trpcResult({ success: true, id });
       }
       const accessCode = Array.from(crypto.getRandomValues(new Uint8Array(4)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,8).toUpperCase();
       const inserted = await env.DB.prepare(`INSERT INTO agentApplications (agentEmail,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,maritalStatus,occupation,annualIncome,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget,applicationReason,notes,applicationData,sensitiveData,accessCode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(owner,...values,accessCode).run();
+      await mergeClientSourcesForAgent(env, owner);
       return trpcResult({ success: true, id: Number(inserted.meta.last_row_id), accessCode });
     }
     if (name === "agent.submitApplication") {
@@ -56970,6 +57048,10 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    if (controller.cron === "calendly-phone-backfill") {
+      ctx.waitUntil(syncAllCalendlyConnections(env));
+      return;
+    }
     const emailSync = Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
       (module) => module.syncAllIcloudInboxes(env)
     );
@@ -56994,7 +57076,9 @@ async function runFiveRingsSyncAsAgent(env, agentEmail) {
     },
     body: JSON.stringify({ json: {} })
   });
-  return runProcedure("agent.syncFiveRings", {}, request, env);
+  const result = await runProcedure("agent.syncFiveRings", {}, request, env);
+  await mergeClientSourcesForAgent(env, agentEmail);
+  return result;
 }
 __name(runFiveRingsSyncAsAgent, "runFiveRingsSyncAsAgent");
 function extractFiveRingsEmailCode(subject, body) {
