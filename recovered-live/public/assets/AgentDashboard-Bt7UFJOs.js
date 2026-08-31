@@ -466,7 +466,7 @@ function H() {
                                         t.eventName || "Reunião",
                                       ],
                                     }),
-                                    e.jsx("button", { type: "button", onClick: () => o(`/agentes/compromisso?meetingId=${t.id}`), className: "mt-2 block text-xs font-bold text-sky-300 hover:text-white", children: "Abrir cliente" }),
+                                    e.jsx("button", { type: "button", onClick: () => window.location.assign(`/agentes/compromisso?meetingId=${t.id}`), className: "mt-2 block text-xs font-bold text-sky-300 hover:text-white", children: "Abrir cliente" }),
                                   ],
                                 },
                                 `meeting-${t.id}`
