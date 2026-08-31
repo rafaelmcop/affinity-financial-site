@@ -466,7 +466,7 @@ function H() {
                                         t.eventName || "Reunião",
                                       ],
                                     }),
-                                    t.clientId && e.jsx("button", { type: "button", onClick: () => o(`/agentes/clientes?clientId=${t.clientId}`), className: "mt-2 block text-xs font-bold text-sky-300 hover:text-white", children: "Abrir cliente" }),
+                                    t.clientId && e.jsx("button", { type: "button", onClick: () => o(`/agentes/crm?clientId=${t.clientId}`), className: "mt-2 block text-xs font-bold text-sky-300 hover:text-white", children: "Abrir cliente" }),
                                   ],
                                 },
                                 `meeting-${t.id}`
