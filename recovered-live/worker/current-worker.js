@@ -56388,41 +56388,15 @@ Affinity Financial Consulting`,
   }
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
-    const portfolio = await env.DB.prepare(
-      "SELECT id,clientId,clientName,clientEmail,clientPhone,birthDate,policyNumber FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY id DESC"
-    ).bind(crmOwner).all();
-    for (const policy of portfolio.results || []) {
-      const policyName = String(policy.clientName || "").trim();
-      const policyEmail = String(policy.clientEmail || "").trim().toLowerCase();
-      const policyPhone = String(policy.clientPhone || "").trim();
-      if (!policyName && !policyEmail && !policyPhone) continue;
-      let crmClient = Number(policy.clientId || 0) ? await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=? LIMIT 1"
-      ).bind(Number(policy.clientId), crmOwner).first() : null;
-      if (!crmClient && policyEmail) crmClient = await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? LIMIT 1"
-      ).bind(crmOwner, policyEmail).first();
-      const phoneDigits = policyPhone.replace(/\D/g, "").slice(-10);
-      if (!crmClient && phoneDigits) crmClient = await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND replace(replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ',''),'+','') LIKE ? LIMIT 1"
-      ).bind(crmOwner, `%${phoneDigits}`).first();
-      if (!crmClient && policyName) crmClient = await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(?) LIMIT 1"
-      ).bind(crmOwner, policyName).first();
-      let crmClientId = Number(crmClient?.id || 0);
-      if (!crmClientId) {
-        const inserted = await env.DB.prepare(
-        "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,'closed','Apólice concluída',?,?)"
-        ).bind(policyName || policyEmail || "Cliente", policyEmail || null, policyPhone || null, policyPhone || null, policy.birthDate || null, crmOwner, policy.policyNumber ? `Apólice ${policy.policyNumber}` : null).run();
-        crmClientId = Number(inserted.meta.last_row_id);
-      } else {
-        await env.DB.prepare(
-          "UPDATE crmClients SET name=COALESCE(NULLIF(name,''),?),email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(NULLIF(birthDate,''),?),status='closed',updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
-        ).bind(policyName || null, policyEmail || null, policyPhone || null, policyPhone || null, policy.birthDate || null, crmClientId, crmOwner).run();
-      }
-      if (crmClientId && Number(policy.clientId || 0) !== crmClientId) await env.DB.prepare(
-        "UPDATE agentPolicies SET clientId=? WHERE id=? AND lower(agentEmail)=?"
-      ).bind(crmClientId, Number(policy.id), crmOwner).run();
+    if (accountType === "agent") {
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE agentPolicies SET clientId=(SELECT c.id FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))) ORDER BY CASE WHEN trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail)) THEN 0 ELSE 1 END,c.id DESC LIMIT 1) WHERE lower(agentEmail)=? AND (clientId IS NULL OR clientId=0) AND EXISTS (SELECT 1 FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))))"
+        ).bind(crmOwner, crmOwner, crmOwner),
+        env.DB.prepare(
+          "UPDATE crmClients SET status='closed',updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status<>'closed' AND EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)"
+        ).bind(crmOwner, crmOwner)
+      ]);
     }
     const rows = accountType === "agent" ? await env.DB.prepare(
       "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY CASE WHEN nextFollowUpAt IS NULL THEN 1 ELSE 0 END, nextFollowUpAt ASC, updatedAt DESC"
