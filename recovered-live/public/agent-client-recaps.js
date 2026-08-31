@@ -1,5 +1,5 @@
 (() => {
-  if (location.pathname !== "/agentes/clientes") return;
+  const supportedPage = () => ["/agentes/clientes", "/agentes/crm"].includes(location.pathname);
   const api = async (name, input = {}) => {
     const response = await fetch(`/api/trpc/${name}?input=${encodeURIComponent(JSON.stringify({ json: input }))}`, { credentials: "include" });
     const payload = await response.json();
@@ -19,7 +19,7 @@
     const dialog = document.createElement("dialog");
     dialog.id = "client-recap-dialog";
     dialog.className = "w-[min(820px,calc(100%-28px))] max-h-[88vh] rounded-2xl border border-[#52647b] bg-[#0b1728] p-0 text-white backdrop:bg-black/80";
-    dialog.innerHTML = '<div class="max-h-[88vh] overflow-auto p-6"><div class="flex items-start justify-between gap-4"><div><h2 id="client-recap-title" class="text-2xl font-bold text-[#dfb934]">Resumo da reunião</h2><p id="client-recap-date" class="mt-1 text-sm text-gray-400"></p></div><button id="client-recap-close" class="rounded-md border border-white/20 px-3 py-2">Fechar</button></div><div class="mt-5 border-t border-white/10 pt-4"><h3 class="font-bold text-[#dfb934]">Resumo</h3><div id="client-recap-summary" class="mt-2 leading-relaxed"></div></div><div class="mt-5 border-t border-white/10 pt-4"><h3 class="font-bold text-[#dfb934]">Próximos passos</h3><div id="client-recap-actions" class="mt-2 leading-relaxed"></div></div><div class="mt-5 border-t border-white/10 pt-4"><h3 class="font-bold text-[#dfb934]">Pontos discutidos</h3><div id="client-recap-discussion" class="mt-2 leading-relaxed"></div></div><details class="mt-5 border-t border-white/10 pt-4"><summary class="cursor-pointer font-bold text-[#dfb934]">Ver transcrição</summary><div id="client-recap-transcript" class="mt-3 max-h-80 overflow-auto rounded-xl bg-black/40 p-4 leading-relaxed"></div></details></div>';
+    dialog.innerHTML = '<div class="max-h-[88vh] overflow-auto p-6"><div class="flex items-start justify-between gap-4"><div><h2 id="client-recap-title" class="text-2xl font-bold text-[#dfb934]">Resumo da reunião</h2><p id="client-recap-date" class="mt-1 text-sm text-gray-400"></p><a id="client-recap-recording" class="mt-3 hidden font-bold text-sky-300" target="_blank" rel="noopener">Abrir gravação</a></div><button id="client-recap-close" class="rounded-md border border-white/20 px-3 py-2">Fechar</button></div><div class="mt-5 border-t border-white/10 pt-4"><h3 class="font-bold text-[#dfb934]">Resumo</h3><div id="client-recap-summary" class="mt-2 leading-relaxed"></div></div><div class="mt-5 border-t border-white/10 pt-4"><h3 class="font-bold text-[#dfb934]">Próximos passos</h3><div id="client-recap-actions" class="mt-2 leading-relaxed"></div></div><div class="mt-5 border-t border-white/10 pt-4"><h3 class="font-bold text-[#dfb934]">Pontos discutidos</h3><div id="client-recap-discussion" class="mt-2 leading-relaxed"></div></div><details class="mt-5 border-t border-white/10 pt-4"><summary class="cursor-pointer font-bold text-[#dfb934]">Ver transcrição</summary><div id="client-recap-transcript" class="mt-3 max-h-80 overflow-auto rounded-xl bg-black/40 p-4 leading-relaxed"></div></details></div>';
     document.body.appendChild(dialog);
     document.getElementById("client-recap-close").onclick = () => dialog.close();
     dialog.onclick = (event) => { if (event.target === dialog) dialog.close(); };
@@ -29,6 +29,9 @@
       const row = await api("agent.calendlyRecap", { id });
       document.getElementById("client-recap-title").textContent = row.title || "Resumo da reunião";
       document.getElementById("client-recap-date").textContent = row.startTime ? new Date(row.startTime).toLocaleString("pt-BR") : "";
+      const recording = document.getElementById("client-recap-recording");
+      recording.classList.toggle("hidden", !row.recordingUrl);
+      if (row.recordingUrl) recording.href = row.recordingUrl;
       document.getElementById("client-recap-summary").innerHTML = recapText(row.summary);
       document.getElementById("client-recap-actions").innerHTML = recapText(row.actionItems);
       document.getElementById("client-recap-discussion").innerHTML = recapText(row.discussion);
@@ -36,16 +39,21 @@
       document.getElementById("client-recap-dialog").showModal();
     } catch (error) { alert(error.message); }
   };
+  const statusLabel = (value) => ({ active: "Agendada", completed: "Compareceu", no_show: "Não compareceu", canceled: "Cancelada", cancelled: "Cancelada" }[String(value || "").toLowerCase()] || String(value || "Status não informado"));
   const render = async (host, clientId) => {
-    host.innerHTML = '<p class="text-sm text-gray-400">Carregando resumos…</p>';
+    host.innerHTML = '<p class="text-sm text-gray-400">Carregando histórico de reuniões…</p>';
     try {
-      const rows = await api("agent.calendlyRecaps", { clientId });
-      host.innerHTML = rows.length ? rows.map((row) => `<button type="button" data-client-recap="${esc(row.id)}" class="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 p-4 text-left hover:border-[#dfb934]/60"><span><strong class="block text-white">${esc(row.title || "Resumo da reunião")}</strong><small class="mt-1 block text-gray-400">${row.startTime ? new Date(row.startTime).toLocaleString("pt-BR") : "Data não informada"}</small></span><span class="font-bold text-[#dfb934]">Ver recap</span></button>`).join("") : '<p class="text-sm text-gray-500">Nenhum Meeting Recap encontrado para este cliente.</p>';
+      const [allMeetings, rows] = await Promise.all([api("agent.calendlyMeetings"), api("agent.calendlyRecaps", { clientId })]);
+      const meetings = (allMeetings || []).filter((row) => Number(row.clientId) === Number(clientId));
+      const meetingHtml = meetings.length ? meetings.map((row) => `<div class="rounded-xl border border-white/10 bg-black/30 p-4"><div class="flex flex-wrap items-start justify-between gap-2"><span><strong class="block text-white">${esc(row.eventName || "Reunião")}</strong><small class="mt-1 block text-gray-400">${row.startTime ? new Date(row.startTime).toLocaleString("pt-BR") : "Data não informada"}</small></span><b class="text-xs text-[#dfb934]">${esc(statusLabel(row.status))}</b></div>${row.meetingUrl ? `<a class="mt-3 inline-block text-sm font-bold text-sky-300" href="${esc(row.meetingUrl)}" target="_blank" rel="noopener">Abrir link da reunião</a>` : ""}</div>`).join("") : '<p class="text-sm text-gray-500">Nenhuma reunião registrada para este cliente.</p>';
+      const recapHtml = rows.length ? rows.map((row) => `<button type="button" data-client-recap="${esc(row.id)}" class="flex w-full items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/30 p-4 text-left hover:border-[#dfb934]/60"><span><strong class="block text-white">${esc(row.title || "Resumo da reunião")}</strong><small class="mt-1 block text-gray-400">${row.startTime ? new Date(row.startTime).toLocaleString("pt-BR") : "Data não informada"}</small></span><span class="font-bold text-[#dfb934]">Ver recap</span></button>`).join("") : '<p class="text-sm text-gray-500">Nenhum Meeting Recap encontrado para este cliente.</p>';
+      host.innerHTML = `<div class="grid gap-2"><p class="text-xs font-bold uppercase tracking-wider text-gray-400">Reuniões e comparecimento</p>${meetingHtml}<p class="mt-3 text-xs font-bold uppercase tracking-wider text-gray-400">Gravações, resumos e transcrições</p>${recapHtml}</div>`;
       host.querySelectorAll("[data-client-recap]").forEach((button) => button.onclick = () => openRecap(button.dataset.clientRecap));
     } catch (error) { host.innerHTML = `<p class="text-sm text-red-300">${esc(error.message)}</p>`; }
   };
   const mount = async () => {
-    const marker = [...document.querySelectorAll("p")].find((node) => node.textContent.trim() === "Ficha do cliente");
+    if (!supportedPage()) { mountedName = ""; return; }
+    const marker = [...document.querySelectorAll("p")].find((node) => ["Ficha do cliente", "Cadastro, apólice, automações e histórico em um só lugar"].includes(node.textContent.trim()));
     if (!marker) { mountedName = ""; return; }
     const card = marker.closest("div.rounded-xl") || marker.parentElement?.parentElement?.parentElement;
     const name = marker.parentElement?.querySelector("h2")?.textContent?.trim();
@@ -58,7 +66,7 @@
     const section = document.createElement("div");
     section.id = "client-meeting-recaps";
     section.className = "mt-4 rounded-xl border border-[#dfb934]/25 bg-black/25 p-4";
-    section.innerHTML = '<div class="mb-3"><p class="text-xs font-bold uppercase tracking-[.16em] text-[#dfb934]">Meeting Recaps</p><p class="mt-1 text-sm text-gray-400">Resumos e transcrições das reuniões deste cliente.</p></div><div id="client-recap-list" class="grid gap-2"></div>';
+    section.innerHTML = '<div class="mb-3"><p class="text-xs font-bold uppercase tracking-[.16em] text-[#dfb934]">Histórico de reuniões</p><p class="mt-1 text-sm text-gray-400">Agenda, comparecimento, gravações, resumos e transcrições deste cliente.</p></div><div id="client-recap-list" class="grid gap-2"></div>';
     card.appendChild(section);
     ensureDialog();
     render(document.getElementById("client-recap-list"), selectedId);

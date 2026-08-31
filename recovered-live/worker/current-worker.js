@@ -53422,6 +53422,14 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   }
   await env.DB.prepare("UPDATE agentCalendlyConnections SET status='connected',lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).run();
   const merged = await mergeClientSourcesForAgent(env, agentEmail);
+  await env.DB.prepare(`UPDATE crmClients
+    SET status=CASE
+      WHEN EXISTS (SELECT 1 FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=lower(crmClients.assignedAdminEmail)) THEN 'client'
+      WHEN status IN ('client','closed') THEN 'new'
+      ELSE status END,
+      updatedAt=CURRENT_TIMESTAMP
+    WHERE lower(assignedAdminEmail)=?
+      AND EXISTS (SELECT 1 FROM calendlyMeetings m WHERE m.clientId=crmClients.id AND lower(m.agentEmail)=lower(crmClients.assignedAdminEmail))`).bind(agentEmail.toLowerCase()).run();
   return { saved, phonesUpdated, ...merged };
 }
 __name(syncCalendlyForAgent, "syncCalendlyForAgent");
@@ -55416,9 +55424,9 @@ Affinity Financial Consulting`,
           if (!client) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.clientName, owner).first();
           let clientId = Number(client?.id || 0);
           if (clientId) {
-            await env.DB.prepare("UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status='client',updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, clientId, owner).run();
+            await env.DB.prepare("UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status=CASE WHEN ?=1 THEN 'client' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? 1 : 0, clientId, owner).run();
           } else {
-            const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,'client','Five Rings',?,'Importado automaticamente em modo somente leitura')").bind(record.clientName, record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, owner).run();
+            const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,'Five Rings',?,'Importado automaticamente em modo somente leitura')").bind(record.clientName, record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? "client" : "new", owner).run();
             clientId = Number(inserted.meta.last_row_id);
             importedClients2 += 1;
           }
@@ -55466,12 +55474,12 @@ Affinity Financial Consulting`,
         let clientId = Number(client?.id || 0);
         if (clientId) {
           await env.DB.prepare(
-            "UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status='client',updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
-          ).bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, clientId, owner).run();
+            "UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status=CASE WHEN ?=1 THEN 'client' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?"
+          ).bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? 1 : 0, clientId, owner).run();
         } else {
           const inserted = await env.DB.prepare(
-            "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,'client','Five Rings',?,'Importado automaticamente em modo somente leitura')"
-          ).bind(record.clientName, record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, owner).run();
+            "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,'Five Rings',?,'Importado automaticamente em modo somente leitura')"
+          ).bind(record.clientName, record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? "client" : "new", owner).run();
           clientId = Number(inserted.meta.last_row_id);
           importedClients += 1;
         }
@@ -55660,6 +55668,7 @@ Affinity Financial Consulting`,
         title: String(row.title || row.name || row.event_name || "Resumo da reunião"),
         attendee: String(row.attendee_name || row.invitee_name || row.attendee?.name || ""),
         startTime: String(row.start_time || row.meeting_start_time || row.created_at || "") || null,
+        recordingUrl: String(row.recording_url || row.video_url || row.recording?.url || row.video?.url || "") || null,
         clientId: Number(matchedMeeting?.clientId || 0) || null
         };
       }).filter((row) => row.id);
@@ -55691,6 +55700,7 @@ Affinity Financial Consulting`,
         summary: pick(row.summary,row.highlights?.summary,row.recap?.summary,row.notes?.summary),
         actionItems: pick(row.action_items,row.highlights?.action_items,row.recap?.action_items,row.next_steps),
         discussion: pick(row.discussion,row.discussion_notes,row.highlights?.discussion,row.recap?.discussion_notes,row.notes),
+        recordingUrl: pick(row.recording_url,row.video_url,row.recording?.url,row.video?.url,row.zoom_recording_url),
         transcript
       });
     } catch (error) { return trpcError(String(error?.message || error)); }
@@ -57392,8 +57402,12 @@ async function runMessageAutomations(env) {
       binds.push(Number(automation.clientId));
     }
     if (String(automation.audience) === "group" && automation.recipientGroup && !automation.selectedClientIds) {
-      sql += " AND status=?";
-      binds.push(String(automation.recipientGroup));
+      if (String(automation.recipientGroup) === "leads") {
+        sql += " AND status IN ('new','contacted','meeting','proposal')";
+      } else {
+        sql += " AND status=?";
+        binds.push(String(automation.recipientGroup));
+      }
     }
     if (automation.selectedClientIds) {
       let selected = [];
