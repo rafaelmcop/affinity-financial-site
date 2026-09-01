@@ -53431,7 +53431,7 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   await env.DB.prepare(`UPDATE crmClients
     SET status=CASE
       WHEN EXISTS (SELECT 1 FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=lower(crmClients.assignedAdminEmail)) THEN 'client'
-      WHEN status IN ('client','closed') THEN 'new'
+      WHEN status='client' THEN 'new'
       ELSE status END,
       updatedAt=CURRENT_TIMESTAMP
     WHERE lower(assignedAdminEmail)=?
@@ -54410,7 +54410,7 @@ Detalhes: ${details}` : ""}`;
     const clientName = String(input.name ?? "").trim();
     const email = String(input.email ?? "").trim().toLowerCase();
     const status = String(input.status ?? "client");
-    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "client", "closed"].includes(
+    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "first_meeting", "followup_documents", "followup_service", "followup_application", "followup_review", "completed", "client", "closed"].includes(
       status
     ))
       return trpcError("Revise os dados do cliente");
@@ -55047,6 +55047,9 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
+    // A collective automation is a dynamic audience. Never retain an old,
+    // frozen selection because every contact added later must be included.
+    await env.DB.prepare("UPDATE scheduledMessages SET selectedClientIds=NULL,recipientGroup=NULL WHERE lower(agentEmail)=? AND audience='all'").bind(owner).run();
     const defaults = [
       [
         "birthday",
@@ -55230,7 +55233,7 @@ Affinity Financial Consulting`,
   if (name === "agent.deliveryLog") {
     const owner = adminEmail.toLowerCase();
     const [future, deliveries, direct, failures] = await env.DB.batch([
-      env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
+      env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
       env.DB.prepare("SELECT d.id,m.title,m.subject,c.name AS clientName,c.email AS recipientEmail,d.sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? ORDER BY d.sentAt DESC LIMIT 250").bind(owner),
       env.DB.prepare("SELECT e.id,e.subject,c.name AS clientName,e.toEmail AS recipientEmail,e.sentAt FROM clientEmails e LEFT JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='sent' AND e.deletedAt IS NULL ORDER BY e.sentAt DESC LIMIT 250").bind(owner),
       env.DB.prepare("SELECT id,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' ORDER BY attemptedAt DESC LIMIT 100").bind(owner)
@@ -55255,6 +55258,8 @@ Affinity Financial Consulting`,
   if (name === "agent.scheduleMessage") {
     const occasion = String(input.occasion);
     const monthNumber = Number(input.monthNumber || 0);
+    const audience = String(input.audience ?? "individual");
+    const selectedClientIds = audience === "all" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
     if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
     await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt,monthNumber) VALUES (?,?,?,'email',?,?,?,?,?,?,?,?)"
@@ -55264,9 +55269,9 @@ Affinity Financial Consulting`,
       occasion,
       String(input.title ?? "Automa\xE7\xE3o"),
       String(input.subject ?? "Mensagem da Affinity Financial"),
-      String(input.audience ?? "individual"),
-      String(input.recipientGroup ?? "") || null,
-      Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null,
+      audience,
+      audience === "all" ? null : String(input.recipientGroup ?? "") || null,
+      selectedClientIds,
       String(input.message ?? "").trim(),
       occasion === "monthly" ? null : input.scheduledAt || null,
       occasion === "monthly" ? monthNumber : null
@@ -55277,6 +55282,8 @@ Affinity Financial Consulting`,
   if (name === "agent.updateMessage") {
     const occasion = String(input.occasion);
     const monthNumber = Number(input.monthNumber || 0);
+    const audience = String(input.audience ?? "individual");
+    const selectedClientIds = audience === "all" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
     if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
     await env.DB.prepare(
       "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,monthNumber=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
@@ -55285,9 +55292,9 @@ Affinity Financial Consulting`,
       occasion,
       String(input.title),
       String(input.subject),
-      String(input.audience),
-      String(input.recipientGroup ?? "") || null,
-      Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null,
+      audience,
+      audience === "all" ? null : String(input.recipientGroup ?? "") || null,
+      selectedClientIds,
       String(input.message),
       occasion === "monthly" ? null : input.scheduledAt || null,
       occasion === "monthly" ? monthNumber : null,
@@ -56407,11 +56414,14 @@ Affinity Financial Consulting`,
     if (accountType === "agent") {
       await env.DB.batch([
         env.DB.prepare(
-          "UPDATE agentPolicies SET clientId=(SELECT c.id FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))) ORDER BY CASE WHEN trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail)) THEN 0 ELSE 1 END,c.id DESC LIMIT 1) WHERE lower(agentEmail)=? AND (clientId IS NULL OR clientId=0) AND EXISTS (SELECT 1 FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))))"
+          "UPDATE agentPolicies SET clientId=(SELECT c.id FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))) ORDER BY CASE WHEN trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail)) THEN 0 WHEN trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10) THEN 1 ELSE 2 END,c.id DESC LIMIT 1) WHERE lower(agentEmail)=? AND (clientId IS NULL OR clientId=0) AND EXISTS (SELECT 1 FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))))"
         ).bind(crmOwner, crmOwner, crmOwner),
         env.DB.prepare(
-          "UPDATE crmClients SET status='closed',updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status<>'closed' AND EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)"
-        ).bind(crmOwner, crmOwner)
+          "UPDATE crmClients SET status='client',updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status<>'client' AND EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)"
+        ).bind(crmOwner, crmOwner),
+        env.DB.prepare(
+          "UPDATE crmClients SET status='closed',notes=CASE WHEN instr(lower(coalesce(notes,'')),'contratado como agente')=0 THEN trim(coalesce(notes,'') || CASE WHEN trim(coalesce(notes,''))<>'' THEN char(10) ELSE '' END || 'Contratado como agente da Affinity Financial.') ELSE notes END,updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status IN ('new','contacted','meeting','proposal') AND EXISTS (SELECT 1 FROM adminAccounts a WHERE a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') AND ((trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.email))=lower(trim(crmClients.email))) OR (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND trim(coalesce(a.phone,a.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(a.phone,a.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR lower(trim(a.name))=lower(trim(crmClients.name))))"
+        ).bind(crmOwner)
       ]);
     }
     const rows = accountType === "agent" ? await env.DB.prepare(
@@ -57102,18 +57112,24 @@ var cloudflare_staging_default = {
       ctx.waitUntil(syncAllCalendlyConnections(env));
       return;
     }
-    const emailSync = Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
-      (module) => module.syncAllIcloudInboxes(env)
-    );
-    const jobs = [
-      runMessageAutomations(env),
-      emailSync.then(() => syncPendingFiveRingsCodes(env)),
-      syncAllCalendlyConnections(env)
-    ];
-    if (controller.cron === "15 11 * * *") jobs.push(syncAllFiveRingsConnections(env));
-    ctx.waitUntil(
-      Promise.all(jobs).then(() => void 0)
-    );
+    if (controller.cron === "*/5 * * * *") {
+      ctx.waitUntil(runMessageAutomations(env));
+      return;
+    }
+    if (controller.cron === "2,7,12,17,22,27,32,37,42,47,52,57 * * * *") {
+      const emailSync = Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports)).then(
+        (module) => module.syncAllIcloudInboxes(env)
+      );
+      ctx.waitUntil(emailSync.then(() => syncPendingFiveRingsCodes(env)));
+      return;
+    }
+    if (controller.cron === "10 * * * *") {
+      ctx.waitUntil(syncAllCalendlyConnections(env));
+      return;
+    }
+    if (controller.cron === "15 11 * * *") {
+      ctx.waitUntil(syncAllFiveRingsConnections(env));
+    }
   }
 };
 async function runFiveRingsSyncAsAgent(env, agentEmail) {
@@ -57238,7 +57254,8 @@ async function runMessageAutomations(env) {
     if (part.type !== "literal") out[part.type] = part.value;
     return out;
   }, {});
-  const isMorningRun = eastern.hour === "08" && eastern.minute === "30";
+  const minuteOfDay = Number(eastern.hour) * 60 + Number(eastern.minute);
+  const isMorningRun = minuteOfDay >= 8 * 60 + 30;
   const month = Number(eastern.month), day = Number(eastern.day), year = eastern.year;
   const isThanksgiving = month === 11 && day >= 22 && day <= 28 && (/* @__PURE__ */ new Date(
     `${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`
@@ -57264,8 +57281,11 @@ async function runMessageAutomations(env) {
   const automations = await env.DB.prepare(
     "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
   ).all();
+  let deliveryBudget = 20;
   for (const automation of automations.results) {
     const occasion = String(automation.occasion);
+    const dueToday = occasion === "birthday" || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
+    if (occasion !== "policy_anniversary" && !dueToday) continue;
     const agentProfile = await env.DB.prepare(
       "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
     ).bind(String(automation.agentEmail).toLowerCase()).first();
@@ -57299,6 +57319,7 @@ async function runMessageAutomations(env) {
       }
       const policies = await env.DB.prepare(policySql).bind(...policyBinds).all();
       for (const policy of policies.results) {
+        if (deliveryBudget <= 0) return;
         const reviewDates = flexLifeReviewDates(String(policy.issuedAt));
         if (!reviewDates) continue;
         const noticeDay = reviewDates.noticeAt.toISOString().slice(0, 10);
@@ -57336,6 +57357,7 @@ async function runMessageAutomations(env) {
         );
         const historyBody = body.replaceAll("**", "");
         try {
+          deliveryBudget -= 1;
           const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
             subject,
@@ -57379,13 +57401,11 @@ async function runMessageAutomations(env) {
       }
       continue;
     }
-    const due = occasion === "birthday" || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
-    if (!due) continue;
     let sql = "SELECT id,name,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND email<>''";
     const binds = [String(automation.agentEmail).toLowerCase()];
     if (occasion === "birthday") {
-      sql += " AND strftime('%m-%d',birthDate)=?";
-      binds.push(`${eastern.month}-${eastern.day}`);
+      sql += " AND (strftime('%m-%d',birthDate)=? OR substr(trim(birthDate),1,5)=?)";
+      binds.push(`${eastern.month}-${eastern.day}`, `${eastern.month}/${eastern.day}`);
     }
     if (String(automation.audience) === "individual") {
       sql += " AND id=?";
@@ -57393,7 +57413,7 @@ async function runMessageAutomations(env) {
     }
     if (String(automation.audience) === "group" && automation.recipientGroup && !automation.selectedClientIds) {
       if (String(automation.recipientGroup) === "leads") {
-        sql += " AND status IN ('new','contacted','meeting','proposal')";
+        sql += " AND status IN ('new','contacted','meeting','proposal','first_meeting','followup_documents','followup_service','followup_application','followup_review')";
       } else {
         sql += " AND status=?";
         binds.push(String(automation.recipientGroup));
@@ -57412,6 +57432,7 @@ async function runMessageAutomations(env) {
     }
     const clients = await env.DB.prepare(sql).bind(...binds).all();
     for (const client of clients.results) {
+      if (deliveryBudget <= 0) return;
       if (occasion === "birthday" && !automation.clientId) {
         const customized = await env.DB.prepare(
           "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND clientId=? AND isActive=1 LIMIT 1"
@@ -57428,6 +57449,7 @@ async function runMessageAutomations(env) {
         escapeAutomationHtml(client.name)
       ), "personalize");
       try {
+        deliveryBudget -= 1;
         const sentMail = await sendAgentEmail(
           env,
           String(automation.agentEmail),

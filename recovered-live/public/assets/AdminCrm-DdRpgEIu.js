@@ -9,7 +9,7 @@ import {
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
-import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js";
+import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-2";
 import { P as ie } from "./plus-DKqFfTiU.js";
 import { S as ce } from "./save-BWWR3RtX.js";
 import { P as V } from "./pen-BtFcHMZL.js";
@@ -42,7 +42,7 @@ const D = {
   I = [
     {
       value: "new",
-      label: "Novo contato",
+      label: "Cliente novo",
       color: "bg-blue-500/15 text-blue-300",
     },
     {
@@ -56,13 +56,43 @@ const D = {
       color: "bg-purple-500/15 text-purple-300",
     },
     {
+      value: "first_meeting",
+      label: "Primeira reunião realizada",
+      color: "bg-purple-500/15 text-purple-300",
+    },
+    {
+      value: "followup_documents",
+      label: "Follow-up de documentos",
+      color: "bg-orange-500/15 text-orange-300",
+    },
+    {
+      value: "followup_service",
+      label: "Follow-up de atendimento",
+      color: "bg-cyan-500/15 text-cyan-300",
+    },
+    {
+      value: "followup_application",
+      label: "Follow-up de aplicativo",
+      color: "bg-indigo-500/15 text-indigo-300",
+    },
+    {
+      value: "followup_review",
+      label: "Follow-up de avaliação",
+      color: "bg-pink-500/15 text-pink-300",
+    },
+    {
       value: "proposal",
       label: "Proposta",
       color: "bg-amber-500/15 text-amber-300",
     },
     {
       value: "client",
-      label: "Cliente",
+      label: "Cliente com apólice",
+      color: "bg-green-500/15 text-green-300",
+    },
+    {
+      value: "completed",
+      label: "Cliente concluído",
       color: "bg-green-500/15 text-green-300",
     },
     {
@@ -124,7 +154,10 @@ function Le({ agentMode: a = !1 }) {
     C = c.crm.activities.useQuery({ clientId: x || 0 }, { enabled: !!x }),
     Y = c.agent.listPolicies.useQuery(void 0, { enabled: a }),
     Z = c.agent.listMessages.useQuery(void 0, { enabled: a }),
-    z = c.agent.messageHistory.useQuery(void 0, { enabled: a }),
+    z = c.agent.deliveryLog.useQuery(void 0, {
+      enabled: a,
+      refetchInterval: 3e4,
+    }),
     L = c.agent.clientEmails.useQuery(
       { clientId: x || 0 },
       { enabled: a && !!x, refetchInterval: 15e3 }
@@ -136,6 +169,7 @@ function Le({ agentMode: a = !1 }) {
     ee = c.agent.listTasks.useQuery(void 0, { enabled: a }),
     [O, se] = p.useState("whatsapp"),
     [A, B] = p.useState(""),
+    [profileNotes, setProfileNotes] = p.useState(""),
     S = i.data || [],
     t = S.find(s => s.id === x),
     T = (Y.data || []).filter(
@@ -160,7 +194,17 @@ function Le({ agentMode: a = !1 }) {
       s => s.email.toLowerCase() === String(re.email || "").toLowerCase()
     ),
     W = p.useMemo(() => {
-      const s = ["new", "contacted", "meeting", "proposal"];
+      const s = [
+        "new",
+        "contacted",
+        "meeting",
+        "proposal",
+        "first_meeting",
+        "followup_documents",
+        "followup_service",
+        "followup_application",
+        "followup_review",
+      ];
       return S.filter(
         l =>
           (b === "leads"
@@ -255,9 +299,24 @@ function Le({ agentMode: a = !1 }) {
         window.open(l, "_blank", "noopener,noreferrer"));
     };
   p.useEffect(() => setPage(1), [w, b]);
+  p.useEffect(() => setProfileNotes(t?.notes || ""), [t?.id, t?.notes]);
   p.useEffect(() => {
     if (page > totalPages) setPage(totalPages);
   }, [page, totalPages]);
+  const saveProfile = async changes => {
+    if (!t) return;
+    try {
+      await G.mutateAsync({ ...t, ...changes });
+      await i.refetch();
+      g.success("Acompanhamento atualizado");
+    } catch (error) {
+      g.error(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível atualizar o acompanhamento"
+      );
+    }
+  };
   return e.jsxs("div", {
     className: "min-h-screen bg-black text-white lg:pl-64",
     children: [
@@ -787,6 +846,58 @@ function Le({ agentMode: a = !1 }) {
                                 }),
                               ],
                             }),
+                            e.jsxs("div", {
+                              className:
+                                "mt-4 rounded-xl border border-gold/20 bg-black/30 p-4",
+                              children: [
+                                e.jsx("label", {
+                                  className:
+                                    "text-xs font-bold uppercase tracking-wider text-gold",
+                                  children: "Etapa atual do cliente",
+                                }),
+                                e.jsx("select", {
+                                  value: t.status,
+                                  onChange: event =>
+                                    saveProfile({ status: event.target.value }),
+                                  className:
+                                    "mt-2 h-11 w-full rounded-lg border border-white/20 bg-black px-3 text-sm text-white",
+                                  children: I.map(option =>
+                                    e.jsx(
+                                      "option",
+                                      {
+                                        value: option.value,
+                                        children: option.label,
+                                      },
+                                      option.value
+                                    )
+                                  ),
+                                }),
+                                e.jsx("label", {
+                                  className:
+                                    "mt-4 block text-xs font-bold uppercase tracking-wider text-gold",
+                                  children: "Observações deste cliente",
+                                }),
+                                e.jsx("textarea", {
+                                  value: profileNotes,
+                                  onChange: event =>
+                                    setProfileNotes(event.target.value),
+                                  placeholder:
+                                    "Registre o que aconteceu, documentos pendentes e o próximo passo.",
+                                  className:
+                                    "mt-2 min-h-28 w-full rounded-lg border border-white/20 bg-black p-3 text-sm text-white",
+                                }),
+                                e.jsx(d, {
+                                  type: "button",
+                                  className: "mt-2 w-full bg-gold text-black",
+                                  disabled: G.isPending,
+                                  onClick: () =>
+                                    saveProfile({ notes: profileNotes }),
+                                  children: G.isPending
+                                    ? "Salvando…"
+                                    : "Salvar observações",
+                                }),
+                              ],
+                            }),
                             e.jsxs(d, {
                               className: "mt-3 w-full bg-gold text-black",
                               onClick: () => q(t),
@@ -1174,7 +1285,7 @@ function Le({ agentMode: a = !1 }) {
                 e.jsx("p", {
                   className: "mt-1 text-sm text-gray-400",
                   children:
-                    "Histórico geral das mensagens enviadas pelo CRM. Clique para abrir o cliente.",
+                    "Acompanhe mensagens programadas, envios concluídos e falhas. Os dados são atualizados automaticamente.",
                 }),
                 e.jsxs("div", {
                   className: "mt-5 space-y-3",
@@ -1186,21 +1297,51 @@ function Le({ agentMode: a = !1 }) {
                           className:
                             "w-full rounded-xl border border-white/10 bg-black/25 p-4 text-left hover:border-gold/50",
                           onClick: () => {
-                            (P(s.clientId), M("clients"));
+                            if (s.clientId) {
+                              P(s.clientId);
+                              M("clients");
+                            }
                           },
                           children: [
-                            e.jsx("span", {
-                              className: "font-semibold text-white",
-                              children: s.clientName,
-                            }),
-                            e.jsx("span", {
-                              className: "ml-2 text-xs text-gray-500",
-                              children: j(s.createdAt),
+                            e.jsxs("div", {
+                              className:
+                                "flex flex-wrap items-center justify-between gap-2",
+                              children: [
+                                e.jsx("span", {
+                                  className: "font-semibold text-white",
+                                  children: s.subject || s.title,
+                                }),
+                                e.jsx("span", {
+                                  className: `rounded-full px-2 py-1 text-xs font-bold ${s.status === "sent" ? "bg-green-500/15 text-green-300" : s.status === "failed" ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`,
+                                  children:
+                                    s.status === "sent"
+                                      ? "Enviada"
+                                      : s.status === "failed"
+                                        ? "Falhou"
+                                        : "Programada",
+                                }),
+                              ],
                             }),
                             e.jsx("span", {
                               className: "mt-2 block text-sm text-gray-300",
-                              children: s.content,
+                              children:
+                                s.clientName ||
+                                "Destinatários definidos pela automação",
                             }),
+                            e.jsx("span", {
+                              className: "mt-1 block text-xs text-gray-500",
+                              children:
+                                typeof s.date === "string" &&
+                                !Number.isNaN(new Date(s.date).getTime())
+                                  ? j(s.date)
+                                  : s.date,
+                            }),
+                            s.errorMessage &&
+                              e.jsx("span", {
+                                className:
+                                  "mt-2 block rounded-lg bg-red-500/10 p-2 text-xs text-red-200",
+                                children: `Motivo: ${s.errorMessage}`,
+                              }),
                           ],
                         },
                         s.id
