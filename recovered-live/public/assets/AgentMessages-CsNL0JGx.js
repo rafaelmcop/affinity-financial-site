@@ -367,7 +367,8 @@ function Q({ scope: s = "all", clientId: u, paymentTemplateCard: x }) {
                       ...t,
                       audience: l,
                       selectedClientIds:
-                        l === "all" || l === "individual"
+                        l === "individual" ||
+                        (l === "all" && t.occasion !== "custom")
                           ? []
                           : (o.data || []).filter(d => d.email).map(d => d.id),
                     });
@@ -475,14 +476,15 @@ function Q({ scope: s = "all", clientId: u, paymentTemplateCard: x }) {
                   }),
                 ],
               }),
-            t.audience === "all" &&
+            t.audience === "all" && t.occasion !== "custom" &&
               e.jsx("div", {
                 className:
                   "rounded-lg border border-green-500/30 bg-green-500/10 p-4 text-sm text-green-200 md:col-span-2",
                 children:
                   "Lista automática: todos os contatos atuais e todos os novos leads, clientes e agentes serão incluídos sem precisar selecionar novamente.",
               }),
-            t.audience === "group" &&
+            (t.audience === "group" ||
+              (t.audience === "all" && t.occasion === "custom")) &&
               e.jsxs("fieldset", {
                 className:
                   "max-h-64 overflow-y-auto rounded-lg border border-white/15 bg-black/30 p-4 md:col-span-2",
@@ -721,7 +723,7 @@ function Q({ scope: s = "all", clientId: u, paymentTemplateCard: x }) {
                     a.audience === "individual"
                       ? (o.data || []).find(l => l.id === a.clientId)?.name ||
                         "1 cliente"
-                      : a.audience === "all"
+                      : a.audience === "all" && a.occasion !== "custom"
                         ? "Todos os contatos atuais e futuros"
                         : a.selectedClientIds
                         ? `${A(a.selectedClientIds).length} clientes selecionados`

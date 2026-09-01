@@ -9,7 +9,7 @@ import {
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
-import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-2";
+import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-3";
 import { P as ie } from "./plus-DKqFfTiU.js";
 import { S as ce } from "./save-BWWR3RtX.js";
 import { P as V } from "./pen-BtFcHMZL.js";

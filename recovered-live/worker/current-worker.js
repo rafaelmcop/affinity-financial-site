@@ -55049,7 +55049,7 @@ Detalhes: ${details}` : ""}`;
     const owner = adminEmail.toLowerCase();
     // A collective automation is a dynamic audience. Never retain an old,
     // frozen selection because every contact added later must be included.
-    await env.DB.prepare("UPDATE scheduledMessages SET selectedClientIds=NULL,recipientGroup=NULL WHERE lower(agentEmail)=? AND audience='all'").bind(owner).run();
+    await env.DB.prepare("UPDATE scheduledMessages SET selectedClientIds=NULL,recipientGroup=NULL WHERE lower(agentEmail)=? AND audience='all' AND occasion<>'custom'").bind(owner).run();
     const defaults = [
       [
         "birthday",
@@ -55259,7 +55259,7 @@ Affinity Financial Consulting`,
     const occasion = String(input.occasion);
     const monthNumber = Number(input.monthNumber || 0);
     const audience = String(input.audience ?? "individual");
-    const selectedClientIds = audience === "all" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
+    const selectedClientIds = audience === "all" && occasion !== "custom" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
     if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
     await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt,monthNumber) VALUES (?,?,?,'email',?,?,?,?,?,?,?,?)"
@@ -55270,7 +55270,7 @@ Affinity Financial Consulting`,
       String(input.title ?? "Automa\xE7\xE3o"),
       String(input.subject ?? "Mensagem da Affinity Financial"),
       audience,
-      audience === "all" ? null : String(input.recipientGroup ?? "") || null,
+      audience === "all" && occasion !== "custom" ? null : String(input.recipientGroup ?? "") || null,
       selectedClientIds,
       String(input.message ?? "").trim(),
       occasion === "monthly" ? null : input.scheduledAt || null,
@@ -55283,7 +55283,7 @@ Affinity Financial Consulting`,
     const occasion = String(input.occasion);
     const monthNumber = Number(input.monthNumber || 0);
     const audience = String(input.audience ?? "individual");
-    const selectedClientIds = audience === "all" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
+    const selectedClientIds = audience === "all" && occasion !== "custom" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
     if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
     await env.DB.prepare(
       "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,monthNumber=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
@@ -55293,7 +55293,7 @@ Affinity Financial Consulting`,
       String(input.title),
       String(input.subject),
       audience,
-      audience === "all" ? null : String(input.recipientGroup ?? "") || null,
+      audience === "all" && occasion !== "custom" ? null : String(input.recipientGroup ?? "") || null,
       selectedClientIds,
       String(input.message),
       occasion === "monthly" ? null : input.scheduledAt || null,
