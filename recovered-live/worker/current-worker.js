@@ -54253,16 +54253,6 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.dashboard") {
     const owner = adminEmail.toLowerCase();
-    await ensureCalendlyTables(env);
-    const calendarConnection = await env.DB.prepare("SELECT lastSyncAt FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND status='connected' LIMIT 1").bind(owner).first();
-    const calendarLastSyncAt = calendarConnection?.lastSyncAt ? Date.parse(`${String(calendarConnection.lastSyncAt).replace(" ", "T")}Z`) : 0;
-    if (calendarConnection && (!Number.isFinite(calendarLastSyncAt) || Date.now() - calendarLastSyncAt > 2 * 60 * 1e3)) {
-      try {
-        await syncCalendlyForAgent(env, owner);
-      } catch (error) {
-        await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0, 500), owner).run();
-      }
-    }
     const today = easternTodayBoundsISOString();
     const [policiesQuery, tasksQuery, clientsQuery, notificationsQuery, unreadQuery, policyStatsQuery, meetingsQuery] = await env.DB.batch([
       env.DB.prepare(
@@ -55647,7 +55637,7 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (name === "agent.syncCalendly") {
-    try { return trpcResult({ success: true, ...(await syncCalendlyForAgent(env, adminEmail.toLowerCase(), { backfill: true })) }); }
+    try { return trpcResult({ success: true, ...(await syncCalendlyForAgent(env, adminEmail.toLowerCase(), { backfill: input.quick !== true })) }); }
     catch (error) { return trpcError(String(error?.message || error)); }
   }
   if (name === "agent.calendlyMeetings") {

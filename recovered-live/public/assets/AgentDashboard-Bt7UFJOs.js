@@ -42,6 +42,7 @@ function H() {
       refetchOnWindowFocus: !1,
       retry: 3,
     }),
+    q = i.agent.syncCalendly.useMutation(),
     j = i.agent.syncInbox.useMutation(),
     p = i.agent.markClientEmailRead.useMutation(),
     b = i.agent.toggleTask.useMutation(),
@@ -59,6 +60,19 @@ function H() {
     l.data &&
       localStorage.setItem("affinity-agent-counts", JSON.stringify(l.data));
   }, [l.data]);
+  k.useEffect(() => {
+    const t = "affinity-calendly-dashboard-sync",
+      a = Number(sessionStorage.getItem(t) || 0);
+    if (Date.now() - a < 12e4) return;
+    sessionStorage.setItem(t, String(Date.now()));
+    let n = !0;
+    q.mutateAsync({ quick: !0 })
+      .then(() => n && Promise.all([r.refetch(), l.refetch()]))
+      .catch(() => {});
+    return () => {
+      n = !1;
+    };
+  }, []);
   const s = r.data,
     g = (s?.policies || []).filter(
       t => String(t.status || "inactive") === "active"
