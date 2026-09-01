@@ -9,7 +9,7 @@ import {
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
-import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-3";
+import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-4";
 import { P as ie } from "./plus-DKqFfTiU.js";
 import { S as ce } from "./save-BWWR3RtX.js";
 import { P as V } from "./pen-BtFcHMZL.js";
@@ -154,17 +154,14 @@ function Le({ agentMode: a = !1 }) {
     C = c.crm.activities.useQuery({ clientId: x || 0 }, { enabled: !!x }),
     Y = c.agent.listPolicies.useQuery(void 0, { enabled: a }),
     Z = c.agent.listMessages.useQuery(void 0, { enabled: a }),
-    z = c.agent.deliveryLog.useQuery(void 0, {
-      enabled: a,
-      refetchInterval: 3e4,
-    }),
     L = c.agent.clientEmails.useQuery(
       { clientId: x || 0 },
       { enabled: a && !!x, refetchInterval: 15e3 }
     ),
+    [loadRecaps, setLoadRecaps] = p.useState(!1),
     recapQuery = c.agent.calendlyRecaps.useQuery(
       { clientId: x || 0 },
-      { enabled: a && !!x, staleTime: 6e4 }
+      { enabled: a && !!x && loadRecaps, staleTime: 6e4, retry: !1 }
     ),
     ee = c.agent.listTasks.useQuery(void 0, { enabled: a }),
     [O, se] = p.useState("whatsapp"),
@@ -299,6 +296,7 @@ function Le({ agentMode: a = !1 }) {
         window.open(l, "_blank", "noopener,noreferrer"));
     };
   p.useEffect(() => setPage(1), [w, b]);
+  p.useEffect(() => setLoadRecaps(!1), [x]);
   p.useEffect(() => setProfileNotes(t?.notes || ""), [t?.id, t?.notes]);
   p.useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -366,7 +364,6 @@ function Le({ agentMode: a = !1 }) {
                 ["leads", "Leads"],
                 ["clients", "Clientes e histórico"],
                 ["automations", "Mensagens automáticas"],
-                ["history", "Registro de envios"],
               ].map(([s, l]) =>
                 e.jsx(
                   d,
@@ -1006,6 +1003,15 @@ function Le({ agentMode: a = !1 }) {
                                       "text-xs font-bold uppercase tracking-wider text-gold",
                                     children: "Reuniões, resumos e gravações",
                                   }),
+                                  !loadRecaps &&
+                                    e.jsx(d, {
+                                      type: "button",
+                                      size: "sm",
+                                      variant: "outline",
+                                      className: "mt-3",
+                                      onClick: () => setLoadRecaps(!0),
+                                      children: "Carregar resumos e gravações",
+                                    }),
                                   recapQuery.isLoading &&
                                     e.jsx("p", {
                                       className: "mt-3 text-sm text-gray-400",
@@ -1041,7 +1047,8 @@ function Le({ agentMode: a = !1 }) {
                                       s.id
                                     )
                                   ),
-                                  !recapQuery.isLoading &&
+                                  loadRecaps &&
+                                    !recapQuery.isLoading &&
                                     !(recapQuery.data || []).length &&
                                     e.jsx("p", {
                                       className: "mt-3 text-sm text-gray-500",
@@ -1273,89 +1280,6 @@ function Le({ agentMode: a = !1 }) {
             ],
           }),
           a && b === "automations" && e.jsx(H, {}),
-          a &&
-            b === "history" &&
-            e.jsxs(u, {
-              className: "border-gold/20 bg-[#0b1524] p-6",
-              children: [
-                e.jsx("h2", {
-                  className: "text-2xl font-bold text-gold",
-                  children: "Registro de envios",
-                }),
-                e.jsx("p", {
-                  className: "mt-1 text-sm text-gray-400",
-                  children:
-                    "Acompanhe mensagens programadas, envios concluídos e falhas. Os dados são atualizados automaticamente.",
-                }),
-                e.jsxs("div", {
-                  className: "mt-5 space-y-3",
-                  children: [
-                    (z.data || []).map(s =>
-                      e.jsxs(
-                        "button",
-                        {
-                          className:
-                            "w-full rounded-xl border border-white/10 bg-black/25 p-4 text-left hover:border-gold/50",
-                          onClick: () => {
-                            if (s.clientId) {
-                              P(s.clientId);
-                              M("clients");
-                            }
-                          },
-                          children: [
-                            e.jsxs("div", {
-                              className:
-                                "flex flex-wrap items-center justify-between gap-2",
-                              children: [
-                                e.jsx("span", {
-                                  className: "font-semibold text-white",
-                                  children: s.subject || s.title,
-                                }),
-                                e.jsx("span", {
-                                  className: `rounded-full px-2 py-1 text-xs font-bold ${s.status === "sent" ? "bg-green-500/15 text-green-300" : s.status === "failed" ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`,
-                                  children:
-                                    s.status === "sent"
-                                      ? "Enviada"
-                                      : s.status === "failed"
-                                        ? "Falhou"
-                                        : "Programada",
-                                }),
-                              ],
-                            }),
-                            e.jsx("span", {
-                              className: "mt-2 block text-sm text-gray-300",
-                              children:
-                                s.clientName ||
-                                "Destinatários definidos pela automação",
-                            }),
-                            e.jsx("span", {
-                              className: "mt-1 block text-xs text-gray-500",
-                              children:
-                                typeof s.date === "string" &&
-                                !Number.isNaN(new Date(s.date).getTime())
-                                  ? j(s.date)
-                                  : s.date,
-                            }),
-                            s.errorMessage &&
-                              e.jsx("span", {
-                                className:
-                                  "mt-2 block rounded-lg bg-red-500/10 p-2 text-xs text-red-200",
-                                children: `Motivo: ${s.errorMessage}`,
-                              }),
-                          ],
-                        },
-                        s.id
-                      )
-                    ),
-                    !z.data?.length &&
-                      e.jsx("p", {
-                        className: "py-8 text-center text-sm text-gray-500",
-                        children: "Nenhum envio registrado.",
-                      }),
-                  ],
-                }),
-              ],
-            }),
         ],
       }),
     ],

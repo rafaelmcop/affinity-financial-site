@@ -54482,7 +54482,7 @@ Detalhes: ${details}` : ""}`;
     ).bind(clientId, adminEmail.toLowerCase()).first();
     if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     const rows = await env.DB.prepare(
-      "SELECT *,CASE WHEN visibility='automation' THEN 1 ELSE 0 END AS isAutomatic FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client') IN ('client','automation') AND deletedAt IS NULL ORDER BY sentAt ASC,id ASC"
+      "SELECT id,agentEmail,clientId,direction,externalId,subject,substr(coalesce(body,''),1,5000) AS body,fromEmail,toEmail,sentAt,readAt,visibility,CASE WHEN visibility='automation' THEN 1 ELSE 0 END AS isAutomatic FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client') IN ('client','automation') AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 50"
     ).bind(clientId, adminEmail.toLowerCase()).all();
     return trpcResult(
       rows.results.map((row) => ({
@@ -55232,10 +55232,9 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.deliveryLog") {
     const owner = adminEmail.toLowerCase();
-    const [future, deliveries, direct, failures] = await env.DB.batch([
+    const [future, deliveries, failures] = await env.DB.batch([
       env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
-      env.DB.prepare("SELECT d.id,m.title,m.subject,c.name AS clientName,c.email AS recipientEmail,d.sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? ORDER BY d.sentAt DESC LIMIT 250").bind(owner),
-      env.DB.prepare("SELECT e.id,e.subject,c.name AS clientName,e.toEmail AS recipientEmail,e.sentAt FROM clientEmails e LEFT JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='sent' AND e.deletedAt IS NULL ORDER BY e.sentAt DESC LIMIT 250").bind(owner),
+      env.DB.prepare("SELECT MIN(d.id) AS id,m.id AS messageId,m.title,m.subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE lower(m.agentEmail)=? GROUP BY m.id,m.title,m.subject,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
       env.DB.prepare("SELECT id,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' ORDER BY attemptedAt DESC LIMIT 100").bind(owner)
     ]);
     const upcoming = (future.results || []).map((row) => {
@@ -55250,10 +55249,12 @@ Affinity Financial Consulting`,
       const recurring = { birthday: "Em cada anivers\xE1rio, 8:30 AM", thanksgiving: "No Dia de A\xE7\xE3o de Gra\xE7as, 8:30 AM", christmas: "Em 25 de dezembro, 8:30 AM", new_year: "Em 1\xBA de janeiro, 8:30 AM", policy_anniversary: "15 dias antes da revis\xE3o Flex Life, 8:30 AM", monthly: monthlyDate };
       return { id: `scheduled-${row.id}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : recipientCount ? `${recipientCount} destinat\xE1rio(s)` : String(row.audience) === "all" ? "Todos os clientes eleg\xEDveis" : "Grupo selecionado", recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "scheduled", date: row.scheduledAt || recurring[String(row.occasion)] || "Programa\xE7\xE3o autom\xE1tica", errorMessage: null };
     });
-    const sentAutomation = (deliveries.results || []).map((row) => ({ id: `automation-${row.id}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "sent", date: row.sentAt, errorMessage: null }));
-    const sentDirect = (direct.results || []).map((row) => ({ id: `email-${row.id}`, title: "Mensagem do CRM", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "sent", date: row.sentAt, errorMessage: null }));
+    const sentAutomation = (deliveries.results || []).map((row) => {
+      const count = Number(row.recipientCount || 0);
+      return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, status: "sent", date: row.sentAt, errorMessage: null };
+    });
     const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "failed", date: row.attemptedAt, errorMessage: row.errorMessage ? String(row.errorMessage) : "Falha n\xE3o identificada" }));
-    return trpcResult([...upcoming, ...failed, ...sentAutomation, ...sentDirect]);
+    return trpcResult([...upcoming, ...failed, ...sentAutomation]);
   }
   if (name === "agent.scheduleMessage") {
     const occasion = String(input.occasion);
@@ -56774,7 +56775,7 @@ Affinity Financial Consulting`,
       if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     }
     const rows = await env.DB.prepare(
-      "SELECT * FROM crmActivities WHERE clientId=? ORDER BY createdAt DESC, id DESC"
+      "SELECT id,clientId,type,substr(coalesce(content,''),1,5000) AS content,createdBy,createdAt FROM crmActivities WHERE clientId=? ORDER BY createdAt DESC, id DESC LIMIT 100"
     ).bind(Number(input.clientId)).all();
     return trpcResult(
       rows.results.map((row) => ({
@@ -57279,7 +57280,7 @@ async function runMessageAutomations(env) {
       )
     ]);
   const automations = await env.DB.prepare(
-    "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email'"
+    "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email' ORDER BY CASE occasion WHEN 'monthly' THEN 0 WHEN 'birthday' THEN 1 WHEN 'thanksgiving' THEN 2 WHEN 'christmas' THEN 2 WHEN 'new_year' THEN 2 WHEN 'custom' THEN 3 WHEN 'policy_anniversary' THEN 4 ELSE 5 END,id"
   ).all();
   let deliveryBudget = 20;
   for (const automation of automations.results) {
