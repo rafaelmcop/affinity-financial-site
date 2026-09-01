@@ -50264,7 +50264,22 @@ async function syncIcloudInbox(env, agentEmail) {
       const parsed = await (0, import_mailparser.simpleParser)(Buffer2.from(source));
       const from = cleanAddress(parsed.from?.text || "");
       if (!from) continue;
-      const customer = customerByEmail.get(from);
+      let customer = customerByEmail.get(from);
+      if (!customer) {
+        const references = [
+          parsed.inReplyTo,
+          ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [])
+        ].map((value) => String(value || "").trim()).filter(Boolean).slice(0, 5);
+        for (const reference of references) {
+          const threaded = await env.DB.prepare(
+            "SELECT c.id,c.email FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.externalId=? LIMIT 1"
+          ).bind(owner, reference).first();
+          if (threaded) {
+            customer = threaded;
+            break;
+          }
+        }
+      }
       const externalId = parsed.messageId || `icloud:${owner}:${uid}`;
       const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
       if (!body) continue;
@@ -50352,6 +50367,9 @@ async function syncIcloudInbox(env, agentEmail) {
           "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,?,'sent',?,?,?,?,?,?,CURRENT_TIMESTAMP,'sent','Sincronizado da pasta Enviados',?)"
         ).bind(owner, customer ? Number(customer.id) : null, externalId, String(uid), String(config.fromEmail || owner), recipient, subject, body, htmlBody, (parsed.date || /* @__PURE__ */ new Date()).toISOString(), topic).run();
         if (htmlBody) await env.DB.prepare("UPDATE agentMailboxEmails SET htmlBody=coalesce(htmlBody,?) WHERE lower(agentEmail)=? AND externalId=? AND direction='sent'").bind(htmlBody, owner, externalId).run();
+        if (customer) await env.DB.prepare(
+          "INSERT OR IGNORE INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,?,'client')"
+        ).bind(owner, Number(customer.id), externalId, subject, body, String(config.fromEmail || owner), recipient, (parsed.date || /* @__PURE__ */ new Date()).toISOString()).run();
       }
     }
     await env.DB.prepare(
@@ -50366,13 +50384,13 @@ async function syncAllIcloudInboxes(env) {
   const rows = await env.DB.prepare(
     "SELECT agentEmail FROM agentEmailSettings WHERE imapHost IS NOT NULL AND trim(imapHost)<>'' AND imapUser IS NOT NULL AND trim(imapUser)<>''"
   ).all();
-  for (const row of rows.results) {
+  await Promise.all((rows.results || []).map(async (row) => {
     try {
       await syncIcloudInbox(env, String(row.agentEmail));
     } catch (error) {
       console.error("icloud_sync_failed", row.agentEmail, error);
     }
-  }
+  }));
 }
 var import_mailparser, cleanAddress, cleanReplyBody, escapeHtml, personalizeTemplate, quoteImap, ImapConnection, imapDate, extractLiteral;
 var init_icloud_email = __esm({

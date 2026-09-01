@@ -82,7 +82,12 @@ Affinity Financial Consulting
       s.toISOString()
     );
   };
-function Q({ scope: s = "all", clientId: u, paymentTemplateCard: x }) {
+function Q({
+  scope: s = "all",
+  clientId: u,
+  paymentTemplateCard: x,
+  showHistory: showHistory = !0,
+}) {
   const g = p.agent.listMessages.useQuery(),
     o = p.agent.listClients.useQuery(),
     b = p.crm.assignees.useQuery(),
@@ -740,7 +745,7 @@ function Q({ scope: s = "all", clientId: u, paymentTemplateCard: x }) {
           )
         ),
       }),
-      s === "all" && e.jsx(J, {}),
+      s === "all" && showHistory && e.jsx(J, {}),
     ],
   });
 }
@@ -1079,15 +1084,44 @@ function J() {
   });
 }
 function oe() {
+  const [tab, setTab] = v.useState("automations");
   return e.jsxs("div", {
     className: "min-h-screen bg-black text-white lg:pl-64",
     children: [
       e.jsx(z, {}),
-      e.jsx("main", {
+      e.jsxs("main", {
         className: "mx-auto max-w-5xl px-4 py-8",
-        children: e.jsx(Q, { paymentTemplateCard: e.jsx(B, {}) }),
+        children: [
+          e.jsx("div", {
+            className:
+              "mb-6 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2",
+            children: [
+              ["automations", "Mensagens e automações"],
+              ["history", "Histórico"],
+            ].map(([value, label]) =>
+              e.jsx(
+                m,
+                {
+                  type: "button",
+                  variant: tab === value ? "default" : "ghost",
+                  className:
+                    tab === value ? "bg-gold text-black" : "text-gray-300",
+                  onClick: () => setTab(value),
+                  children: label,
+                },
+                value
+              )
+            ),
+          }),
+          tab === "automations"
+            ? e.jsx(Q, {
+                paymentTemplateCard: e.jsx(B, {}),
+                showHistory: !1,
+              })
+            : e.jsx(J, {}),
+        ],
       }),
     ],
   });
 }
-export { Q as ScheduledMessagesPanel, oe as default };
+export { J as DeliveryHistory, Q as ScheduledMessagesPanel, oe as default };

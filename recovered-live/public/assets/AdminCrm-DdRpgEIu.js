@@ -9,7 +9,10 @@ import {
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
-import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-5";
+import {
+  DeliveryHistory as be,
+  ScheduledMessagesPanel as H,
+} from "./AgentMessages-CsNL0JGx.js?v=20260901-6";
 import { P as ie } from "./plus-DKqFfTiU.js";
 import { S as ce } from "./save-BWWR3RtX.js";
 import { P as V } from "./pen-BtFcHMZL.js";
@@ -371,7 +374,8 @@ function Le({ agentMode: a = !1 }) {
               children: [
                 ["leads", "Leads"],
                 ["clients", "Clientes e histórico"],
-                ["automations", "Mensagens automáticas"],
+                ["automations", "Mensagens e automações"],
+                ["history", "Histórico"],
               ].map(([s, l]) =>
                 e.jsx(
                   d,
@@ -1287,7 +1291,10 @@ function Le({ agentMode: a = !1 }) {
                 }),
             ],
           }),
-          a && b === "automations" && e.jsx(H, {}),
+          a &&
+            b === "automations" &&
+            e.jsx(H, { showHistory: !1 }),
+          a && b === "history" && e.jsx(be, {}),
         ],
       }),
     ],
