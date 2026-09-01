@@ -5,7 +5,7 @@ import {
   B as d,
   C as u,
   b as g,
-} from "./index-BIU-6RMI.js?v=20260901-11";
+} from "./index-BIU-6RMI.js?v=20260901-12";
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
@@ -168,7 +168,7 @@ function Le({ agentMode: a = !1 }) {
       { enabled: !!x && loadHistory, staleTime: 3e4 }
     ),
     Y = c.agent.listPolicies.useQuery(void 0, { enabled: a }),
-    Z = c.agent.listMessages.useQuery(void 0, { enabled: !1 }),
+    Z = c.agent.listMessages.useQuery(void 0, { enabled: a && !!x, staleTime: 3e4 }),
     L = c.agent.clientEmails.useQuery(
       { clientId: x || 0 },
       { enabled: a && !!x && loadHistory, staleTime: 3e4 }
@@ -190,6 +190,18 @@ function Le({ agentMode: a = !1 }) {
         (!!t?.email && s.clientEmail?.toLowerCase() === t.email.toLowerCase())
     ),
     ae = (Z.data || []).filter(s => s.clientId === x && s.isActive),
+    scheduledForClient = (Z.data || []).filter(s => {
+      if (!s.isActive) return !1;
+      if (s.clientId === x || s.audience === "all") return !0;
+      try {
+        const ids = Array.isArray(s.selectedClientIds)
+          ? s.selectedClientIds
+          : JSON.parse(s.selectedClientIds || "[]");
+        return ids.map(Number).includes(Number(x));
+      } catch {
+        return !1;
+      }
+    }),
     te = (ee.data || []).filter(
       s => s.clientId === x && s.status === "pending"
     ),
@@ -330,6 +342,207 @@ function Le({ agentMode: a = !1 }) {
       );
     }
   };
+  if (t)
+    return e.jsxs("div", {
+      className: "min-h-screen bg-black text-white lg:pl-64",
+      children: [
+        a ? e.jsx(oe, {}) : e.jsx(ne, {}),
+        e.jsxs("main", {
+          className: "mx-auto max-w-5xl px-4 py-8 sm:px-6",
+          children: [
+            e.jsxs(d, {
+              type: "button",
+              variant: "outline",
+              onClick: () => {
+                P(null);
+                window.history.back();
+              },
+              children: ["←", " Voltar"],
+            }),
+            e.jsxs(u, {
+              className: "mt-5 border-gold/20 bg-[#0b1524] p-6",
+              children: [
+                e.jsx("h1", {
+                  className: "text-3xl font-bold text-gold",
+                  children: t.name,
+                }),
+                e.jsx("p", {
+                  className: "mt-1 text-sm text-gray-400",
+                  children: "Informações e acompanhamento deste cliente",
+                }),
+                e.jsxs("div", {
+                  className: "mt-6 grid gap-3 rounded-xl border border-white/10 bg-black/30 p-4 text-sm sm:grid-cols-2",
+                  children: [
+                    e.jsxs("p", { children: ["E-mail: ", e.jsx("strong", { children: t.email || "Não informado" })] }),
+                    e.jsxs("p", { children: ["Telefone: ", e.jsx("strong", { children: t.phone || "Não informado" })] }),
+                    e.jsxs("p", { children: ["WhatsApp: ", e.jsx("strong", { children: t.whatsapp || "Não informado" })] }),
+                    e.jsxs("p", { children: ["Nascimento: ", e.jsx("strong", { children: U(t.birthDate) })] }),
+                    e.jsxs("p", { children: ["Etapa: ", e.jsx("strong", { children: I.find(s => s.value === t.status)?.label || t.status })] }),
+                    e.jsxs("p", { children: ["Próximo acompanhamento: ", e.jsx("strong", { children: j(t.nextFollowUpAt) })] }),
+                  ],
+                }),
+                e.jsxs("div", {
+                  className: "mt-4 flex flex-wrap gap-2",
+                  children: [
+                    e.jsx(d, { variant: "outline", onClick: () => v("whatsapp"), children: "WhatsApp" }),
+                    e.jsx(d, { variant: "outline", onClick: () => v("sms"), children: "SMS" }),
+                    e.jsx(d, { variant: "outline", onClick: () => v("email"), children: "E-mail" }),
+                    e.jsx(d, { variant: "outline", onClick: () => v("call"), children: "Ligar" }),
+                  ],
+                }),
+                e.jsxs("div", {
+                  className: "mt-5 rounded-xl border border-white/10 bg-black/30 p-4",
+                  children: [
+                    e.jsx("label", { className: "text-xs font-bold uppercase tracking-wider text-gold", children: "Etapa do atendimento" }),
+                    e.jsx("select", {
+                      value: t.status,
+                      onChange: event => saveProfile({ status: event.target.value }),
+                      className: "mt-2 h-11 w-full rounded-lg border border-white/20 bg-black px-3 text-sm",
+                      children: I.map(option => e.jsx("option", { value: option.value, children: option.label }, option.value)),
+                    }),
+                    e.jsx("label", { className: "mt-4 block text-xs font-bold uppercase tracking-wider text-gold", children: "Observações" }),
+                    e.jsx("textarea", {
+                      value: profileNotes,
+                      onChange: event => setProfileNotes(event.target.value),
+                      className: "mt-2 min-h-24 w-full rounded-lg border border-white/20 bg-black p-3 text-sm",
+                    }),
+                    e.jsx(d, {
+                      className: "mt-2 bg-gold text-black",
+                      onClick: () => saveProfile({ notes: profileNotes }),
+                      children: "Salvar observações",
+                    }),
+                  ],
+                }),
+                a && e.jsxs("section", {
+                  className: "mt-6 rounded-xl border border-white/10 bg-black/30 p-4",
+                  children: [
+                    e.jsx("h2", { className: "text-xl font-bold", children: "Reuniões, resumos e gravações" }),
+                    !loadRecaps && e.jsx(d, {
+                      type: "button",
+                      variant: "outline",
+                      className: "mt-3",
+                      onClick: () => setLoadRecaps(!0),
+                      children: "Carregar reuniões",
+                    }),
+                    recapQuery.isLoading && e.jsx("p", { className: "mt-3 text-sm text-gray-400", children: "Carregando reuniões…" }),
+                    (recapQuery.data || []).map(s => e.jsxs("div", {
+                      className: "mt-3 rounded-lg border border-white/10 bg-black/35 p-3",
+                      children: [
+                        e.jsx("p", { className: "font-semibold", children: s.title }),
+                        e.jsx("p", { className: "mt-1 text-xs text-gray-400", children: j(s.startTime) }),
+                        s.recordingUrl && e.jsx("a", { href: s.recordingUrl, target: "_blank", rel: "noreferrer", className: "mt-2 inline-flex font-bold text-gold", children: "Abrir gravação" }),
+                      ],
+                    }, s.id)),
+                  ],
+                }),
+                a && e.jsxs("section", {
+                  className: "mt-6",
+                  children: [
+                    e.jsx("h2", { className: "text-xl font-bold", children: "Apólices" }),
+                    e.jsx("div", {
+                      className: "mt-3 grid gap-3 sm:grid-cols-2",
+                      children: T.slice(0, 25).map(s => e.jsxs("div", {
+                        className: "rounded-xl border border-white/10 bg-black/30 p-4",
+                        children: [
+                          e.jsxs("p", { className: "font-semibold", children: ["Apólice ", s.policyNumber] }),
+                          e.jsx("p", { className: "mt-1 text-sm text-gray-400", children: s.product || "Produto não informado" }),
+                        ],
+                      }, s.id)),
+                    }),
+                    T.length === 0 && e.jsx("p", { className: "mt-3 text-sm text-gray-400", children: "Nenhuma apólice vinculada." }),
+                  ],
+                }),
+                a && e.jsxs("section", {
+                  className: "mt-6 rounded-xl border border-white/10 bg-black/30 p-4",
+                  children: [
+                    e.jsx("h2", { className: "text-xl font-bold", children: "Mensagens automáticas programadas" }),
+                    Z.isLoading && e.jsx("p", { className: "mt-3 text-sm text-gray-400", children: "Carregando automações…" }),
+                    e.jsx("div", {
+                      className: "mt-3 grid gap-3 sm:grid-cols-2",
+                      children: scheduledForClient.map(s => e.jsxs("div", {
+                        className: "rounded-xl border border-gold/20 bg-black/35 p-4",
+                        children: [
+                          e.jsx("p", { className: "font-semibold text-gold", children: s.title || s.subject || "Mensagem automática" }),
+                          e.jsx("p", { className: "mt-1 text-xs uppercase tracking-wider text-gray-500", children: s.occasion || "programada" }),
+                          e.jsx("p", { className: "mt-2 text-sm", children: s.subject || "Sem assunto" }),
+                          e.jsx("p", { className: "mt-2 line-clamp-4 whitespace-pre-wrap text-xs text-gray-400", children: s.message || "" }),
+                        ],
+                      }, s.id)),
+                    }),
+                    !Z.isLoading && scheduledForClient.length === 0 && e.jsx("p", { className: "mt-3 text-sm text-gray-400", children: "Nenhuma mensagem automática programada para este cliente." }),
+                  ],
+                }),
+                e.jsxs("section", {
+                  className: "mt-6 border-t border-white/10 pt-5",
+                  children: [
+                    e.jsx("h2", { className: "text-xl font-bold", children: "Histórico" }),
+                    !loadHistory && e.jsx(d, {
+                      type: "button",
+                      variant: "outline",
+                      className: "mt-3",
+                      onClick: () => setLoadHistory(!0),
+                      children: "Carregar histórico",
+                    }),
+                    loadHistory && (C.isLoading || L.isLoading) && e.jsx("p", { className: "mt-3 text-sm text-gray-400", children: "Carregando…" }),
+                    loadHistory && e.jsxs("div", {
+                      className: "mt-4 space-y-3",
+                      children: [
+                        ...(L.data || []).map(s => e.jsxs("div", {
+                          className: "rounded-xl border border-white/10 bg-black/30 p-3 text-sm",
+                          children: [
+                            e.jsxs("p", { className: "text-xs text-gray-400", children: [s.direction === "sent" ? "Enviado" : "Recebido", " · ", j(s.sentAt)] }),
+                            e.jsx("p", { className: "mt-1 font-semibold", children: s.subject }),
+                            e.jsx("p", { className: "mt-1 whitespace-pre-wrap text-gray-300", children: s.body }),
+                          ],
+                        }, `email-${s.id}`)),
+                        ...(C.data || []).map(s => e.jsxs("div", {
+                          className: "border-l-2 border-gold/40 pl-3 text-sm",
+                          children: [e.jsx("p", { children: s.content }), e.jsx("p", { className: "mt-1 text-xs text-gray-500", children: j(s.createdAt) })],
+                        }, `activity-${s.id}`)),
+                      ],
+                    }),
+                  ],
+                }),
+                a && e.jsxs("section", {
+                  className: "mt-6 rounded-xl border border-white/10 bg-black/30 p-4",
+                  children: [
+                    e.jsx("h2", { className: "text-xl font-bold", children: "Registrar interação" }),
+                    e.jsx("select", {
+                      value: O,
+                      onChange: event => se(event.target.value),
+                      className: "mt-3 h-10 rounded-md border border-white/20 bg-black px-3 text-sm",
+                      children: [
+                        e.jsx("option", { value: "whatsapp", children: "WhatsApp" }),
+                        e.jsx("option", { value: "sms", children: "SMS" }),
+                        e.jsx("option", { value: "email", children: "E-mail" }),
+                        e.jsx("option", { value: "call", children: "Ligação" }),
+                        e.jsx("option", { value: "note", children: "Observação" }),
+                      ],
+                    }),
+                    e.jsx("textarea", {
+                      value: A,
+                      onChange: event => B(event.target.value),
+                      placeholder: "Descreva a conversa ou ação realizada",
+                      className: "mt-3 min-h-24 w-full rounded-md border border-white/20 bg-black p-3 text-sm",
+                    }),
+                    e.jsx(d, {
+                      className: "mt-2 w-full bg-gold text-black",
+                      onClick: async () => {
+                        if (!A.trim()) return;
+                        await E(O, A.trim());
+                        B("");
+                        setLoadHistory(!0);
+                      },
+                      children: "Salvar no histórico",
+                    }),
+                  ],
+                }),
+              ],
+            }),
+          ],
+        }),
+      ],
+    });
   return e.jsxs("div", {
     className: "min-h-screen bg-black text-white lg:pl-64",
     children: [
@@ -642,6 +855,11 @@ function Le({ agentMode: a = !1 }) {
                           {
                             className: `cursor-pointer border bg-[#0b1524] p-4 transition ${x === s.id ? "border-gold" : "border-white/10 hover:border-gold/50"}`,
                             onClick: () => {
+                              window.history.pushState(
+                                {},
+                                "",
+                                `${window.location.pathname}?setor=${b}&clientId=${s.id}`
+                              );
                               P(s.id);
                               setLoadHistory(!1);
                               setLoadRecaps(!1);
