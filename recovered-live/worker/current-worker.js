@@ -57062,6 +57062,10 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-meeting-detail.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
+    if (url.pathname === "/agentes/cliente") {
+      url.pathname = "/agent-crm-client.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
     if (url.pathname === "/agentes/configuracoes-agenda") {
       url.pathname = "/agent-calendar-settings.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });

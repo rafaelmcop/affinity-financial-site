@@ -5,7 +5,7 @@ import {
   B as d,
   C as u,
   b as g,
-} from "./index-BIU-6RMI.js?v=20260901-12";
+} from "./index-BIU-6RMI.js?v=20260901-13";
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
@@ -855,14 +855,7 @@ function Le({ agentMode: a = !1 }) {
                           {
                             className: `cursor-pointer border bg-[#0b1524] p-4 transition ${x === s.id ? "border-gold" : "border-white/10 hover:border-gold/50"}`,
                             onClick: () => {
-                              window.history.pushState(
-                                {},
-                                "",
-                                `${window.location.pathname}?setor=${b}&clientId=${s.id}`
-                              );
-                              P(s.id);
-                              setLoadHistory(!1);
-                              setLoadRecaps(!1);
+                              window.location.href = `/agentes/cliente?clientId=${s.id}`;
                             },
                             children: [
                               e.jsxs("div", {
