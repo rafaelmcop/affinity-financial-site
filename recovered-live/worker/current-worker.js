@@ -55642,7 +55642,17 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.calendlyMeetings") {
     await ensureCalendlyTables(env);
-    const rows = await env.DB.prepare("SELECT m.*,COALESCE(NULLIF(m.inviteePhone,''),(SELECT COALESCE(NULLIF(c.phone,''),NULLIF(c.whatsapp,'')) FROM crmClients c WHERE lower(c.assignedAdminEmail)=lower(m.agentEmail) AND (c.id=m.clientId OR (m.inviteeEmail IS NOT NULL AND lower(trim(c.email))=lower(trim(m.inviteeEmail)))) ORDER BY CASE WHEN c.id=m.clientId THEN 0 ELSE 1 END,c.id DESC LIMIT 1)) AS resolvedPhone FROM calendlyMeetings m WHERE lower(m.agentEmail)=? ORDER BY datetime(m.startTime) DESC LIMIT 250").bind(adminEmail.toLowerCase()).all();
+    const owner = adminEmail.toLowerCase();
+    const connection = await env.DB.prepare("SELECT lastSyncAt FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND status='connected' LIMIT 1").bind(owner).first();
+    const lastSyncAt = connection?.lastSyncAt ? Date.parse(`${String(connection.lastSyncAt).replace(" ", "T")}Z`) : 0;
+    if (connection && (!Number.isFinite(lastSyncAt) || Date.now() - lastSyncAt > 2 * 60 * 1e3)) {
+      try {
+        await syncCalendlyForAgent(env, owner);
+      } catch (error) {
+        await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0, 500), owner).run();
+      }
+    }
+    const rows = await env.DB.prepare("SELECT m.*,COALESCE(NULLIF(m.inviteePhone,''),(SELECT COALESCE(NULLIF(c.phone,''),NULLIF(c.whatsapp,'')) FROM crmClients c WHERE lower(c.assignedAdminEmail)=lower(m.agentEmail) AND (c.id=m.clientId OR (m.inviteeEmail IS NOT NULL AND lower(trim(c.email))=lower(trim(m.inviteeEmail)))) ORDER BY CASE WHEN c.id=m.clientId THEN 0 ELSE 1 END,c.id DESC LIMIT 1)) AS resolvedPhone FROM calendlyMeetings m WHERE lower(m.agentEmail)=? ORDER BY datetime(m.startTime) DESC LIMIT 250").bind(owner).all();
     return trpcResult((rows.results || []).map((row) => {
       let answerPhone = "";
       try {
