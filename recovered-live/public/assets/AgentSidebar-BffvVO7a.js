@@ -63,6 +63,9 @@ import { E as z } from "./external-link-CEjUwZyT.js";
 function E() {
   const [t, s] = u(),
     x = t === "/agentes/crm" || t === "/agentes/mensagens",
+    B =
+      t === "/agentes/crm" &&
+      new URLSearchParams(window.location.search).get("setor") === "leads",
     [l, m] = f.useState(x),
     [P, R] = f.useState(t === "/agentes/clientes"),
     [T, H] = f.useState(t === "/agentes/configuracoes"),
@@ -134,8 +137,14 @@ function E() {
                   className: "mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3",
                   children: [
                     e.jsxs("button", {
+                      onClick: () =>
+                        window.location.assign("/agentes/crm?setor=leads"),
+                      className: `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${B ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`,
+                      children: [e.jsx(i, { size: 15 }), " Leads"],
+                    }),
+                    e.jsxs("button", {
                       onClick: () => s("/agentes/crm"),
-                      className: `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${t === "/agentes/crm" ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`,
+                      className: `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${t === "/agentes/crm" && !B ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`,
                       children: [
                         e.jsx(i, { size: 15 }),
                         " Clientes e acompanhamento",

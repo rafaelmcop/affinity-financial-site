@@ -7,7 +7,7 @@ import {
   j as e,
   C as m,
 } from "./index-BIU-6RMI.js";
-import { A as C } from "./AgentSidebar-BffvVO7a.js";
+import { A as C } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { u as A } from "./FloatingInternalChat-C-mZ1jql.js";
 import { M as P } from "./mail-DTOVvRc8.js";
 import { C as f, M as I } from "./message-square-Bd585pvl.js";
