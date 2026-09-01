@@ -882,11 +882,19 @@ function J() {
   const s = p.agent.deliveryLog.useQuery(void 0, { refetchInterval: 3e4 }),
     u = s.data || [],
     [x, g] = v.useState("all"),
+    [expandedId, setExpandedId] = v.useState(null),
     o = x === "all" ? u : u.filter(i => i.status === x),
     b = i => {
       if (!i) return "Horário automático";
-      const c = new Date(String(i));
-      return Number.isNaN(c.getTime()) ? String(i) : c.toLocaleString("pt-BR");
+      const raw = String(i),
+        c = new Date(
+          /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+            ? raw.replace(" ", "T") + "Z"
+            : raw
+        );
+      return Number.isNaN(c.getTime())
+        ? raw
+        : c.toLocaleString("pt-BR", { timeZone: "America/New_York" });
     };
   return e.jsxs(N, {
     className: "border-gold/25 bg-[#0b1524] p-5",
@@ -959,7 +967,10 @@ function J() {
             return e.jsx(
               "div",
               {
-                className: "rounded-xl border border-white/10 bg-black/25 p-4",
+                className: `rounded-xl border border-white/10 bg-black/25 p-4 ${i.status === "sent" ? "cursor-pointer hover:border-gold/40" : ""}`,
+                onClick: () =>
+                  i.status === "sent" &&
+                  setExpandedId(current => (current === i.id ? null : i.id)),
                 children: e.jsxs("div", {
                   className: "flex items-start gap-3",
                   children: [
@@ -998,6 +1009,44 @@ function J() {
                           className: "mt-1 text-xs text-gray-500",
                           children: b(i.date),
                         }),
+                        i.status === "sent" &&
+                          e.jsx("p", {
+                            className: "mt-2 text-xs font-semibold text-gold",
+                            children:
+                              expandedId === i.id
+                                ? "Ocultar destinatários"
+                                : "Clique para ver quem recebeu",
+                          }),
+                        i.status === "sent" &&
+                          expandedId === i.id &&
+                          e.jsx("div", {
+                            className:
+                              "mt-3 max-h-72 overflow-y-auto rounded-lg border border-white/10 bg-black/35 p-3",
+                            children: e.jsx("div", {
+                              className: "grid gap-2 sm:grid-cols-2",
+                              children: (i.recipients || []).map((recipient, index) =>
+                                e.jsxs(
+                                  "div",
+                                  {
+                                    className:
+                                      "rounded-md bg-white/5 px-3 py-2 text-xs",
+                                    children: [
+                                      e.jsx("p", {
+                                        className: "font-semibold text-white",
+                                        children: recipient.name,
+                                      }),
+                                      recipient.email &&
+                                        e.jsx("p", {
+                                          className: "mt-0.5 text-gray-400",
+                                          children: recipient.email,
+                                        }),
+                                    ],
+                                  },
+                                  `${recipient.email || recipient.name}-${index}`
+                                )
+                              ),
+                            }),
+                          }),
                         i.errorMessage &&
                           e.jsxs("p", {
                             className:

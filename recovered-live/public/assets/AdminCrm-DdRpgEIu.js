@@ -9,7 +9,7 @@ import {
 import { A as ne } from "./AdminSidebar-CB3x3HMt.js";
 import { A as oe } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
 import { I as h } from "./input-maK0rC7f.js";
-import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-4";
+import { ScheduledMessagesPanel as H } from "./AgentMessages-CsNL0JGx.js?v=20260901-5";
 import { P as ie } from "./plus-DKqFfTiU.js";
 import { S as ce } from "./save-BWWR3RtX.js";
 import { P as V } from "./pen-BtFcHMZL.js";
@@ -112,12 +112,20 @@ function F(a) {
   return a.replace(/\D/g, "");
 }
 function j(a) {
-  return a
-    ? new Date(String(a)).toLocaleString("pt-BR", {
+  if (!a) return "Não agendado";
+  const raw = String(a),
+    date = new Date(
+      /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+        ? raw.replace(" ", "T") + "Z"
+        : raw
+    );
+  return Number.isNaN(date.getTime())
+    ? raw
+    : date.toLocaleString("pt-BR", {
         dateStyle: "short",
         timeStyle: "short",
-      })
-    : "Não agendado";
+        timeZone: "America/New_York",
+      });
 }
 function U(a) {
   if (!a) return "Não informado";

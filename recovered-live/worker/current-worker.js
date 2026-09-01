@@ -54139,14 +54139,24 @@ Detalhes: ${details}` : ""}`;
         status='completed',
         matchedPolicyId=(SELECT p.id FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId
           WHERE lower(p.agentEmail)=lower(a.agentEmail)
-          AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
-            OR lower(trim(c.name))=lower(trim(a.clientName))) ORDER BY p.id DESC LIMIT 1),
+          AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(coalesce(c.email,p.clientEmail,'')))=lower(trim(a.clientEmail)))
+            OR (a.clientPhone IS NOT NULL AND trim(a.clientPhone)<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,p.clientPhone,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10))
+            OR lower(trim(coalesce(c.name,p.clientName,'')))=lower(trim(a.clientName))) ORDER BY p.id DESC LIMIT 1),
         completedAt=CURRENT_TIMESTAMP,
         updatedAt=CURRENT_TIMESTAMP
-        WHERE lower(a.agentEmail)=? AND a.status='submitted'
+        WHERE lower(a.agentEmail)=? AND a.status IN ('draft','submitted')
         AND EXISTS (SELECT 1 FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId
           WHERE lower(p.agentEmail)=lower(a.agentEmail)
+          AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(coalesce(c.email,p.clientEmail,'')))=lower(trim(a.clientEmail)))
+            OR (a.clientPhone IS NOT NULL AND trim(a.clientPhone)<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,p.clientPhone,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10))
+            OR lower(trim(coalesce(c.name,p.clientName,'')))=lower(trim(a.clientName))))`).bind(owner).run();
+      await env.DB.prepare(`UPDATE agentApplications AS a SET
+        status='completed',completedAt=COALESCE(completedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP
+        WHERE lower(a.agentEmail)=? AND a.status IN ('draft','submitted')
+        AND EXISTS (SELECT 1 FROM crmClients c
+          WHERE lower(c.assignedAdminEmail)=lower(a.agentEmail) AND c.status='client'
           AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
+            OR (a.clientPhone IS NOT NULL AND trim(a.clientPhone)<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10))
             OR lower(trim(c.name))=lower(trim(a.clientName))))`).bind(owner).run();
       const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount,
         EXISTS(SELECT 1 FROM applicationDeletionRequests d WHERE d.applicationId=a.id AND d.status='pending') AS deletionPending,
@@ -55234,7 +55244,7 @@ Affinity Financial Consulting`,
     const owner = adminEmail.toLowerCase();
     const [future, deliveries, failures] = await env.DB.batch([
       env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
-      env.DB.prepare("SELECT MIN(d.id) AS id,m.id AS messageId,m.title,m.subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE lower(m.agentEmail)=? GROUP BY m.id,m.title,m.subject,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
+      env.DB.prepare("SELECT MIN(d.id) AS id,m.id AS messageId,m.title,m.subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt,group_concat(coalesce(c.name,'') || char(31) || coalesce(c.email,''),char(30)) AS recipients FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? GROUP BY m.id,m.title,m.subject,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
       env.DB.prepare("SELECT id,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' ORDER BY attemptedAt DESC LIMIT 100").bind(owner)
     ]);
     const upcoming = (future.results || []).map((row) => {
@@ -55251,7 +55261,11 @@ Affinity Financial Consulting`,
     });
     const sentAutomation = (deliveries.results || []).map((row) => {
       const count = Number(row.recipientCount || 0);
-      return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, status: "sent", date: row.sentAt, errorMessage: null };
+      const recipients = String(row.recipients || "").split(String.fromCharCode(30)).filter(Boolean).map((entry) => {
+        const [name, email] = entry.split(String.fromCharCode(31));
+        return { name: name || "Contato", email: email || null };
+      });
+      return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, recipients, status: "sent", date: row.sentAt, firstSentAt: row.firstSentAt, errorMessage: null };
     });
     const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "failed", date: row.attemptedAt, errorMessage: row.errorMessage ? String(row.errorMessage) : "Falha n\xE3o identificada" }));
     return trpcResult([...upcoming, ...failed, ...sentAutomation]);
