@@ -162,19 +162,23 @@ function Le({ agentMode: a = !1 }) {
         : "clients"
     ),
     [page, setPage] = p.useState(1),
-    C = c.crm.activities.useQuery({ clientId: x || 0 }, { enabled: !!x }),
+    [loadHistory, setLoadHistory] = p.useState(!1),
+    C = c.crm.activities.useQuery(
+      { clientId: x || 0 },
+      { enabled: !!x && loadHistory, staleTime: 3e4 }
+    ),
     Y = c.agent.listPolicies.useQuery(void 0, { enabled: a }),
-    Z = c.agent.listMessages.useQuery(void 0, { enabled: a }),
+    Z = c.agent.listMessages.useQuery(void 0, { enabled: !1 }),
     L = c.agent.clientEmails.useQuery(
       { clientId: x || 0 },
-      { enabled: a && !!x, refetchInterval: 15e3 }
+      { enabled: a && !!x && loadHistory, staleTime: 3e4 }
     ),
     [loadRecaps, setLoadRecaps] = p.useState(!1),
     recapQuery = c.agent.calendlyRecaps.useQuery(
       { clientId: x || 0 },
       { enabled: a && !!x && loadRecaps, staleTime: 6e4, retry: !1 }
     ),
-    ee = c.agent.listTasks.useQuery(void 0, { enabled: a }),
+    ee = c.agent.listTasks.useQuery(void 0, { enabled: !1 }),
     [O, se] = p.useState("whatsapp"),
     [A, B] = p.useState(""),
     [profileNotes, setProfileNotes] = p.useState(""),
@@ -639,14 +643,8 @@ function Le({ agentMode: a = !1 }) {
                             className: `cursor-pointer border bg-[#0b1524] p-4 transition ${x === s.id ? "border-gold" : "border-white/10 hover:border-gold/50"}`,
                             onClick: () => {
                               P(s.id);
-                              window.requestAnimationFrame(() =>
-                                document
-                                  .getElementById("crm-client-profile")
-                                  ?.scrollIntoView({
-                                    behavior: "smooth",
-                                    block: "start",
-                                  })
-                              );
+                              setLoadHistory(!1);
+                              setLoadRecaps(!1);
                             },
                             children: [
                               e.jsxs("div", {
@@ -737,13 +735,15 @@ function Le({ agentMode: a = !1 }) {
                                     type: "button",
                                     variant: "outline",
                                     size: "sm",
-                                    onClick: () =>
-                                      document
-                                        .getElementById(target)
-                                        ?.scrollIntoView({
-                                          behavior: "smooth",
-                                          block: "start",
-                                        }),
+                                    onClick: () => {
+                                      label === "Histórico" && setLoadHistory(!0);
+                                      label === "Reuniões" && setLoadRecaps(!0);
+                                      window.requestAnimationFrame(() =>
+                                        document
+                                          .getElementById(target)
+                                          ?.scrollIntoView({ block: "nearest" })
+                                      );
+                                    },
                                     children: label,
                                   },
                                   target
@@ -1191,7 +1191,21 @@ function Le({ agentMode: a = !1 }) {
                               id: "crm-profile-history",
                               className: "mt-5 scroll-mt-16 space-y-3",
                               children: [
+                                !loadHistory &&
+                                  e.jsx(d, {
+                                    type: "button",
+                                    variant: "outline",
+                                    className: "w-full",
+                                    onClick: () => setLoadHistory(!0),
+                                    children: "Carregar histórico deste cliente",
+                                  }),
+                                loadHistory && (C.isLoading || L.isLoading) &&
+                                  e.jsx("p", {
+                                    className: "text-sm text-gray-400",
+                                    children: "Carregando histórico…",
+                                  }),
                                 a &&
+                                  loadHistory &&
                                   (L.data || []).length > 0 &&
                                   e.jsxs("div", {
                                     className:
@@ -1236,7 +1250,7 @@ function Le({ agentMode: a = !1 }) {
                                       ),
                                     ],
                                   }),
-                                (C.data || []).map(s =>
+                                loadHistory && (C.data || []).map(s =>
                                   e.jsxs(
                                     "div",
                                     {
@@ -1264,7 +1278,7 @@ function Le({ agentMode: a = !1 }) {
                                     s.id
                                   )
                                 ),
-                                C.data?.length === 0 &&
+                                loadHistory && C.data?.length === 0 &&
                                   e.jsx("p", {
                                     className: "text-sm text-gray-500",
                                     children: "Ainda não há ações registradas.",
@@ -1283,12 +1297,6 @@ function Le({ agentMode: a = !1 }) {
                   }),
                 ],
               }),
-              a &&
-                t &&
-                e.jsx("div", {
-                  className: "mt-8",
-                  children: e.jsx(H, { scope: "client", clientId: t.id }),
-                }),
             ],
           }),
           a &&
