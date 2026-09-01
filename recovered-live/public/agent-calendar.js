@@ -11,10 +11,10 @@ document
 const agendaGrid = document.querySelector(".grid");
 if (agendaGrid) agendaGrid.style.gridTemplateColumns = "1fr";
 async function api(name, input = {}, method = "GET") {
-  const options = { credentials: "include" };
+  const options = { credentials: "include", cache: "no-store" };
   let url = `/api/trpc/${name}`;
   if (method === "GET")
-    url += `?input=${encodeURIComponent(JSON.stringify({ json: input }))}`;
+    url += `?input=${encodeURIComponent(JSON.stringify({ json: input }))}&fresh=${Date.now()}`;
   else {
     options.method = "POST";
     options.headers = { "content-type": "application/json" };
@@ -141,6 +141,7 @@ function openClientPopup(id) {
   $("client-dialog").showModal();
 }
 function renderMeetings(rows) {
+  rows = Array.isArray(rows) ? rows : [];
   window.calendarRows = rows;
   const now = new Date();
   const upcoming = rows
@@ -151,6 +152,9 @@ function renderMeetings(rows) {
         ) && new Date(row.endTime) > now
     )
     .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+  const meetingCount = $("meeting-count");
+  if (meetingCount)
+    meetingCount.textContent = `${upcoming.length} próxima${upcoming.length === 1 ? " reunião" : "s reuniões"}`;
   $("meetings").innerHTML = upcoming.length
     ? upcoming
         .map(
@@ -360,9 +364,12 @@ document.addEventListener(
 );
 async function loadMeetings() {
   try {
-    renderMeetings(await api("agent.calendlyMeetings"));
+    const meetings = await api("agent.calendlyMeetings");
+    renderMeetings(meetings);
   } catch (e) {
     $("meetings").innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`;
+    const meetingCount = $("meeting-count");
+    if (meetingCount) meetingCount.textContent = "Não foi possível atualizar";
   }
 }
 function recapParagraphs(value) {
@@ -420,12 +427,13 @@ async function openRecap(id) {
 async function load() {
   try {
     state = (await api("agent.getCalendly")) || {};
-    if (state.connection) loadMeetings();
+    if (state.connection) await loadMeetings();
     else
       $("meetings").innerHTML =
         '<p class="muted">Sua agenda ainda não está conectada. <a class="button" href="/agentes/configuracoes">Configurar Calendly</a></p>';
   } catch (e) {
     notice(e.message, true);
+    $("meetings").innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`;
   }
 }
 $("connect").onclick = async () => {

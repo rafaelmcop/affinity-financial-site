@@ -53381,7 +53381,13 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   const completedMeetingKeys = new Set((completedMeetingResult.results || []).map((row) => `${String(row.eventUri)}|${String(row.inviteeUri || "")}`));
   const pendingMeetingResult = options.backfill ? await env.DB.prepare("SELECT DISTINCT eventUri FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))=''").bind(agentEmail.toLowerCase()).all() : { results: [] };
   const pendingEventUris = new Set((pendingMeetingResult.results || []).map((row) => String(row.eventUri || "")));
-  const eventsToProcess = options.backfill && pendingEventUris.size ? eventRows.filter((event) => pendingEventUris.has(String(event.uri || ""))).slice(0, 20) : eventRows.slice(0, options.backfill ? 20 : eventRows.length);
+  const uniqueEvents = [...new Map(eventRows.map((event) => [String(event.uri || ""), event])).values()];
+  const currentEvents = uniqueEvents.filter((event) => {
+    const endTime = new Date(String(event.end_time || event.start_time || "")).getTime();
+    return Number.isFinite(endTime) && endTime >= now - day;
+  });
+  const pendingHistoricalEvents = options.backfill ? uniqueEvents.filter((event) => pendingEventUris.has(String(event.uri || "")) && !currentEvents.some((current) => String(current.uri || "") === String(event.uri || ""))).slice(0, 20) : [];
+  const eventsToProcess = options.backfill ? [...currentEvents, ...pendingHistoricalEvents] : uniqueEvents;
   let saved = 0;
   for (const event of eventsToProcess) {
     const eventId = calendlyUuid(event.uri);
