@@ -77,6 +77,27 @@ function secondCallMessage(row) {
   const reschedule = safeUrl(row.rescheduleUrl || state.profile?.calendlyUrl);
   return `Olá, ${row.inviteeName || "tudo bem"}!\n\nNão conseguimos conversar no horário da nossa primeira chamada e gostaria de dar continuidade ao seu atendimento com a Affinity Financial Consulting.\n\nSe ainda tiver interesse, responda esta mensagem ou escolha um novo horário que seja mais conveniente para você.${reschedule !== "#" ? `\n\n📅 Reagende aqui:\n${reschedule}` : ""}\n\nFico à disposição e será um prazer falar com você.\n\nAffinity Financial Consulting`;
 }
+function feedbackMessage(row, link) {
+  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nObrigado por conversar comigo hoje. Sua opinião é muito importante para que eu possa melhorar cada vez mais meu atendimento.\n\nPreparei um formulário rápido para você me contar como foi nossa conversa, se ficou alguma dúvida e o que gostaria de analisar melhor antes de tomar uma decisão:\n\n${link}\n\nPode responder com total sinceridade. Ficarei à disposição para esclarecer qualquer dúvida.\n\nAffinity Financial Consulting`;
+}
+async function prepareFeedback(id) {
+  const row = window.calendarRows.find(item => Number(item.id) === Number(id));
+  if (!row) return notice("Reunião não encontrada.", true);
+  try {
+    const invite = await api("agent.createReviewInvite", {
+      clientName: row.inviteeName || "Cliente",
+      clientEmail: row.inviteeEmail || "",
+    }, "POST");
+    const link = `${invite.link}${invite.link.includes("?") ? "&" : "?"}followup=1`;
+    const composer = $(`composer-${id}`), text = $(`message-${id}`);
+    composer.classList.remove("hidden");
+    text.value = feedbackMessage(row, link);
+    composer.dataset.type = "feedback";
+    notice("Link individual criado. Copie a mensagem ou abra no WhatsApp.");
+  } catch (error) {
+    notice(error.message, true);
+  }
+}
 function setComposer(id, type) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id));
   if (!row) return;
@@ -166,15 +187,15 @@ function renderMeetings(rows) {
   const followUps = rows
     .filter(row => {
       const status = String(row.status || "").toLowerCase();
-      return ["canceled", "cancelled", "no_show"].includes(status) ||
+      return ["canceled", "cancelled", "no_show", "completed"].includes(status) ||
         (new Date(row.endTime) <= now && status === "active");
     })
     .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
   $("followup-meetings").innerHTML = followUps.length
     ? followUps.map(row => {
         const status = String(row.status || "").toLowerCase();
-        const label = status === "no_show" ? "Não compareceu" : ["canceled", "cancelled"].includes(status) ? "Cancelada" : "Confirmar comparecimento";
-        return `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${label}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions"><button class="primary" data-open-followup="${row.id}">Preparar follow-up</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button>${status === "active" ? `<button data-attended="${row.id}">Compareceu</button><button data-no-show="${row.id}">Não compareceu</button>` : ""}</div><div id="composer-${row.id}" class="message-composer hidden"><p class="message-help">Personalize a segunda chamada antes de copiar ou abrir o WhatsApp.</p><textarea id="message-${row.id}" aria-label="Follow-up para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div></article>`;
+        const label = status === "no_show" ? "Não compareceu" : ["canceled", "cancelled"].includes(status) ? "Cancelada" : status === "completed" ? "Compareceu" : "Confirmar comparecimento";
+        return `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${label}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions"><button class="primary" data-open-followup="${row.id}">Preparar follow-up</button><button data-feedback="${row.id}">Não fechou / pedir feedback</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button>${status === "active" ? `<button data-attended="${row.id}">Compareceu</button><button data-no-show="${row.id}">Não compareceu</button>` : ""}</div><div id="composer-${row.id}" class="message-composer hidden"><p class="message-help">Personalize a mensagem antes de copiar ou abrir o WhatsApp.</p><textarea id="message-${row.id}" aria-label="Follow-up para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div></article>`;
       }).join("")
     : '<p class="muted">Nenhuma reunião cancelada ou pendente de confirmação.</p>';
   document
@@ -187,6 +208,9 @@ function renderMeetings(rows) {
   document
     .querySelectorAll("[data-open-followup]")
     .forEach(button => (button.onclick = () => setComposer(button.dataset.openFollowup, "second")));
+  document
+    .querySelectorAll("[data-feedback]")
+    .forEach(button => (button.onclick = () => prepareFeedback(button.dataset.feedback)));
   document
     .querySelectorAll("[data-template]")
     .forEach(
