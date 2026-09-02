@@ -12117,6 +12117,32 @@ function base64ToBytes(value) {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
+function applicationDocumentPayload(input) {
+  const name = String(input.name || "documento.pdf").trim().slice(0, 180);
+  const category = String(input.category || "Documento").trim().slice(0, 80);
+  const data = String(input.data || "");
+  const match = data.match(/^data:(application\/pdf);base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new Error("Selecione um arquivo PDF válido");
+  const bytes = base64ToBytes(match[2]);
+  if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new Error("O PDF deve ter no máximo 15 MB");
+  const safeName = name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "documento.pdf";
+  return { bytes, name, safeName, category, type: "application/pdf" };
+}
+async function storeApplicationDocument(env, applicationId, agentEmail, input) {
+  const file = applicationDocumentPayload(input);
+  const key = `${Number(applicationId)}-${crypto.randomUUID()}`;
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDocuments (storageKey TEXT PRIMARY KEY,applicationId INTEGER NOT NULL,agentEmail TEXT NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL,category TEXT,size INTEGER NOT NULL,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDocumentChunks (storageKey TEXT NOT NULL,chunkIndex INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(storageKey,chunkIndex))").run();
+  await env.DB.prepare("INSERT INTO applicationDocuments (storageKey,applicationId,agentEmail,name,type,category,size) VALUES (?,?,?,?,?,?,?)").bind(key, Number(applicationId), String(agentEmail || "").toLowerCase(), file.name, file.type, file.category, file.bytes.length).run();
+  const encoded = String(input.data).split(",", 2)[1];
+  const chunks = [];
+  for (let offset = 0, index = 0; offset < encoded.length; offset += 480000, index++) {
+    const encryptedChunk = await encryptSmtpPassword(encoded.slice(offset, offset + 480000), env.JWT_SECRET);
+    chunks.push(env.DB.prepare("INSERT INTO applicationDocumentChunks (storageKey,chunkIndex,data) VALUES (?,?,?)").bind(key, index, encryptedChunk));
+  }
+  for (let offset = 0; offset < chunks.length; offset += 20) await env.DB.batch(chunks.slice(offset, offset + 20));
+  return { name: file.name, type: file.type, category: file.category, storageKey: `d1:${key}`, size: file.bytes.length };
+}
 async function encryptionKey(secret) {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -53909,6 +53935,16 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("UPDATE passwordResetTokens SET used=1 WHERE id=?").bind(row.id).run();
     return trpcResult({ success: true, userType: row.userType });
   }
+  if (name === "applications.uploadDocument") {
+    const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase(), token = String(input.token || "").trim().toLowerCase();
+    const row = token
+      ? await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND clientToken=?").bind(id, token).first()
+      : await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
+    if (!row || (token ? !/^[a-f0-9]{32}$/.test(token) : !/^[A-Z0-9]{8}$/.test(code))) return trpcError("Link ou código inválido", "UNAUTHORIZED", 401);
+    if (row.status === "completed") return trpcError("Esta aplicação já foi concluída");
+    try { return trpcResult(await storeApplicationDocument(env, Number(row.id), row.agentEmail, input)); }
+    catch (error) { return trpcError(error.message || "Não foi possível armazenar o PDF"); }
+  }
   if (name === "applications.verifyCode" || name === "applications.clientSave") {
     const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase(), token = String(input.token || "").trim().toLowerCase();
     try { await env.DB.prepare("ALTER TABLE agentApplications ADD COLUMN clientToken TEXT").run(); } catch {}
@@ -54121,7 +54157,7 @@ Detalhes: ${details}` : ""}`;
     if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion"].includes(name)) {
+  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument"].includes(name)) {
     const owner = adminEmail.toLowerCase();
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54174,6 +54210,12 @@ Detalhes: ${details}` : ""}`;
     )`).run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+    if (name === "agent.uploadApplicationDocument") {
+      const application = await env.DB.prepare("SELECT id,agentEmail FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id || 0), owner).first();
+      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      try { return trpcResult(await storeApplicationDocument(env, Number(application.id), owner, input)); }
+      catch (error) { return trpcError(error.message || "Não foi possível armazenar o PDF"); }
+    }
     if (name === "agent.listApplications") {
       await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
       await env.DB.prepare("UPDATE agentApplications SET clientToken=lower(hex(randomblob(16))) WHERE lower(agentEmail)=? AND (clientToken IS NULL OR trim(clientToken)='')").bind(owner).run();
