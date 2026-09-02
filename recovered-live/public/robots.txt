@@ -7,5 +7,6 @@ Disallow: /api/
 Disallow: /agent-
 Disallow: /preencher-aplicacao
 Disallow: /avaliacao-convite
+Disallow: /feedback-atendimento
 
 Sitemap: https://www.affinityfc.org/sitemap.xml

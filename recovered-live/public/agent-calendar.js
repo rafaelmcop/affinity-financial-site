@@ -84,11 +84,12 @@ async function prepareFeedback(id) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id));
   if (!row) return notice("Reunião não encontrada.", true);
   try {
-    const invite = await api("agent.createReviewInvite", {
+    const invite = await api("agent.createServiceFeedbackInvite", {
+      meetingId: Number(row.id),
       clientName: row.inviteeName || "Cliente",
       clientEmail: row.inviteeEmail || "",
     }, "POST");
-    const link = `${invite.link}${invite.link.includes("?") ? "&" : "?"}followup=1`;
+    const link = invite.link;
     const composer = $(`composer-${id}`), text = $(`message-${id}`);
     composer.classList.remove("hidden");
     text.value = feedbackMessage(row, link);

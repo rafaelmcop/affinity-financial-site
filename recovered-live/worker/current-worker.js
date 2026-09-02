@@ -53948,6 +53948,19 @@ Detalhes: ${details}` : ""}`;
     ]);
     return trpcResult({ success: true });
   }
+  if (name === "serviceFeedback.get" || name === "serviceFeedback.submit") {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS serviceFeedbackInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,meetingId INTEGER,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,rating INTEGER,comment TEXT,reason TEXT,doubts TEXT,submittedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+    const token = String(input.token || "").trim().toLowerCase();
+    const invite = await env.DB.prepare("SELECT * FROM serviceFeedbackInvites WHERE token=? AND submittedAt IS NULL").bind(token).first();
+    if (!invite) return trpcError("Este link é inválido ou já foi utilizado", "NOT_FOUND", 404);
+    if (name === "serviceFeedback.get") return trpcResult({ clientName: invite.clientName || "" });
+    const rating = Number(input.rating || 0), comment = String(input.comment || "").trim(), reason = String(input.reason || "").trim(), doubts = String(input.doubts || "").trim();
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return trpcError("Escolha uma nota de 1 a 5 estrelas");
+    if (comment.length < 10) return trpcError("Deixe uma mensagem sobre o atendimento");
+    if (reason.length < 3) return trpcError("Conte por que decidiu pensar um pouco mais");
+    await env.DB.prepare("UPDATE serviceFeedbackInvites SET rating=?,comment=?,reason=?,doubts=?,submittedAt=CURRENT_TIMESTAMP WHERE id=? AND submittedAt IS NULL").bind(rating,comment,reason,doubts||null,Number(invite.id)).run();
+    return trpcResult({ success: true });
+  }
   if (name === "address.search") {
     const query = String(input.query || "").trim().slice(0, 180);
     if (query.length < 6) return trpcResult([]);
@@ -54090,6 +54103,17 @@ Detalhes: ${details}` : ""}`;
     const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
     await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode) VALUES (?,?,?,?,NULL)").bind(adminEmail.toLowerCase(),String(input.clientName||"").trim()||null,String(input.clientEmail||"").trim().toLowerCase()||null,token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token}` });
+  }
+  if (name === "agent.createServiceFeedbackInvite") {
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS serviceFeedbackInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,meetingId INTEGER,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,rating INTEGER,comment TEXT,reason TEXT,doubts TEXT,submittedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+    const meetingId = Number(input.meetingId || 0), clientName = String(input.clientName || "").trim(), clientEmail = String(input.clientEmail || "").trim().toLowerCase();
+    if (meetingId) {
+      const existing = await env.DB.prepare("SELECT token FROM serviceFeedbackInvites WHERE lower(agentEmail)=? AND meetingId=? AND submittedAt IS NULL ORDER BY id DESC LIMIT 1").bind(adminEmail.toLowerCase(),meetingId).first();
+      if (existing) return trpcResult({ token: existing.token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${existing.token}` });
+    }
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
+    await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(),meetingId||null,clientName||null,clientEmail||null,token).run();
+    return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
   if (name === "admin.deleteApplication") {
     if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplicações", "FORBIDDEN", 403);

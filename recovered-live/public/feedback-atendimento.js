@@ -1,11 +1,13 @@
 (() => {
-  const $ = id => document.getElementById(id), params = new URLSearchParams(location.search), token = params.get("token") || "";
+  const $ = id => document.getElementById(id), token = new URLSearchParams(location.search).get("token") || "";
   let rating = 0;
   async function api(name, input, mutation = false) {
-    const options = { headers: { "content-type": "application/json" } }; let url = "/api/trpc/" + name;
+    const options = { headers: { "content-type": "application/json" } };
+    let url = "/api/trpc/" + name;
     if (mutation) { options.method = "POST"; options.body = JSON.stringify({ json: input }); }
     else url += "?input=" + encodeURIComponent(JSON.stringify({ json: input }));
-    const response = await fetch(url, options), text = await response.text(); let payload;
+    const response = await fetch(url, options), text = await response.text();
+    let payload;
     try { payload = JSON.parse(text); } catch { throw Error("O servidor não respondeu corretamente"); }
     if (payload.error) throw Error(payload.error.json?.message || "Não foi possível continuar");
     return payload.result.data.json;
@@ -18,13 +20,15 @@
   document.querySelectorAll(".star").forEach(star => star.onclick = () => { rating = Number(star.dataset.rating); paint(); });
   $("send").onclick = async () => {
     try {
-      let quote = $("quote").value.trim();
+      const comment = $("comment").value.trim(), reason = $("reason").value.trim(), doubts = $("doubts").value.trim();
       if (!rating) throw Error("Escolha sua nota nas estrelas.");
-      if (quote.length < 10) throw Error("Deixe uma mensagem sobre seu atendimento.");
-      await api("reviewInvites.submit", { token, rating, quote }, true);
-      $("msg").className = "msg"; $("msg").textContent = "Muito obrigado! Sua avaliação foi enviada para análise."; $("send").disabled = true;
-      document.querySelectorAll("input,textarea,.star").forEach(element => element.disabled = true);
+      if (comment.length < 10) throw Error("Deixe uma mensagem sobre seu atendimento.");
+      if (!reason) throw Error("Conte por que decidiu pensar um pouco mais.");
+      await api("serviceFeedback.submit", { token, rating, comment, reason, doubts }, true);
+      $("msg").className = "msg"; $("msg").textContent = "Obrigado! Seu feedback foi enviado ao seu consultor."; $("send").disabled = true;
+      document.querySelectorAll("textarea,.star").forEach(element => element.disabled = true);
     } catch (error) { $("msg").className = "msg"; $("msg").textContent = error.message; }
   };
+  api("serviceFeedback.get", { token }).catch(error => { $("msg").className = "msg"; $("msg").textContent = error.message; $("send").disabled = true; });
   paint();
 })();
