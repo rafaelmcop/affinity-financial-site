@@ -93,6 +93,11 @@ async function prepareFeedback(id) {
     composer.classList.remove("hidden");
     text.value = feedbackMessage(row, link);
     composer.dataset.type = "feedback";
+    composer
+      .querySelectorAll("[data-template]")
+      .forEach(button =>
+        button.classList.toggle("active", button.dataset.template === "feedback")
+      );
     notice("Link individual criado. Copie a mensagem ou abra no WhatsApp.");
   } catch (error) {
     notice(error.message, true);
@@ -180,7 +185,7 @@ function renderMeetings(rows) {
     ? upcoming
         .map(
           row =>
-            `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${row.status === "active" ? "Confirmada" : row.status}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions">${row.meetingUrl ? `<a class="button primary" href="${safeUrl(row.meetingUrl)}" target="_blank">Entrar no Zoom</a>` : ""}<button data-open-message="${row.id}">Preparar mensagem</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button><button class="danger" data-cancel="${row.id}">Cancelar</button></div><div id="composer-${row.id}" class="message-composer hidden"><div class="message-tabs"><button class="active" data-template="reminder" data-id="${row.id}">Lembrete da reunião</button><button data-template="second" data-id="${row.id}">Segunda chamada</button></div><p class="message-help">Você pode personalizar o texto antes de copiar ou abrir o WhatsApp.</p><textarea id="message-${row.id}" aria-label="Mensagem para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div></article>`
+            `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${row.status === "active" ? "Confirmada" : row.status}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions">${row.meetingUrl ? `<a class="button primary" href="${safeUrl(row.meetingUrl)}" target="_blank">Entrar no Zoom</a>` : ""}<button data-open-message="${row.id}">Preparar mensagem</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button><button class="danger" data-cancel="${row.id}">Cancelar</button></div><div id="composer-${row.id}" class="message-composer hidden"><div class="message-tabs"><button class="active" data-template="reminder" data-id="${row.id}">Primeira chamada</button><button data-template="second" data-id="${row.id}">Segunda chamada</button><button data-template="feedback" data-id="${row.id}">Avaliação do atendimento</button></div><p class="message-help">Você pode personalizar o texto antes de copiar ou abrir o WhatsApp.</p><textarea id="message-${row.id}" aria-label="Mensagem para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div></article>`
         )
         .join("")
     : '<p class="muted">Nenhuma reunião futura encontrada.</p>';
@@ -215,8 +220,11 @@ function renderMeetings(rows) {
     .querySelectorAll("[data-template]")
     .forEach(
       button =>
-        (button.onclick = () =>
-          setComposer(button.dataset.id, button.dataset.template))
+        (button.onclick = () => {
+          if (button.dataset.template === "feedback")
+            return prepareFeedback(button.dataset.id);
+          setComposer(button.dataset.id, button.dataset.template);
+        })
     );
   document
     .querySelectorAll("[data-copy-message]")
@@ -498,13 +506,21 @@ $("disconnect").onclick = async () => {
 };
 const dialogActions = $("copy-client").parentElement,
   reminderButton = document.createElement("button"),
+  feedbackButton = document.createElement("button"),
   blankButton = document.createElement("button");
 reminderButton.textContent = "WhatsApp com lembrete";
 reminderButton.className = "primary";
+feedbackButton.textContent = "Solicitar avaliação";
 blankButton.textContent = "WhatsApp em branco";
 dialogActions.insertBefore(reminderButton, $("copy-client"));
+dialogActions.insertBefore(feedbackButton, $("copy-client"));
 dialogActions.insertBefore(blankButton, $("copy-client"));
 reminderButton.onclick = () => openClientWhatsApp(true);
+feedbackButton.onclick = () => {
+  if (!selectedClientRow) return;
+  $("client-dialog").close();
+  prepareFeedback(selectedClientRow.id);
+};
 blankButton.onclick = () => openClientWhatsApp(false);
 $("close-client").onclick = () => $("client-dialog").close();
 $("client-dialog").onclick = event => {
