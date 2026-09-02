@@ -1013,6 +1013,127 @@
       notice("O PDF está pronto na nova aba. Clique em ‘Salvar como PDF’.");
     }
   }
+  function dataUriBytes(uri) {
+    const encoded = String(uri || "").split(",", 2)[1] || "";
+    const binary = atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return bytes;
+  }
+  async function downloadApplicationPdf(row) {
+    if (!window.PDFLib?.PDFDocument) throw new Error("O gerador de PDF não carregou. Atualize a página e tente novamente.");
+    const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+    const pdfText = value => String(value == null ? "" : value)
+      .replace(/[–—]/g, "-").replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+      .replace(/[^\x20-\x7E\xA0-\xFF]/g, " ").replace(/\s+/g, " ").trim();
+    const pdfDocument = await PDFDocument.create();
+    const regular = await pdfDocument.embedFont(StandardFonts.Helvetica);
+    const bold = await pdfDocument.embedFont(StandardFonts.HelveticaBold);
+    const pageSize = [612, 792], margin = 42, width = pageSize[0] - margin * 2;
+    let page, y;
+    const addPage = () => {
+      page = pdfDocument.addPage(pageSize);
+      y = 750;
+      page.drawText("Affinity Financial Consulting - Ficha cadastral", { x: margin, y, size: 16, font: bold, color: rgb(0.09, 0.2, 0.36) });
+      y -= 25;
+      page.drawText(pdfText(`Cliente: ${row.clientName || "Não informado"}`), { x: margin, y, size: 10, font: bold });
+      y -= 26;
+    };
+    const wrap = (text, font, size, maxWidth) => {
+      const words = pdfText(text == null || text === "" ? "Não informado" : text).split(" ");
+      const lines = [];
+      let line = "";
+      for (const word of words) {
+        const candidate = line ? `${line} ${word}` : word;
+        if (font.widthOfTextAtSize(candidate, size) <= maxWidth || !line) line = candidate;
+        else { lines.push(line); line = word; }
+      }
+      if (line) lines.push(line);
+      return lines;
+    };
+    const ensure = needed => { if (!page || y < needed + 42) addPage(); };
+    const drawSection = (title, items) => {
+      ensure(55);
+      page.drawText(pdfText(title), { x: margin, y, size: 12, font: bold, color: rgb(0.09, 0.2, 0.36) });
+      y -= 18;
+      for (const [label, raw] of items) {
+        const value = raw == null || raw === "" ? "Não informado" : String(raw);
+        const lines = wrap(value, regular, 9, width - 155);
+        ensure(Math.max(22, lines.length * 12 + 8));
+        page.drawText(pdfText(label), { x: margin, y, size: 9, font: bold });
+        lines.forEach((line, index) => page.drawText(line, { x: margin + 155, y: y - index * 12, size: 9, font: regular }));
+        y -= Math.max(20, lines.length * 12 + 6);
+        page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: margin + width, y: y + 7 }, thickness: 0.35, color: rgb(0.8, 0.82, 0.84) });
+      }
+      y -= 8;
+    };
+    const measurements = americanMeasurements(row);
+    addPage();
+    drawSection("1. Proposta e apólice", [
+      ["Produto", row.productInterest], ["Cobertura pretendida", usd(row.coverageRequested)], ["Premium pretendido", usd(row.premiumBudget)],
+      ["Seguro existente", row.existingInsurance], ["Seguradora", row.existingInsuranceCompany], ["Cobertura existente", usd(row.existingCoverage)],
+      ["Benefícios em vida", row.existingLivingBenefits], ["Observações", row.notes],
+    ]);
+    drawSection("2. Dados pessoais", [
+      ["Nome", row.clientName], ["Nascimento", usDate(row.birthDate)], ["Sexo", row.gender], ["Estado civil", row.maritalStatus],
+      ["E-mail", row.clientEmail], ["Telefone", row.clientPhone], ["Endereço", `${row.address || ""}, ${row.city || ""} - ${row.state || ""} ${row.zipCode || ""}`],
+      ["Local de nascimento", row.bornInUSA === "Sim" ? `USA · ${row.birthState || ""}` : row.birthCountry], ["SSN/ITIN", row.ssn],
+      ["Passaporte", row.passportNumber], ["Driver americana", row.driverHasLicense], ["Número / Estado da Driver", `${row.driverLicenseNumber || ""} / ${row.driverLicenseState || ""}`],
+      ["Altura / Peso", `${measurements.height || "Não informado"} / ${measurements.weight || "Não informado"}`],
+    ]);
+    drawSection("3. Profissional, financeiro e bancário", [
+      ["Empresa", row.employer], ["Área profissional", row.industry], ["Ocupação", row.occupation], ["Tempo de trabalho", row.employmentLength],
+      ["Renda pessoal anual", annualUsd(row.personalWeeklyIncome, 52)], ["Despesas pessoais anuais", annualUsd(row.personalWeeklyExpenses ?? row.personalMonthlyExpenses, row.personalWeeklyExpenses != null ? 52 : 12)],
+      ["Renda familiar anual", annualUsd(row.weeklyIncome, 52)], ["Despesas familiares anuais", annualUsd(row.weeklyFixedExpenses ?? row.monthlyFixedExpenses, row.weeklyFixedExpenses != null ? 52 : 12)],
+      ["Pessoas na residência", row.householdSize], ["Nome do banco", row.bankName], ["Routing number", row.routingNumber], ["Account number", row.accountNumber],
+    ]);
+    drawSection("4. Informações médicas", [
+      ["Consultou médico nos EUA", row.seenDoctor], ["Mês/ano aproximado", row.lastDoctorVisit], ["Médico, clínica ou hospital", row.physicianName],
+      ["Fumo", row.tobacco], ["Doença ou diagnóstico", row.hasMedicalCondition], ["Detalhes médicos", row.medicalDetails],
+      ["Medicamentos", row.usesMedication], ["Quais medicamentos", row.medications],
+      ["Pai", row.fatherLiving === "Sim" ? `Vivo, ${row.fatherAge || "?"} anos` : `Falecido aos ${row.fatherDeathAge || "?"} · ${row.fatherDeathReason || ""}`],
+      ["Mãe", row.motherLiving === "Sim" ? `Viva, ${row.motherAge || "?"} anos` : `Falecida aos ${row.motherDeathAge || "?"} · ${row.motherDeathReason || ""}`],
+    ]);
+    drawSection("5. Beneficiários", (row.beneficiaries || []).map((item, index) => [
+      `Beneficiário ${index + 1}`, `${item.name || ""} · ${item.relationship || ""} · ${usDate(item.birthDate)} · ${item.percentage || 0}%`,
+    ]));
+    if ((row.contacts || []).length) drawSection("6. Contatos de emergência", row.contacts.map((item, index) => [
+      `Contato ${index + 1}`, `${item.name || ""} · ${item.relationship || ""} · ${item.phone || ""}`,
+    ]));
+
+    const attachments = Array.isArray(row.attachments) ? row.attachments : [];
+    for (const item of attachments) {
+      try {
+        if (item.type === "application/pdf" && item.storageKey) {
+          const file = await api("agent.getApplicationDocument", { applicationId: row.id, storageKey: item.storageKey });
+          const source = await PDFDocument.load(dataUriBytes(file.data), { ignoreEncryption: true });
+          const pages = await pdfDocument.copyPages(source, source.getPageIndices());
+          pages.forEach(copied => pdfDocument.addPage(copied));
+        } else if (String(item.data || "").startsWith("data:image/")) {
+          const bytes = dataUriBytes(item.data);
+          const image = String(item.type || "").includes("png") ? await pdfDocument.embedPng(bytes) : await pdfDocument.embedJpg(bytes);
+          const imagePage = pdfDocument.addPage(pageSize);
+          const scaled = image.scale(Math.min((pageSize[0] - 60) / image.width, (pageSize[1] - 80) / image.height));
+          imagePage.drawText(pdfText(`${item.category || "Documento"} - ${item.name || "Arquivo"}`), { x: 30, y: 760, size: 10, font: bold });
+          imagePage.drawImage(image, { x: (pageSize[0] - scaled.width) / 2, y: (pageSize[1] - scaled.height) / 2 - 10, width: scaled.width, height: scaled.height });
+        }
+      } catch (error) {
+        console.error("Falha ao incorporar documento", item?.name, error);
+        throw new Error(`Não foi possível incluir o documento ${item?.name || "anexado"}. Tente novamente.`);
+      }
+    }
+    const bytes = await pdfDocument.save({ useObjectStreams: true });
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `Ficha cadastral - ${String(row.clientName || "cliente").replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    notice("PDF gerado e baixado com todos os documentos anexados.");
+  }
   function showShare(row) {
     const link = `${location.origin}/preencher-aplicacao.html?id=${row.id}&token=${row.clientToken}`,
       first = String(row.clientName || "cliente").split(/\s+/)[0],
@@ -1105,26 +1226,19 @@
       );
     document.querySelectorAll("[data-pdf]").forEach(b => {
       b.onclick = async () => {
-        const pdfWindow = open("", "_blank");
-        if (!pdfWindow) {
-          notice(
-            "O navegador bloqueou o PDF. Permita pop-ups para este site e tente novamente.",
-            true
-          );
-          return;
-        }
-        pdfWindow.focus();
-        pdfWindow.document.write(
-          '<title>Gerando PDF…</title><p style="font-family:Arial;padding:30px">Carregando a aplicação e os documentos…</p>'
-        );
+        const originalText = b.textContent;
+        b.disabled = true;
+        b.textContent = "Gerando PDF…";
         try {
           const application = await api("agent.getApplication", {
             id: +b.dataset.pdf,
           });
-          await makePdf(application, pdfWindow);
+          await downloadApplicationPdf(application);
         } catch (error) {
-          pdfWindow.close();
           notice(error.message || "Não foi possível gerar o PDF.", true);
+        } finally {
+          b.disabled = false;
+          b.textContent = originalText;
         }
       };
     });
@@ -1230,14 +1344,7 @@
   $("form").onsubmit = async e => {
     e.preventDefault();
     if (!validateForCompletion()) return;
-    const pdfWindow = open("", "_blank");
-    if (pdfWindow) {
-      pdfWindow.document.write(
-        '<title>Gerando PDF…</title><p style="font-family:Arial;padding:30px">Gerando o PDF da aplicação…</p>'
-      );
-    }
     if (!(await saveDraft(false))) {
-      pdfWindow?.close();
       return;
     }
     try {
@@ -1245,14 +1352,13 @@
       const completed = await api("agent.getApplication", {
         id: +$("id").value,
       });
-      await makePdf(completed, pdfWindow);
+      await downloadApplicationPdf(completed);
       $("form-card").classList.add("hidden");
       await load();
       notice(
         "Aplicação concluída e PDF gerado. O link da avaliação também foi criado."
       );
     } catch (error) {
-      pdfWindow?.close();
       notice(error.message, true);
     }
   };
