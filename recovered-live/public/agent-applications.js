@@ -1065,13 +1065,30 @@
       .forEach(
         b => (b.onclick = () => edit(rows.find(r => r.id === +b.dataset.edit)))
       );
-    document
-      .querySelectorAll("[data-pdf]")
-      .forEach(
-        b =>
-          (b.onclick = async () =>
-            makePdf(await api("agent.getApplication", { id: +b.dataset.pdf })))
-      );
+    document.querySelectorAll("[data-pdf]").forEach(b => {
+      b.onclick = async () => {
+        const pdfWindow = open("", "_blank");
+        if (!pdfWindow) {
+          notice(
+            "O navegador bloqueou o PDF. Permita pop-ups para este site e tente novamente.",
+            true
+          );
+          return;
+        }
+        pdfWindow.document.write(
+          '<title>Gerando PDF…</title><p style="font-family:Arial;padding:30px">Carregando a aplicação e os documentos…</p>'
+        );
+        try {
+          const application = await api("agent.getApplication", {
+            id: +b.dataset.pdf,
+          });
+          await makePdf(application, pdfWindow);
+        } catch (error) {
+          pdfWindow.close();
+          notice(error.message || "Não foi possível gerar o PDF.", true);
+        }
+      };
+    });
     document
       .querySelectorAll("[data-share]")
       .forEach(
