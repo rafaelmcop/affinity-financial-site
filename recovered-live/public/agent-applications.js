@@ -850,6 +850,16 @@
   }
   async function makePdf(row, w = open("", "_blank")) {
     if (!w) return notice("Permita pop-ups para gerar o PDF.", true);
+    const showPdfProgress = message => {
+      try {
+        w.document.title = "Gerando PDF…";
+        const status = w.document.getElementById("pdf-generation-status");
+        if (status) status.textContent = message;
+      } catch {}
+    };
+    try {
+      w.focus();
+    } catch {}
     let session = {};
     try {
       session = JSON.parse(localStorage.getItem("agentSession") || "{}");
@@ -871,6 +881,7 @@
       ]);
     let storedPdfPages = "";
     try {
+      showPdfProgress("Preparando os documentos anexados…");
       storedPdfPages = await pdfStoredDocumentImages(row.id, row.attachments);
     } catch (error) {
       console.error("Falha ao incluir documento PDF", error);
@@ -974,10 +985,33 @@
       storedPdfPages;
     w.document.open();
     w.document.write(
-      `<!doctype html><meta charset="utf-8"><style>body{font:12px Arial;margin:34px;color:#111}header{border-bottom:3px solid #d8b22f;margin-bottom:20px;padding-bottom:12px}h1{color:#17345c;margin:0}h2{color:#17345c;margin:22px 0 7px;page-break-after:avoid}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top}th{width:34%;background:#eef2f6}.document-page{page-break-before:always;text-align:center}.document-page img{max-width:100%;max-height:900px;object-fit:contain}footer{margin-top:24px;border-top:1px solid #bbb;padding-top:10px}@media print{button{display:none}}</style><header><h1>Affinity Financial Consulting — Ficha cadastral</h1><p>Cliente: <b>${esc(row.clientName)}</b></p></header>${html}<footer>Agente responsável: <b>${esc(session.name || session.agentName || "Não informado")}</b></footer><button onclick="print()">Salvar como PDF</button>`
+      `<!doctype html><meta charset="utf-8"><title>Ficha cadastral — ${esc(row.clientName)}</title><style>body{font:12px Arial;margin:34px;color:#111}header{border-bottom:3px solid #d8b22f;margin-bottom:20px;padding-bottom:12px}h1{color:#17345c;margin:0}h2{color:#17345c;margin:22px 0 7px;page-break-after:avoid}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top}th{width:34%;background:#eef2f6}.document-page{page-break-before:always;text-align:center}.document-page img{max-width:100%;max-height:900px;object-fit:contain}footer{margin-top:24px;border-top:1px solid #bbb;padding-top:10px}.pdf-actions{position:sticky;bottom:10px;text-align:right}.pdf-actions button{background:#d8b22f;border:0;border-radius:8px;padding:12px 18px;font-weight:700}@media print{.pdf-actions{display:none}}</style><header><h1>Affinity Financial Consulting — Ficha cadastral</h1><p>Cliente: <b>${esc(row.clientName)}</b></p></header>${html}<footer>Agente responsável: <b>${esc(session.name || session.agentName || "Não informado")}</b></footer><div class="pdf-actions"><button onclick="window.print()">Salvar como PDF</button></div>`
     );
     w.document.close();
-    setTimeout(() => w.print(), 800);
+    // Printing on a fixed timer could run before large passport pages had been
+    // decoded. Chrome would then finish only after the user changed tabs and
+    // the document images could be absent from the saved PDF.
+    try {
+      w.focus();
+      const images = Array.from(w.document.images || []);
+      await Promise.race([
+        Promise.all(images.map(image => {
+          if (typeof image.decode === "function") return image.decode().catch(() => {});
+          if (image.complete) return Promise.resolve();
+          return new Promise(resolve => {
+            image.onload = resolve;
+            image.onerror = resolve;
+          });
+        })),
+        new Promise(resolve => setTimeout(resolve, 20000)),
+      ]);
+      await new Promise(resolve => w.requestAnimationFrame(() => w.requestAnimationFrame(resolve)));
+      w.focus();
+      w.print();
+    } catch (error) {
+      console.error("Falha ao abrir impressão automática", error);
+      notice("O PDF está pronto na nova aba. Clique em ‘Salvar como PDF’.");
+    }
   }
   function showShare(row) {
     const link = `${location.origin}/preencher-aplicacao.html?id=${row.id}&token=${row.clientToken}`,
@@ -1079,6 +1113,7 @@
           );
           return;
         }
+        pdfWindow.focus();
         pdfWindow.document.write(
           '<title>Gerando PDF…</title><p style="font-family:Arial;padding:30px">Carregando a aplicação e os documentos…</p>'
         );
