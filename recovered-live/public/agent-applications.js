@@ -308,7 +308,7 @@
       ) {
         const page = await pdfDocument.getPage(pageNumber);
         const initial = page.getViewport({ scale: 1 });
-        const scale = Math.min(2, 1500 / Math.max(1, initial.width));
+        const scale = Math.min(1.6, 1100 / Math.max(1, initial.width));
         const viewport = page.getViewport({ scale });
         const canvas = document.createElement("canvas");
         canvas.width = Math.ceil(viewport.width);
@@ -318,7 +318,7 @@
           viewport,
         }).promise;
         sections.push(
-          `<section class="document-page"><h2>${esc(item.category || "Documento")} — página ${pageNumber}</h2><p>${esc(item.name || file.name || "Documento PDF")}</p><img src="${canvas.toDataURL("image/jpeg", 0.9)}" alt="${esc(item.category || "Documento")}"></section>`
+          `<section class="document-page"><h2>${esc(item.category || "Documento")} — página ${pageNumber}</h2><p>${esc(item.name || file.name || "Documento PDF")}</p><img src="${canvas.toDataURL("image/jpeg", 0.76)}" alt="${esc(item.category || "Documento")}"></section>`
         );
         page.cleanup();
       }

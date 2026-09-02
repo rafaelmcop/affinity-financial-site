@@ -54222,8 +54222,9 @@ Detalhes: ${details}` : ""}`;
       if (!document) return trpcError("Documento não encontrado", "NOT_FOUND", 404);
       const result = await env.DB.prepare("SELECT data FROM applicationDocumentChunks WHERE storageKey=? ORDER BY chunkIndex").bind(storageKey).all();
       if (!result.results.length) return trpcError("O arquivo do documento está incompleto");
-      const parts = [];
-      for (const chunk of result.results) parts.push(await decryptSmtpPassword(String(chunk.data), env.JWT_SECRET));
+      const parts = await Promise.all(result.results.map((chunk) =>
+        decryptSmtpPassword(String(chunk.data), env.JWT_SECRET)
+      ));
       return trpcResult({ name: document.name, type: document.type, data: `data:${document.type};base64,${parts.join("")}` });
     }
     if (name === "agent.listApplications") {
@@ -54272,6 +54273,23 @@ Detalhes: ${details}` : ""}`;
       let extra = {}, sensitive = {};
       try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
       try { sensitive = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)); } catch {}
+      try {
+        const stored = await env.DB.prepare("SELECT storageKey,name,type,category,size FROM applicationDocuments WHERE applicationId=? AND lower(agentEmail)=? ORDER BY createdAt").bind(Number(row.id), owner).all();
+        const attachments = Array.isArray(extra.attachments) ? extra.attachments : [];
+        const known = new Set(attachments.map((item) => String(item?.storageKey || "").replace(/^d1:/, "")));
+        for (const document of stored.results || []) {
+          if (!known.has(String(document.storageKey))) attachments.push({
+            storageKey: `d1:${document.storageKey}`,
+            name: document.name,
+            type: document.type,
+            category: document.category,
+            size: Number(document.size || 0),
+          });
+        }
+        extra.attachments = attachments;
+      } catch (error) {
+        console.error("Could not merge stored application documents", error);
+      }
       delete row.applicationData;
       delete row.sensitiveData;
       return trpcResult({ ...row, ...extra, ...sensitive, id: Number(row.id) });
