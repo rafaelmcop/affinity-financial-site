@@ -54157,7 +54157,7 @@ Detalhes: ${details}` : ""}`;
     if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument"].includes(name)) {
+  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument"].includes(name)) {
     const owner = adminEmail.toLowerCase();
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54215,6 +54215,16 @@ Detalhes: ${details}` : ""}`;
       if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
       try { return trpcResult(await storeApplicationDocument(env, Number(application.id), owner, input)); }
       catch (error) { return trpcError(error.message || "Não foi possível armazenar o PDF"); }
+    }
+    if (name === "agent.getApplicationDocument") {
+      const storageKey = String(input.storageKey || "").replace(/^d1:/, "");
+      const document = await env.DB.prepare("SELECT * FROM applicationDocuments WHERE storageKey=? AND applicationId=? AND lower(agentEmail)=?").bind(storageKey, Number(input.applicationId || 0), owner).first();
+      if (!document) return trpcError("Documento não encontrado", "NOT_FOUND", 404);
+      const result = await env.DB.prepare("SELECT data FROM applicationDocumentChunks WHERE storageKey=? ORDER BY chunkIndex").bind(storageKey).all();
+      if (!result.results.length) return trpcError("O arquivo do documento está incompleto");
+      const parts = [];
+      for (const chunk of result.results) parts.push(await decryptSmtpPassword(String(chunk.data), env.JWT_SECRET));
+      return trpcResult({ name: document.name, type: document.type, data: `data:${document.type};base64,${parts.join("")}` });
     }
     if (name === "agent.listApplications") {
       await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
