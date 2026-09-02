@@ -869,10 +869,13 @@
         `Contato ${i + 1}`,
         `${c.name} · ${c.relationship} · ${c.phone}`,
       ]);
-    const storedPdfPages = await pdfStoredDocumentImages(
-      row.id,
-      row.attachments
-    );
+    let storedPdfPages = "";
+    try {
+      storedPdfPages = await pdfStoredDocumentImages(row.id, row.attachments);
+    } catch (error) {
+      console.error("Falha ao incluir documento PDF", error);
+      storedPdfPages = `<section class="document-page"><h2>Documento anexado</h2><p>O documento está salvo com segurança, mas não pôde ser convertido nesta tentativa: ${esc(error?.message || "erro desconhecido")}</p></section>`;
+    }
     const html =
       section("1. Proposta e apólice", [
         ["Produto", row.productInterest],
@@ -969,6 +972,7 @@
       (contacts.length ? section("6. Contatos de emergência", contacts) : "") +
       pdfDocumentImages(row.attachments) +
       storedPdfPages;
+    w.document.open();
     w.document.write(
       `<!doctype html><meta charset="utf-8"><style>body{font:12px Arial;margin:34px;color:#111}header{border-bottom:3px solid #d8b22f;margin-bottom:20px;padding-bottom:12px}h1{color:#17345c;margin:0}h2{color:#17345c;margin:22px 0 7px;page-break-after:avoid}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top}th{width:34%;background:#eef2f6}.document-page{page-break-before:always;text-align:center}.document-page img{max-width:100%;max-height:900px;object-fit:contain}footer{margin-top:24px;border-top:1px solid #bbb;padding-top:10px}@media print{button{display:none}}</style><header><h1>Affinity Financial Consulting — Ficha cadastral</h1><p>Cliente: <b>${esc(row.clientName)}</b></p></header>${html}<footer>Agente responsável: <b>${esc(session.name || session.agentName || "Não informado")}</b></footer><button onclick="print()">Salvar como PDF</button>`
     );
