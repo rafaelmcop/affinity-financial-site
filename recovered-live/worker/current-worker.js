@@ -57231,6 +57231,10 @@ Affinity Financial Consulting`,
 __name(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async fetch(request, env) {
+    // The payment helpers come from a lazily initialized module in this
+    // recovered bundle. Initialize it for every request before any route can
+    // call normalizePolicyNumber/extractPolicyNumbers on a cold Worker.
+    init_paymentNotice();
     const url = new URL(request.url);
     if (url.hostname === "affinityfc.org") {
       url.hostname = "www.affinityfc.org";
