@@ -50048,6 +50048,19 @@ function extractPaymentClientName(subject, body) {
   }
   return "";
 }
+function extractPaymentAmount(subject, body) {
+  const text = `${subject}\n${body}`;
+  const patterns = [
+    /(?:amount|payment\s+amount|premium\s+amount|valor)\s*[:#-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)/i,
+    /\$\s*([\d,]+\.\d{2})\b/
+  ];
+  for (const pattern of patterns) {
+    const raw = text.match(pattern)?.[1]?.replaceAll(",", "");
+    const amount = Number(raw || 0);
+    if (Number.isFinite(amount) && amount > 0) return Math.round(amount * 100) / 100;
+  }
+  return 0;
+}
 function paymentPolicyNumbersMatch(left, right) {
   const a = normalizePolicyNumber(String(left || ""));
   const b = normalizePolicyNumber(String(right || ""));
@@ -50126,6 +50139,11 @@ async function handlePaymentNotice(env, owner, config, uid, parsed) {
         "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt,status) VALUES (?,?,?,CURRENT_TIMESTAMP,'pending')"
       ).bind(owner, resolvedMatch?.clientId ? Number(resolvedMatch.clientId) : possibleMatch?.clientId ? Number(possibleMatch.clientId) : null, title).run();
     return { actionStatus: "needs_review", actionDetail: reason };
+  }
+  const paymentAmount = extractPaymentAmount(subject, rawBody);
+  if (paymentAmount > 0 && resolvedMatch.policyId) {
+    const annualTarget = Math.round(paymentAmount * 12 * 100) / 100;
+    await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount,annualTarget,Math.round(annualTarget),Number(resolvedMatch.policyId),owner).run();
   }
   const agent = await env.DB.prepare(
     "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
@@ -57265,6 +57283,12 @@ var cloudflare_staging_default = {
         if (!client && policy?.clientId) {
           clientId = Number(policy.clientId);
           client = await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first();
+        }
+        const paymentAmount = extractPaymentAmount(String(mailbox?.subject || ""), String(mailbox?.body || ""));
+        if (policy && paymentAmount > 0) {
+          const annualTarget = Math.round(paymentAmount * 12 * 100) / 100;
+          await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount,annualTarget,Math.round(annualTarget),Number(policy.id),owner).run();
+          policy = { ...policy, premiumAmount: Number(policy.premiumAmount || 0) > 0 ? policy.premiumAmount : paymentAmount, premiumFrequency: policy.premiumFrequency || "monthly", targetPremium: Number(policy.targetPremium || 0) > 0 ? policy.targetPremium : annualTarget, points: Number(policy.points || 0) > 0 ? policy.points : Math.round(annualTarget) };
         }
         const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
         const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
