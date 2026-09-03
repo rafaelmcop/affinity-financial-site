@@ -50094,10 +50094,11 @@ async function handlePaymentNotice(env, owner, config, uid, parsed) {
   ).bind(owner).all();
   const mentionedPolicies = extractPolicyNumbers(subject, rawBody);
   const loweredBody = rawBody.toLowerCase();
+  const loweredNotice = `${subject}\n${rawBody}`.toLowerCase();
   const normalizedNotice = normalizePolicyNumber(`${subject} ${rawBody}`);
   const policyMatches = policies.results.filter((row) => {
     const policy = normalizePolicyNumber(row.policyNumber);
-    return policy && (mentionedPolicies.has(policy) || normalizedNotice.includes(policy));
+    return policy && ([...mentionedPolicies].some((mentioned) => paymentPolicyNumbersMatch(policy, mentioned)) || normalizedNotice.includes(policy));
   });
   const emailMatches = policies.results.filter((row) => {
     const email = cleanAddress(String(row.email || ""));
@@ -50108,11 +50109,11 @@ async function handlePaymentNotice(env, owner, config, uid, parsed) {
   const possibleClients = new Map(emailMatches.map((row) => [Number(row.clientId), row]));
   const nameMatches = policies.results.filter((row) => {
     const name = String(row.name || "").trim().toLowerCase();
-    return name.length >= 5 && loweredBody.includes(name);
+    return name.length >= 5 && loweredNotice.includes(name);
   });
   const possibleNameClients = new Map(nameMatches.map((row) => [Number(row.clientId), row]));
   const possibleMatch = possibleClients.size === 1 ? [...possibleClients.values()][0] : possibleNameClients.size === 1 ? [...possibleNameClients.values()][0] : null;
-  const resolvedMatch = match || (possibleMatch && normalizePolicyNumber(possibleMatch.policyNumber) && normalizedNotice.includes(normalizePolicyNumber(possibleMatch.policyNumber)) ? possibleMatch : null);
+  const resolvedMatch = match || (possibleMatch && [...mentionedPolicies].some((mentioned) => paymentPolicyNumbersMatch(possibleMatch.policyNumber, mentioned)) ? possibleMatch : null);
   const taskPrefix = `[Pagamento ${uid}]`;
   if (!resolvedMatch || !resolvedMatch.clientId || !resolvedMatch.email) {
     const reason = !resolvedMatch ? possibleMatch ? "Confirmar n\xFAmero da ap\xF3lice" : "Identificar cliente e ap\xF3lice" : "Completar o e-mail do cliente";
