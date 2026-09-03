@@ -57236,6 +57236,16 @@ var cloudflare_staging_default = {
       url.hostname = "www.affinityfc.org";
       return secureResponse(Response.redirect(url.toString(), 301));
     }
+    if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
+      const email = await getAdminEmail(request, env);
+      if (!email) return secureResponse(jsonResponse({ error: "Sessão expirada" }, 401), { privateData: true });
+      const taskId = Number(url.searchParams.get("taskId") || 0);
+      const result = await runProcedure("agent.paymentCase", { taskId }, request, env);
+      if (result?.error) {
+        return secureResponse(jsonResponse({ error: result.error.json?.message || "Não foi possível abrir o caso" }, Number(result.error.json?.data?.httpStatus || 400)), { privateData: true });
+      }
+      return secureResponse(jsonResponse(result?.result?.data?.json || {}), { privateData: true });
+    }
     const logoutEntryPaths = new Set(["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"]);
     if (request.method === "GET" && logoutEntryPaths.has(url.pathname)) {
       return clearPortalSessions(secureResponse(await env.ASSETS.fetch(request)));

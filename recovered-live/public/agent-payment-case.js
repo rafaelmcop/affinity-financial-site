@@ -51,10 +51,26 @@
       );
     return payload?.result?.data?.json;
   }
+  async function loadCase() {
+    const response = await fetch(
+      `/api/agent/payment-case?taskId=${encodeURIComponent(taskId)}`,
+      { credentials: "include", cache: "no-store" }
+    );
+    const text = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error("O portal não respondeu corretamente.");
+    }
+    if (!response.ok || payload?.error)
+      throw new Error(payload?.error || "Não foi possível abrir o caso");
+    return payload;
+  }
   async function load() {
     try {
       if (!taskId) throw new Error("Pendência inválida");
-      const data = (await api("agent.paymentCase", { taskId })) || {};
+      const data = (await loadCase()) || {};
       const task = data.task || {},
         candidate = data.candidate || {},
         history = Array.isArray(data.history) ? data.history : [];
