@@ -54,7 +54,7 @@
   async function load() {
     try {
       if (!taskId) throw new Error("Pendência inválida");
-      const data = await api("agent.paymentCase", { taskId });
+      const data = (await api("agent.paymentCase", { taskId })) || {};
       const task = data.task || {},
         candidate = data.candidate || {},
         history = Array.isArray(data.history) ? data.history : [];

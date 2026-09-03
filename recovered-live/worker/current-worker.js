@@ -50048,6 +50048,15 @@ function extractPaymentClientName(subject, body) {
   }
   return "";
 }
+function paymentPolicyNumbersMatch(left, right) {
+  const a = normalizePolicyNumber(String(left || ""));
+  const b = normalizePolicyNumber(String(right || ""));
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Carrier messages sometimes omit the product prefix stored in the CRM
+  // (for example 811046300 in the e-mail and LS811046300 in the policy).
+  return Math.min(a.length, b.length) >= 7 && (a.endsWith(b) || b.endsWith(a));
+}
 var normalizePolicyNumber;
 var init_paymentNotice = __esm({
   "shared/paymentNotice.ts"() {
@@ -54461,13 +54470,19 @@ Detalhes: ${details}` : ""}`;
     const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
     const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
     const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+    const policyRows = policies?.results || [];
     const extractedPolicies = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
     const candidatePolicies = [mailbox?.policyNumber, ...extractedPolicies].map(normalizePolicyNumber).filter(Boolean);
-    let policy = policies.results.find((row) => candidatePolicies.includes(normalizePolicyNumber(String(row.policyNumber || "")))) || null;
+    let policy = policyRows.find((row) => candidatePolicies.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || null;
     const policyNumber = normalizePolicyNumber(String(policy?.policyNumber || candidatePolicies[0] || ""));
     const clientId = Number(task.clientId || mailbox?.clientId || policy?.clientId || 0);
-    if (!policy && clientId) policy = policies.results.find((row) => Number(row.clientId) === clientId) || null;
-    const client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
+    if (!policy && clientId) policy = policyRows.find((row) => Number(row.clientId) === clientId) || null;
+    let client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
+    if (!client) {
+      const extractedName = extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || ""));
+      if (extractedName) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").bind(owner, extractedName).first();
+    }
+    const resolvedClientId = Number(client?.id || clientId || policy?.clientId || 0);
     const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
     const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
     const candidateName = String(client?.name || policy?.clientName || extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || "")) || "").trim();
@@ -54475,9 +54490,9 @@ Detalhes: ${details}` : ""}`;
     const candidatePhone = String(client?.phone || client?.whatsapp || policy?.clientPhone || "").trim();
     const preparedSubject = personalizeTemplate(settings?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
     const preparedMessage = personalizeTemplate(settings?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
-    const history = clientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all() : { results: [] };
+    const history = resolvedClientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(resolvedClientId, owner).all() : { results: [] };
     return trpcResult({
-      task: { ...task, id: Number(task.id), clientId: clientId || null },
+      task: { ...task, id: Number(task.id), clientId: resolvedClientId || null },
       client: client ? { ...client, id: Number(client.id) } : null,
       policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId) } : null,
       notice: mailbox ? { id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
