@@ -57253,6 +57253,10 @@ var cloudflare_staging_default = {
     // recovered bundle. Initialize it for every request before any route can
     // call normalizePolicyNumber/extractPolicyNumbers on a cold Worker.
     init_paymentNotice();
+    // The dedicated payment-case endpoint also formats the prepared message.
+    // Initialize the email module so personalizeTemplate is always available
+    // on a cold Worker, regardless of whether an inbox sync ran beforehand.
+    init_icloud_email();
     const url = new URL(request.url);
     if (url.hostname === "affinityfc.org") {
       url.hostname = "www.affinityfc.org";
