@@ -52944,6 +52944,14 @@ function secureResponse(response, options = {}) {
   return secured;
 }
 __name(secureResponse, "secureResponse");
+function clearPortalSessions(response) {
+  const cleared = new Response(response.body, response);
+  cleared.headers.append("Set-Cookie", `${ADMIN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+  cleared.headers.append("Set-Cookie", `${AFFILIATE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+  cleared.headers.set("Cache-Control", "private, no-store, max-age=0");
+  return cleared;
+}
+__name(clearPortalSessions, "clearPortalSessions");
 function trpcResult(data) {
   return { result: { data: { json: data } } };
 }
@@ -53588,7 +53596,8 @@ async function runProcedure(name, input, request, env) {
         role: "admin"
       }),
       cookies: [
-        `${ADMIN_COOKIE}=${session}; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`
+        `${ADMIN_COOKIE}=${session}; Path=/; HttpOnly; Secure; SameSite=Lax`,
+        `${AFFILIATE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`
       ]
     };
   }
@@ -53660,7 +53669,8 @@ async function runProcedure(name, input, request, env) {
         role: "agent"
       }),
       cookies: [
-        `${ADMIN_COOKIE}=${session}; Path=/; Max-Age=28800; HttpOnly; Secure; SameSite=Lax`
+        `${ADMIN_COOKIE}=${session}; Path=/; HttpOnly; Secure; SameSite=Lax`,
+        `${AFFILIATE_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`
       ]
     };
   }
@@ -53802,7 +53812,8 @@ async function runProcedure(name, input, request, env) {
         commissionRate: String(row.commissionRate)
       }),
       cookies: [
-        `${AFFILIATE_COOKIE}=${session}; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Lax`
+        `${AFFILIATE_COOKIE}=${session}; Path=/; HttpOnly; Secure; SameSite=Lax`,
+        `${ADMIN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`
       ]
     };
   }
@@ -57224,6 +57235,28 @@ var cloudflare_staging_default = {
     if (url.hostname === "affinityfc.org") {
       url.hostname = "www.affinityfc.org";
       return secureResponse(Response.redirect(url.toString(), 301));
+    }
+    const logoutEntryPaths = new Set(["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"]);
+    if (request.method === "GET" && logoutEntryPaths.has(url.pathname)) {
+      return clearPortalSessions(secureResponse(await env.ASSETS.fetch(request)));
+    }
+    if (request.method === "GET" && /^\/(admin|agentes|afiliados)(?:\/|$)/.test(url.pathname)) {
+      if (url.pathname.startsWith("/afiliados/")) {
+        if (!await getAffiliateId(request, env)) return secureResponse(Response.redirect(new URL("/afiliados/login", url).toString(), 302));
+      } else {
+        const email = await getAdminEmail(request, env);
+        if (!email) {
+          const loginPath = url.pathname.startsWith("/admin/") ? "/admin/login" : "/agentes/login";
+          return secureResponse(Response.redirect(new URL(loginPath, url).toString(), 302));
+        }
+        const access = await getAdminAccess(email, env);
+        const accountType = String(access.account?.accountType || (email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase() ? "admin" : ""));
+        const allowed = url.pathname.startsWith("/admin/") ? ["admin", "both"].includes(accountType) : ["agent", "both"].includes(accountType);
+        if (!allowed) {
+          const loginPath = url.pathname.startsWith("/admin/") ? "/admin/login" : "/agentes/login";
+          return clearPortalSessions(secureResponse(Response.redirect(new URL(loginPath, url).toString(), 302)));
+        }
+      }
     }
     if (url.pathname === "/agentes/email") {
       url.pathname = "/agent-email.html";

@@ -70,6 +70,36 @@
         display: none !important;
       }
     </style>
+    <script>
+      (() => {
+        const entries = ["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"];
+        const clearLocalSession = () => {
+          for (const key of ["adminSession", "agentSession", "affiliateSession", "agentUser", "agentToken", "affinity-agent-counts"]) localStorage.removeItem(key);
+        };
+        const path = () => location.pathname.replace(/\/$/, "") || "/";
+        if (entries.includes(path())) clearLocalSession();
+        const leavePortal = () => {
+          if (!entries.includes(path())) return;
+          clearLocalSession();
+          fetch("/api/trpc/auth.logout", {
+            method: "POST",
+            credentials: "include",
+            keepalive: true,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ json: {} })
+          }).catch(() => {});
+        };
+        for (const method of ["pushState", "replaceState"]) {
+          const original = history[method];
+          history[method] = function (...args) {
+            const result = original.apply(this, args);
+            queueMicrotask(leavePortal);
+            return result;
+          };
+        }
+        addEventListener("popstate", leavePortal);
+      })();
+    </script>
     <script type="module" crossorigin src="/assets/index-BIU-6RMI.js?v=20260901-13"></script>
     <script src="/review-button-position.js" defer></script>
     <script src="/career-nav.js?v=20260825-2" defer></script>
