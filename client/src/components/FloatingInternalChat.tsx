@@ -30,9 +30,9 @@ export default function FloatingInternalChat({ mode }: Props) {
       return {};
     }
   }, []);
-  const myEmail = String(session.email || "").toLowerCase();
   const agents = trpc.crm.assignees.useQuery(undefined, { refetchInterval: 30000 });
   const presence = trpc.crm.presence.useQuery(undefined, { refetchInterval: 30000 });
+  const myEmail = String(presence.data?.currentEmail || session.email || "").toLowerCase();
   const setPresence = trpc.crm.setPresence.useMutation();
   const unread = trpc.crm.internalUnreadCount.useQuery(
     { mode },
@@ -47,7 +47,7 @@ export default function FloatingInternalChat({ mode }: Props) {
     const list = (Array.isArray(agents.data) ? agents.data : [])
       .filter(item =>
         ["agent", "both"].includes(String(item.accountType || "")) &&
-        (mode === "admin" || item.email.toLowerCase() !== myEmail)
+        item.email.toLowerCase() !== myEmail
       )
       .map(item => ({ email: item.email.toLowerCase(), name: item.name, presence: statusFor(item.email) }));
     const adminStatuses = presenceUsers.filter(item => ["admin", "both"].includes(String(item.accountType))).map(item => effectivePresence(item.presenceStatus, item.lastSeenAt));
@@ -74,6 +74,8 @@ export default function FloatingInternalChat({ mode }: Props) {
   const count = Number(unread.data?.count || 0);
   useNotificationSound("chat", count, `affinity-chat-unread-${mode}`);
   const currentUser = (presence.data?.users || []).find(item => item.email.toLowerCase() === presence.data?.currentEmail.toLowerCase());
+  const myName = String(currentUser?.name || session.name || myEmail || "Usuário");
+  const myRole = mode === "admin" ? "Admin" : "Agente";
   const myPresence = String(currentUser?.presenceStatus || "available") as "available" | "away" | "meeting";
 
   useEffect(() => {
@@ -121,7 +123,7 @@ export default function FloatingInternalChat({ mode }: Props) {
     <section className="fixed bottom-3 right-3 z-[70] flex h-[min(42rem,calc(100vh-1.5rem))] w-[min(25rem,calc(100vw-1.5rem))] flex-col overflow-hidden rounded-2xl border border-gold/35 bg-[#0b1524] text-white shadow-2xl shadow-black/70 sm:bottom-6 sm:right-6">
       <header className="flex items-center gap-3 border-b border-gold/20 bg-[#122742] px-4 py-3">
         <MessageCircle className="text-gold" size={21} />
-        <div className="min-w-0 flex-1"><p className="font-bold">Mensagens internas</p><p className="flex items-center gap-2 truncate text-xs text-gray-400">{activeContact && <span title={presenceLabel[activeContact.presence]} aria-label={presenceLabel[activeContact.presence]} className={`h-2.5 w-2.5 shrink-0 rounded-full ${presenceColor[activeContact.presence]}`} />}{activeContact?.name || "Selecione um contato"}</p></div>
+        <div className="min-w-0 flex-1"><p className="font-bold">{myName} <span className="font-normal text-gold">({myRole})</span></p><p className="flex items-center gap-2 truncate text-xs text-gray-400">Conversando com: {activeContact && <span title={presenceLabel[activeContact.presence]} aria-label={presenceLabel[activeContact.presence]} className={`h-2.5 w-2.5 shrink-0 rounded-full ${presenceColor[activeContact.presence]}`} />}{activeContact?.name || "Selecione um contato"}</p></div>
         <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-2 text-gray-300 hover:bg-white/10" aria-label="Minimizar chat"><ChevronDown size={20} /></button>
         <button type="button" onClick={() => setOpen(false)} className="rounded-lg p-2 text-gray-300 hover:bg-white/10" aria-label="Fechar chat"><X size={19} /></button>
       </header>

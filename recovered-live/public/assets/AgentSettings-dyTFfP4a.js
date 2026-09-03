@@ -16,7 +16,7 @@ import { S as A } from "./shield-check-CQZEKJwS.js";
 import { M as q } from "./mail-DTOVvRc8.js";
 import { S as U } from "./send-u-E2Isyn.js";
 import { M as Q } from "./LanguageSelector-DkTXTche.js";
-import "./FloatingInternalChat-C-mZ1jql.js";
+import "./FloatingInternalChat-C-mZ1jql.js?v=20260903-2";
 import "./x-BKidgWlG.js";
 import "./chevron-right-DepQZrYR.js";
 import "./external-link-CEjUwZyT.js";

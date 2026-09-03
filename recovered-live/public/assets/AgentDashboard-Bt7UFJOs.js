@@ -8,7 +8,7 @@ import {
   C as m,
 } from "./index-BIU-6RMI.js?v=20260901-13";
 import { A as C } from "./AgentSidebar-BffvVO7a.js?v=20260901-2";
-import { u as A } from "./FloatingInternalChat-C-mZ1jql.js";
+import { u as A } from "./FloatingInternalChat-C-mZ1jql.js?v=20260903-2";
 import { M as P } from "./mail-DTOVvRc8.js";
 import { C as f, M as I } from "./message-square-Bd585pvl.js";
 import { S as M } from "./shield-check-CQZEKJwS.js";
