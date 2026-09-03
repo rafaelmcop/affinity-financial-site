@@ -28,4 +28,11 @@
   document.getElementById('agent-unified-logout')?.addEventListener('click', async () => { try { await fetch('/api/auth.logout',{method:'POST',credentials:'include'}); } catch {} localStorage.removeItem('agentUser'); localStorage.removeItem('agentToken'); location.href='/agentes/login'; });
   fetch('/api/agent.pendingCounts',{credentials:'include'}).then((r)=>r.ok?r.json():null).then((data)=>{const count=Number(data?.unreadEmails??data?.emails??0),badge=document.getElementById('unified-email-badge');if(badge&&count>0){badge.textContent=count>99?'99+':String(count);badge.hidden=false;}}).catch(()=>{});
   fetch('/api/trpc/careers.access?input='+encodeURIComponent(JSON.stringify({json:{}})),{credentials:'include'}).then((r)=>r.ok?r.json():null).then((data)=>{const info=data?.result?.data?.json,slot=document.getElementById('agent-careers-slot');if(!slot||!info?.allowed)return;const link=document.createElement('a');link.href='/candidaturas.html?portal=agent';link.className=matches('/candidaturas.html')?'active':'';link.innerHTML='Candidaturas'+(Number(info.pendingCount)>0?` <b class="agent-menu-badge">${Number(info.pendingCount)>99?'99+':Number(info.pendingCount)}</b>`:'');slot.replaceWith(link);}).catch(()=>{});
+  if (!document.querySelector('[data-affinity-messenger],script[data-agent-messenger]')) {
+    const messenger = document.createElement('script');
+    messenger.src = '/agent-messenger.js?v=20260903-1';
+    messenger.defer = true;
+    messenger.dataset.agentMessenger = 'true';
+    document.head.appendChild(messenger);
+  }
 })();
