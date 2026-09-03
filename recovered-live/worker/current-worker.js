@@ -49996,6 +49996,8 @@ function classifyPaymentNotice(subject, body) {
 ${body}`.toLowerCase();
   if (!/(payment|premium|billing|bank draft|pagamento|cobrança|cobranca)/i.test(text))
     return null;
+  if (!/(policy|premium|national life|\bnlg\b|five rings|mga360|life insurance|ap[oó]lice|insured|underwriting)/i.test(text))
+    return null;
   if (/(return(?:ed)?|declin(?:e|ed)|fail(?:ed|ure)?|insufficient|nsf|revers(?:ed|al)|unable to process|past due|não processado|nao processado|recusado|devolvido)/i.test(text))
     return "attention";
   if (/(received|successful|processed|paid|posted|thank you for your payment|confirmado|recebido|processado)/i.test(text))
@@ -50011,13 +50013,20 @@ function classifyMailboxTopic(subject, body) {
   if (/(underwriting|policy status|approved|declined|issued|decision|subscri[cç][aã]o|status da ap[oó]lice|ap[oó]lice emitida|evaluaci[oó]n|p[oó]liza emitida)/i.test(text)) return "underwriting";
   return "general";
 }
+function isProfessionalMailboxMessage(subject, body, fromEmail, toEmail, isKnownClient = false) {
+  if (isKnownClient) return true;
+  const text = `${subject}\n${body}\n${fromEmail}\n${toEmail}`.toLowerCase();
+  return /(national\s+life|\bnlg\b|five\s*rings|fiverings|mga360|corebridge|american\s+general|docusign|my\s*wfg|mywfg|\bwfg\b|world\s+financial\s+group)/i.test(text);
+}
+const PROFESSIONAL_MAILBOX_SQL = `(m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
 function extractPolicyNumbers(subject, body) {
   const text = `${subject}
 ${body}`;
   const values = /* @__PURE__ */ new Set();
   const patterns = [
     /(?:policy|ap[oó]lice|contract|certificate)\s*(?:number|no\.?|#|n[º°o]|n[uú]mero)?\s*[:#-]?\s*([A-Z0-9-]{5,30})/gi,
-    /(?:policy|ap[oó]lice)\s*[:#-]\s*([A-Z0-9-]{5,30})/gi
+    /(?:policy|ap[oó]lice)\s*[:#-]\s*([A-Z0-9-]{5,30})/gi,
+    /\b(\d{7,12})\s*-\s*[A-ZÀ-Ý]/g
   ];
   for (const pattern of patterns) {
     let match;
@@ -50025,6 +50034,19 @@ ${body}`;
       values.add(normalizePolicyNumber(match[1]));
   }
   return values;
+}
+function extractPaymentClientName(subject, body) {
+  const text = `${subject}\n${body}`.replace(/<[^>]+>/g, " ");
+  const patterns = [
+    /\b\d{7,12}\s*-\s*([A-ZÀ-Ý][A-ZÀ-Ý' -]{3,80})(?:\r?\n|$)/m,
+    /(?:insured|policy\s*owner|customer|client|proposed\s*insured|nome|name)\s*(?:name)?\s*[:#-]\s*([A-ZÀ-Ý][A-Za-zÀ-ÿ' -]{3,80})/i,
+    /(?:for|para)\s+([A-ZÀ-Ý][A-Za-zÀ-ÿ']+(?:\s+[A-ZÀ-Ý][A-Za-zÀ-ÿ']+){1,4})\s*(?:\n|,|\||-|policy|ap[oó]lice)/i
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern)?.[1]?.replace(/\s+/g, " ").trim();
+    if (match) return match;
+  }
+  return "";
 }
 var normalizePolicyNumber;
 var init_paymentNotice = __esm({
@@ -50310,6 +50332,7 @@ async function syncIcloudInbox(env, agentEmail) {
       const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
       if (!body) continue;
       const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
+      if (!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
       const topic = classifyMailboxTopic(String(parsed.subject || ""), body);
       await env.DB.prepare(
@@ -50387,6 +50410,7 @@ async function syncIcloudInbox(env, agentEmail) {
         const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
         const customer = customerByEmail.get(recipient);
         const subject = String(parsed.subject || "Sem assunto");
+        if (!isProfessionalMailboxMessage(subject, body, config.fromEmail || owner, recipient, Boolean(customer))) continue;
         const externalId = parsed.messageId || `icloud-sent:${owner}:${uid}`;
         const topic = classifyMailboxTopic(subject, body);
         await env.DB.prepare(
@@ -54437,19 +54461,66 @@ Detalhes: ${details}` : ""}`;
     const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
     const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
     const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
-    const policyNumber = normalizePolicyNumber(String(mailbox?.policyNumber || ""));
-    let policy = policyNumber ? policies.results.find((row) => normalizePolicyNumber(String(row.policyNumber || "")) === policyNumber) : null;
+    const extractedPolicies = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
+    const candidatePolicies = [mailbox?.policyNumber, ...extractedPolicies].map(normalizePolicyNumber).filter(Boolean);
+    let policy = policies.results.find((row) => candidatePolicies.includes(normalizePolicyNumber(String(row.policyNumber || "")))) || null;
+    const policyNumber = normalizePolicyNumber(String(policy?.policyNumber || candidatePolicies[0] || ""));
     const clientId = Number(task.clientId || mailbox?.clientId || policy?.clientId || 0);
     if (!policy && clientId) policy = policies.results.find((row) => Number(row.clientId) === clientId) || null;
     const client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
+    const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
+    const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
+    const candidateName = String(client?.name || policy?.clientName || extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || "")) || "").trim();
+    const candidateEmail = String(client?.email || policy?.clientEmail || "").trim();
+    const candidatePhone = String(client?.phone || client?.whatsapp || policy?.clientPhone || "").trim();
+    const preparedSubject = personalizeTemplate(settings?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
+    const preparedMessage = personalizeTemplate(settings?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
     const history = clientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all() : { results: [] };
     return trpcResult({
       task: { ...task, id: Number(task.id), clientId: clientId || null },
       client: client ? { ...client, id: Number(client.id) } : null,
       policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId) } : null,
       notice: mailbox ? { id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
+      candidate: { name: candidateName, email: candidateEmail, phone: candidatePhone, policyNumber: String(policy?.policyNumber || policyNumber || "") },
+      prepared: { subject: preparedSubject, message: preparedMessage },
       history: (history.results || []).map((row) => ({ ...row, id: Number(row.id) }))
     });
+  }
+  if (name === "agent.resolvePaymentCase") {
+    const owner = adminEmail.toLowerCase(), taskId = Number(input.taskId || 0);
+    const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
+    if (!task) return trpcError("Pendência de pagamento não encontrada", "NOT_FOUND", 404);
+    const clientName = String(input.name || "").replace(/\s+/g, " ").trim();
+    const email = String(input.email || "").trim().toLowerCase();
+    const phone = String(input.phone || "").trim();
+    const policyNumber = String(input.policyNumber || "").trim().toUpperCase();
+    if (!clientName || !policyNumber) return trpcError("Informe o nome do cliente e o número da apólice");
+    if (email && !validEmail(email)) return trpcError("Informe um e-mail válido");
+    let client = Number(input.clientId || task.clientId || 0) ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(input.clientId || task.clientId), owner).first() : null;
+    if (!client && email) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? ORDER BY id LIMIT 1").bind(owner, email).first();
+    if (!client) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").bind(owner, clientName).first();
+    let clientId;
+    if (client) {
+      clientId = Number(client.id);
+      await env.DB.prepare("UPDATE crmClients SET name=CASE WHEN trim(coalesce(name,''))='' THEN ? ELSE name END,email=CASE WHEN trim(coalesce(email,''))='' THEN ? ELSE email END,phone=CASE WHEN trim(coalesce(phone,''))='' THEN ? ELSE phone END,whatsapp=CASE WHEN trim(coalesce(whatsapp,''))='' THEN ? ELSE whatsapp END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientName,email||null,phone||null,phone||null,clientId,owner).run();
+    } else {
+      const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?, 'client','Aviso de pagamento',?,'Cadastro relacionado a aviso de pagamento recebido')").bind(clientName,email||null,phone||null,phone||null,owner).run();
+      clientId = Number(inserted.meta.last_row_id);
+    }
+    const policies = await env.DB.prepare("SELECT id,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+    let policy = policies.results.find((row) => normalizePolicyNumber(row.policyNumber) === normalizePolicyNumber(policyNumber));
+    if (policy) {
+      await env.DB.prepare("UPDATE agentPolicies SET clientId=?,clientName=CASE WHEN trim(coalesce(clientName,''))='' THEN ? ELSE clientName END,clientEmail=CASE WHEN trim(coalesce(clientEmail,''))='' THEN ? ELSE clientEmail END,clientPhone=CASE WHEN trim(coalesce(clientPhone,''))='' THEN ? ELSE clientPhone END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId,clientName,email||null,phone||null,Number(policy.id),owner).run();
+    } else {
+      const inserted = await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status) VALUES (?,?,?,?,?,?,'inactive')").bind(owner,clientId,clientName,email||null,phone||null,policyNumber).run();
+      policy = { id: Number(inserted.meta.last_row_id), policyNumber };
+    }
+    const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
+    await env.DB.batch([
+      env.DB.prepare("UPDATE agentTasks SET clientId=?,title=replace(title,'Identificar cliente e apólice','Pagamento identificado') WHERE id=? AND lower(agentEmail)=?").bind(clientId,taskId,owner),
+      env.DB.prepare("UPDATE agentMailboxEmails SET clientId=?,policyNumber=?,actionStatus='needs_review',actionDetail='Cliente e apólice identificados; mensagem pronta para envio' WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=?").bind(clientId,policyNumber,owner,uid)
+    ]);
+    return trpcResult({ success: true, clientId, policyId: Number(policy.id), merged: Boolean(client) });
   }
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
@@ -54683,6 +54754,7 @@ Detalhes: ${details}` : ""}`;
     const search = String(input.search || "").trim().toLowerCase().slice(0, 120);
     let where = "lower(m.agentEmail)=?";
     const binds = [owner];
+    where += ` AND ${PROFESSIONAL_MAILBOX_SQL}`;
     if (folder === "trash") where += " AND m.deletedAt IS NOT NULL";
     else {
       where += " AND m.deletedAt IS NULL";
@@ -54699,8 +54771,8 @@ Detalhes: ${details}` : ""}`;
     const rows = await env.DB.prepare(
       `SELECT m.id,m.agentEmail,m.clientId,m.externalId,m.imapUid,m.direction,m.fromEmail,m.toEmail,m.subject,m.body,m.sentAt,m.readAt,m.paymentStatus,m.actionStatus,m.actionDetail,m.policyNumber,m.topic,m.folderId,m.deletedAt,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE ${where} ORDER BY datetime(m.sentAt) DESC,m.id DESC LIMIT 300`
     ).bind(owner, owner, ...binds).all();
-    const unread = await env.DB.prepare("SELECT COUNT(*) AS total FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL AND deletedAt IS NULL AND folderId IS NULL").bind(owner).first();
-    const topicRows = await env.DB.prepare("SELECT coalesce(topic,'general') AS topic,COUNT(*) AS total,SUM(CASE WHEN direction='received' AND readAt IS NULL THEN 1 ELSE 0 END) AS unread FROM agentMailboxEmails WHERE lower(agentEmail)=? AND deletedAt IS NULL AND folderId IS NULL GROUP BY coalesce(topic,'general')").bind(owner).all();
+    const unread = await env.DB.prepare(`SELECT COUNT(*) AS total FROM agentMailboxEmails m WHERE lower(m.agentEmail)=? AND ${PROFESSIONAL_MAILBOX_SQL} AND m.direction='received' AND m.readAt IS NULL AND m.deletedAt IS NULL AND m.folderId IS NULL`).bind(owner).first();
+    const topicRows = await env.DB.prepare(`SELECT coalesce(m.topic,'general') AS topic,COUNT(*) AS total,SUM(CASE WHEN m.direction='received' AND m.readAt IS NULL THEN 1 ELSE 0 END) AS unread FROM agentMailboxEmails m WHERE lower(m.agentEmail)=? AND ${PROFESSIONAL_MAILBOX_SQL} AND m.deletedAt IS NULL AND m.folderId IS NULL GROUP BY coalesce(m.topic,'general')`).bind(owner).all();
     const topicCounts = Object.fromEntries(topicRows.results.map((row) => [String(row.topic), { total: Number(row.total || 0), unread: Number(row.unread || 0) }]));
     return trpcResult({
       items: rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null })),
@@ -57255,7 +57327,7 @@ var cloudflare_staging_default = {
       ctx.waitUntil(emailSync.then(() => syncPendingFiveRingsCodes(env)));
       return;
     }
-    if (controller.cron === "10 * * * *") {
+    if (controller.cron === "*/15 * * * *") {
       ctx.waitUntil(syncAllCalendlyConnections(env));
       return;
     }
