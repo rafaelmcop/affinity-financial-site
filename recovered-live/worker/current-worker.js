@@ -57237,14 +57237,56 @@ var cloudflare_staging_default = {
       return secureResponse(Response.redirect(url.toString(), 301));
     }
     if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
-      const email = await getAdminEmail(request, env);
-      if (!email) return secureResponse(jsonResponse({ error: "Sessão expirada" }, 401), { privateData: true });
-      const taskId = Number(url.searchParams.get("taskId") || 0);
-      const result = await runProcedure("agent.paymentCase", { taskId }, request, env);
-      if (result?.error) {
-        return secureResponse(jsonResponse({ error: result.error.json?.message || "Não foi possível abrir o caso" }, Number(result.error.json?.data?.httpStatus || 400)), { privateData: true });
+      try {
+        const email = await getAdminEmail(request, env);
+        if (!email) return secureResponse(jsonResponse({ error: "Sessão expirada" }, 401), { privateData: true });
+        const owner = email.toLowerCase();
+        const taskId = Number(url.searchParams.get("taskId") || 0);
+        const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
+        if (!task) return secureResponse(jsonResponse({ error: "Pendência de pagamento não encontrada" }, 404), { privateData: true });
+        const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
+        const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
+        const extracted = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
+        const candidates = [mailbox?.policyNumber, ...extracted].filter(Boolean);
+        const policyRows = (await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all()).results || [];
+        let policy = policyRows.find((row) => candidates.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || null;
+        let clientId = Number(task.clientId || mailbox?.clientId || policy?.clientId || 0);
+        let client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
+        if (!client) {
+          const name = extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || ""));
+          if (name) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").bind(owner, name).first();
+          clientId = Number(client?.id || 0);
+        }
+        if (!policy && clientId) policy = policyRows.find((row) => Number(row.clientId) === clientId && candidates.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || policyRows.find((row) => Number(row.clientId) === clientId && String(row.status || "").toLowerCase() === "active") || null;
+        if (!client && policy?.clientId) {
+          clientId = Number(policy.clientId);
+          client = await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first();
+        }
+        const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
+        const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
+        const candidateName = String(client?.name || policy?.clientName || extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || "")) || "").trim();
+        const candidateEmail = String(client?.email || policy?.clientEmail || "").trim();
+        const candidatePhone = String(client?.phone || client?.whatsapp || policy?.clientPhone || "").trim();
+        const policyNumber = String(policy?.policyNumber || mailbox?.policyNumber || candidates[0] || "").trim();
+        const agentName = String(agent?.name || "Seu agente Affinity");
+        const agentPhone = String(agent?.phone || agent?.whatsapp || "(857) 421-8325");
+        const history = clientId ? (await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all()).results || [] : [];
+        return secureResponse(jsonResponse({
+          task: { ...task, id: Number(task.id), clientId: clientId || null },
+          client: client ? { ...client, id: Number(client.id) } : null,
+          policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId || clientId || 0) || null } : null,
+          notice: mailbox ? { id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
+          candidate: { name: candidateName, email: candidateEmail, phone: candidatePhone, policyNumber },
+          prepared: {
+            subject: personalizeTemplate(settings?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT, candidateName || "cliente", agentName, agentPhone, policyNumber),
+            message: personalizeTemplate(settings?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE, candidateName || "cliente", agentName, agentPhone, policyNumber)
+          },
+          history: history.map((row) => ({ ...row, id: Number(row.id) }))
+        }), { privateData: true });
+      } catch (error) {
+        console.error("payment_case_endpoint_failed", error);
+        return secureResponse(jsonResponse({ error: `Falha ao carregar o caso: ${String(error?.message || error)}` }, 500), { privateData: true });
       }
-      return secureResponse(jsonResponse(result?.result?.data?.json || {}), { privateData: true });
     }
     const logoutEntryPaths = new Set(["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"]);
     if (request.method === "GET" && logoutEntryPaths.has(url.pathname)) {
