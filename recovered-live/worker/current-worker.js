@@ -56701,9 +56701,9 @@ Affinity Financial Consulting`,
       ]);
     }
     const rows = accountType === "agent" ? await env.DB.prepare(
-      "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY CASE WHEN nextFollowUpAt IS NULL THEN 1 ELSE 0 END, nextFollowUpAt ASC, updatedAt DESC"
+      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
     ).bind(adminEmail.toLowerCase()).all() : await env.DB.prepare(
-      "SELECT * FROM crmClients ORDER BY CASE WHEN nextFollowUpAt IS NULL THEN 1 ELSE 0 END, nextFollowUpAt ASC, updatedAt DESC"
+      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
     ).all();
     return trpcResult(
       rows.results.map((row) => ({ ...row, id: Number(row.id) }))

@@ -156,6 +156,7 @@ function Le({ agentMode: a = !1 }) {
     }),
     [y, Q] = p.useState(""),
     [w, X] = p.useState(""),
+    [sortMode, setSortMode] = p.useState("name_asc"),
     [b, M] = p.useState(() =>
       new URLSearchParams(location.search).get("setor") === "leads"
         ? "leads"
@@ -239,8 +240,16 @@ function Le({ agentMode: a = !1 }) {
           ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
             .toLowerCase()
             .includes(w.toLowerCase())
-      );
-    }, [S, w, b]),
+      ).sort((l, o) => {
+        if (sortMode.startsWith("date")) {
+          const left = new Date(l.lastMeetingAt || l.createdAt || 0).getTime() || 0,
+            right = new Date(o.lastMeetingAt || o.createdAt || 0).getTime() || 0;
+          return sortMode === "date_asc" ? left - right : right - left;
+        }
+        const result = String(l.name || "").localeCompare(String(o.name || ""), "pt-BR", { sensitivity: "base" });
+        return sortMode === "name_desc" ? -result : result;
+      });
+    }, [S, w, b, sortMode]),
     totalPages = Math.max(1, Math.ceil(W.length / 10)),
     pageRows = W.slice((page - 1) * 10, page * 10),
     le = async s => {
@@ -613,12 +622,23 @@ function Le({ agentMode: a = !1 }) {
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",
                 children: e.jsxs("div", {
-                  className: "grid gap-3 sm:grid-cols-2",
+                  className: "grid gap-3 sm:grid-cols-3",
                   children: [
                     e.jsx(h, {
                       placeholder: "Buscar por nome, e-mail ou telefone",
                       value: w,
-                      onChange: s => X(s.target.value),
+                      onChange: s => (X(s.target.value), setPage(1)),
+                    }),
+                    e.jsxs("select", {
+                      value: sortMode,
+                      onChange: s => (setSortMode(s.target.value), setPage(1)),
+                      className: "h-10 rounded-md border border-white/20 bg-black px-3 text-sm text-white",
+                      children: [
+                        e.jsx("option", { value: "name_asc", children: "Nome: A → Z" }),
+                        e.jsx("option", { value: "name_desc", children: "Nome: Z → A" }),
+                        e.jsx("option", { value: "date_desc", children: "Data: mais recente" }),
+                        e.jsx("option", { value: "date_asc", children: "Data: mais antiga" }),
+                      ],
                     }),
                     e.jsxs("div", {
                       className:
@@ -882,6 +902,10 @@ function Le({ agentMode: a = !1 }) {
                               e.jsx("span", {
                                 className: `mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${l.color}`,
                                 children: l.label,
+                              }),
+                              e.jsxs("p", {
+                                className: "mt-2 text-xs text-gray-400",
+                                children: [s.lastMeetingAt ? "Última reunião: " : "Entrada no CRM: ", j(s.lastMeetingAt || s.createdAt)],
                               }),
                             ],
                           },

@@ -143,11 +143,11 @@ function E() {
                       children: [e.jsx(i, { size: 15 }), " Leads"],
                     }),
                     e.jsxs("button", {
-                      onClick: () => s("/agentes/crm"),
+                      onClick: () => window.location.assign("/agentes/crm?setor=clients"),
                       className: `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${t === "/agentes/crm" && !B ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`,
                       children: [
                         e.jsx(i, { size: 15 }),
-                        " Clientes e acompanhamento",
+                        " Clientes",
                       ],
                     }),
                     e.jsxs("button", {
