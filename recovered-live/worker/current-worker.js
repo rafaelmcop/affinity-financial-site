@@ -53395,6 +53395,15 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
     env.DB.prepare("SELECT id,clientId,inviteeName,inviteeEmail,inviteePhone FROM calendlyMeetings WHERE lower(agentEmail)=?").bind(owner).all()
   ]);
   const clients = clientResult.results || [], applications = applicationResult.results || [], policies = policyResult.results || [], meetings = meetingResult.results || [];
+  for (const application of applications) {
+    const applicationEmail = sourceEmail(application.clientEmail), applicationPhone = sourcePhone(application.clientPhone), applicationName = sourceName(application.clientName);
+    const existingClient = clients.find((client) => applicationEmail && sourceEmail(client.email) === applicationEmail) || clients.find((client) => applicationPhone && sourcePhone(client.phone || client.whatsapp) === applicationPhone) || clients.find((client) => applicationName && sourceName(client.name) === applicationName);
+    if (existingClient) continue;
+    const composedAddress = [application.address, application.city, application.state, application.zipCode].filter((value) => String(value || "").trim()).join(", ");
+    const completed = ["submitted", "completed", "complete", "concluida", "concluido"].includes(String(application.status || "").toLowerCase());
+    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplicação").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, completed ? "client" : "proposal", "Aplicação do portal", owner, `Ficha criada automaticamente a partir da aplicação nº ${Number(application.id)}.`).run();
+    clients.push({ id: Number(inserted.meta.last_row_id), name: String(application.clientName || "Cliente da aplicação").trim(), email: applicationEmail || null, phone: String(application.clientPhone || "").trim() || null, whatsapp: String(application.clientPhone || "").trim() || null, birthDate: String(application.birthDate || "").trim() || null, address: composedAddress || null });
+  }
   const emailMap = new Map(), phoneMap = new Map(), nameMap = new Map();
   const addMatch = (map, key, row) => { if (!key) return; const list = map.get(key) || []; list.push(row); map.set(key, list); };
   for (const row of applications) {
