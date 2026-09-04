@@ -1133,7 +1133,7 @@
     sectionBlock("4. Dados dos beneficiários", beneficiaryRows.length ? beneficiaryRows : [["Beneficiários", "Não informado"]]);
     sectionBlock("5. Premium anual", [
       ["Premium mensal", usd(row.premiumBudget)],
-      ["Premium anual (premium mensal x 12)", annualUsd(row.premiumBudget, 12)],
+      ["Premium anual", annualUsd(row.premiumBudget, 12)],
     ]);
     sectionBlock("6. Idade e informações familiares", [
       ["Idade do cliente", ageFromBirthDate(row.birthDate)],
