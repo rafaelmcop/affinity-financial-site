@@ -53352,6 +53352,8 @@ function sourceEmail(value) { return String(value || "").trim().toLowerCase(); }
 __name(sourceEmail, "sourceEmail");
 function sourcePhone(value) { const digits = String(value || "").replace(/\D/g, ""); return digits.length >= 10 ? digits.slice(-10) : ""; }
 __name(sourcePhone, "sourcePhone");
+function sourceName(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+__name(sourceName, "sourceName");
 function sourceValue(rows, field) {
   for (const row of rows) {
     const value = row?.[field];
@@ -53369,26 +53371,27 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
     env.DB.prepare("SELECT id,clientId,inviteeName,inviteeEmail,inviteePhone FROM calendlyMeetings WHERE lower(agentEmail)=?").bind(owner).all()
   ]);
   const clients = clientResult.results || [], applications = applicationResult.results || [], policies = policyResult.results || [], meetings = meetingResult.results || [];
-  const emailMap = new Map(), phoneMap = new Map();
+  const emailMap = new Map(), phoneMap = new Map(), nameMap = new Map();
   const addMatch = (map, key, row) => { if (!key) return; const list = map.get(key) || []; list.push(row); map.set(key, list); };
-  for (const row of applications) { addMatch(emailMap, sourceEmail(row.clientEmail), { ...row, sourceType: "application" }); addMatch(phoneMap, sourcePhone(row.clientPhone), { ...row, sourceType: "application" }); }
-  for (const row of policies) { addMatch(emailMap, sourceEmail(row.clientEmail), { ...row, sourceType: "policy" }); addMatch(phoneMap, sourcePhone(row.clientPhone), { ...row, sourceType: "policy" }); }
-  for (const row of meetings) { addMatch(emailMap, sourceEmail(row.inviteeEmail), { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }); addMatch(phoneMap, sourcePhone(row.inviteePhone), { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }); }
+  for (const row of applications) { const item = { ...row, sourceType: "application" }; addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item); }
+  for (const row of policies) { const item = { ...row, sourceType: "policy" }; addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item); }
+  for (const row of meetings) { const item = { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }; addMatch(emailMap, sourceEmail(row.inviteeEmail), item); addMatch(phoneMap, sourcePhone(row.inviteePhone), item); addMatch(nameMap, sourceName(row.inviteeName), item); }
   let clientsUpdated = 0, policiesUpdated = 0, applicationsUpdated = 0;
   for (const client of clients) {
-    const matches = [...(emailMap.get(sourceEmail(client.email)) || []), ...(phoneMap.get(sourcePhone(client.phone)) || [])].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
+    const matches = [...(emailMap.get(sourceEmail(client.email)) || []), ...(phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || []), ...(nameMap.get(sourceName(client.name)) || [])].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
     if (!matches.length) continue;
     const prioritized = matches.sort((a, b) => ({ application: 0, policy: 1, calendly: 2 }[a.sourceType] - ({ application: 0, policy: 1, calendly: 2 }[b.sourceType])));
     const app = prioritized.find((row) => row.sourceType === "application");
     const composedAddress = app ? [app.address, app.city, app.state, app.zipCode].filter((value) => String(value || "").trim()).join(", ") : "";
+    const name = String(app?.clientName || prioritized.find((row) => row.sourceType === "policy")?.clientName || client.name || "").trim() || client.name;
     const email = client.email || sourceValue(prioritized, "clientEmail");
     const phone = client.phone || sourceValue(prioritized, "clientPhone");
     const whatsapp = client.whatsapp || phone;
     const birthDate = client.birthDate || sourceValue(prioritized, "birthDate");
     const address = client.address || composedAddress || null;
-    const changed = email !== client.email || phone !== client.phone || whatsapp !== client.whatsapp || birthDate !== client.birthDate || address !== client.address;
+    const changed = name !== client.name || email !== client.email || phone !== client.phone || whatsapp !== client.whatsapp || birthDate !== client.birthDate || address !== client.address;
     if (changed) {
-      await env.DB.prepare("UPDATE crmClients SET email=?,phone=?,whatsapp=?,birthDate=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(email || null, phone || null, whatsapp || null, birthDate || null, address || null, Number(client.id), owner).run();
+      await env.DB.prepare("UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(name, email || null, phone || null, whatsapp || null, birthDate || null, address || null, Number(client.id), owner).run();
       clientsUpdated += 1;
     }
     for (const policy of prioritized.filter((row) => row.sourceType === "policy")) {
@@ -55953,26 +55956,44 @@ Affinity Financial Consulting`,
     if (!connection) return trpcError("Conecte seu Calendly para visualizar os resumos");
     try {
       const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
-      const query = new URLSearchParams({ user: String(connection.userUri || ""), count: "50" });
+      const query = new URLSearchParams({ count: "100", status: "available" });
       const payload = await calendlyRequest(token, `/meeting_recaps?${query}`);
       const rows = Array.isArray(payload.collection) ? payload.collection : [];
       const meetings = await env.DB.prepare("SELECT clientId,eventUri,inviteeEmail FROM calendlyMeetings WHERE lower(agentEmail)=? AND clientId IS NOT NULL").bind(owner).all();
       const meetingRows = meetings.results || [];
       const normalized = rows.map((row) => {
         const eventUri = String(row.event || row.event_uri || row.scheduled_event || row.scheduled_event_uri || row.meeting?.event || "");
-        const attendeeEmail = String(row.attendee_email || row.invitee_email || row.attendee?.email || row.invitee?.email || "").trim().toLowerCase();
+        const guests = Array.isArray(row.attendees) ? row.attendees : [];
+        const guest = guests.find((person) => !person.host) || guests[0] || {};
+        const attendeeEmail = String(row.attendee_email || row.invitee_email || row.attendee?.email || row.invitee?.email || guest.user_email || "").trim().toLowerCase();
         const matchedMeeting = meetingRows.find((meeting) => eventUri && String(meeting.eventUri) === eventUri) || meetingRows.find((meeting) => attendeeEmail && String(meeting.inviteeEmail || "").trim().toLowerCase() === attendeeEmail);
         return {
         id: calendlyUuid(row.uri || row.id || row.uuid),
         title: String(row.title || row.name || row.event_name || "Resumo da reunião"),
         attendee: String(row.attendee_name || row.invitee_name || row.attendee?.name || ""),
         startTime: String(row.start_time || row.meeting_start_time || row.created_at || "") || null,
-        recordingUrl: String(row.recording_url || row.video_url || row.recording?.url || row.video?.url || "") || null,
+        recordingUrl: String(row.share_link || row.recording_url || row.video_url || row.recording?.url || row.video?.url || "") || null,
+        eventUri: eventUri || null,
         clientId: Number(matchedMeeting?.clientId || 0) || null
         };
       }).filter((row) => row.id);
       const requestedClientId = Number(input.clientId || 0);
-      return trpcResult(requestedClientId ? normalized.filter((row) => row.clientId === requestedClientId) : normalized);
+      const selected = (requestedClientId ? normalized.filter((row) => row.clientId === requestedClientId) : normalized).slice(0, requestedClientId ? 20 : 30);
+      const enriched = await Promise.all(selected.map(async (item) => {
+        try {
+          const detailPayload = await calendlyRequest(token, `/meeting_recaps/${encodeURIComponent(item.id)}`);
+          const detail = detailPayload.resource || detailPayload;
+          return { ...item,
+            title: String(detail.name || detail.title || item.title),
+            startTime: String(detail.start_time || item.startTime || "") || null,
+            recordingUrl: String(detail.share_link || detail.recording_url || detail.video_url || detail.recording?.url || detail.video?.url || item.recordingUrl || "") || null,
+            summary: detail.summary_md || detail.summary || null,
+            actionItems: detail.action_items_md || detail.action_items || null,
+            discussion: detail.discussion_md || detail.discussion || null
+          };
+        } catch { return item; }
+      }));
+      return trpcResult(enriched);
     } catch (error) { return trpcError(String(error?.message || error)); }
   }
   if (name === "agent.calendlyRecap") {
@@ -55983,7 +56004,7 @@ Affinity Financial Consulting`,
     if (!connection) return trpcError("Conecte seu Calendly para visualizar o resumo");
     try {
       const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
-      const query = new URLSearchParams({ user: String(connection.userUri || ""), count: "100" });
+      const query = new URLSearchParams({ count: "100", status: "available" });
       const list = await calendlyRequest(token, `/meeting_recaps?${query}`);
       const owned = (Array.isArray(list.collection) ? list.collection : []).some((row) => calendlyUuid(row.uri || row.id || row.uuid) === recapId);
       if (!owned) return trpcError("Resumo não encontrado para este agente", "NOT_FOUND", 404);
@@ -55996,10 +56017,10 @@ Affinity Financial Consulting`,
         id: recapId,
         title: String(pick(row.title,row.name,row.event_name,"Resumo da reunião")),
         startTime: pick(row.start_time,row.meeting_start_time,row.created_at),
-        summary: pick(row.summary,row.highlights?.summary,row.recap?.summary,row.notes?.summary),
-        actionItems: pick(row.action_items,row.highlights?.action_items,row.recap?.action_items,row.next_steps),
-        discussion: pick(row.discussion,row.discussion_notes,row.highlights?.discussion,row.recap?.discussion_notes,row.notes),
-        recordingUrl: pick(row.recording_url,row.video_url,row.recording?.url,row.video?.url,row.zoom_recording_url),
+        summary: pick(row.summary_md,row.summary,row.highlights?.summary,row.recap?.summary,row.notes?.summary),
+        actionItems: pick(row.action_items_md,row.action_items,row.highlights?.action_items,row.recap?.action_items,row.next_steps),
+        discussion: pick(row.discussion_md,row.discussion,row.discussion_notes,row.highlights?.discussion,row.recap?.discussion_notes,row.notes),
+        recordingUrl: pick(row.share_link,row.recording_url,row.video_url,row.recording?.url,row.video?.url,row.zoom_recording_url),
         transcript
       });
     } catch (error) { return trpcError(String(error?.message || error)); }
@@ -56699,6 +56720,7 @@ Affinity Financial Consulting`,
           "UPDATE crmClients SET status='closed',notes=CASE WHEN instr(lower(coalesce(notes,'')),'contratado como agente')=0 THEN trim(coalesce(notes,'') || CASE WHEN trim(coalesce(notes,''))<>'' THEN char(10) ELSE '' END || 'Contratado como agente da Affinity Financial.') ELSE notes END,updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status IN ('new','contacted','meeting','proposal') AND EXISTS (SELECT 1 FROM adminAccounts a WHERE a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') AND ((trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.email))=lower(trim(crmClients.email))) OR (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND trim(coalesce(a.phone,a.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(a.phone,a.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR lower(trim(a.name))=lower(trim(crmClients.name))))"
         ).bind(crmOwner)
       ]);
+      await mergeClientSourcesForAgent(env, crmOwner);
     }
     const rows = accountType === "agent" ? await env.DB.prepare(
       "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
