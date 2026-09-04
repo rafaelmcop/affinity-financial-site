@@ -1102,6 +1102,7 @@
     sectionBlock("3. Informações do cliente", [
       ["Nome completo", row.clientName],
       ["Data de nascimento", usDate(row.birthDate)],
+      ["Idade", ageFromBirthDate(row.birthDate)],
       ["Sexo", row.gender],
       ["Estado civil", row.maritalStatus],
       ["Cidadania / país de nascimento", row.bornInUSA === "Sim" ? `Estados Unidos - ${row.birthState || "estado não informado"}` : row.birthCountry ? `${row.birthCountry} - cidadania estrangeira` : "Não informado"],
@@ -1135,9 +1136,7 @@
       ["Premium mensal", usd(row.premiumBudget)],
       ["Premium anual", annualUsd(row.premiumBudget, 12)],
     ]);
-    sectionBlock("6. Idade e informações familiares", [
-      ["Idade do cliente", ageFromBirthDate(row.birthDate)],
-      ["Data de nascimento", usDate(row.birthDate)],
+    sectionBlock("6. Informações dos pais", [
       ["Pai", parentDescription("father")],
       ["Mãe", parentDescription("mother", true)],
     ]);
