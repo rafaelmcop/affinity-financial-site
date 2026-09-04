@@ -1141,7 +1141,7 @@
     const overlay = document.createElement("div");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#000b;z-index:9999;display:grid;place-items:center;padding:20px";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Copie e envie por WhatsApp ou e-mail. Nada será enviado automaticamente.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" class="primary" data-copy>Copiar mensagem</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Envie diretamente pelo WhatsApp ou pelo e-mail configurado no portal.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1155,6 +1155,10 @@
       notice("Mensagem e link privado copiados.");
       overlay.remove();
     };
+    wireDirectShare(overlay, row, {
+      textarea: "#share-message",
+      subject: "Link privado para continuar sua aplicação",
+    });
   }
   function showReviewShare(invite, row = {}) {
     const first = String(row?.clientName || "cliente").split(/\s+/)[0],
@@ -1162,7 +1166,7 @@
     const overlay = document.createElement("div");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#000b;z-index:9999;display:grid;place-items:center;padding:20px";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Copie a mensagem e envie ao cliente por WhatsApp ou e-mail.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" class="primary" data-copy>Copiar mensagem</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Envie diretamente pelo WhatsApp ou pelo e-mail configurado no portal.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1175,6 +1179,56 @@
       }
       notice("Mensagem da avaliação copiada.");
       overlay.remove();
+    };
+    wireDirectShare(overlay, row, {
+      textarea: "#review-share-message",
+      subject: "Conte como foi seu atendimento na Affinity Financial",
+    });
+  }
+  function whatsappNumber(value) {
+    let number = digits(value);
+    if (number.length === 10) number = `1${number}`;
+    return number;
+  }
+  function wireDirectShare(overlay, row, options) {
+    const area = overlay.querySelector(options.textarea);
+    const whatsapp = overlay.querySelector("[data-whatsapp]");
+    const email = overlay.querySelector("[data-email]");
+    whatsapp.onclick = () => {
+      const number = whatsappNumber(row.clientPhone);
+      if (!number) {
+        notice("Cadastre o telefone da cliente antes de enviar pelo WhatsApp.", true);
+        return;
+      }
+      location.href = `whatsapp://send?phone=${number}&text=${encodeURIComponent(area.value)}`;
+    };
+    email.onclick = async () => {
+      const recipient = String(row.clientEmail || "").trim();
+      if (!recipient) {
+        notice("Cadastre o e-mail da cliente antes de enviar.", true);
+        return;
+      }
+      if (!confirm(`Confirmar o envio deste e-mail para ${recipient}?`)) return;
+      const original = email.textContent;
+      email.disabled = true;
+      email.textContent = "Enviando…";
+      try {
+        await api(
+          "agent.sendApplicationEmail",
+          {
+            applicationId: Number(row.id),
+            subject: options.subject,
+            body: area.value,
+          },
+          true
+        );
+        notice(`E-mail enviado para ${recipient} e registrado no histórico.`);
+        overlay.remove();
+      } catch (error) {
+        notice(error.message, true);
+        email.disabled = false;
+        email.textContent = original;
+      }
     };
   }
   new MutationObserver(() => {

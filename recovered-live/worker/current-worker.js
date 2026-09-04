@@ -54220,7 +54220,7 @@ Detalhes: ${details}` : ""}`;
     if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument"].includes(name)) {
+  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument", "agent.sendApplicationEmail"].includes(name)) {
     const owner = adminEmail.toLowerCase();
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54273,6 +54273,37 @@ Detalhes: ${details}` : ""}`;
     )`).run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+    if (name === "agent.sendApplicationEmail") {
+      const applicationId = Number(input.applicationId || 0);
+      const subject = String(input.subject || "").trim();
+      const body = String(input.body || "").trim();
+      const application = await env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone FROM agentApplications WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(applicationId, owner).first();
+      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      const recipient = String(application.clientEmail || "").trim().toLowerCase();
+      if (!validEmail(recipient)) return trpcError("Esta cliente não possui um e-mail válido");
+      if (!subject || subject.length > 500 || !body || body.length > 5e4) return trpcError("Revise o assunto e a mensagem");
+      const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+      if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
+      const sent = await sendAgentEmail(env, owner, {
+        to: recipient,
+        subject,
+        html: emailHtml(escapeAutomationHtml(subject), `<p>${escapeAutomationHtml(body).replaceAll("\n", "<br>")}</p>`),
+        replyTo: String(config.fromEmail)
+      });
+      const externalId = String(sent.messageId || `portal:${owner}:${Date.now()}`);
+      const client = await env.DB.prepare(`SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND (
+        (email IS NOT NULL AND trim(email)<>'' AND lower(trim(email))=?) OR
+        (phone IS NOT NULL AND trim(phone)<>'' AND substr(replace(replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(?,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR
+        lower(trim(name))=lower(trim(?))
+      ) ORDER BY CASE WHEN lower(trim(email))=? THEN 0 ELSE 1 END,id DESC LIMIT 1`).bind(owner, recipient, String(application.clientPhone || ""), String(application.clientName || ""), recipient).first();
+      const statements = [env.DB.prepare("INSERT INTO agentMailboxEmails (agentEmail,clientId,externalId,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'sent','Enviado diretamente pelo portal','general')").bind(owner, client?.id ? Number(client.id) : null, externalId, String(config.fromEmail), recipient, subject, body)];
+      if (client?.id) {
+        statements.push(env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')").bind(owner, Number(client.id), externalId, subject, body, String(config.fromEmail), recipient));
+        statements.push(env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)").bind(Number(client.id), `E-mail enviado pelo portal: ${subject}`, owner));
+      }
+      await env.DB.batch(statements);
+      return trpcResult({ success: true });
+    }
     if (name === "agent.uploadApplicationDocument") {
       const application = await env.DB.prepare("SELECT id,agentEmail FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id || 0), owner).first();
       if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
