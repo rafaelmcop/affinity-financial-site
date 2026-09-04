@@ -55947,7 +55947,25 @@ Affinity Financial Consulting`,
         await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0, 500), owner).run();
       }
     }
-    const rows = await env.DB.prepare("SELECT m.*,COALESCE(NULLIF(m.inviteePhone,''),(SELECT COALESCE(NULLIF(c.phone,''),NULLIF(c.whatsapp,'')) FROM crmClients c WHERE lower(c.assignedAdminEmail)=lower(m.agentEmail) AND (c.id=m.clientId OR (m.inviteeEmail IS NOT NULL AND lower(trim(c.email))=lower(trim(m.inviteeEmail)))) ORDER BY CASE WHEN c.id=m.clientId THEN 0 ELSE 1 END,c.id DESC LIMIT 1)) AS resolvedPhone FROM calendlyMeetings m WHERE lower(m.agentEmail)=? ORDER BY datetime(m.startTime) DESC LIMIT 250").bind(owner).all();
+    const [rows, applications, policies, agents, closedClients] = await Promise.all([
+      env.DB.prepare("SELECT m.*,COALESCE(NULLIF(m.inviteePhone,''),(SELECT COALESCE(NULLIF(c.phone,''),NULLIF(c.whatsapp,'')) FROM crmClients c WHERE lower(c.assignedAdminEmail)=lower(m.agentEmail) AND (c.id=m.clientId OR (m.inviteeEmail IS NOT NULL AND lower(trim(c.email))=lower(trim(m.inviteeEmail)))) ORDER BY CASE WHEN c.id=m.clientId THEN 0 ELSE 1 END,c.id DESC LIMIT 1)) AS resolvedPhone FROM calendlyMeetings m WHERE lower(m.agentEmail)=? ORDER BY datetime(m.startTime) DESC LIMIT 250").bind(owner).all(),
+      env.DB.prepare("SELECT clientName AS name,clientEmail AS email,clientPhone AS phone FROM agentApplications WHERE lower(agentEmail)=? AND lower(coalesce(status,'')) IN ('submitted','completed','complete','concluida','concluido')").bind(owner).all(),
+      env.DB.prepare("SELECT clientId,clientName AS name,clientEmail AS email,clientPhone AS phone FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all(),
+      env.DB.prepare("SELECT name,email,COALESCE(NULLIF(phone,''),whatsapp) AS phone FROM adminAccounts WHERE isActive=1 AND status='approved' AND accountType IN ('agent','both')").all(),
+      env.DB.prepare("SELECT id,name,email,COALESCE(NULLIF(phone,''),whatsapp) AS phone FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(coalesce(status,'')) IN ('client','closed','completed')").bind(owner).all()
+    ]);
+    const closedIds = new Set(), closedEmails = new Set(), closedPhones = new Set(), closedNames = new Set();
+    const rememberClosed = (row) => {
+      const id = Number(row?.clientId || row?.id || 0);
+      const email = sourceEmail(row?.email);
+      const phone = sourcePhone(row?.phone);
+      const normalizedName = sourceName(row?.name);
+      if (id) closedIds.add(id);
+      if (email) closedEmails.add(email);
+      if (phone) closedPhones.add(phone);
+      if (normalizedName && normalizedName.includes(" ")) closedNames.add(normalizedName);
+    };
+    for (const row of [...(applications.results || []), ...(policies.results || []), ...(agents.results || []), ...(closedClients.results || [])]) rememberClosed(row);
     return trpcResult((rows.results || []).map((row) => {
       let answerPhone = "";
       try {
@@ -55955,7 +55973,9 @@ Affinity Financial Consulting`,
         answerPhone = String(answers.find((item) => /phone|telefone|teléfono|whatsapp|mobile|cell|celular|móvel|número.*contato|contact.*number/i.test(String(item.question || "")))?.answer || answers.find((item) => { const digits = String(item.answer || "").replace(/\D/g, ""); return digits.length >= 10 && digits.length <= 15; })?.answer || "");
       } catch {}
       const { resolvedPhone, ...meeting } = row;
-      return { ...meeting, inviteePhone: String(resolvedPhone || answerPhone || "").trim() || null, id: Number(row.id), clientId: Number(row.clientId || 0) || null };
+      const inviteePhone = String(resolvedPhone || answerPhone || "").trim() || null;
+      const isClosed = closedIds.has(Number(row.clientId || 0)) || closedEmails.has(sourceEmail(row.inviteeEmail)) || closedPhones.has(sourcePhone(inviteePhone)) || closedNames.has(sourceName(row.inviteeName));
+      return { ...meeting, inviteePhone, id: Number(row.id), clientId: Number(row.clientId || 0) || null, isClosed };
     }));
   }
   if (name === "agent.calendlyRecaps") {

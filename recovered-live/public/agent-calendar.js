@@ -189,6 +189,7 @@ function renderMeetings(rows) {
     : '<p class="muted">Nenhuma reunião futura encontrada.</p>';
   const followUps = rows
     .filter(row => {
+      if (row.isClosed) return false;
       const status = String(row.status || "").toLowerCase();
       return ["canceled", "cancelled", "no_show", "completed"].includes(status) ||
         (new Date(row.endTime) <= now && status === "active");
