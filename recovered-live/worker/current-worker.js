@@ -53371,23 +53371,42 @@ function sourceValue(rows, field) {
   return null;
 }
 __name(sourceValue, "sourceValue");
+function applicationBeneficiaries(application) {
+  let data = {};
+  try { data = JSON.parse(String(application?.applicationData || "{}")) || {}; } catch {}
+  const list = Array.isArray(data.beneficiaries) ? data.beneficiaries.filter((item) => item && typeof item === "object") : [];
+  if (list.length) return JSON.stringify(list.map((item) => ({
+    name: String(item.name || item.fullName || item.beneficiaryName || "").trim(),
+    relationship: String(item.relationship || item.beneficiaryRelationship || "").trim(),
+    birthDate: String(item.birthDate || item.dateOfBirth || "").trim(),
+    percentage: Number(item.percentage || item.beneficiaryPercentage || 0)
+  })).filter((item) => item.name));
+  const name = String(application?.beneficiaryName || data.beneficiaryName || "").trim();
+  if (!name) return null;
+  return JSON.stringify([{ name, relationship: String(application?.beneficiaryRelationship || data.beneficiaryRelationship || "").trim(), percentage: Number(application?.beneficiaryPercentage || data.beneficiaryPercentage || 100) }]);
+}
+__name(applicationBeneficiaries, "applicationBeneficiaries");
 async function mergeClientSourcesForAgent(env, agentEmail) {
   const owner = String(agentEmail || "").trim().toLowerCase();
   const [clientResult, applicationResult, policyResult, meetingResult] = await Promise.all([
     env.DB.prepare("SELECT id,name,email,phone,whatsapp,birthDate,address FROM crmClients WHERE lower(assignedAdminEmail)=?").bind(owner).all(),
-    env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget FROM agentApplications WHERE lower(agentEmail)=?").bind(owner).all(),
+    env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget,applicationData,status,submittedAt,completedAt,createdAt,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(owner).all(),
     env.DB.prepare("SELECT id,clientId,clientName,clientEmail,clientPhone,birthDate,policyNumber,product,premiumAmount,coverageAmount,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all(),
     env.DB.prepare("SELECT id,clientId,inviteeName,inviteeEmail,inviteePhone FROM calendlyMeetings WHERE lower(agentEmail)=?").bind(owner).all()
   ]);
   const clients = clientResult.results || [], applications = applicationResult.results || [], policies = policyResult.results || [], meetings = meetingResult.results || [];
   const emailMap = new Map(), phoneMap = new Map(), nameMap = new Map();
   const addMatch = (map, key, row) => { if (!key) return; const list = map.get(key) || []; list.push(row); map.set(key, list); };
-  for (const row of applications) { const item = { ...row, sourceType: "application" }; addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item); }
+  for (const row of applications) {
+    const rawApplicationDate = String(row.submittedAt || row.completedAt || row.createdAt || "").trim();
+    const item = { ...row, sourceType: "application", beneficiaries: applicationBeneficiaries(row), issuedAt: rawApplicationDate ? rawApplicationDate.slice(0, 10) : null, product: row.productInterest || null, premiumAmount: Number(row.premiumBudget || 0), coverageAmount: Number(row.coverageRequested || 0) };
+    addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item);
+  }
   for (const row of policies) { const item = { ...row, sourceType: "policy" }; addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item); }
   for (const row of meetings) { const item = { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }; addMatch(emailMap, sourceEmail(row.inviteeEmail), item); addMatch(phoneMap, sourcePhone(row.inviteePhone), item); addMatch(nameMap, sourceName(row.inviteeName), item); }
   let clientsUpdated = 0, policiesUpdated = 0, applicationsUpdated = 0;
   for (const client of clients) {
-    const matches = [...(emailMap.get(sourceEmail(client.email)) || []), ...(phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || []), ...(nameMap.get(sourceName(client.name)) || [])].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
+    const matches = [...(emailMap.get(sourceEmail(client.email)) || []), ...(phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || []), ...(nameMap.get(sourceName(client.name)) || []), ...policies.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, sourceType: "policy" })), ...meetings.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }))].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
     if (!matches.length) continue;
     const prioritized = matches.sort((a, b) => ({ application: 0, policy: 1, calendly: 2 }[a.sourceType] - ({ application: 0, policy: 1, calendly: 2 }[b.sourceType])));
     const app = prioritized.find((row) => row.sourceType === "application");
@@ -53404,9 +53423,17 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
       clientsUpdated += 1;
     }
     for (const policy of prioritized.filter((row) => row.sourceType === "policy")) {
-      if (policy.clientId && policy.clientEmail && policy.clientPhone && policy.birthDate) continue;
-      const result = await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),birthDate=COALESCE(NULLIF(birthDate,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(Number(client.id), email || null, phone || null, birthDate || null, Number(policy.id), owner).run();
+      const matchedApplication = prioritized.find((row) => row.sourceType === "application");
+      const applicationDate = matchedApplication?.issuedAt || null;
+      const applicationBeneficiaryData = matchedApplication?.beneficiaries || null;
+      const applicationPremium = Number(matchedApplication?.premiumAmount || 0);
+      const applicationTarget = applicationPremium > 0 ? applicationPremium * 12 : 0;
+      const result = await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=CASE WHEN trim(coalesce(clientName,''))='' THEN ? ELSE clientName END,clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),birthDate=COALESCE(NULLIF(birthDate,''),?),product=COALESCE(NULLIF(product,''),?),premiumAmount=CASE WHEN coalesce(premiumAmount,0)=0 AND ?>0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN coalesce(targetPremium,0)=0 AND ?>0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)=0 AND ?>0 THEN round(?) ELSE points END,coverageAmount=CASE WHEN coalesce(coverageAmount,0)=0 AND ?>0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),issuedAt=COALESCE(NULLIF(issuedAt,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(Number(client.id), name, email || null, phone || null, birthDate || null, matchedApplication?.product || null, applicationPremium, applicationPremium, applicationTarget, applicationTarget, applicationTarget, applicationTarget, Number(matchedApplication?.coverageAmount || 0), Number(matchedApplication?.coverageAmount || 0), applicationBeneficiaryData, applicationDate, Number(policy.id), owner).run();
       policiesUpdated += Number(result.meta?.changes || 0);
+      if (matchedApplication && !matchedApplication.matchedPolicyId) {
+        const linked = await env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND matchedPolicyId IS NULL").bind(Number(policy.id), Number(matchedApplication.id), owner).run();
+        applicationsUpdated += Number(linked.meta?.changes || 0);
+      }
     }
     for (const application of prioritized.filter((row) => row.sourceType === "application")) {
       if (application.clientEmail && application.clientPhone && application.birthDate) continue;
