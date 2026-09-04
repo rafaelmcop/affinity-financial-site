@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="pt-BR">
+
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Seguro de Vida e Planejamento Financeiro | Affinity Financial</title>
+    <meta name="description" content="Consultoria em seguro de vida, proteção familiar e planejamento financeiro para famílias nos Estados Unidos. Atendimento em português, inglês e espanhol." />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <meta name="author" content="Affinity Financial Consulting Inc." />
+    <meta name="theme-color" content="#10243d" />
+    <link rel="canonical" href="https://www.affinityfc.org/" />
+    <link rel="alternate" hreflang="pt-BR" href="https://www.affinityfc.org/" />
+    <link rel="alternate" hreflang="en-US" href="https://www.affinityfc.org/" />
+    <link rel="alternate" hreflang="es-US" href="https://www.affinityfc.org/" />
+    <link rel="alternate" hreflang="x-default" href="https://www.affinityfc.org/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Affinity Financial Consulting" />
+    <meta property="og:title" content="Seguro de Vida e Planejamento Financeiro | Affinity Financial" />
+    <meta property="og:description" content="Proteção familiar e planejamento financeiro com atendimento em português, inglês e espanhol nos Estados Unidos." />
+    <meta property="og:url" content="https://www.affinityfc.org/" />
+    <meta property="og:image" content="https://www.affinityfc.org/family-hero.jpg" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:locale:alternate" content="en_US" />
+    <meta property="og:locale:alternate" content="es_US" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Seguro de Vida e Planejamento Financeiro | Affinity Financial" />
+    <meta name="twitter:description" content="Proteção familiar e planejamento financeiro para famílias nos Estados Unidos." />
+    <meta name="twitter:image" content="https://www.affinityfc.org/family-hero.jpg" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": ["FinancialService", "InsuranceAgency"],
+        "@id": "https://www.affinityfc.org/#organization",
+        "name": "Affinity Financial Consulting Inc.",
+        "url": "https://www.affinityfc.org/",
+        "image": "https://www.affinityfc.org/family-hero.jpg",
+        "telephone": "+1-857-421-8325",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "247 Washington St",
+          "addressLocality": "Stoughton",
+          "addressRegion": "MA",
+          "addressCountry": "US"
+        },
+        "areaServed": {
+          "@type": "Country",
+          "name": "United States"
+        },
+        "availableLanguage": ["Portuguese", "English", "Spanish"],
+        "description": "Consultoria em seguro de vida, proteção familiar e planejamento financeiro para famílias nos Estados Unidos.",
+        "knowsAbout": ["Seguro de vida", "Proteção familiar", "Planejamento financeiro", "Planejamento de aposentadoria"]
+      }
+    </script>
+    <!-- Elegant fonts for Affinity Financial -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800&family=Lato:wght@400;500;700&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --font-serif: 'Playfair Display', serif;
+        --font-sans: 'Lato', sans-serif;
+      }
+      #reviews [class*="review-progress_10s"] {
+        display: none !important;
+      }
+      a[href="/avaliar"] {
+        display: none !important;
+      }
+    </style>
+    <script>
+      (() => {
+        const entries = ["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"];
+        const clearLocalSession = () => {
+          for (const key of ["adminSession", "agentSession", "affiliateSession", "agentUser", "agentToken", "affinity-agent-counts"]) localStorage.removeItem(key);
+        };
+        const path = () => location.pathname.replace(/\/$/, "") || "/";
+        if (entries.includes(path())) clearLocalSession();
+        const leavePortal = () => {
+          if (!entries.includes(path())) return;
+          clearLocalSession();
+          fetch("/api/trpc/auth.logout", {
+            method: "POST",
+            credentials: "include",
+            keepalive: true,
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ json: {} })
+          }).catch(() => {});
+        };
+        for (const method of ["pushState", "replaceState"]) {
+          const original = history[method];
+          history[method] = function (...args) {
+            const result = original.apply(this, args);
+            queueMicrotask(leavePortal);
+            return result;
+          };
+        }
+        addEventListener("popstate", leavePortal);
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-BIU-6RMI.js?v=20260901-13"></script>
+    <script src="/review-button-position.js" defer></script>
+    <script src="/career-nav.js?v=20260825-2" defer></script>
+    <script src="/career-portal-menu.js?v=20260825-2" defer></script>
+    <script src="/payment-case-link.js?v=20260826-1" defer></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CBbEAruF.css">
+  </head>
+
+  <body>
+    <div id="root"></div>
+  <script src="/email-provider-selector.js?v=20260828-1" defer></script>
+<script src="/agent-menu-labels.js?v=20260828-1" defer></script><script src="/agent-reviews-hub.js?v=20260828-1" defer></script><script src="/agent-document-upload-links.js?v=20260828-1" defer></script><script src="/calendly-public.js?v=20260828-1" defer></script><script src="/agent-client-recaps.js?v=20260831-2" defer></script></body>
+
+</html>

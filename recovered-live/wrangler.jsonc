@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "affinity-financial-staging",
+  "main": "./worker/current-worker.js",
+  "compatibility_date": "2026-08-06",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true,
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "affinity-financial-staging-db",
+      "database_id": "aa4b6291-383d-4237-8a4b-edff1eb7f60b",
+    },
+  ],
+  "ai": {
+    "binding": "AI",
+  },
+  "vars": {
+    "ADMIN_EMAIL": "preview@affinityfc.org",
+    "VITE_FRONTEND_URL": "https://www.affinityfc.org",
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+  },
+  "triggers": {
+    "crons": ["*/5 * * * *", "2,7,12,17,22,27,32,37,42,47,52,57 * * * *", "*/15 * * * *", "15 11 * * *"],
+  },
+  "routes": [
+    {
+      "pattern": "www.affinityfc.org/*",
+      "zone_name": "affinityfc.org",
+    },
+    {
+      "pattern": "affinityfc.org/*",
+      "zone_name": "affinityfc.org",
+    },
+  ],
+}

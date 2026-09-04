@@ -1,11 +1,13 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { Upload, ShieldCheck } from "lucide-react";
+import { ArrowDown, ArrowUp, FileSpreadsheet, Search, Upload, ShieldCheck, X } from "lucide-react";
+import { extractApplicationDate, extractPdfCreationDate } from "../../../shared/pcSheet";
+import { extractIssuedPolicyData } from "../../../shared/issuedPolicy";
 type PolicyForm = {
   clientName: string;
   clientEmail: string;
@@ -36,7 +38,185 @@ const empty: PolicyForm = {
   beneficiaries: "",
   issuedAt: "",
 };
-const money = (v: string) => Number(v.replace(/[$,]/g, "")) || 0;
+const money = (v: string) => {
+  const cleaned = v.replace(/[$,\s]/g, "").toLowerCase();
+  const value = Number(cleaned.replace(/[km]$/, ""));
+  if (!Number.isFinite(value)) return 0;
+  if (cleaned.endsWith("m")) return value * 1_000_000;
+  if (cleaned.endsWith("k")) return value * 1_000;
+  return value;
+};
+type SpreadsheetRow = PolicyForm & {
+  policyStatus: "active" | "lapse" | "declined" | "cancelled";
+};
+const cleanHeader = (value: string) =>
+  value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const spreadsheetValue = (row: Record<string, unknown>, aliases: string[]) => {
+  const entries = Object.entries(row).map(([key, value]) => [cleanHeader(key), String(value ?? "").trim()] as const);
+  for (const alias of aliases) {
+    const found = entries.find(([key]) => key === alias || key.includes(alias));
+    if (found?.[1]) return found[1];
+  }
+  return "";
+};
+const spreadsheetDate = (value: string) => {
+  const iso = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
+  const us = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (us) return `${us[3]}-${us[1].padStart(2, "0")}-${us[2].padStart(2, "0")}`;
+  const named = new Date(value);
+  return Number.isNaN(named.getTime()) ? "" : named.toISOString().slice(0, 10);
+};
+export const spreadsheetBirthDate = (value: string) => {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  // Excel may expose a date-formatted cell as its internal day serial when the
+  // author saved the cell with a General/custom format (34618 = 10/11/1994).
+  if (/^\d{4,5}(?:\.\d+)?$/.test(text)) {
+    const serial = Number(text);
+    if (serial >= 1 && serial <= 100000) {
+      const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86400000);
+      return `${String(date.getUTCMonth() + 1).padStart(2, "0")}/${String(date.getUTCDate()).padStart(2, "0")}/${date.getUTCFullYear()}`;
+    }
+  }
+  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (iso) return `${iso[2].padStart(2, "0")}/${iso[3].padStart(2, "0")}/${iso[1]}`;
+  const us = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2}|\d{4})/);
+  if (us) {
+    const year = us[3].length === 2 ? Number(us[3]) + (Number(us[3]) > 30 ? 1900 : 2000) : Number(us[3]);
+    return `${us[1].padStart(2, "0")}/${us[2].padStart(2, "0")}/${year}`;
+  }
+  const named = new Date(text);
+  if (!Number.isNaN(named.getTime()))
+    return `${String(named.getUTCMonth() + 1).padStart(2, "0")}/${String(named.getUTCDate()).padStart(2, "0")}/${named.getUTCFullYear()}`;
+  return text;
+};
+const spreadsheetStatus = (value: string): SpreadsheetRow["policyStatus"] => {
+  const normalized = cleanHeader(value);
+  if (normalized.includes("lapse")) return "lapse";
+  if (normalized.includes("recus") || normalized.includes("declin")) return "declined";
+  if (normalized.includes("cancel")) return "cancelled";
+  return "active";
+};
+export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[]> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true });
+  const createdAt = workbook.Props?.CreatedDate ? new Date(workbook.Props.CreatedDate) : null;
+  const fileCreationDate = createdAt && !Number.isNaN(createdAt.getTime())
+    ? createdAt.toISOString().slice(0, 10)
+    : "";
+  const tableRows = workbook.SheetNames.flatMap(sheetName =>
+    XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets[sheetName], { defval: "", raw: false })
+  );
+  const fromTable = tableRows.map(row => {
+    const premiumAmount = money(spreadsheetValue(row, ["premium", "premio", "valor premium"]));
+    const frequency = spreadsheetValue(row, ["frequencia", "frequency", "modal"]);
+    const suppliedTarget = money(spreadsheetValue(row, ["target premium", "premium anual"]));
+    const targetPremium = suppliedTarget || premiumAmount * 12;
+    const suppliedPoints = money(spreadsheetValue(row, ["pontos", "points"]));
+    return {
+      clientName: spreadsheetValue(row, ["nome completo", "nome cliente", "client name", "cliente", "nome"]),
+      clientEmail: spreadsheetValue(row, ["e mail", "email"]),
+      clientPhone: spreadsheetValue(row, ["telefone", "celular", "phone", "whatsapp"]),
+      birthDate: spreadsheetBirthDate(spreadsheetValue(row, ["data nascimento", "nascimento", "date of birth", "dob"])),
+      policyNumber: spreadsheetValue(row, ["numero apolice", "apolice numero", "policy number", "apolice"]),
+      product: spreadsheetValue(row, ["tipo apolice", "produto", "product"]),
+      policyStatus: spreadsheetStatus(spreadsheetValue(row, ["status apolice", "policy status", "status"])),
+      premiumAmount, premiumFrequency: frequency, targetPremium,
+      points: Math.round(suppliedPoints || targetPremium),
+      coverageAmount: money(spreadsheetValue(row, ["valor cobertura", "cobertura", "coverage", "face amount"])),
+      beneficiaries: spreadsheetValue(row, ["beneficiarios", "beneficiario", "beneficiaries"]),
+      issuedAt: spreadsheetDate(spreadsheetValue(row, ["data aplicacao", "application date", "date esigned", "data emissao"])) || fileCreationDate,
+    } satisfies SpreadsheetRow;
+  }).filter(row => row.clientName);
+
+  // Algumas fichas cadastrais são formulários visuais: os rótulos e valores
+  // ficam espalhados pela planilha, em vez de formarem uma tabela com cabeçalho.
+  const fromForms = workbook.SheetNames.flatMap(sheetName => {
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], {
+      header: 1, defval: "", raw: false,
+    }).map(row => row.map(value => String(value ?? "").trim()));
+    const normalized = matrix.map(row => row.map(cleanHeader));
+    const findCell = (aliases: string[], startRow = 0, endRow = matrix.length) => {
+      for (let row = startRow; row < Math.min(endRow, matrix.length); row += 1) {
+        for (let col = 0; col < (normalized[row]?.length || 0); col += 1) {
+          const cell = normalized[row][col];
+          if (aliases.some(alias => cell === alias || cell.includes(alias))) return { row, col };
+        }
+      }
+      return undefined;
+    };
+    const rightValue = (aliases: string[], startRow = 0, endRow = matrix.length, maxDistance = 4) => {
+      const cell = findCell(aliases, startRow, endRow);
+      if (!cell) return "";
+      for (let distance = 1; distance <= maxDistance; distance += 1) {
+        const value = matrix[cell.row]?.[cell.col + distance]?.trim();
+        if (value) return value;
+      }
+      return "";
+    };
+    const belowValue = (aliases: string[], maxRows = 4) => {
+      const cell = findCell(aliases);
+      if (!cell) return "";
+      for (let distance = 1; distance <= maxRows; distance += 1) {
+        const value = matrix[cell.row + distance]?.[cell.col]?.trim();
+        if (value) return value;
+      }
+      return "";
+    };
+    const personalSection = findCell(["dados pessoais"]);
+    const beneficiarySection = findCell(["beneficiarios"]);
+    const personalStart = personalSection ? personalSection.row + 1 : 0;
+    const personalEnd = beneficiarySection?.row ?? matrix.length;
+    const clientName = rightValue(["nome completo"], personalStart, personalEnd);
+    if (!clientName) return [];
+
+    const premiumAmount = money(belowValue(["premium", "premio"]));
+    const premiumFrequency = rightValue(["frequencia", "frequency", "modal"], 0, personalStart) || "Mensal";
+    const targetPremium = premiumAmount * 12;
+    const productRows = matrix.slice(0, personalStart).filter(row => row.some(value => /\(\s*x\s*\)/i.test(value)));
+    const productText = productRows.flat().join(" ");
+    const product = /term|temporar/i.test(productText) ? "Term Life"
+      : /iul|indexad/i.test(productText) ? "IUL"
+      : /whole\s*life|vida inteira/i.test(productText) ? "Whole Life" : "";
+    const beneficiaryStart = beneficiarySection?.row ?? matrix.length;
+    const beneficiaries: string[] = [];
+    for (let row = beneficiaryStart; row < Math.min(beneficiaryStart + 12, matrix.length); row += 1) {
+      const nameLabel = normalized[row]?.findIndex(value => value === "nome completo");
+      if (nameLabel === undefined || nameLabel < 0) continue;
+      const name = matrix[row].slice(nameLabel + 1, nameLabel + 5).find(Boolean) || "";
+      const relationship = matrix[row + 1]?.slice(0, 6).filter(Boolean).at(-1) || "";
+      if (name) beneficiaries.push(relationship ? `${name} (${relationship})` : name);
+    }
+    const applicationDate = rightValue(["data da proposta", "data aplicacao", "application date"], 0, personalStart)
+      || belowValue(["data da proposta", "data aplicacao", "application date"], 2);
+    const policyNumber = belowValue(["apolice n", "numero apolice", "policy number"]);
+    const coverageAmount = money(belowValue(["valor da apolice", "valor cobertura", "coverage", "face amount"]));
+    return [{
+      clientName,
+      clientEmail: rightValue(["email", "e mail"], personalStart, personalEnd),
+      clientPhone: rightValue(["telefone", "celular", "phone", "whatsapp"], personalStart, personalEnd),
+      birthDate: spreadsheetBirthDate(rightValue(["data de nascimento", "data nascimento", "date of birth", "dob"], personalStart, personalEnd)),
+      policyNumber, product, policyStatus: "active" as const,
+      premiumAmount, premiumFrequency, targetPremium,
+      points: Math.round(targetPremium), coverageAmount,
+      beneficiaries: beneficiaries.join("; "),
+      issuedAt: spreadsheetDate(applicationDate) || fileCreationDate,
+    } satisfies SpreadsheetRow];
+  });
+
+  const all = [...fromTable, ...fromForms];
+  const unique = new Map<string, SpreadsheetRow>();
+  for (const row of all) {
+    const key = `${cleanHeader(row.clientName)}|${row.policyNumber.toLowerCase()}`;
+    const current = unique.get(key);
+    unique.set(key, current ? {
+      ...current,
+      ...Object.fromEntries(Object.entries(row).map(([field, value]) => [field, value || current[field as keyof SpreadsheetRow]])),
+    } as SpreadsheetRow : row);
+  }
+  return Array.from(unique.values());
+}
 export async function readPcSheet(file: File) {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -48,6 +228,10 @@ export async function readPcSheet(file: File) {
     password: "",
     stopAtErrors: false,
   }).promise;
+  const metadata = await pdf.getMetadata().catch(() => null);
+  const pdfCreationDate = extractPdfCreationDate(
+    (metadata?.info as Record<string, unknown> | undefined)?.CreationDate
+  );
   const pageLines: string[][] = [];
   const rawPages: string[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -132,11 +316,7 @@ export async function readPcSheet(file: File) {
     all,
     /Target Premium[^$\d]{0,40}\$?\s*([\d,]+(?:\.\d{2})?)/i
   );
-  const issuedDate =
-    find(
-      all,
-      /(?:Policy Date|Issue Date|Effective Date)[^\d]{0,30}(\d{1,2}\/\d{1,2}\/\d{4})/i
-    ) || "";
+  let applicationDate = extractApplicationDate(all) || pdfCreationDate;
   const flatLines = pageLines.flat();
   const primaryIndex = flatLines.findIndex(line => /^Primary:/i.test(line));
   const primaryLine =
@@ -180,6 +360,16 @@ export async function readPcSheet(file: File) {
       find(nationalCover, /Proposed Insured\s*\nDOB:\s*\n?([^\n|]+)/i).match(
         /\d{1,2}\/\d{1,2}\/\d{4}/
       )?.[0] || dob;
+
+    // Issued policy packages use a Data Section instead of the application
+    // cover sheet. These values are authoritative when both are present.
+    const issued = extractIssuedPolicyData(all);
+    policy = issued.policyNumber || policy;
+    name = issued.clientName || name;
+    coverage = issued.coverage || coverage;
+    premium = issued.premium || premium;
+    product = issued.product || product;
+    applicationDate = applicationDate || spreadsheetDate(issued.issuedAt);
   }
   const corebridge = /American General Life Insurance Company|Corebridge/i.test(
     all
@@ -237,7 +427,6 @@ export async function readPcSheet(file: File) {
     if (coreBeneficiary) beneficiaries.unshift(coreBeneficiary.trim());
   }
   const dobParts = dob.split("/");
-  const issueParts = issuedDate.split("/");
   const targetPremium = targetPremiumText
     ? money(targetPremiumText)
     : money(premium) * 12;
@@ -261,57 +450,78 @@ export async function readPcSheet(file: File) {
     points: Math.round(targetPremium),
     coverageAmount: money(coverage),
     beneficiaries: Array.from(new Set(beneficiaries)).join(", "),
-    issuedAt:
-      issueParts.length === 3
-        ? `${issueParts[2]}-${issueParts[0].padStart(2, "0")}-${issueParts[1].padStart(2, "0")}`
-        : "",
+    issuedAt: applicationDate,
   };
 }
 export function PcSheetUpload() {
   const [form, setForm] = useState(empty);
   const [loading, setLoading] = useState(false);
   const save = trpc.agent.savePcSheet.useMutation();
+  const importSpreadsheet = trpc.agent.importSpreadsheet.useMutation();
   const utils = trpc.useUtils();
   return (
     <Card className="border-gold/20 bg-[#0b1524] p-6">
       <div className="rounded-xl border border-dashed border-gold/40 bg-black/30 p-6 text-center">
         <Upload className="mx-auto text-gold" />
-        <p className="mt-3 font-bold">Selecione um PC Sheet em PDF</p>
+        <p className="mt-3 font-bold">Selecione um PC Sheet em PDF ou uma ficha em Excel</p>
         <p className="mt-1 text-xs text-gray-400">
-          A leitura acontece neste navegador. Dados bancários, SSN e informações
-          médicas são ignorados.
+          O sistema identifica automaticamente PDF, Excel ou CSV. Dados bancários,
+          SSN e informações médicas são ignorados.
         </p>
         <Input
           className="mx-auto mt-4 max-w-md"
           type="file"
-          accept="application/pdf"
+          accept=".pdf,.xlsx,.xls,.csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
           onChange={async e => {
             const file = e.target.files?.[0];
             if (!file) return;
+            e.currentTarget.value = "";
             setLoading(true);
             try {
+              const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+              if (!isPdf) {
+                const rows = await readClientSpreadsheet(file);
+                if (!rows.length) throw new Error("Não foi possível identificar nenhum cliente nesta planilha");
+                setForm({ ...empty, ...rows[0] });
+                const result = await importSpreadsheet.mutateAsync({ rows });
+                await Promise.all([
+                  utils.agent.listPolicies.invalidate(),
+                  utils.agent.listClients.invalidate(),
+                  utils.agent.dashboard.invalidate(),
+                ]);
+                toast.success(`${rows.length} cadastro(s) identificado(s) e salvos. ${result.createdClients} cliente(s) criado(s) e ${result.updatedClients} completado(s).`);
+                return;
+              }
               const extracted = await readPcSheet(file);
               setForm(extracted);
               const filled = Object.values(extracted).filter(
                 value => value !== "" && value !== 0
               ).length;
-              if (!extracted.clientName && !extracted.policyNumber)
+              if (!extracted.clientName || !extracted.policyNumber)
                 toast.error(
                   "O texto foi lido, mas não foi possível identificar nome e número da apólice. Confira os campos abaixo ou tente o PDF original."
                 );
-              else
+              else {
+                const result = await save.mutateAsync(extracted);
+                await Promise.all([
+                  utils.agent.listPolicies.invalidate(),
+                  utils.agent.listMessages.invalidate(),
+                  utils.agent.listTasks.invalidate(),
+                  utils.agent.listClients.invalidate(),
+                ]);
                 toast.success(
-                  `${filled} campos extraídos. Confira antes de salvar.`
+                  `${filled} campos extraídos e salvos automaticamente. ${result.automationCount ?? 0} mensagens e acompanhamentos programados.`
                 );
-            } catch {
-              toast.error("Não foi possível ler este PDF");
+              }
+            } catch (error) {
+              toast.error(error instanceof Error ? error.message : "Não foi possível ler e salvar este arquivo");
             } finally {
               setLoading(false);
             }
           }}
         />
         {loading && (
-          <p className="mt-3 text-sm text-gold">Lendo documento...</p>
+          <p className="mt-3 text-sm text-gold">Lendo e salvando arquivo...</p>
         )}
       </div>
       <div className="mt-6 grid gap-4 md:grid-cols-2">
@@ -435,7 +645,7 @@ export function PcSheetUpload() {
           </p>
         </label>
         <label className="text-sm text-gray-300">
-          Data de emissão da apólice
+          Data da aplicação
           <Input
             className="mt-2"
             type="date"
@@ -443,7 +653,8 @@ export function PcSheetUpload() {
             onChange={e => setForm({ ...form, issuedAt: e.target.value })}
           />
           <p className="mt-1 text-xs text-gray-500">
-            Usada para a revisão anual e o aviso ao agente.
+            Extraída do campo “Date and Time eSigned” do PC Sheet, sem o
+            horário. Usada para a revisão anual e o aviso ao agente.
           </p>
         </label>
         <label className="text-sm text-gray-300">
@@ -468,34 +679,84 @@ export function PcSheetUpload() {
             onChange={e => setForm({ ...form, beneficiaries: e.target.value })}
           />
         </label>
-        <Button
-          className="bg-gold text-black md:col-span-2"
-          disabled={!form.clientName || !form.policyNumber || save.isPending}
-          onClick={async () => {
-            try {
-              const result = await save.mutateAsync(form);
-              setForm(empty);
-              await Promise.all([
-                utils.agent.listPolicies.invalidate(),
-                utils.agent.listMessages.invalidate(),
-                utils.agent.listTasks.invalidate(),
-                utils.agent.listClients.invalidate(),
-              ]);
-              toast.success(
-                `Cliente pronto: ${result.automationCount ?? 0} mensagens e acompanhamentos programados`
-              );
-            } catch (error) {
-              toast.error(
-                error instanceof Error ? error.message : "Erro ao salvar"
-              );
-            }
-          }}
-        >
+        <p className="rounded-lg border border-gold/20 bg-gold/10 p-3 text-sm text-gold md:col-span-2">
           {save.isPending
-            ? "Criando cliente e automações..."
-            : "Confirmar e automatizar"}
-        </Button>
+            ? "Salvando cliente, apólice e automações..."
+            : "O cadastro é salvo automaticamente assim que o PC Sheet termina de ser lido."}
+        </p>
       </div>
+    </Card>
+  );
+}
+export function SpreadsheetUpload() {
+  const [rows, setRows] = useState<SpreadsheetRow[]>([]);
+  const [fileName, setFileName] = useState("");
+  const [reading, setReading] = useState(false);
+  const importer = trpc.agent.importSpreadsheet.useMutation();
+  const utils = trpc.useUtils();
+  const clear = () => { setRows([]); setFileName(""); };
+  const readFile = async (file: File) => {
+    setReading(true);
+    try {
+      const parsed = await readClientSpreadsheet(file);
+      if (!parsed.length) throw new Error("Nenhuma coluna de nome foi encontrada");
+      setRows(parsed);
+      setFileName(file.name);
+      toast.success(`${parsed.length} cadastro(s) identificado(s). Confira antes de importar.`);
+    } catch (error) {
+      clear();
+      toast.error(error instanceof Error ? error.message : "Não foi possível ler a planilha");
+    } finally {
+      setReading(false);
+    }
+  };
+  return (
+    <Card className="border-gold/20 bg-[#0b1524] p-6">
+      <div className="rounded-xl border border-dashed border-emerald-400/40 bg-emerald-500/5 p-6 text-center">
+        <FileSpreadsheet className="mx-auto text-emerald-300" />
+        <p className="mt-3 font-bold">Importar clientes por Excel</p>
+        <p className="mx-auto mt-1 max-w-2xl text-xs text-gray-400">
+          Aceita .xlsx, .xls e .csv. Use uma linha por cliente. O sistema cria novos cadastros e apenas completa campos vazios dos já existentes; os dados do PC Sheet têm prioridade.
+        </p>
+        <Input
+          className="mx-auto mt-4 max-w-md"
+          type="file"
+          accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv"
+          disabled={reading || importer.isPending}
+          onChange={event => { const file = event.target.files?.[0]; if (file) void readFile(file); event.currentTarget.value = ""; }}
+        />
+        <p className="mt-3 text-xs text-gray-500">
+          Colunas reconhecidas: Nome, E-mail, Telefone, Nascimento, Nº da apólice, Produto, Status, Premium, Frequência, Target Premium, Pontos, Cobertura, Beneficiários e Data da aplicação.
+        </p>
+      </div>
+      {rows.length > 0 && (
+        <div className="mt-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div><p className="font-bold text-gold">Conferência antes da importação</p><p className="text-sm text-gray-400">{fileName} · {rows.length} linha(s)</p></div>
+            <Button type="button" variant="outline" size="sm" onClick={clear}><X className="mr-2 h-4 w-4" />Cancelar</Button>
+          </div>
+          <div className="max-h-72 overflow-auto rounded-xl border border-white/10">
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="sticky top-0 bg-[#101d30] text-gray-300"><tr><th className="p-3">Cliente</th><th className="p-3">Contato</th><th className="p-3">Apólice</th><th className="p-3">Status</th><th className="p-3">Premium</th><th className="p-3">Cobertura</th></tr></thead>
+              <tbody>{rows.map((row, index) => <tr key={`${row.clientName}-${index}`} className="border-t border-white/10"><td className="p-3 font-semibold">{row.clientName}</td><td className="p-3 text-gray-400">{row.clientEmail || row.clientPhone || "—"}</td><td className="p-3">{row.policyNumber || "Somente cliente"}</td><td className="p-3">{{ active: "Ativa", lapse: "Lapse", declined: "Recusada", cancelled: "Cancelada" }[row.policyStatus]}</td><td className="p-3">${row.premiumAmount.toFixed(2)}</td><td className="p-3">${row.coverageAmount.toLocaleString()}</td></tr>)}</tbody>
+            </table>
+          </div>
+          <Button
+            className="w-full bg-gold text-black"
+            disabled={importer.isPending}
+            onClick={async () => {
+              try {
+                const result = await importer.mutateAsync({ rows });
+                await Promise.all([utils.agent.listPolicies.invalidate(), utils.agent.listClients.invalidate(), utils.agent.dashboard.invalidate()]);
+                toast.success(`${result.createdClients} cliente(s) criado(s), ${result.updatedClients} completado(s), ${result.createdPolicies} apólice(s) criada(s) e ${result.updatedPolicies} completada(s).`);
+                clear();
+              } catch (error) {
+                toast.error(error instanceof Error ? error.message : "Não foi possível importar a planilha");
+              }
+            }}
+          >{importer.isPending ? "Importando e conferindo duplicidades..." : `Importar ${rows.length} cadastro(s)`}</Button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -505,6 +766,46 @@ export default function AgentPolicies({
   uploadOnly?: boolean;
 }) {
   const q = trpc.agent.listPolicies.useQuery();
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<
+    "name" | "date" | "type" | "coverage" | "premium"
+  >("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const policies = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    const valueFor = (policy: NonNullable<typeof q.data>[number]) => {
+      if (sortKey === "date") return String(policy.issuedAt || "");
+      if (sortKey === "type") return String(policy.product || "").toLowerCase();
+      if (sortKey === "coverage") return Number(policy.coverageAmount || 0);
+      if (sortKey === "premium") return Number(policy.premiumAmount || 0);
+      return String(policy.clientName || "").toLowerCase();
+    };
+    return (q.data || [])
+      .filter(policy =>
+        `${policy.clientName} ${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`
+          .toLowerCase()
+          .includes(term)
+      )
+      .sort((a, b) => {
+        const first = valueFor(a),
+          second = valueFor(b);
+        const result =
+          typeof first === "number" && typeof second === "number"
+            ? first - second
+            : String(first).localeCompare(String(second), "pt-BR", {
+                numeric: true,
+              });
+        return sortDirection === "asc" ? result : -result;
+      });
+  }, [q.data, search, sortKey, sortDirection]);
+  const changeSort = (key: typeof sortKey) => {
+    if (sortKey === key)
+      setSortDirection(current => (current === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDirection("asc");
+    }
+  };
   return (
     <div className="min-h-screen bg-black text-white lg:pl-64">
       <AgentSidebar />
@@ -521,7 +822,51 @@ export default function AgentPolicies({
           <PcSheetUpload />
         ) : (
           <div className="grid gap-4">
-            {(q.data || []).map(p => (
+            <Card className="border-gold/20 bg-[#0b1524] p-4">
+              <div className="relative">
+                <Search
+                  className="absolute left-3 top-3 text-gray-500"
+                  size={17}
+                />
+                <Input
+                  className="pl-10"
+                  placeholder="Buscar por cliente, número, tipo, data ou valor"
+                  value={search}
+                  onChange={event => setSearch(event.target.value)}
+                />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(
+                  [
+                    ["name", "Nome"],
+                    ["date", "Data"],
+                    ["type", "Tipo de apólice"],
+                    ["coverage", "Cobertura"],
+                    ["premium", "Premium"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <Button
+                    key={key}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => changeSort(key)}
+                    className={
+                      sortKey === key ? "border-gold bg-gold/15 text-gold" : ""
+                    }
+                  >
+                    {label}
+                    {sortKey === key &&
+                      (sortDirection === "asc" ? (
+                        <ArrowUp className="ml-2 h-3.5 w-3.5" />
+                      ) : (
+                        <ArrowDown className="ml-2 h-3.5 w-3.5" />
+                      ))}
+                  </Button>
+                ))}
+              </div>
+            </Card>
+            {policies.map(p => (
               <Card key={p.id} className="border-gold/20 bg-[#0b1524] p-5">
                 <div className="flex items-start justify-between">
                   <div>
@@ -529,6 +874,9 @@ export default function AgentPolicies({
                     <p className="text-sm text-gray-400">
                       {p.policyNumber} · {p.product || "Produto não informado"}
                     </p>
+                    <span className={`mt-2 inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${String(p.status || "active") === "active" ? "bg-emerald-500/15 text-emerald-300" : String(p.status) === "lapse" ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300"}`}>
+                      {({ active: "Ativa", lapse: "Lapse", declined: "Recusada", cancelled: "Cancelada" } as const)[String(p.status || "active") as "active" | "lapse" | "declined" | "cancelled"]}
+                    </span>
                   </div>
                   <ShieldCheck className="text-gold" />
                 </div>
@@ -545,7 +893,7 @@ export default function AgentPolicies({
                     <b>${Number(p.targetPremium || 0).toFixed(2)}</b>
                   </span>
                   <span>
-                    Pontos: <b>{Math.round(Number(p.points || 0))}</b>
+                    Pontos contabilizados: <b>{String(p.status || "active") === "active" ? Math.round(Number(p.points || 0)) : 0}</b>
                   </span>
                   <span>
                     Cobertura:{" "}
@@ -554,12 +902,24 @@ export default function AgentPolicies({
                   <span>
                     Beneficiário: <b>{p.beneficiaries || "Não informado"}</b>
                   </span>
+                  <span>
+                    Data da aplicação:{" "}
+                    <b>
+                      {p.issuedAt
+                        ? new Date(
+                            `${String(p.issuedAt).slice(0, 10)}T12:00:00`
+                          ).toLocaleDateString("en-US")
+                        : "Não informada"}
+                    </b>
+                  </span>
                 </div>
               </Card>
             ))}
-            {q.data?.length === 0 && (
+            {policies.length === 0 && (
               <Card className="border-white/10 bg-[#0b1524] p-8 text-center text-gray-400">
-                Nenhuma apólice cadastrada.
+                {q.data?.length
+                  ? "Nenhuma apólice encontrada."
+                  : "Nenhuma apólice cadastrada."}
               </Card>
             )}
           </div>

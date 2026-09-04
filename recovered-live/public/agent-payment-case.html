@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Caso de pagamento | Affinity</title>
+    <style>
+      :root {
+        --gold: #dfb934;
+        --navy: #0f223b;
+        --card: #0b1728;
+        --line: #293b52;
+        --muted: #9ca8b8;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #000;
+        color: #fff;
+        font:
+          15px Lato,
+          Arial,
+          sans-serif;
+      }
+      .main {
+        margin-left: 260px;
+        padding: 38px;
+        max-width: 1250px;
+      }
+      .eyebrow {
+        color: var(--gold);
+        font-weight: 900;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+      h1 {
+        font-size: 38px;
+        margin: 8px 0;
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .card {
+        margin-top: 18px;
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 17px;
+        padding: 22px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 15px;
+      }
+      .grid div {
+        background: #050d18;
+        border-radius: 11px;
+        padding: 13px;
+      }
+      .grid b {
+        display: block;
+        color: var(--gold);
+        margin-bottom: 5px;
+      }
+      .status {
+        display: inline-block;
+        border-radius: 99px;
+        padding: 6px 10px;
+        font-weight: 900;
+      }
+      .sent {
+        background: #14532d;
+        color: #bbf7d0;
+      }
+      .review {
+        background: #78350f;
+        color: #fde68a;
+      }
+      .failed {
+        background: #7f1d1d;
+        color: #fecaca;
+      }
+      .message {
+        white-space: pre-wrap;
+        line-height: 1.55;
+        background: #050d18;
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 13px;
+      }
+      label {
+        color: #d8dee8;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      input,
+      textarea {
+        width: 100%;
+        margin-top: 7px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #050d18;
+        color: #fff;
+        padding: 12px;
+        font: inherit;
+      }
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+      }
+      .wide {
+        grid-column: 1 / -1;
+      }
+      .history {
+        display: grid;
+        gap: 10px;
+      }
+      .email {
+        border: 1px solid #24354b;
+        border-radius: 12px;
+        padding: 14px;
+      }
+      .email.out {
+        margin-left: 8%;
+        background: #4d3e121f;
+      }
+      .email.in {
+        margin-right: 8%;
+        background: #07598522;
+      }
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+      .actions button,
+      .actions a {
+        border: 1px solid var(--line);
+        background: #101d2d;
+        color: #fff;
+        border-radius: 10px;
+        padding: 11px 15px;
+        font-weight: 800;
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .actions .primary {
+        background: var(--gold);
+        color: #050505;
+      }
+      .empty {
+        text-align: center;
+        color: var(--muted);
+        padding: 25px;
+      }
+      @media (max-width: 899px) {
+        .main {
+          margin: 0;
+          padding: 22px 16px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        .form-grid {
+          grid-template-columns: 1fr;
+        }
+        .wide {
+          grid-column: auto;
+        }
+        h1 {
+          font-size: 31px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="main">
+      <div class="eyebrow">Prioridade de pagamento</div>
+      <h1>Caso de pagamento</h1>
+      <p class="muted">Somente as informações relacionadas a esta pendência.</p>
+      <div id="content"><div class="card empty">Carregando o caso…</div></div>
+    </main>
+    <script src="/agent-payment-case.js?v=20260903-4"></script>
+    <script src="/agent-unified-menu.js?v=20260903-3" defer></script>
+  </body>
+</html>

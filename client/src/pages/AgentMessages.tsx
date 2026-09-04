@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Edit2, Plus, Trash2 } from "lucide-react";
 import AgentSidebar from "@/components/AgentSidebar";
 import { Card } from "@/components/ui/card";
@@ -6,6 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
+import {
+  DEFAULT_PAYMENT_RETURN_MESSAGE,
+  DEFAULT_PAYMENT_RETURN_SUBJECT,
+} from "@shared/paymentReturnTemplate";
 
 type Occasion =
   | "birthday"
@@ -49,7 +53,7 @@ const labels: Record<Occasion, string> = {
   thanksgiving: "Dia de Ação de Graças",
   christmas: "Natal",
   new_year: "Ano-Novo",
-  policy_anniversary: "Aniversário da apólice",
+  policy_anniversary: "Revisão Flex Life (13 meses)",
   monthly: "Início do mês",
   custom: "Data personalizada",
 };
@@ -68,11 +72,36 @@ export function ScheduledMessagesPanel({
   clientId?: number;
 }) {
   const messages = trpc.agent.listMessages.useQuery(),
-    clients = trpc.agent.listClients.useQuery();
+    clients = trpc.agent.listClients.useQuery(),
+    profiles = trpc.crm.assignees.useQuery();
   const create = trpc.agent.scheduleMessage.useMutation(),
     update = trpc.agent.updateMessage.useMutation(),
     remove = trpc.agent.deleteMessage.useMutation();
   const [form, setForm] = useState<Form | null>(null);
+  const session = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("agentSession") || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  const profile = (profiles.data || []).find(
+    item => item.email.toLowerCase() === String(session.email || "").toLowerCase()
+  );
+  const previewMessage = (value: unknown) =>
+    String(value || "")
+      .replaceAll("{agente_nome}", profile?.name || session.name || "Nome do agente")
+      .replaceAll("{agente_telefone}", profile?.phone || profile?.whatsapp || "Telefone do agente")
+      .replaceAll("{agente}", profile?.name || session.name || "Nome do agente")
+      .replaceAll("{telefone do agente}", profile?.phone || profile?.whatsapp || "Telefone do agente");
+  const formRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!form) return;
+    window.setTimeout(
+      () => formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      50
+    );
+  }, [form?.id, form?.monthNumber, Boolean(form)]);
   const visibleMessages = (messages.data || []).filter(row => {
     if (scope === "collective")
       return (
@@ -177,11 +206,11 @@ export function ScheduledMessagesPanel({
             Automações do CRM
           </p>
           <h1 className="mt-2 text-3xl font-bold">
-            {scope === "collective" ? "Mensagens coletivas" : scope === "client" ? "Mensagens deste cliente" : "Mensagens automáticas"}
+            {scope === "collective" ? "Mensagens coletivas" : scope === "client" ? "Mensagens deste cliente" : "Mensagens e automações"}
           </h1>
           <p className="mt-2 text-sm text-gray-400">
-            Enviadas às 8:30 AM pelo e-mail particular configurado no portal.
-            Use <b>{"{nome}"}</b> para personalizar.
+            Crie mensagens sob demanda ou automáticas, individuais, em grupo ou coletivas. Os envios programados usam 8:30 AM como horário padrão pelo e-mail particular configurado no portal.
+            Use <b>{"{nome}"}</b> para o cliente. Nos modelos de revisão Flex Life, use também <b>{"{apolice numero}"}</b>, <b>{"{agente}"}</b> e <b>{"{telefone do agente}"}</b>. Os dados são preenchidos automaticamente.
           </p>
         </div>
         <Button className="bg-gold text-black" onClick={newMessage}>
@@ -190,7 +219,7 @@ export function ScheduledMessagesPanel({
         </Button>
       </div>
       {form && (
-        <Card className="grid gap-4 border-gold/30 bg-[#0b1524] p-6 md:grid-cols-2">
+        <Card ref={formRef} className="scroll-mt-4 grid gap-4 border-2 border-gold/50 bg-[#0b1524] p-6 shadow-2xl shadow-black/50 md:grid-cols-2">
           <Input
             placeholder="Nome da automação"
             value={form.title}
@@ -214,7 +243,7 @@ export function ScheduledMessagesPanel({
               <option value="thanksgiving">Dia de Ação de Graças</option>
               <option value="christmas">Natal</option>
               <option value="new_year">Ano-Novo</option>
-              {scope !== "collective" && <option value="policy_anniversary">Aniversário da apólice</option>}
+              {scope !== "collective" && <option value="policy_anniversary">Revisão Flex Life (1 ano e 1 mês)</option>}
               <option value="monthly">Início do mês</option>
               <option value="custom">Data personalizada</option>
             </select>
@@ -485,8 +514,8 @@ export function ScheduledMessagesPanel({
                     ? "Todos os clientes"
                     : `Grupo ${row.recipientGroup || "selecionado"}`}
             </p>
-            <p className="mt-2 line-clamp-3 text-sm text-gray-300">
-              {row.message}
+            <p className="mt-2 whitespace-pre-wrap text-sm text-gray-300">
+              {previewMessage(row.message)}
             </p>
           </Card>
         ))}
@@ -496,10 +525,40 @@ export function ScheduledMessagesPanel({
 }
 
 export default function AgentMessages() {
+  const template = trpc.agent.getPaymentReturnTemplate.useQuery();
+  const saveTemplate = trpc.agent.savePaymentReturnTemplate.useMutation();
+  const [templateSubject, setTemplateSubject] = useState(DEFAULT_PAYMENT_RETURN_SUBJECT);
+  const [templateMessage, setTemplateMessage] = useState(DEFAULT_PAYMENT_RETURN_MESSAGE);
+  const [editingPaymentTemplate, setEditingPaymentTemplate] = useState(false);
+  useEffect(() => {
+    if (!template.data) return;
+    setTemplateSubject(template.data.subject);
+    setTemplateMessage(template.data.message);
+  }, [template.data]);
   return (
     <div className="min-h-screen bg-black text-white lg:pl-64">
       <AgentSidebar />
       <main className="mx-auto max-w-5xl px-4 py-8">
+        <Card className="mb-8 border-gold/30 bg-[#0b1524] p-5">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <span className="rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300">Ativa</span>
+              <h2 className="mt-3 text-lg font-bold text-gold">Pagamento devolvido</h2>
+              <p className="mt-2 text-xs uppercase tracking-wider text-gray-500">Modelo automático · E-mail individual</p>
+              <p className="mt-3 text-sm font-semibold text-white">{templateSubject}</p>
+              {!editingPaymentTemplate && <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-gray-300">{templateMessage}</p>}
+            </div>
+            <Button size="icon" variant="outline" aria-label="Editar modelo de pagamento devolvido" onClick={() => setEditingPaymentTemplate(open => !open)}>
+              <Edit2 size={16} />
+            </Button>
+          </div>
+          {editingPaymentTemplate && <div className="mt-5 space-y-4 border-t border-white/10 pt-5">
+            <p className="text-sm text-gray-400">Este texto é enviado quando o sistema identifica com segurança o cliente e a apólice. Use <b>{"{cliente}"}</b>, <b>{"{agente}"}</b> e <b>{"{telefone}"}</b> para preencher os dados automaticamente.</p>
+            <label className="block text-sm text-gray-300">Assunto<Input className="mt-2" value={templateSubject} onChange={event => setTemplateSubject(event.target.value)} /></label>
+            <label className="block text-sm text-gray-300">Mensagem<textarea className="mt-2 min-h-72 w-full rounded-md border border-white/20 bg-black p-4 text-sm leading-relaxed text-white" value={templateMessage} onChange={event => setTemplateMessage(event.target.value)} /></label>
+            <div className="flex flex-wrap gap-2"><Button className="bg-gold text-black" disabled={saveTemplate.isPending || !templateSubject.trim() || !templateMessage.trim()} onClick={async () => { try { await saveTemplate.mutateAsync({ subject: templateSubject, message: templateMessage }); await template.refetch(); setEditingPaymentTemplate(false); toast.success("Modelo de pagamento devolvido salvo"); } catch (error) { toast.error(error instanceof Error ? error.message : "Não foi possível salvar o modelo"); } }}>Salvar modelo</Button><Button variant="outline" onClick={() => { setTemplateSubject(DEFAULT_PAYMENT_RETURN_SUBJECT); setTemplateMessage(DEFAULT_PAYMENT_RETURN_MESSAGE); }}>Restaurar padrão</Button><Button variant="ghost" onClick={() => setEditingPaymentTemplate(false)}>Cancelar</Button></div>
+          </div>}
+        </Card>
         <ScheduledMessagesPanel />
       </main>
     </div>
