@@ -1067,39 +1067,94 @@
       }
       y -= 8;
     };
+    const sectionPage = (title, items) => {
+      addPage();
+      drawSection(title, items);
+    };
+    const ageFromBirthDate = input => {
+      const match = String(input || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!match) return "Não informado";
+      const birth = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      const today = new Date();
+      let age = today.getFullYear() - birth.getFullYear();
+      if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age -= 1;
+      return age >= 0 ? `${age} anos` : "Não informado";
+    };
+    const parentDescription = (parent, feminine = false) => {
+      const living = String(row[`${parent}Living`] || "");
+      if (living === "Sim") return `${feminine ? "Viva" : "Vivo"}, ${row[`${parent}Age`] || "idade não informada"} anos`;
+      if (living === "Não") return `${feminine ? "Falecida" : "Falecido"} aos ${row[`${parent}DeathAge`] || "idade não informada"} anos - ${row[`${parent}DeathReason`] || "motivo não informado"}`;
+      return "Não informado";
+    };
     const measurements = americanMeasurements(row);
-    addPage();
-    drawSection("1. Proposta e apólice", [
-      ["Produto", row.productInterest], ["Cobertura pretendida", usd(row.coverageRequested)], ["Premium pretendido", usd(row.premiumBudget)],
-      ["Seguro existente", row.existingInsurance], ["Seguradora", row.existingInsuranceCompany], ["Cobertura existente", usd(row.existingCoverage)],
-      ["Benefícios em vida", row.existingLivingBenefits], ["Observações", row.notes],
+    sectionPage("1. Agent Report - seguro de vida anterior", [
+      ["Já possui ou possuiu seguro de vida?", row.existingInsurance || "Não informado"],
+      ["Companhia da apólice anterior", row.existingInsurance === "Sim" ? row.existingInsuranceCompany : "Não se aplica"],
+      ["Valor da cobertura anterior", row.existingInsurance === "Sim" ? usd(row.existingCoverage) : "Não se aplica"],
+      ["Riders / benefícios acelerados ou em vida", row.existingInsurance === "Sim" ? row.existingLivingBenefits : "Não se aplica"],
     ]);
-    drawSection("2. Dados pessoais", [
-      ["Nome", row.clientName], ["Nascimento", usDate(row.birthDate)], ["Sexo", row.gender], ["Estado civil", row.maritalStatus],
-      ["E-mail", row.clientEmail], ["Telefone", row.clientPhone], ["Endereço", `${row.address || ""}, ${row.city || ""} - ${row.state || ""} ${row.zipCode || ""}`],
-      ["Local de nascimento", row.bornInUSA === "Sim" ? `USA · ${row.birthState || ""}` : row.birthCountry], ["SSN/ITIN", row.ssn],
-      ["Passaporte", row.passportNumber], ["Driver americana", row.driverHasLicense], ["Número / Estado da Driver", `${row.driverLicenseNumber || ""} / ${row.driverLicenseState || ""}`],
+    sectionPage("2. Informações do cliente", [
+      ["Nome completo", row.clientName],
+      ["Data de nascimento", usDate(row.birthDate)],
+      ["Sexo", row.gender],
+      ["Estado civil", row.maritalStatus],
+      ["Cidadania / país de nascimento", row.bornInUSA === "Sim" ? `Estados Unidos - ${row.birthState || "estado não informado"}` : row.birthCountry ? `${row.birthCountry} - cidadania estrangeira` : "Não informado"],
+      ["Endereço completo", [row.address, row.city, row.state, row.zipCode].filter(Boolean).join(", ")],
+      ["Telefone", row.clientPhone],
+      ["E-mail", row.clientEmail],
       ["Altura / Peso", `${measurements.height || "Não informado"} / ${measurements.weight || "Não informado"}`],
+      ["SSN / ITIN", row.ssn || "0 - não possui número informado"],
+      ["Passaporte", row.passportNumber],
+      ["Possui Driver's License americana?", row.driverHasLicense],
+      ["Número / Estado da Driver's License", row.driverHasLicense === "Sim" ? `${row.driverLicenseNumber || "Não informado"} / ${row.driverLicenseState || "Não informado"}` : "Não se aplica"],
+      ["Empresa", row.employer],
+      ["Área / indústria", row.industry],
+      ["Cargo / ocupação", row.occupation],
+      ["Tempo de trabalho", row.employmentLength],
+      ["Renda pessoal anual", annualUsd(row.personalWeeklyIncome, 52)],
+      ["Despesas pessoais anuais", annualUsd(row.personalWeeklyExpenses ?? row.personalMonthlyExpenses, row.personalWeeklyExpenses != null ? 52 : 12)],
+      ["Renda familiar anual", annualUsd(row.weeklyIncome, 52)],
+      ["Despesas familiares anuais", annualUsd(row.weeklyFixedExpenses ?? row.monthlyFixedExpenses, row.weeklyFixedExpenses != null ? 52 : 12)],
     ]);
-    drawSection("3. Profissional, financeiro e bancário", [
-      ["Empresa", row.employer], ["Área profissional", row.industry], ["Ocupação", row.occupation], ["Tempo de trabalho", row.employmentLength],
-      ["Renda pessoal anual", annualUsd(row.personalWeeklyIncome, 52)], ["Despesas pessoais anuais", annualUsd(row.personalWeeklyExpenses ?? row.personalMonthlyExpenses, row.personalWeeklyExpenses != null ? 52 : 12)],
-      ["Renda familiar anual", annualUsd(row.weeklyIncome, 52)], ["Despesas familiares anuais", annualUsd(row.weeklyFixedExpenses ?? row.monthlyFixedExpenses, row.weeklyFixedExpenses != null ? 52 : 12)],
-      ["Pessoas na residência", row.householdSize], ["Nome do banco", row.bankName], ["Routing number", row.routingNumber], ["Account number", row.accountNumber],
+    const beneficiaryRows = [];
+    (row.beneficiaries || []).forEach((item, index) => {
+      beneficiaryRows.push([`Beneficiário ${index + 1} - grau de parentesco`, item.relationship]);
+      beneficiaryRows.push([`Beneficiário ${index + 1} - nome completo`, item.name]);
+      beneficiaryRows.push([`Beneficiário ${index + 1} - data de nascimento`, usDate(item.birthDate)]);
+      beneficiaryRows.push([`Beneficiário ${index + 1} - porcentagem`, `${item.percentage || 0}%`]);
+    });
+    sectionPage("3. Dados dos beneficiários", beneficiaryRows.length ? beneficiaryRows : [["Beneficiários", "Não informado"]]);
+    sectionPage("4. Premium anual", [
+      ["Premium mensal", usd(row.premiumBudget)],
+      ["Premium anual (premium mensal x 12)", annualUsd(row.premiumBudget, 12)],
     ]);
-    drawSection("4. Informações médicas", [
+    sectionPage("5. Idade e informações familiares", [
+      ["Idade do cliente", ageFromBirthDate(row.birthDate)],
+      ["Data de nascimento", usDate(row.birthDate)],
+      ["Pai", parentDescription("father")],
+      ["Mãe", parentDescription("mother", true)],
+    ]);
+    sectionPage("6. Informações médicas", [
       ["Consultou médico nos EUA", row.seenDoctor], ["Mês/ano aproximado", row.lastDoctorVisit], ["Médico, clínica ou hospital", row.physicianName],
       ["Fumo", row.tobacco], ["Doença ou diagnóstico", row.hasMedicalCondition], ["Detalhes médicos", row.medicalDetails],
       ["Medicamentos", row.usesMedication], ["Quais medicamentos", row.medications],
-      ["Pai", row.fatherLiving === "Sim" ? `Vivo, ${row.fatherAge || "?"} anos` : `Falecido aos ${row.fatherDeathAge || "?"} · ${row.fatherDeathReason || ""}`],
-      ["Mãe", row.motherLiving === "Sim" ? `Viva, ${row.motherAge || "?"} anos` : `Falecida aos ${row.motherDeathAge || "?"} · ${row.motherDeathReason || ""}`],
     ]);
-    drawSection("5. Beneficiários", (row.beneficiaries || []).map((item, index) => [
-      `Beneficiário ${index + 1}`, `${item.name || ""} · ${item.relationship || ""} · ${usDate(item.birthDate)} · ${item.percentage || 0}%`,
-    ]));
-    if ((row.contacts || []).length) drawSection("6. Contatos de emergência", row.contacts.map((item, index) => [
-      `Contato ${index + 1}`, `${item.name || ""} · ${item.relationship || ""} · ${item.phone || ""}`,
-    ]));
+    sectionPage("7. Dados de pagamento", [
+      ["Nome do banco", row.bankName],
+      ["Routing number", row.routingNumber],
+      ["Account number", row.accountNumber],
+    ]);
+    const additionalRows = [
+      ["Produto pretendido", row.productInterest],
+      ["Cobertura pretendida", usd(row.coverageRequested)],
+      ["Quantidade de pessoas na residência", row.householdSize],
+      ["Motivo / objetivo da aplicação", row.applicationReason],
+      ["Observações do agente", row.notes],
+    ];
+    (row.contacts || []).forEach((item, index) => {
+      additionalRows.push([`Contato de emergência ${index + 1}`, `${item.name || ""} - ${item.relationship || ""} - ${item.phone || ""}`]);
+    });
+    sectionPage("8. Informações adicionais", additionalRows);
 
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     for (const item of attachments) {
@@ -1122,6 +1177,10 @@
         throw new Error(`Não foi possível incluir o documento ${item?.name || "anexado"}. Tente novamente.`);
       }
     }
+    const generatedPages = pdfDocument.getPages();
+    generatedPages.forEach((currentPage, index) => {
+      currentPage.drawText(`Página ${index + 1} de ${generatedPages.length}`, { x: 485, y: 22, size: 8, font: regular, color: rgb(0.4, 0.43, 0.47) });
+    });
     const bytes = await pdfDocument.save({ useObjectStreams: true });
     const blob = new Blob([bytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
