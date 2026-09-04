@@ -132,30 +132,27 @@ async function copyMessage(id) {
 }
 function openWhatsApp(id) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id)),
-    phone = String(row?.inviteePhone || "").replace(/\D/g, ""),
+    phone = whatsappPhone(row?.inviteePhone),
     message = $(`message-${id}`).value;
   if (!phone)
     return notice(
       "O Calendly não informou o WhatsApp deste cliente. Copie a mensagem e envie pelo contato cadastrado.",
       true
     );
-  window.open(
-    `https://wa.me/${phone}?text=${encodeURIComponent(message)}`,
-    "_blank",
-    "noopener,noreferrer"
-  );
+  location.href = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
+}
+function whatsappPhone(value) {
+  let phone = String(value || "").replace(/\D/g, "");
+  if (phone.length === 10) phone = `1${phone}`;
+  return phone;
 }
 function openClientWhatsApp(withReminder) {
   if (!selectedClientRow) return;
-  const phone = String(selectedClientRow.inviteePhone || "").replace(/\D/g, "");
+  const phone = whatsappPhone(selectedClientRow.inviteePhone);
   if (!phone)
     return notice("O Calendly não informou o telefone deste cliente.", true);
   const message = withReminder ? reminderMessage(selectedClientRow) : "";
-  window.open(
-    `https://wa.me/${phone}${message ? `?text=${encodeURIComponent(message)}` : ""}`,
-    "_blank",
-    "noopener,noreferrer"
-  );
+  location.href = `whatsapp://send?phone=${phone}${message ? `&text=${encodeURIComponent(message)}` : ""}`;
 }
 let selectedClientRow = null;
 function openClientPopup(id) {
