@@ -53301,6 +53301,15 @@ async function ensureCalendlyTables(env) {
 __name(ensureCalendlyTables, "ensureCalendlyTables");
 function calendlyUuid(uri) { return String(uri || "").split("/").filter(Boolean).pop() || ""; }
 __name(calendlyUuid, "calendlyUuid");
+function calendlyApiPath(uri, fallbackId = "") {
+  try {
+    const parsed = new URL(String(uri || ""));
+    if (parsed.hostname === "api.calendly.com" && parsed.pathname.startsWith("/")) return parsed.pathname;
+  } catch {}
+  const id = calendlyUuid(uri) || String(fallbackId || "").trim();
+  return id ? `/meeting_recaps/${encodeURIComponent(id)}` : "";
+}
+__name(calendlyApiPath, "calendlyApiPath");
 function calendlyPhoneFrom(value) {
   if (!value || typeof value !== "object") return "";
   for (const [key, item] of Object.entries(value)) {
@@ -55969,6 +55978,7 @@ Affinity Financial Consulting`,
         const matchedMeeting = meetingRows.find((meeting) => eventUri && String(meeting.eventUri) === eventUri) || meetingRows.find((meeting) => attendeeEmail && String(meeting.inviteeEmail || "").trim().toLowerCase() === attendeeEmail);
         return {
         id: calendlyUuid(row.uri || row.id || row.uuid),
+        apiPath: calendlyApiPath(row.uri, row.id || row.uuid),
         title: String(row.title || row.name || row.event_name || "Resumo da reunião"),
         attendee: String(row.attendee_name || row.invitee_name || row.attendee?.name || ""),
         startTime: String(row.start_time || row.meeting_start_time || row.created_at || "") || null,
@@ -55979,20 +55989,24 @@ Affinity Financial Consulting`,
       }).filter((row) => row.id);
       const requestedClientId = Number(input.clientId || 0);
       const selected = (requestedClientId ? normalized.filter((row) => row.clientId === requestedClientId) : normalized).slice(0, requestedClientId ? 20 : 30);
-      const enriched = await Promise.all(selected.map(async (item) => {
+      const enriched = [];
+      for (const item of selected) {
+        const { apiPath, ...publicItem } = item;
         try {
-          const detailPayload = await calendlyRequest(token, `/meeting_recaps/${encodeURIComponent(item.id)}`);
+          const detailPayload = await calendlyRequest(token, apiPath || `/meeting_recaps/${encodeURIComponent(item.id)}`);
           const detail = detailPayload.resource || detailPayload;
-          return { ...item,
+          enriched.push({ ...publicItem,
             title: String(detail.name || detail.title || item.title),
             startTime: String(detail.start_time || item.startTime || "") || null,
             recordingUrl: String(detail.share_link || detail.recording_url || detail.video_url || detail.recording?.url || detail.video?.url || item.recordingUrl || "") || null,
             summary: detail.summary_md || detail.summary || null,
             actionItems: detail.action_items_md || detail.action_items || null,
             discussion: detail.discussion_md || detail.discussion || null
-          };
-        } catch { return item; }
-      }));
+          });
+        } catch (detailError) {
+          enriched.push({ ...publicItem, detailUnavailable: true, detailMessage: String(detailError?.message || "Não foi possível consultar os detalhes da gravação") });
+        }
+      }
       return trpcResult(enriched);
     } catch (error) { return trpcError(String(error?.message || error)); }
   }
