@@ -1087,13 +1087,19 @@
       return "Não informado";
     };
     const measurements = americanMeasurements(row);
-    sectionBlock("1. Agent Report - seguro de vida anterior", [
+    sectionBlock("1. Produto e objetivo da aplicação", [
+      ["Produto pretendido", row.productInterest],
+      ["Cobertura pretendida", usd(row.coverageRequested)],
+      ["Motivo / objetivo da aplicação", row.applicationReason],
+      ["Observações do agente", row.notes],
+    ]);
+    sectionBlock("2. Agent Report - seguro de vida anterior", [
       ["Já possui ou possuiu seguro de vida?", row.existingInsurance || "Não informado"],
       ["Companhia da apólice anterior", row.existingInsurance === "Sim" ? row.existingInsuranceCompany : "Não se aplica"],
       ["Valor da cobertura anterior", row.existingInsurance === "Sim" ? usd(row.existingCoverage) : "Não se aplica"],
       ["Riders / benefícios acelerados ou em vida", row.existingInsurance === "Sim" ? row.existingLivingBenefits : "Não se aplica"],
     ]);
-    sectionBlock("2. Informações do cliente", [
+    sectionBlock("3. Informações do cliente", [
       ["Nome completo", row.clientName],
       ["Data de nascimento", usDate(row.birthDate)],
       ["Sexo", row.gender],
@@ -1115,6 +1121,7 @@
       ["Despesas pessoais anuais", annualUsd(row.personalWeeklyExpenses ?? row.personalMonthlyExpenses, row.personalWeeklyExpenses != null ? 52 : 12)],
       ["Renda familiar anual", annualUsd(row.weeklyIncome, 52)],
       ["Despesas familiares anuais", annualUsd(row.weeklyFixedExpenses ?? row.monthlyFixedExpenses, row.weeklyFixedExpenses != null ? 52 : 12)],
+      ["Quantidade de pessoas na residência", row.householdSize],
     ]);
     const beneficiaryRows = [];
     (row.beneficiaries || []).forEach((item, index) => {
@@ -1123,38 +1130,32 @@
       beneficiaryRows.push([`Beneficiário ${index + 1} - data de nascimento`, usDate(item.birthDate)]);
       beneficiaryRows.push([`Beneficiário ${index + 1} - porcentagem`, `${item.percentage || 0}%`]);
     });
-    sectionBlock("3. Dados dos beneficiários", beneficiaryRows.length ? beneficiaryRows : [["Beneficiários", "Não informado"]]);
-    sectionBlock("4. Premium anual", [
+    sectionBlock("4. Dados dos beneficiários", beneficiaryRows.length ? beneficiaryRows : [["Beneficiários", "Não informado"]]);
+    sectionBlock("5. Premium anual", [
       ["Premium mensal", usd(row.premiumBudget)],
       ["Premium anual (premium mensal x 12)", annualUsd(row.premiumBudget, 12)],
     ]);
-    sectionBlock("5. Idade e informações familiares", [
+    sectionBlock("6. Idade e informações familiares", [
       ["Idade do cliente", ageFromBirthDate(row.birthDate)],
       ["Data de nascimento", usDate(row.birthDate)],
       ["Pai", parentDescription("father")],
       ["Mãe", parentDescription("mother", true)],
     ]);
-    sectionBlock("6. Informações médicas", [
+    sectionBlock("7. Informações médicas", [
       ["Consultou médico nos EUA", row.seenDoctor], ["Mês/ano aproximado", row.lastDoctorVisit], ["Médico, clínica ou hospital", row.physicianName],
       ["Fumo", row.tobacco], ["Doença ou diagnóstico", row.hasMedicalCondition], ["Detalhes médicos", row.medicalDetails],
       ["Medicamentos", row.usesMedication], ["Quais medicamentos", row.medications],
     ]);
-    sectionBlock("7. Dados de pagamento", [
+    sectionBlock("8. Dados de pagamento", [
       ["Nome do banco", row.bankName],
       ["Routing number", row.routingNumber],
       ["Account number", row.accountNumber],
     ]);
-    const additionalRows = [
-      ["Produto pretendido", row.productInterest],
-      ["Cobertura pretendida", usd(row.coverageRequested)],
-      ["Quantidade de pessoas na residência", row.householdSize],
-      ["Motivo / objetivo da aplicação", row.applicationReason],
-      ["Observações do agente", row.notes],
-    ];
+    const additionalRows = [];
     (row.contacts || []).forEach((item, index) => {
       additionalRows.push([`Contato de emergência ${index + 1}`, `${item.name || ""} - ${item.relationship || ""} - ${item.phone || ""}`]);
     });
-    sectionBlock("8. Informações adicionais", additionalRows);
+    if (additionalRows.length) sectionBlock("9. Informações adicionais", additionalRows);
 
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     for (const item of attachments) {
