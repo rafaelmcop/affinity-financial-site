@@ -1053,16 +1053,22 @@
     };
     const ensure = needed => { if (!page || y < needed + 42) addPage(); };
     const drawSection = (title, items) => {
+      const labelWidth = 190;
+      const columnGap = 16;
+      const valueX = margin + labelWidth + columnGap;
+      const valueWidth = width - labelWidth - columnGap;
       ensure(55);
       page.drawText(pdfText(title), { x: margin, y, size: 12, font: bold, color: rgb(0.09, 0.2, 0.36) });
       y -= 18;
       for (const [label, raw] of items) {
         const value = raw == null || raw === "" ? "Não informado" : String(raw);
-        const lines = wrap(value, regular, 9, width - 155);
-        ensure(Math.max(22, lines.length * 12 + 8));
-        page.drawText(pdfText(label), { x: margin, y, size: 9, font: bold });
-        lines.forEach((line, index) => page.drawText(line, { x: margin + 155, y: y - index * 12, size: 9, font: regular }));
-        y -= Math.max(20, lines.length * 12 + 6);
+        const labelLines = wrap(label, bold, 9, labelWidth);
+        const valueLines = wrap(value, regular, 9, valueWidth);
+        const lineCount = Math.max(labelLines.length, valueLines.length);
+        ensure(Math.max(22, lineCount * 12 + 8));
+        labelLines.forEach((line, index) => page.drawText(line, { x: margin, y: y - index * 12, size: 9, font: bold }));
+        valueLines.forEach((line, index) => page.drawText(line, { x: valueX, y: y - index * 12, size: 9, font: regular }));
+        y -= Math.max(20, lineCount * 12 + 6);
         page.drawLine({ start: { x: margin, y: y + 7 }, end: { x: margin + width, y: y + 7 }, thickness: 0.35, color: rgb(0.8, 0.82, 0.84) });
       }
       y -= 8;
