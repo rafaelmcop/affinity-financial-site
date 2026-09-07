@@ -57617,6 +57617,13 @@ var cloudflare_staging_default = {
       url.hostname = "www.affinityfc.org";
       return secureResponse(Response.redirect(url.toString(), 301));
     }
+    // Older policy screens still request the original hashed PDF.js chunk.
+    // Serve the current bundled reader at that stable compatibility path so
+    // cached screens can parse PC Sheets instead of receiving the SPA HTML.
+    if (request.method === "GET" && url.pathname === "/assets/pdf-D4EPeiVb.js") {
+      url.pathname = "/vendor/pdf.mjs";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
+    }
     if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
       try {
         const email = await getAdminEmail(request, env);
