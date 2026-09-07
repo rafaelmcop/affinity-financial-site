@@ -71,6 +71,7 @@ Affinity Financial Consulting
     christmas: "Natal",
     new_year: "Ano-Novo",
     policy_anniversary: "Revisão Flex Life (13 meses)",
+    weekly_monday: "Toda segunda-feira",
     monthly: "Início do mês",
     custom: "Data personalizada",
   },
@@ -127,7 +128,7 @@ function Q({
   }, [t?.id, t?.monthNumber, !!t]);
   const P = (g.data || []).filter(a =>
       s === "collective"
-        ? ["thanksgiving", "christmas", "new_year", "monthly"].includes(
+        ? ["weekly_monday", "thanksgiving", "christmas", "new_year", "monthly"].includes(
             a.occasion
           ) && a.audience !== "individual"
         : s === "client"
@@ -297,6 +298,10 @@ function Q({
                   value: t.occasion,
                   onChange: a => n({ ...t, occasion: a.target.value }),
                   children: [
+                    e.jsx("option", {
+                      value: "weekly_monday",
+                      children: "Toda segunda-feira às 8:30 AM",
+                    }),
                     s !== "collective" &&
                       e.jsx("option", {
                         value: "birthday",

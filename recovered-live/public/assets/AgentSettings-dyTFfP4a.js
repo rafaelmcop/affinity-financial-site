@@ -40,14 +40,17 @@ const D = {
     phone: "",
     whatsapp: "",
     address: "",
+    photoUrl: "",
     messageSignature:
       "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org",
   },
-  $ = { portalEmail: "", password: "" };
+  $ = { portalEmail: "", password: "", trustDevice: !0 },
+  K = { portalEmail: "", password: "", trustDevice: !0 };
 function se() {
   const u = n.agent.getEmailSettings.useQuery(),
     c = n.agent.getProfile.useQuery(),
     s = n.agent.getFiveRingsConnection.useQuery(),
+    V = n.agent.getNationalLifeConnection.useQuery(),
     j = n.agent.saveEmailSettings.useMutation(),
     y = n.agent.testEmailSettings.useMutation(),
     C = n.agent.updateProfile.useMutation(),
@@ -56,9 +59,11 @@ function se() {
     S = n.agent.submitFiveRingsCode.useMutation(),
     x = n.agent.syncFiveRings.useMutation(),
     k = n.agent.resetFiveRingsChallenge.useMutation(),
+    Z = n.agent.saveNationalLifeConnection.useMutation(),
     [t, l] = m.useState(D),
     [o, p] = m.useState(W),
     [g, h] = m.useState($),
+    [G, H] = m.useState(K),
     [f, b] = m.useState(""),
     [N, P] = m.useState("");
   return (
@@ -74,14 +79,18 @@ function se() {
           phone: c.data.phone || "",
           whatsapp: c.data.whatsapp || "",
           address: c.data.address || "",
+          photoUrl: c.data.photoUrl || "",
           messageSignature:
             c.data.messageSignature ||
             "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org",
         });
     }, [c.data]),
     m.useEffect(() => {
-      s.data && h({ portalEmail: s.data.portalEmail, password: "" });
+      s.data && h({ portalEmail: s.data.portalEmail, password: "", trustDevice: s.data.trustDevice !== !1 });
     }, [s.data]),
+    m.useEffect(() => {
+      V.data && H({ portalEmail: V.data.portalEmail || "", password: "", trustDevice: V.data.trustDevice !== !1 });
+    }, [V.data]),
     e.jsxs("div", {
       className: "min-h-screen bg-black text-white lg:pl-64",
       children: [
@@ -115,6 +124,19 @@ function se() {
                   className:
                     "flex items-center gap-2 text-xl font-bold text-gold",
                   children: [e.jsx(z, {}), "Meu perfil"],
+                }),
+                e.jsxs("div", {
+                  className: "flex items-center gap-4 rounded-xl border border-white/10 bg-black/25 p-4",
+                  children: [
+                    o.photoUrl
+                      ? e.jsx("img", { src: o.photoUrl, alt: "Foto do agente", className: "h-20 w-20 rounded-full object-cover ring-2 ring-gold/50" })
+                      : e.jsx("div", { className: "flex h-20 w-20 items-center justify-center rounded-full bg-gold text-xl font-black text-black", children: (o.name || "Agente").split(/\s+/).filter(Boolean).slice(0,1).concat((o.name || "").split(/\s+/).filter(Boolean).slice(-1)).map(a => a[0]).join("").slice(0,2).toUpperCase() }),
+                    e.jsxs("label", { className: "cursor-pointer text-sm text-gray-300", children: [
+                      e.jsx("span", { className: "block font-semibold text-gold", children: "Foto do perfil" }),
+                      e.jsx("span", { className: "mt-1 block text-xs text-gray-500", children: "Escolha uma foto JPG, PNG ou WebP." }),
+                      e.jsx("input", { type: "file", accept: "image/jpeg,image/png,image/webp", className: "mt-3 block text-xs", onChange: a => { const file = a.target.files?.[0]; if (!file) return; if (file.size > 2e6) return r.error("A foto deve ter no máximo 2 MB"); const reader = new FileReader(); reader.onload = () => p({ ...o, photoUrl: String(reader.result || "") }); reader.readAsDataURL(file); } })
+                    ] })
+                  ]
                 }),
                 e.jsxs("div", {
                   className: "grid gap-4 sm:grid-cols-2",
@@ -237,6 +259,7 @@ function se() {
                         whatsapp: o.whatsapp,
                         address: o.address,
                         messageSignature: o.messageSignature,
+                        photoUrl: o.photoUrl,
                       }),
                         await c.refetch(),
                         r.success("Perfil atualizado"));
@@ -253,6 +276,7 @@ function se() {
                     "Salvar perfil",
                   ],
                 }),
+                !1 && e.jsxs(e.Fragment, { children: [
                 s.data &&
                   e.jsx(d, {
                     className: "w-full bg-gold text-black hover:bg-yellow-300",
@@ -380,6 +404,7 @@ function se() {
                       "rounded-lg bg-red-500/10 p-3 text-sm text-red-200",
                     children: s.data.lastError,
                   }),
+                ] }),
               ],
             }),
             e.jsxs(v, {
@@ -411,6 +436,10 @@ function se() {
                     }),
                   ],
                 }),
+                e.jsxs("label", { className: "flex items-center gap-3 rounded-lg border border-sky-400/20 bg-black/20 p-3 text-sm text-sky-100", children: [
+                  e.jsx("input", { type: "checkbox", checked: g.trustDevice !== !1, onChange: a => h({ ...g, trustDevice: a.target.checked }) }),
+                  "Confiar neste dispositivo para reduzir novos pedidos de código"
+                ] }),
                 e.jsxs("label", {
                   className: "block text-sm text-gray-300",
                   children: [
@@ -464,6 +493,15 @@ function se() {
                     "Conectar em modo somente leitura",
                   ],
                 }),
+                s.data && e.jsx(d, { className: "w-full bg-gold text-black hover:bg-yellow-300", disabled: x.isPending, onClick: async () => { try { const a = await x.mutateAsync(); await s.refetch(); if (a.requiresCode) return r.info("Informe o código enviado pelo Five Rings"); r.success(`${a.found || 0} registros encontrados no Five Rings · ${a.importedClients} clientes novos · ${a.importedPolicies} apólices novas · ${a.updatedPolicies} apólices conferidas/atualizadas`); } catch (a) { await s.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível sincronizar"); } }, children: x.isPending ? "Sincronizando..." : "Sincronizar clientes e apólices" }),
+                s.data && e.jsx(d, { variant: "outline", className: "w-full border-sky-300/50 text-sky-200", disabled: E.isPending, onClick: async () => { try { const a = await E.mutateAsync(); await s.refetch(); a.success ? r.success("Login confirmado em modo somente leitura") : a.requiresCode && r.info("Informe o código enviado pelo Five Rings"); } catch (a) { await s.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível verificar o login"); } }, children: "Apenas verificar conexão" }),
+                s.data?.requiresCode && e.jsxs("div", { className: "space-y-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4", children: [
+                  e.jsx("p", { className: "text-sm text-amber-100", children: "O Five Rings enviou um código por e-mail. Informe-o abaixo para concluir o acesso." }),
+                  e.jsx(i, { inputMode: "numeric", autoComplete: "one-time-code", placeholder: "Código de confirmação", value: f, onChange: a => b(a.target.value.replace(/\D/g, "").slice(0, 10)) }),
+                  e.jsx(d, { className: "w-full bg-amber-300 text-black", disabled: f.length < 4 || S.isPending, onClick: async () => { try { (await S.mutateAsync({ code: f })).success && (b(""), await s.refetch(), r.success("Código confirmado. Five Rings conectado.")); } catch (a) { r.error(a instanceof Error ? a.message : "Código inválido"); } }, children: "Confirmar código" }),
+                  e.jsx(d, { type: "button", variant: "outline", className: "w-full border-amber-200/50 text-amber-100", disabled: k.isPending || x.isPending, onClick: async () => { try { await k.mutateAsync(); b(""); await s.refetch(); const a = await x.mutateAsync(); await s.refetch(); a.requiresCode ? r.info("Novo código solicitado por e-mail") : r.success("Conexão reiniciada e sincronizada"); } catch (a) { await s.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível reiniciar"); } }, children: "Reiniciar e enviar por e-mail" })
+                ] }),
+                s.data?.lastError && e.jsx("p", { className: "rounded-lg bg-red-500/10 p-3 text-sm text-red-200", children: s.data.lastError }),
                 e.jsx("p", {
                   className: "text-xs leading-relaxed text-gray-500",
                   children:
@@ -471,6 +509,17 @@ function se() {
                 }),
               ],
             }),
+            e.jsxs(v, { id: "national-life", className: "space-y-5 border-emerald-400/20 bg-[#0b1524] p-6", children: [
+              e.jsxs("h2", { className: "flex items-center gap-2 text-xl font-bold text-emerald-300", children: [e.jsx(A, {}), "Portal National Life Group"] }),
+              e.jsx("div", { className: "rounded-lg border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm leading-relaxed text-emerald-100", children: "Estrutura inicial da conexão individual e protegida. O acesso será usado somente para consultar e completar dados dos seus próprios clientes e apólices." }),
+              e.jsxs("label", { className: "block text-sm text-gray-300", children: ["E-mail do portal National Life", e.jsx(i, { className: "mt-2", type: "email", autoComplete: "username", value: G.portalEmail, onChange: a => H({ ...G, portalEmail: a.target.value }) })] }),
+              e.jsxs("label", { className: "block text-sm text-gray-300", children: ["Senha do portal", e.jsx(i, { className: "mt-2", type: "password", autoComplete: "current-password", placeholder: V.data?.passwordConfigured ? "Deixe vazio para manter a senha atual" : "Informe sua senha", value: G.password, onChange: a => H({ ...G, password: a.target.value }) })] }),
+              e.jsxs("label", { className: "flex items-center gap-3 rounded-lg border border-emerald-400/20 bg-black/20 p-3 text-sm text-emerald-100", children: [e.jsx("input", { type: "checkbox", checked: G.trustDevice !== !1, onChange: a => H({ ...G, trustDevice: a.target.checked }) }), "Confiar neste dispositivo quando o portal oferecer essa opção"] }),
+              V.data && e.jsx("div", { className: "rounded-lg bg-black/30 p-3 text-sm text-gray-300", children: `Status: ${V.data.passwordConfigured ? "Acesso protegido salvo" : "Aguardando configuração"}` }),
+              e.jsx(d, { className: "w-full bg-emerald-300 text-slate-950 hover:bg-emerald-200", disabled: !G.portalEmail || Z.isPending, onClick: async () => { try { await Z.mutateAsync(G); H(a => ({ ...a, password: "" })); await V.refetch(); r.success("Acesso National Life salvo com proteção"); } catch (a) { r.error(a instanceof Error ? a.message : "Não foi possível salvar o acesso"); } }, children: Z.isPending ? "Salvando..." : "Salvar conexão protegida" }),
+              e.jsx("a", { href: "https://nationallife.my.site.com/nlgpartnerportal/login?locale=us", target: "_blank", rel: "noreferrer", className: "block text-center text-sm text-emerald-300 underline", children: "Abrir portal oficial National Life" }),
+              e.jsx("p", { className: "text-xs leading-relaxed text-gray-500", children: "Esta primeira etapa guarda o acesso com segurança. A leitura automática será ativada após mapearmos o primeiro acesso e a confirmação do portal, sem permitir alterações na National Life." })
+            ] }),
             e.jsxs(v, {
               id: "email",
               className: "space-y-6 border-gold/20 bg-[#0b1524] p-6",

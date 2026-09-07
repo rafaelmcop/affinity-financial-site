@@ -52450,6 +52450,14 @@ function fiveRingsFetch(input, init = {}, timeoutMs = 12e3) {
   return fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
 }
 __name(fiveRingsFetch, "fiveRingsFetch");
+async function ensureCarrierConnectionTables(env) {
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS agentNationalLifeConnections (agentEmail TEXT PRIMARY KEY,portalEmail TEXT NOT NULL,encryptedPassword TEXT NOT NULL,trustDevice INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'configured',encryptedChallenge TEXT,encryptedSession TEXT,lastSyncAt TEXT,lastError TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+  const fiveRingsColumns = await env.DB.prepare("PRAGMA table_info(agentFiveRingsConnections)").all();
+  if (!(fiveRingsColumns.results || []).some((column) => String(column.name) === "trustDevice")) {
+    try { await env.DB.prepare("ALTER TABLE agentFiveRingsConnections ADD COLUMN trustDevice INTEGER NOT NULL DEFAULT 1").run(); } catch {}
+  }
+}
+__name(ensureCarrierConnectionTables, "ensureCarrierConnectionTables");
 function fiveRingsCookies(headers) {
   const values = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [headers.get("set-cookie") || ""];
   return values.map((value) => value.split(";", 1)[0]).filter(Boolean).join("; ");
@@ -55224,6 +55232,12 @@ Detalhes: ${details}` : ""}`;
         "Ol\xE1, {nome}! \u2728\u{1F942}\n\nQue este novo ano chegue trazendo novas oportunidades, conquistas, sa\xFAde e muitos momentos especiais para voc\xEA e sua fam\xEDlia.\n\nAgradecemos pela confian\xE7a em nosso trabalho e esperamos continuar fazendo parte da sua jornada, ajudando voc\xEA a construir um futuro cada vez mais seguro e tranquilo.\n\nSempre que precisar de alguma orienta\xE7\xE3o ou quiser conversar conosco, conte com a equipe da Affinity Financial Consulting.\n\n\u{1F4DE} {agente_telefone}\n\u{1F310} www.affinityfc.org\n\nFeliz Ano Novo! Que seja um ano incr\xEDvel para voc\xEA e sua fam\xEDlia! \u{1F386}\u2728\n\n{agente_nome}\nAffinity Financial Consulting"
       ],
       [
+        "weekly_monday",
+        "Mensagem acolhedora de segunda-feira",
+        DEFAULT_MONDAY_SUBJECT,
+        DEFAULT_MONDAY_MESSAGE
+      ],
+      [
         "policy_anniversary",
         "Revis\xE3o de ap\xF3lice Flex Life",
         DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
@@ -55417,6 +55431,12 @@ Detalhes: ${details}` : ""}`;
         "Feliz Ano-Novo",
         "Feliz Ano-Novo, {nome}!",
         "Ol\xE1 {nome}, desejo um novo ano de sa\xFAde, prote\xE7\xE3o, prosperidade e grandes realiza\xE7\xF5es."
+      ],
+      [
+        "weekly_monday",
+        "Mensagem acolhedora de segunda-feira",
+        DEFAULT_MONDAY_SUBJECT,
+        DEFAULT_MONDAY_MESSAGE
       ],
       [
         "policy_anniversary",
@@ -55681,8 +55701,9 @@ Affinity Financial Consulting`,
     );
   }
   if (name === "agent.getFiveRingsConnection") {
+    await ensureCarrierConnectionTables(env);
     const row = await env.DB.prepare(
-      "SELECT portalEmail,status,lastSyncAt,lastError,encryptedChallenge FROM agentFiveRingsConnections WHERE lower(agentEmail)=?"
+      "SELECT portalEmail,status,lastSyncAt,lastError,encryptedChallenge,trustDevice FROM agentFiveRingsConnections WHERE lower(agentEmail)=?"
     ).bind(adminEmail.toLowerCase()).first();
     return trpcResult(row ? {
       portalEmail: row.portalEmail,
@@ -55690,10 +55711,12 @@ Affinity Financial Consulting`,
       lastSyncAt: row.lastSyncAt,
       lastError: row.lastError,
       requiresCode: Boolean(row.encryptedChallenge),
+      trustDevice: Number(row.trustDevice) !== 0,
       passwordConfigured: true
     } : null);
   }
   if (name === "agent.saveFiveRingsConnection") {
+    await ensureCarrierConnectionTables(env);
     const owner = adminEmail.toLowerCase();
     const current = await env.DB.prepare(
       "SELECT encryptedPassword FROM agentFiveRingsConnections WHERE lower(agentEmail)=?"
@@ -55703,8 +55726,8 @@ Affinity Financial Consulting`,
     if (!validEmail(String(input.portalEmail || "")) || !encryptedPassword.startsWith("v1."))
       return trpcError("Informe o e-mail e a senha do portal Five Rings");
     await env.DB.prepare(
-      "INSERT INTO agentFiveRingsConnections (agentEmail,portalEmail,encryptedPassword,status,lastError) VALUES (?,?,?,'pending',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,status='pending',lastError=NULL,updatedAt=CURRENT_TIMESTAMP"
-    ).bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword).run();
+      "INSERT INTO agentFiveRingsConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?,'pending',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='pending',lastError=NULL,updatedAt=CURRENT_TIMESTAMP"
+    ).bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
     return trpcResult({ success: true });
   }
   if (name === "agent.verifyFiveRingsConnection") {
@@ -55880,6 +55903,30 @@ Affinity Financial Consulting`,
     ).bind(adminEmail.toLowerCase()).run();
     return trpcResult({ success: true });
   }
+  if (name === "agent.getNationalLifeConnection") {
+    await ensureCarrierConnectionTables(env);
+    const row = await env.DB.prepare("SELECT portalEmail,status,lastSyncAt,lastError,encryptedChallenge,trustDevice FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(adminEmail.toLowerCase()).first();
+    return trpcResult(row ? {
+      portalEmail: row.portalEmail,
+      status: row.status,
+      lastSyncAt: row.lastSyncAt,
+      lastError: row.lastError,
+      requiresCode: Boolean(row.encryptedChallenge),
+      trustDevice: Number(row.trustDevice) !== 0,
+      passwordConfigured: true,
+      portalUrl: "https://www.nationallife.com/agent/"
+    } : null);
+  }
+  if (name === "agent.saveNationalLifeConnection") {
+    await ensureCarrierConnectionTables(env);
+    const owner = adminEmail.toLowerCase();
+    const current = await env.DB.prepare("SELECT encryptedPassword FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
+    const clear = String(input.password || "");
+    const encryptedPassword = clear ? await encryptSmtpPassword(clear, env.JWT_SECRET) : String(current?.encryptedPassword || "");
+    if (!validEmail(String(input.portalEmail || "")) || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o e-mail e a senha do portal National Life Group");
+    await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
+    return trpcResult({ success: true, status: "configured" });
+  }
   if (name === "agent.getPaymentReturnTemplate") {
     const row = await env.DB.prepare(
       "SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=?"
@@ -55949,7 +55996,7 @@ Affinity Financial Consulting`,
   if (name === "agent.getProfile") {
     await ensureAgentMessageSignatureColumn(env);
     const row = await env.DB.prepare(
-      "SELECT email,name,phone,contactEmail,whatsapp,address,messageSignature FROM adminAccounts WHERE lower(email)=?"
+      "SELECT a.email,a.name,a.phone,a.contactEmail,a.whatsapp,a.address,a.messageSignature,p.photoUrl FROM adminAccounts a LEFT JOIN agentPublicProfiles p ON lower(p.agentEmail)=lower(a.email) WHERE lower(a.email)=?"
     ).bind(adminEmail.toLowerCase()).first();
     return trpcResult(row ? { ...row, messageSignature: String(row.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE) } : null);
   }
@@ -56147,6 +56194,7 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.updateProfile") {
     await ensureAgentMessageSignatureColumn(env);
+    await ensureCalendlyTables(env);
     const profileName = String(input.name ?? "").trim(), contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
     const messageSignature = String(input.messageSignature ?? DEFAULT_AGENT_MESSAGE_SIGNATURE).trim().slice(0, 2e3) || DEFAULT_AGENT_MESSAGE_SIGNATURE;
     if (!profileName || contactEmail && !validEmail(contactEmail))
@@ -56162,6 +56210,16 @@ Affinity Financial Consulting`,
       messageSignature,
       adminEmail.toLowerCase()
     ).run();
+    if (Object.prototype.hasOwnProperty.call(input, "photoUrl")) {
+      const photoUrl = String(input.photoUrl || "").trim().slice(0, 500000) || null;
+      const current = await env.DB.prepare("SELECT slug FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(adminEmail.toLowerCase()).first();
+      if (current)
+        await env.DB.prepare("UPDATE agentPublicProfiles SET photoUrl=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(photoUrl, adminEmail.toLowerCase()).run();
+      else {
+        const slug = `${profileName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${Date.now().toString(36).slice(-4)}`;
+        await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,photoUrl,isPublished) VALUES (?,?,?, ?,1)").bind(adminEmail.toLowerCase(), slug, "Consultor financeiro", photoUrl).run();
+      }
+    }
     return trpcResult({ success: true });
   }
   if (name === "admin.getStats") {
@@ -57729,6 +57787,51 @@ function escapeAutomationHtml(value) {
 }
 __name(escapeAutomationHtml, "escapeAutomationHtml");
 var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org";
+var DEFAULT_MONDAY_SUBJECT = "Uma ótima segunda-feira para você, {nome}! ☀️";
+var DEFAULT_MONDAY_MESSAGE = "Olá, {nome}! ☀️\n\nBom dia e uma excelente segunda-feira!\n\nA cada semana, o sistema prepara uma mensagem diferente, motivadora e acolhedora para começar a segunda-feira com energia e confiança.\n\nQue sua semana seja leve, produtiva e cheia de boas notícias. Sempre que precisar, conte conosco.";
+function mondayMessageVariation(year, month, day) {
+  const seed = Math.floor(Date.UTC(Number(year), Number(month) - 1, Number(day)) / 6048e5);
+  const openings = [
+    "Uma nova semana começa trazendo novas oportunidades para avançar com tranquilidade e confiança.",
+    "Que esta segunda-feira renove sua energia e abra espaço para uma semana cheia de boas possibilidades.",
+    "Começar a semana é também uma nova chance de cuidar dos planos, dos sonhos e de quem mais importa.",
+    "Que a manhã de hoje traga clareza, disposição e bons motivos para acreditar em uma ótima semana.",
+    "Toda segunda-feira é um convite para recomeçar com esperança, coragem e pensamentos positivos.",
+    "Uma nova semana está diante de nós: que ela venha com leveza, progresso e momentos especiais.",
+    "Que esta segunda-feira seja o primeiro passo de uma semana produtiva, serena e cheia de conquistas.",
+    "Hoje começa mais uma oportunidade de transformar pequenos passos em grandes resultados.",
+    "Que sua semana comece com paz no coração, foco nos objetivos e confiança no caminho.",
+    "Segunda-feira chegou, trazendo uma página nova para construir uma semana muito especial.",
+    "Que o início desta semana venha acompanhado de boas ideias, energia renovada e tranquilidade.",
+    "Mais uma semana começa, e desejamos que cada dia traga motivos para sorrir e seguir em frente."
+  ];
+  const encouragements = [
+    "Siga no seu ritmo: constância e boas escolhas constroem resultados duradouros.",
+    "Não é preciso fazer tudo de uma vez; cada passo dado com propósito já é uma conquista.",
+    "Confie no processo, valorize o que já conquistou e continue construindo o futuro que deseja.",
+    "Que você encontre equilíbrio para cuidar das prioridades e aproveitar os bons momentos.",
+    "Grandes planos começam com decisões simples e consistentes tomadas ao longo do caminho.",
+    "Leve para esta semana a certeza de que dedicação, paciência e planejamento fazem diferença.",
+    "Que os desafios se transformem em aprendizado e as oportunidades em belas conquistas.",
+    "Reserve também um momento para respirar, agradecer e reconhecer tudo o que já avançou.",
+    "Que não faltem coragem para começar, sabedoria para decidir e serenidade para continuar.",
+    "Uma semana bem vivida começa com intenção, cuidado e espaço para aquilo que realmente importa.",
+    "Acredite nas possibilidades desta semana e celebre cada progresso, mesmo os menores.",
+    "Que seus objetivos ganhem força e que você encontre apoio sempre que precisar."
+  ];
+  const closings = [
+    "Desejamos uma semana leve, produtiva e repleta de boas notícias.",
+    "Que seja uma semana de paz, saúde, prosperidade e bons encontros.",
+    "Desejamos dias positivos, decisões tranquilas e muitos motivos para comemorar.",
+    "Que esta semana traga equilíbrio, segurança e novas realizações para você e sua família.",
+    "Esperamos que os próximos dias sejam acolhedores, produtivos e cheios de coisas boas.",
+    "Que sua semana seja iluminada, organizada e cercada de pessoas que fazem bem.",
+    "Desejamos uma semana de crescimento, serenidade e conquistas especiais.",
+    "Que cada dia desta semana aproxime você dos seus planos e sonhos."
+  ];
+  return `Olá, {nome}! ☀️\n\nBom dia e uma excelente segunda-feira!\n\n${openings[seed % openings.length]}\n\n${encouragements[Math.floor(seed / openings.length) % encouragements.length]}\n\n${closings[Math.floor(seed / (openings.length * encouragements.length)) % closings.length]}\n\nSempre que precisar de orientação ou quiser conversar sobre seus planos, estamos à disposição.`;
+}
+__name(mondayMessageVariation, "mondayMessageVariation");
 async function ensureAgentMessageSignatureColumn(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(adminAccounts)").all();
   if (!(columns.results || []).some((column) => String(column.name) === "messageSignature")) {
@@ -57756,6 +57859,8 @@ async function runMessageAutomations(env) {
   const minuteOfDay = Number(eastern.hour) * 60 + Number(eastern.minute);
   const isMorningRun = minuteOfDay >= 8 * 60 + 30;
   const month = Number(eastern.month), day = Number(eastern.day), year = eastern.year;
+  const easternDate = /* @__PURE__ */ new Date(`${year}-${eastern.month}-${eastern.day}T12:00:00-05:00`);
+  const isMonday = easternDate.getDay() === 1;
   const isThanksgiving = month === 11 && day >= 22 && day <= 28 && (/* @__PURE__ */ new Date(
     `${year}-11-${String(day).padStart(2, "0")}T12:00:00-05:00`
   )).getDay() === 4;
@@ -57775,15 +57880,22 @@ async function runMessageAutomations(env) {
         "Revis\xE3o de ap\xF3lice Flex Life",
         DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
         DEFAULT_FLEX_LIFE_REVIEW_MESSAGE
+      ),
+      env.DB.prepare(
+        "INSERT INTO scheduledMessages (agentEmail,occasion,channel,title,subject,audience,message,isActive) SELECT lower(a.email),'weekly_monday','email',?,?, 'all',?,1 FROM adminAccounts a WHERE a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') AND NOT EXISTS (SELECT 1 FROM scheduledMessages m WHERE lower(m.agentEmail)=lower(a.email) AND m.occasion='weekly_monday' AND m.title IS NOT NULL)"
+      ).bind(
+        "Mensagem acolhedora de segunda-feira",
+        DEFAULT_MONDAY_SUBJECT,
+        DEFAULT_MONDAY_MESSAGE
       )
     ]);
   const automations = await env.DB.prepare(
-    "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email' ORDER BY CASE occasion WHEN 'monthly' THEN 0 WHEN 'birthday' THEN 1 WHEN 'thanksgiving' THEN 2 WHEN 'christmas' THEN 2 WHEN 'new_year' THEN 2 WHEN 'custom' THEN 3 WHEN 'policy_anniversary' THEN 4 ELSE 5 END,id"
+    "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email' ORDER BY CASE occasion WHEN 'weekly_monday' THEN 0 WHEN 'monthly' THEN 1 WHEN 'birthday' THEN 2 WHEN 'thanksgiving' THEN 3 WHEN 'christmas' THEN 3 WHEN 'new_year' THEN 3 WHEN 'custom' THEN 4 WHEN 'policy_anniversary' THEN 5 ELSE 6 END,id"
   ).all();
   let deliveryBudget = 20;
   for (const automation of automations.results) {
     const occasion = String(automation.occasion);
-    const dueToday = occasion === "birthday" || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
+    const dueToday = occasion === "birthday" || occasion === "weekly_monday" && isMonday || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
     if (occasion !== "policy_anniversary" && !dueToday) continue;
     const agentProfile = await env.DB.prepare(
       "SELECT email,name,phone,whatsapp,contactEmail,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1"
@@ -57962,7 +58074,7 @@ async function runMessageAutomations(env) {
         ).bind(String(automation.agentEmail).toLowerCase(), Number(client.id)).first();
         if (customized) continue;
       }
-      const sentKey = occasion === "custom" ? "once" : occasion === "monthly" ? `monthly-${year}-${month}` : `${occasion}-${year}`;
+      const sentKey = occasion === "custom" ? "once" : occasion === "monthly" ? `monthly-${year}-${month}` : occasion === "weekly_monday" ? `weekly-monday-${year}-${eastern.month}-${eastern.day}` : `${occasion}-${year}`;
       const sent = await env.DB.prepare(
         "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
       ).bind(Number(automation.id), Number(client.id), sentKey).first();
@@ -57971,7 +58083,8 @@ async function runMessageAutomations(env) {
         "{nome}",
         escapeAutomationHtml(client.name)
       ), "personalize");
-      const personalizedMessage = addPersonalSignature(automation.message).replaceAll(
+      const automationMessage = occasion === "weekly_monday" ? mondayMessageVariation(year, month, day) : automation.message;
+      const personalizedMessage = addPersonalSignature(automationMessage).replaceAll(
         "{nome}",
         escapeAutomationHtml(client.name)
       );

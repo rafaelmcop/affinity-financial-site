@@ -69,14 +69,19 @@ function E() {
     [l, m] = f.useState(x),
     [P, R] = f.useState(t === "/agentes/clientes"),
     [T, H] = f.useState(t === "/agentes/configuracoes"),
+    [O, D] = f.useState(!1),
     p = g.auth.logout.useMutation(),
+    Q = g.agent.getProfile.useQuery(),
     d = g.agent.pendingCounts.useQuery(void 0, {
       refetchInterval: 6e4,
       staleTime: 3e4,
     }),
     n = d.data?.incompleteProfiles || 0,
     o = d.data?.pendingReviews || 0,
-    q = d.data?.newMessages || 0;
+    q = d.data?.newMessages || 0,
+    profileName = Q.data?.name || (() => { try { return JSON.parse(localStorage.getItem("agentSession") || "{}").name || "Agente"; } catch { return "Agente"; } })(),
+    initials = profileName.split(/\s+/).filter(Boolean).slice(0, 1).concat(profileName.split(/\s+/).filter(Boolean).slice(-1)).map(r => r[0]).join("").slice(0, 2).toUpperCase(),
+    logoutToHome = async () => { try { await p.mutateAsync(); } catch {} localStorage.removeItem("agentSession"); window.location.assign("/"); };
   return e.jsxs(e.Fragment, {
     children: [
       e.jsxs("aside", {
@@ -87,7 +92,11 @@ function E() {
             className:
               "flex items-start justify-between border-b border-gold/20 p-5",
             children: [
-              e.jsxs("div", {
+              e.jsxs("button", {
+                type: "button",
+                onClick: logoutToHome,
+                title: "Sair e voltar ao site principal",
+                className: "text-left hover:opacity-80",
                 children: [
                   e.jsx("div", {
                     className: "text-lg font-bold text-gold",
@@ -246,7 +255,7 @@ function E() {
                   a
                 )
               ),
-              e.jsxs("button", {
+              !1 && e.jsxs("button", {
                 type: "button",
                 "aria-expanded": T,
                 onClick: () => H(r => !r),
@@ -257,7 +266,7 @@ function E() {
                   T ? e.jsx(C, { size: 16 }) : e.jsx(N, { size: 16 }),
                 ],
               }),
-              T && e.jsx("div", {
+              !1 && T && e.jsx("div", {
                 className: "mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3",
                 children: [
                   ["Perfil e dados pessoais", "/agentes/configuracoes#perfil"],
@@ -274,14 +283,14 @@ function E() {
                   children: r,
                 }, a)),
               }),
-              e.jsx("div", { className: "my-3 border-t border-white/10" }),
-              e.jsxs("button", {
+              !1 && e.jsx("div", { className: "my-3 border-t border-white/10" }),
+              !1 && e.jsxs("button", {
                 onClick: () => s("/"),
                 className:
                   "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-gray-300 hover:bg-white/10",
                 children: [e.jsx(z, { size: 18 }), "Site principal"],
               }),
-              e.jsxs("button", {
+              !1 && e.jsxs("button", {
                 onClick: async () => {
                   (await p.mutateAsync(),
                     localStorage.removeItem("agentSession"),
@@ -295,6 +304,15 @@ function E() {
           }),
         ],
       }),
+      e.jsxs("div", { className: "fixed right-4 top-4 z-[70]", children: [
+        e.jsx("button", { type: "button", onClick: () => D(r => !r), "aria-label": "Abrir menu da conta", className: "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-gold bg-[#0f1f36] text-sm font-black text-gold shadow-xl", children: Q.data?.photoUrl ? e.jsx("img", { src: Q.data.photoUrl, alt: profileName, className: "h-full w-full object-cover" }) : initials }),
+        O && e.jsxs("div", { className: "absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-gold/30 bg-[#0f1f36] p-2 text-white shadow-2xl", children: [
+          e.jsxs("div", { className: "border-b border-white/10 px-3 py-3", children: [e.jsx("p", { className: "font-bold text-gold", children: profileName }), e.jsx("p", { className: "text-xs text-gray-400", children: Q.data?.email || "Portal do Agente" })] }),
+          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes#perfil"), className: "mt-2 w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Perfil" }),
+          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),
+          e.jsx("button", { type: "button", onClick: logoutToHome, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10", children: "Sair" })
+        ] })
+      ] }),
       e.jsx(v, { mode: "agent" }),
     ],
   });
