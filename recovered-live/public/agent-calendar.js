@@ -75,7 +75,14 @@ function reminderMessage(row) {
 }
 function secondCallMessage(row) {
   const reschedule = safeUrl(row.rescheduleUrl || state.profile?.calendlyUrl);
-  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nNão conseguimos conversar no horário da nossa primeira chamada e gostaria de dar continuidade ao seu atendimento com a Affinity Financial Consulting.\n\nSe ainda tiver interesse, responda esta mensagem ou escolha um novo horário que seja mais conveniente para você.${reschedule !== "#" ? `\n\n📅 Reagende aqui:\n${reschedule}` : ""}\n\nFico à disposição e será um prazer falar com você.\n\nAffinity Financial Consulting`;
+  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nGostaria de retomar nosso atendimento exatamente de onde paramos e dar continuidade ao que conversamos.\n\nQuando for conveniente, responda esta mensagem ou escolha um horário para continuarmos.${reschedule !== "#" ? `\n\n📅 Escolha seu horário:\n${reschedule}` : ""}\n\nFico à disposição.\n\nAffinity Financial Consulting`;
+}
+function noShowMessage(row) {
+  const reschedule = safeUrl(row.rescheduleUrl || state.profile?.calendlyUrl);
+  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nNão conseguimos nos encontrar no horário marcado. Espero que esteja tudo bem.\n\nSe desejar, podemos reagendar nossa conversa para um momento mais conveniente.${reschedule !== "#" ? `\n\n📅 Reagende aqui:\n${reschedule}` : ""}\n\nFico à disposição.\n\nAffinity Financial Consulting`;
+}
+function referralMessage(row) {
+  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nFoi um prazer conversar com você. Se conhece alguém que também possa se beneficiar de uma orientação financeira cuidadosa e personalizada, ficarei muito feliz com a sua recomendação.\n\nPode me enviar o nome e o telefone da pessoa por aqui. Entrarei em contato com todo cuidado e respeito.\n\nMuito obrigado pela confiança!\n\nAffinity Financial Consulting`;
 }
 function feedbackMessage(row, link) {
   return `Olá, ${row.inviteeName || "tudo bem"}!\n\nObrigado por conversar comigo hoje. Sua opinião é muito importante para que eu possa melhorar cada vez mais meu atendimento.\n\nPreparei um formulário rápido para você me contar como foi nossa conversa, se ficou alguma dúvida e o que gostaria de analisar melhor antes de tomar uma decisão:\n\n${link}\n\nPode responder com total sinceridade. Ficarei à disposição para esclarecer qualquer dúvida.\n\nAffinity Financial Consulting`;
@@ -110,8 +117,7 @@ function setComposer(id, type) {
   const composer = $(`composer-${id}`),
     text = $(`message-${id}`);
   composer.classList.remove("hidden");
-  text.value =
-    type === "second" ? secondCallMessage(row) : reminderMessage(row);
+  text.value = type === "second" ? secondCallMessage(row) : type === "no-show" ? noShowMessage(row) : type === "referral" ? referralMessage(row) : type === "blank" ? "" : reminderMessage(row);
   composer.dataset.type = type;
   composer
     .querySelectorAll("[data-template]")
@@ -130,7 +136,7 @@ async function copyMessage(id) {
     notice("Mensagem copiada.");
   }
 }
-function openWhatsApp(id) {
+async function openWhatsApp(id) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id)),
     phone = whatsappPhone(row?.inviteePhone),
     message = $(`message-${id}`).value;
@@ -139,6 +145,14 @@ function openWhatsApp(id) {
       "O Calendly não informou o WhatsApp deste cliente. Copie a mensagem e envie pelo contato cadastrado.",
       true
     );
+  if (!message.trim()) return notice("Digite uma mensagem antes de abrir o WhatsApp.", true);
+  const composer = $(`composer-${id}`);
+  const labels = { reminder: "Primeira chamada", second: "Segunda chamada", "no-show": "Não compareceu", feedback: "Avaliação", referral: "Pedido de recomendação", blank: "Mensagem personalizada" };
+  try {
+    await api("agent.logMeetingMessage", { meetingId: Number(id), template: labels[composer?.dataset.type] || "Mensagem", channel: "whatsapp", message }, "POST");
+  } catch (error) {
+    notice(`WhatsApp será aberto, mas o histórico não pôde ser salvo: ${error.message}`, true);
+  }
   location.href = `whatsapp://send?phone=${phone}&text=${encodeURIComponent(message)}`;
 }
 function whatsappPhone(value) {
@@ -164,6 +178,9 @@ function openClientPopup(id) {
   $("client-dialog-phone").textContent = row.inviteePhone || "Não informado";
   $("client-dialog").showModal();
 }
+function composerHtml(row) {
+  return `<div id="composer-${row.id}" class="message-composer hidden"><div class="message-tabs"><button class="active" data-template="reminder" data-id="${row.id}">Primeira chamada</button><button data-template="second" data-id="${row.id}">Segunda chamada</button><button data-template="no-show" data-id="${row.id}">Não compareceu</button><button data-template="feedback" data-id="${row.id}">Avaliação</button><button data-template="referral" data-id="${row.id}">Pedir recomendação</button><button data-template="blank" data-id="${row.id}">Mensagem em branco</button></div><p class="message-help">Você pode personalizar o texto antes de copiar ou abrir o WhatsApp. Ao abrir o WhatsApp, a mensagem será registrada no histórico do cliente.</p><textarea id="message-${row.id}" aria-label="Mensagem para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div>`;
+}
 function renderMeetings(rows) {
   rows = Array.isArray(rows) ? rows : [];
   window.calendarRows = rows;
@@ -183,7 +200,7 @@ function renderMeetings(rows) {
     ? upcoming
         .map(
           row =>
-            `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${row.status === "active" ? "Confirmada" : row.status}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions">${row.meetingUrl ? `<a class="button primary" href="${safeUrl(row.meetingUrl)}" target="_blank">Entrar no Zoom</a>` : ""}<button data-open-message="${row.id}">Preparar mensagem</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button><button class="danger" data-cancel="${row.id}">Cancelar</button></div><div id="composer-${row.id}" class="message-composer hidden"><div class="message-tabs"><button class="active" data-template="reminder" data-id="${row.id}">Primeira chamada</button><button data-template="second" data-id="${row.id}">Segunda chamada</button><button data-template="feedback" data-id="${row.id}">Avaliação do atendimento</button></div><p class="message-help">Você pode personalizar o texto antes de copiar ou abrir o WhatsApp.</p><textarea id="message-${row.id}" aria-label="Mensagem para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div></article>`
+            `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${row.status === "active" ? "Confirmada" : row.status}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions">${row.meetingUrl ? `<a class="button primary" href="${safeUrl(row.meetingUrl)}" target="_blank">Entrar no Zoom</a>` : ""}<button data-open-message="${row.id}">Preparar mensagem</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button><button class="danger" data-cancel="${row.id}">Cancelar</button></div>${composerHtml(row)}</article>`
         )
         .join("")
     : '<p class="muted">Nenhuma reunião futura encontrada.</p>';
@@ -199,7 +216,7 @@ function renderMeetings(rows) {
     ? followUps.map(row => {
         const status = String(row.status || "").toLowerCase();
         const label = status === "no_show" ? "Não compareceu" : ["canceled", "cancelled"].includes(status) ? "Cancelada" : status === "completed" ? "Compareceu" : "Confirmar comparecimento";
-        return `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${label}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions"><button class="primary" data-open-followup="${row.id}">Preparar follow-up</button><button data-feedback="${row.id}">Não fechou / pedir feedback</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button>${status === "active" ? `<button data-attended="${row.id}">Compareceu</button><button data-no-show="${row.id}">Não compareceu</button>` : ""}</div><div id="composer-${row.id}" class="message-composer hidden"><p class="message-help">Personalize a mensagem antes de copiar ou abrir o WhatsApp.</p><textarea id="message-${row.id}" aria-label="Follow-up para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div></article>`;
+        return `<article class="meeting"><div><div class="when">${formatDate(row.startTime)}</div><span class="pill">${label}</span></div><div class="person"><strong>${escapeHtml(row.inviteeName || "Cliente")}</strong><span>${escapeHtml(row.eventName || "Reunião")}</span><span>${escapeHtml(row.inviteeEmail || "")}${row.inviteePhone ? ` · ${escapeHtml(row.inviteePhone)}` : ""}</span></div><div class="actions"><button class="primary" data-open-followup="${row.id}">Preparar mensagem</button><button data-feedback="${row.id}">Não fechou / pedir feedback</button>${row.rescheduleUrl ? `<a class="button" href="${safeUrl(row.rescheduleUrl)}" target="_blank">Reagendar</a>` : ""}<button data-open-client="${row.id}">Abrir cliente</button>${status === "active" ? `<button data-attended="${row.id}">Compareceu</button><button data-no-show="${row.id}">Não compareceu</button>` : ""}</div>${composerHtml(row)}</article>`;
       }).join("")
     : '<p class="muted">Nenhuma reunião cancelada ou pendente de confirmação.</p>';
   document

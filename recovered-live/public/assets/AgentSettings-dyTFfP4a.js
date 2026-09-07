@@ -40,6 +40,8 @@ const D = {
     phone: "",
     whatsapp: "",
     address: "",
+    messageSignature:
+      "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org",
   },
   $ = { portalEmail: "", password: "" };
 function se() {
@@ -72,6 +74,9 @@ function se() {
           phone: c.data.phone || "",
           whatsapp: c.data.whatsapp || "",
           address: c.data.address || "",
+          messageSignature:
+            c.data.messageSignature ||
+            "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org",
         });
     }, [c.data]),
     m.useEffect(() => {
@@ -195,6 +200,24 @@ function se() {
                         }),
                       ],
                     }),
+                    e.jsxs("label", {
+                      className: "text-sm text-gray-300 sm:col-span-2",
+                      children: [
+                        "Assinatura das mensagens automáticas",
+                        e.jsx("textarea", {
+                          className:
+                            "mt-2 min-h-40 w-full rounded-md border border-gray-700 bg-black/40 px-3 py-3 text-sm text-white outline-none focus:border-gold",
+                          value: o.messageSignature,
+                          onChange: a =>
+                            p({ ...o, messageSignature: a.target.value }),
+                        }),
+                        e.jsx("span", {
+                          className: "mt-2 block text-xs text-gray-500",
+                          children:
+                            "Você pode usar {agente_nome}, {agente_telefone} e {agente_email}. O sistema troca esses campos pelos seus dados.",
+                        }),
+                      ],
+                    }),
                   ],
                 }),
                 e.jsx("p", {
@@ -213,6 +236,7 @@ function se() {
                         phone: o.phone,
                         whatsapp: o.whatsapp,
                         address: o.address,
+                        messageSignature: o.messageSignature,
                       }),
                         await c.refetch(),
                         r.success("Perfil atualizado"));

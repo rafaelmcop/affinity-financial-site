@@ -54262,6 +54262,30 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(),meetingId||null,clientName||null,clientEmail||null,token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
+  if (name === "agent.logMeetingMessage") {
+    await ensureCalendlyTables(env);
+    const owner = adminEmail.toLowerCase(), meetingId = Number(input.meetingId || 0);
+    const message = String(input.message || "").trim().slice(0, 1e4);
+    const template = String(input.template || "Mensagem").trim().slice(0, 120);
+    const channel = String(input.channel || "whatsapp").toLowerCase() === "email" ? "email" : "whatsapp";
+    if (!meetingId || !message) return trpcError("Mensagem ou compromisso inválido");
+    const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
+    if (!meeting) return trpcError("Compromisso não encontrado", "NOT_FOUND", 404);
+    let clientId = Number(meeting.clientId || 0);
+    if (!clientId) {
+      const email = String(meeting.inviteeEmail || "").trim().toLowerCase();
+      const phone = String(meeting.inviteePhone || "").replace(/\D/g, "").slice(-10);
+      let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? ORDER BY id DESC LIMIT 1").bind(owner, email).first() : null;
+      if (!client && phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND substr(replace(replace(replace(replace(replace(coalesce(phone,whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=? ORDER BY id DESC LIMIT 1").bind(owner, phone).first();
+      if (!client) {
+        const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail) VALUES (?,?,?,?,'new','Calendly',?)").bind(String(meeting.inviteeName || "Cliente"), email || null, String(meeting.inviteePhone || "") || null, String(meeting.inviteePhone || "") || null, owner).run();
+        clientId = Number(inserted.meta.last_row_id);
+      } else clientId = Number(client.id);
+      await env.DB.prepare("UPDATE calendlyMeetings SET clientId=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(clientId, meetingId).run();
+    }
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, channel, `${template}\n${message}`, owner).run();
+    return trpcResult({ success: true, clientId });
+  }
   if (name === "admin.deleteApplication") {
     if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplicações", "FORBIDDEN", 403);
     const result = await env.DB.prepare("DELETE FROM agentApplications WHERE id=?").bind(Number(input.id || 0)).run();
@@ -55923,10 +55947,11 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (name === "agent.getProfile") {
+    await ensureAgentMessageSignatureColumn(env);
     const row = await env.DB.prepare(
-      "SELECT email,name,phone,contactEmail,whatsapp,address FROM adminAccounts WHERE lower(email)=?"
+      "SELECT email,name,phone,contactEmail,whatsapp,address,messageSignature FROM adminAccounts WHERE lower(email)=?"
     ).bind(adminEmail.toLowerCase()).first();
-    return trpcResult(row || null);
+    return trpcResult(row ? { ...row, messageSignature: String(row.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE) } : null);
   }
   if (name === "agent.getCalendly") {
     await ensureCalendlyTables(env);
@@ -56121,17 +56146,20 @@ Affinity Financial Consulting`,
     } catch(error) { return trpcError(String(error).includes('UNIQUE')?'Este endereço já está sendo usado por outro agente':'Não foi possível salvar o perfil'); }
   }
   if (name === "agent.updateProfile") {
+    await ensureAgentMessageSignatureColumn(env);
     const profileName = String(input.name ?? "").trim(), contactEmail = String(input.contactEmail ?? "").trim().toLowerCase();
+    const messageSignature = String(input.messageSignature ?? DEFAULT_AGENT_MESSAGE_SIGNATURE).trim().slice(0, 2e3) || DEFAULT_AGENT_MESSAGE_SIGNATURE;
     if (!profileName || contactEmail && !validEmail(contactEmail))
       return trpcError("Revise os dados do perfil");
     await env.DB.prepare(
-      "UPDATE adminAccounts SET name=?,phone=?,contactEmail=?,whatsapp=?,address=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?"
+      "UPDATE adminAccounts SET name=?,phone=?,contactEmail=?,whatsapp=?,address=?,messageSignature=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?"
     ).bind(
       profileName,
       String(input.phone ?? "").trim() || null,
       contactEmail || null,
       String(input.whatsapp ?? "").trim() || null,
       String(input.address ?? "").trim() || null,
+      messageSignature,
       adminEmail.toLowerCase()
     ).run();
     return trpcResult({ success: true });
@@ -57700,7 +57728,18 @@ function escapeAutomationHtml(value) {
   return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 __name(escapeAutomationHtml, "escapeAutomationHtml");
+var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org";
+async function ensureAgentMessageSignatureColumn(env) {
+  const columns = await env.DB.prepare("PRAGMA table_info(adminAccounts)").all();
+  if (!(columns.results || []).some((column) => String(column.name) === "messageSignature")) {
+    try {
+      await env.DB.prepare("ALTER TABLE adminAccounts ADD COLUMN messageSignature TEXT").run();
+    } catch {}
+  }
+}
+__name(ensureAgentMessageSignatureColumn, "ensureAgentMessageSignatureColumn");
 async function runMessageAutomations(env) {
+  await ensureAgentMessageSignatureColumn(env);
   const now = /* @__PURE__ */ new Date();
   const eastern = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -57747,7 +57786,7 @@ async function runMessageAutomations(env) {
     const dueToday = occasion === "birthday" || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
     if (occasion !== "policy_anniversary" && !dueToday) continue;
     const agentProfile = await env.DB.prepare(
-      "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
+      "SELECT email,name,phone,whatsapp,contactEmail,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1"
     ).bind(String(automation.agentEmail).toLowerCase()).first();
     const agentName = escapeAutomationHtml(
       agentProfile?.name || "Seu agente Affinity"
@@ -57755,7 +57794,31 @@ async function runMessageAutomations(env) {
     const agentPhone = escapeAutomationHtml(
       agentProfile?.phone || agentProfile?.whatsapp || "(857) 421-8325"
     );
-    const personalizeAgent = /* @__PURE__ */ __name((value) => escapeAutomationHtml(value).replaceAll("{agente_nome}", agentName).replaceAll("{agente_telefone}", agentPhone).replaceAll("{agente}", agentName).replaceAll("{telefone do agente}", agentPhone), "personalizeAgent");
+    const agentEmail = escapeAutomationHtml(
+      agentProfile?.contactEmail || agentProfile?.email || automation.agentEmail
+    );
+    const personalizeAgent = /* @__PURE__ */ __name((value) => escapeAutomationHtml(value).replaceAll("{agente_nome}", agentName).replaceAll("{agente_telefone}", agentPhone).replaceAll("{agente_email}", agentEmail).replaceAll("{agente}", agentName).replaceAll("{telefone do agente}", agentPhone).replaceAll("{email do agente}", agentEmail), "personalizeAgent");
+    const addPersonalSignature = /* @__PURE__ */ __name((value) => {
+      const message = personalizeAgent(value);
+      const normalizedAgentName = agentName.replaceAll("**", "").trim().toLowerCase();
+      const normalizedPhone = agentPhone.replace(/\D/g, "");
+      const normalizedEmail = agentEmail.trim().toLowerCase();
+      const signatureLines = personalizeAgent(agentProfile?.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE).split("\n").map((line) => line.trim()).filter(Boolean);
+      const bodyLines = message.split("\n").filter((line) => {
+        const plain = line.replaceAll("**", "").trim();
+        const lower = plain.toLowerCase();
+        const digits = plain.replace(/\D/g, "");
+        if (!plain) return true;
+        if (lower === normalizedAgentName) return false;
+        if (/^affinity financial consulting(?: inc\.)?$/i.test(plain)) return false;
+        if (/^(?:🌐\s*)?(?:https?:\/\/)?(?:www\.)?affinityfc\.org\/?$/i.test(plain)) return false;
+        if (normalizedEmail && lower.replace(/^✉️?\s*/, "") === normalizedEmail) return false;
+        if (normalizedPhone.length >= 10 && digits.endsWith(normalizedPhone.slice(-10)) && digits.length <= normalizedPhone.length + 1) return false;
+        return true;
+      });
+      while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop();
+      return `${bodyLines.join("\n").trim()}\n\n${signatureLines.join("\n")}`.trim();
+    }, "addPersonalSignature");
     if (occasion !== "custom" && !isMorningRun) continue;
     if (occasion === "policy_anniversary") {
       let policySql = "SELECT p.id policyId,p.policyNumber,p.clientId,p.issuedAt,c.name,c.email FROM agentPolicies p JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=? AND p.issuedAt IS NOT NULL AND lower(coalesce(p.product,'')) LIKE '%flex%life%'";
@@ -57802,7 +57865,7 @@ async function runMessageAutomations(env) {
         if (!policy.email) continue;
         const safeName = escapeAutomationHtml(policy.name);
         const scheduleUrl = "https://calendly.com/affinityfc/consultoria-gratuita?hide_event_type_details=1&hide_gdpr_banner=1";
-        const body = personalizeAgent(automation.message).replaceAll("{nome}", safeName).replaceAll(
+        const body = addPersonalSignature(automation.message).replaceAll("{nome}", safeName).replaceAll(
           "{apolice numero}",
           escapeAutomationHtml(policy.policyNumber)
         ).replaceAll(
@@ -57908,6 +57971,10 @@ async function runMessageAutomations(env) {
         "{nome}",
         escapeAutomationHtml(client.name)
       ), "personalize");
+      const personalizedMessage = addPersonalSignature(automation.message).replaceAll(
+        "{nome}",
+        escapeAutomationHtml(client.name)
+      );
       try {
         deliveryBudget -= 1;
         const sentMail = await sendAgentEmail(
@@ -57918,7 +57985,7 @@ async function runMessageAutomations(env) {
             subject: personalize(automation.subject || automation.title),
             html: emailHtml(
               personalize(automation.title || "Mensagem"),
-              `<p>${personalize(automation.message).replaceAll("\n", "<br>")}</p>`
+              `<p>${personalizedMessage.replaceAll("\n", "<br>")}</p>`
             )
           }
         );
@@ -57942,7 +58009,7 @@ async function runMessageAutomations(env) {
             Number(client.id),
             String(sentMail.messageId || "") || null,
             `Automático · ${personalize(automation.subject || automation.title)}`,
-            personalize(automation.message),
+            personalizedMessage.replaceAll("**", ""),
             String(automation.agentEmail).toLowerCase(),
             String(client.email)
           )
