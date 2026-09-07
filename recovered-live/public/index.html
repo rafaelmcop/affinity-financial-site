@@ -100,27 +100,7 @@
         addEventListener("popstate", leavePortal);
       })();
     </script>
-    <script>
-      (() => {
-        // Browser translators and the unified portal menu can move a text node
-        // immediately before React finishes an update. React may then try to
-        // remove that already-moved node; treat that operation as completed
-        // instead of crashing the entire portal.
-        const nativeRemoveChild = Node.prototype.removeChild;
-        Node.prototype.removeChild = function (child) {
-          if (child && child.parentNode !== this) return child;
-          return nativeRemoveChild.call(this, child);
-        };
-        const nativeInsertBefore = Node.prototype.insertBefore;
-        Node.prototype.insertBefore = function (newNode, referenceNode) {
-          if (referenceNode && referenceNode.parentNode !== this) {
-            return this.appendChild(newNode);
-          }
-          return nativeInsertBefore.call(this, newNode, referenceNode);
-        };
-      })();
-    </script>
-    <script type="module" crossorigin src="/assets/index-BIU-6RMI.js?v=20260901-13"></script>
+    <script type="module" crossorigin src="/assets/index-BIU-6RMI.js?v=20260907-domfix1"></script>
     <script src="/review-button-position.js" defer></script>
     <script src="/career-nav.js?v=20260825-2" defer></script>
     <script src="/career-portal-menu.js?v=20260825-2" defer></script>
