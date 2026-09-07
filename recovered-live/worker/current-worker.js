@@ -52495,36 +52495,19 @@ async function verifyNationalLifeLogin(portalEmail, password) {
   const landing = await nationalLifeFollow(NATIONAL_LIFE_AGENT_URL);
   const config = nationalLifeConfig(landing.html);
   const authBase = String(config.authorizationServer?.url || `https://${config.auth0Domain}`).replace(/\/$/, "");
-  const payload = {
-    client_id: config.clientID,
-    credential_type: "http://auth0.com/oauth/grant-type/password-realm",
-    username: portalEmail,
-    password,
-    realm: config.connection || "NLGAgentsDB"
-  };
-  const authResponse = await fiveRingsFetch(`${authBase}/co/authenticate`, {
-    method: "POST", redirect: "manual",
-    headers: { "content-type": "application/json", origin: authBase, referer: landing.url, ...(landing.cookies ? { cookie: landing.cookies } : {}) },
-    body: JSON.stringify(payload)
+  const authResponse = await fiveRingsFetch(`${authBase}/oauth/token`, {
+    method: "POST", redirect: "manual", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ grant_type: "http://auth0.com/oauth/grant-type/password-realm", client_id: config.clientID, username: portalEmail, password, realm: config.connection || "NLGAgentsDB", audience: config.extraParams?.audience || "https://api.nlg.net/agent-portal", scope: config.extraParams?.scope || "openid profile email" })
   }, 2e4);
   const authText = await authResponse.text();
   let authResult = {}; try { authResult = JSON.parse(authText); } catch {}
   if (authResult.error === "mfa_required" || authResult.mfa_token) return { requiresCode: true, challenge: { type: "mfa", mfaToken: authResult.mfa_token, authBase, clientId: config.clientID, cookies: landing.cookies } };
-  if (!authResponse.ok || !authResult.login_ticket) throw new Error(authResult.description || authResult.error_description || "Usuário ou senha recusados pela National Life");
-  const authorize = new URL(`${authBase}/authorize`);
-  const params = { ...(config.internalOptions || {}), ...(config.extraParams || {}), client_id: config.clientID, redirect_uri: config.callbackURL, login_ticket: authResult.login_ticket };
-  for (const [key, value] of Object.entries(params)) if (value != null && typeof value !== "object") authorize.searchParams.set(key, String(value));
-  let result = await nationalLifeFollow(authorize.toString(), mergeFiveRingsCookies(landing.cookies, authResponse.headers));
-  const callback = nationalLifeHiddenForm(result.html, result.url);
-  if (callback && new URL(callback.action).hostname.endsWith("nationallife.com")) result = await nationalLifeFollow(callback.action, result.cookies, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(result.url).origin, referer: result.url }, body: callback.body });
-  if (/id=["']loginForm["']|name=["']password["']/i.test(result.html) || !new URL(result.url).hostname.endsWith("nationallife.com")) throw new Error("A National Life não concluiu a sessão. Confirme seus dados de acesso.");
-  const inforce = await nationalLifeFollow(NATIONAL_LIFE_INFORCE_URL, result.cookies);
-  if (/id=["']loginForm["']|name=["']password["']/i.test(inforce.html) || new URL(inforce.url).hostname.includes("auth0.com")) throw new Error("A National Life não manteve a sessão para consultar o Book of Business");
-  return { requiresCode: false, session: { cookies: inforce.cookies, url: NATIONAL_LIFE_INFORCE_URL, html: inforce.html }, title: inforce.html.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() || "National Life" };
+  if (!authResponse.ok || !authResult.access_token) throw new Error(authResult.error_description || authResult.description || "Usuário ou senha recusados pela National Life");
+  return { requiresCode: false, session: { accessToken: authResult.access_token, refreshToken: authResult.refresh_token || null, idToken: authResult.id_token || null, cookies: landing.cookies || "", url: NATIONAL_LIFE_INFORCE_URL }, title: "National Life Book of Business" };
 }
 __name(verifyNationalLifeLogin, "verifyNationalLifeLogin");
 async function readNationalLifeRecords(session) {
-  const page = await nationalLifeFollow(NATIONAL_LIFE_INFORCE_URL, String(session?.cookies || ""));
+  const page = await nationalLifeFollow(NATIONAL_LIFE_INFORCE_URL, String(session?.cookies || ""), { headers: session?.accessToken ? { authorization: `Bearer ${session.accessToken}`, accept: "text/html,application/json" } : {} });
   if (/id=["']loginForm["']|name=["']password["']/i.test(page.html) || new URL(page.url).hostname.includes("auth0.com")) throw new Error("Sua sessão da National Life expirou. Clique em conectar novamente.");
   const rows = [...fiveRingsTableRecords(page.html), ...fiveRingsJsonRecords(page.html)];
   const records = rows.map((row) => normalizeFiveRingsRecord(row)).filter((record) => record.clientName || record.policyNumber);
