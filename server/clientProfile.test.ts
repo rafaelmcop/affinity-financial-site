@@ -19,4 +19,45 @@ describe("missingClientProfileFields", () => {
       )
     ).toEqual(["apólice"]);
   });
+
+  it("does not request missing data when every policy is inactive", () => {
+    expect(
+      missingClientProfileFields(
+        { email: "", phone: "", birthDate: null },
+        [
+          {
+            status: "lapse",
+            policyNumber: "LS1",
+            product: "",
+            issuedAt: null,
+            premiumAmount: 0,
+            targetPremium: 0,
+            coverageAmount: 0,
+            beneficiaries: "",
+          },
+        ]
+      )
+    ).toEqual([]);
+  });
+
+  it("checks only active policies when statuses are mixed", () => {
+    expect(
+      missingClientProfileFields(
+        { email: "a@example.com", phone: "555", birthDate: "2000-01-01" },
+        [
+          { status: "cancelled", policyNumber: "OLD", product: "" },
+          {
+            status: "active",
+            policyNumber: "NEW",
+            product: "IUL",
+            issuedAt: null,
+            premiumAmount: 100,
+            targetPremium: 1200,
+            coverageAmount: 100000,
+            beneficiaries: "Maria",
+          },
+        ]
+      )
+    ).toEqual(["data da aplicação"]);
+  });
 });

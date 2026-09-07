@@ -50608,13 +50608,16 @@ __name(isValidMediaUrl, "isValidMediaUrl");
 var present = /* @__PURE__ */ __name((value) => value !== null && value !== void 0 && String(value).trim() !== "", "present");
 var positive = /* @__PURE__ */ __name((value) => Number(value || 0) > 0, "positive");
 function missingClientProfileFields(client, policies) {
+  const inactiveStatuses = new Set(["inactive", "inativa", "lapse", "lapsed", "cancelled", "canceled", "cancelada", "declined", "recusada", "surrendered", "terminated", "expired"]);
+  const activePolicies = policies.filter((policy) => !inactiveStatuses.has(String(policy.status || "").trim().toLowerCase()));
+  if (policies.length > 0 && activePolicies.length === 0) return [];
   const missing = [];
   if (!present(client.email)) missing.push("e-mail");
   if (!present(client.phone)) missing.push("telefone");
   if (!present(client.birthDate)) missing.push("data de nascimento");
   if (!policies.length) return [...missing, "ap\xF3lice"];
-  policies.forEach((policy, index) => {
-    const suffix = policies.length > 1 ? ` (ap\xF3lice ${index + 1})` : "";
+  activePolicies.forEach((policy, index) => {
+    const suffix = activePolicies.length > 1 ? ` (ap\xF3lice ${index + 1})` : "";
     if (!present(policy.policyNumber)) missing.push(`n\xFAmero da ap\xF3lice${suffix}`);
     if (!present(policy.product)) missing.push(`produto${suffix}`);
     if (!present(policy.issuedAt)) missing.push(`data da aplica\xE7\xE3o${suffix}`);
