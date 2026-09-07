@@ -53486,7 +53486,7 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
     if (existingClient) continue;
     const composedAddress = [application.address, application.city, application.state, application.zipCode].filter((value) => String(value || "").trim()).join(", ");
     const completed = ["submitted", "completed", "complete", "concluida", "concluido"].includes(String(application.status || "").toLowerCase());
-    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplicação").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, "followup_application", "Aplicação do portal", owner, `Ficha criada automaticamente a partir da aplicação nº ${Number(application.id)}.`).run();
+    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplicação").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, "proposal", "Aplicação do portal", owner, `Ficha criada automaticamente a partir da aplicação nº ${Number(application.id)}.`).run();
     clients.push({ id: Number(inserted.meta.last_row_id), name: String(application.clientName || "Cliente da aplicação").trim(), email: applicationEmail || null, phone: String(application.clientPhone || "").trim() || null, whatsapp: String(application.clientPhone || "").trim() || null, birthDate: String(application.birthDate || "").trim() || null, address: composedAddress || null });
   }
   const emailMap = new Map(), phoneMap = new Map(), nameMap = new Map();
@@ -57035,8 +57035,8 @@ Affinity Financial Consulting`,
             WHEN EXISTS (SELECT 1 FROM agentApplications a WHERE lower(a.agentEmail)=? AND (
               (trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.clientEmail))=lower(trim(crmClients.email))) OR
               (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR
-              lower(trim(a.clientName))=lower(trim(crmClients.name)))) THEN 'followup_application'
-            ELSE 'followup_service' END,updatedAt=CURRENT_TIMESTAMP
+              lower(trim(a.clientName))=lower(trim(crmClients.name)))) THEN 'proposal'
+            ELSE 'contacted' END,updatedAt=CURRENT_TIMESTAMP
           WHERE lower(assignedAdminEmail)=? AND status IN ('client','completed')
           AND NOT EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)`
         ).bind(crmOwner, crmOwner, crmOwner),
