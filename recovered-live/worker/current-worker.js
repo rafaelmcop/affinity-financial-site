@@ -52889,7 +52889,7 @@ async function readFiveRingsRecords(session, sections) {
   ];
   const safe = [...required, ...sections.filter(
     (item) => /(client|customer|insured|polic|contract|production|book of business|business|case|application)/i.test(`${item.label} ${item.url}`) && !/(\/create|\/add|\/edit|\/delete|\/remove|\/logout|\/settings?|\/profile)/i.test(item.url)
-  )].filter((item, index, all2) => all2.findIndex((other) => other.url === item.url) === index).slice(0, 24);
+  )].filter((item, index, all2) => all2.findIndex((other) => other.url === item.url) === index).slice(0, 10);
   const pages = [{ body: session.html, html: true, url: session.url }];
   const fetched = await Promise.allSettled(safe.map(async (item) => {
     const response = await fiveRingsFetch(
@@ -52904,7 +52904,7 @@ async function readFiveRingsRecords(session, sections) {
   }));
   for (const result of fetched)
     if (result.status === "fulfilled" && result.value) pages.push(result.value);
-  const discovered = pages.filter((page) => page.html).flatMap((page) => fiveRingsSections(page.body, "https://portal.fiveringsfinancial.com")).filter((item) => /(client|customer|insured|polic|contract|production|business|case|application)/i.test(`${item.label} ${item.url}`)).filter((item) => !/(\/create|\/add|\/edit|\/delete|\/remove|\/logout|\/settings?|\/profile)/i.test(item.url)).filter((item) => !pages.some((page) => page.url === item.url)).filter((item, index, all2) => all2.findIndex((other) => other.url === item.url) === index).slice(0, 24);
+  const discovered = pages.filter((page) => page.html).flatMap((page) => fiveRingsSections(page.body, "https://portal.fiveringsfinancial.com")).filter((item) => /(client|customer|insured|polic|contract|production|business|case|application)/i.test(`${item.label} ${item.url}`)).filter((item) => !/(\/create|\/add|\/edit|\/delete|\/remove|\/logout|\/settings?|\/profile)/i.test(item.url)).filter((item) => !pages.some((page) => page.url === item.url)).filter((item, index, all2) => all2.findIndex((other) => other.url === item.url) === index).slice(0, 10);
   const extra = await Promise.allSettled(discovered.map(async (item) => {
     const response = await fiveRingsFetch(item.url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
     if (!response.ok) return null;
@@ -52924,10 +52924,10 @@ async function readFiveRingsRecords(session, sections) {
     }
     return rows.map((row) => normalizeFiveRingsRecord(row));
   })];
-  const detailItems = all.flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => ({ record, url }))).filter((item, index, entries) => entries.findIndex((other) => other.url === item.url) === index);
+  const detailItems = all.filter((record) => !record.email || !record.phone || !record.birthDate || !record.address || record.policyNumber && (!record.coverageAmount || !record.premiumAmount || !record.product)).flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => ({ record, url }))).filter((item, index, entries) => entries.findIndex((other) => other.url === item.url) === index);
   const selectedDetails = [
-    ...detailItems.filter((item) => /\/account\/clients\//i.test(item.url)).slice(0, 120),
-    ...detailItems.filter((item) => /\/account\/policies\//i.test(item.url)).slice(0, 120)
+    ...detailItems.filter((item) => /\/account\/clients\//i.test(item.url)).slice(0, 30),
+    ...detailItems.filter((item) => /\/account\/policies\//i.test(item.url)).slice(0, 30)
   ];
   const details = await Promise.allSettled(selectedDetails.map(async ({ record, url }) => {
     const response = await fiveRingsFetch(url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
@@ -55909,9 +55909,7 @@ Affinity Financial Consulting`,
         await env.DB.prepare(
           "UPDATE agentFiveRingsConnections SET status='pending',encryptedChallenge=?,encryptedSession=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
         ).bind(encryptedChallenge, owner).run();
-        const confirmed = await waitForFiveRingsEmailCode(env, owner, login.challenge);
-        if (confirmed) return runFiveRingsSyncAsAgent(env, owner);
-        return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0 });
+        return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0, message: "Código solicitado. Informe-o para continuar sem recarregar a página." });
       }
       const records = await readFiveRingsRecords(login.session, login.sections);
       let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
@@ -55996,8 +55994,8 @@ Affinity Financial Consulting`,
     const current = await env.DB.prepare("SELECT encryptedPassword FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
     const clear = String(input.password || "");
     const encryptedPassword = clear ? await encryptSmtpPassword(clear, env.JWT_SECRET) : String(current?.encryptedPassword || "");
-    if (!validEmail(String(input.portalEmail || "")) || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o e-mail e a senha do portal National Life Group");
-    await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
+    if (String(input.portalEmail || "").trim().length < 2 || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o nome de usuário e a senha do portal National Life Group");
+    await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).trim(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
     return trpcResult({ success: true, status: "configured" });
   }
   if (name === "agent.verifyNationalLifeConnection") {
