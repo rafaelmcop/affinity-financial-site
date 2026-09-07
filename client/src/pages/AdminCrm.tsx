@@ -116,7 +116,7 @@ export default function AdminCrm({
 }: {
   agentMode?: boolean;
 }) {
-  const clientsQuery = trpc.crm.list.useQuery();
+  const clientsQuery = (trpc.crm.list as any).useQuery({ agentMode });
   const assigneesQuery = trpc.crm.assignees.useQuery();
   const createMutation = trpc.crm.create.useMutation();
   const updateMutation = trpc.crm.update.useMutation();
@@ -126,7 +126,10 @@ export default function AdminCrm({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
-  const [crmView, setCrmView] = useState<"clients" | "automations" | "history">("clients");
+  const [crmView, setCrmView] = useState<"leads" | "followup" | "new_business" | "clients" | "automations" | "history">(() => {
+    const section = new URLSearchParams(window.location.search).get("setor");
+    return section === "leads" || section === "followup" || section === "new_business" ? section : "clients";
+  });
   const activitiesQuery = trpc.crm.activities.useQuery(
     { clientId: selectedId || 0 },
     { enabled: !!selectedId }
@@ -152,7 +155,7 @@ export default function AdminCrm({
   );
   const [communication, setCommunication] = useState("");
   const clients = clientsQuery.data || [];
-  const selected = clients.find(client => client.id === selectedId);
+  const selected = clients.find((client: any) => client.id === selectedId);
   const selectedPolicies = (policiesQuery.data || []).filter(
     policy =>
       policy.clientId === selectedId ||
@@ -180,15 +183,27 @@ export default function AdminCrm({
       admin.email.toLowerCase() ===
       String(storedSession.email || "").toLowerCase()
   );
-  const filtered = useMemo(
-    () =>
-      clients.filter(client =>
+  const filtered = useMemo(() => {
+    const policies = policiesQuery.data || [];
+    return clients.filter((client: any) => {
+        const clientRecord = client as typeof client & { lastMeetingAt?: string | null; status: string };
+        const hasPolicy = policies.some(policy =>
+          Number(policy.clientId) === Number(client.id) ||
+          (!!client.email && policy.clientEmail?.toLowerCase() === client.email.toLowerCase())
+        );
+        const hasApplication = clientRecord.status === "proposal" || clientRecord.status === "followup_application";
+        const hasMeeting = Boolean(clientRecord.lastMeetingAt) || ["meeting", "first_meeting", "contacted", "followup_service", "followup_documents", "followup_review"].includes(clientRecord.status);
+        const belongs = crmView === "clients" ? hasPolicy
+          : crmView === "new_business" ? !hasPolicy && hasApplication
+          : crmView === "followup" ? !hasPolicy && !hasApplication && hasMeeting
+          : crmView === "leads" ? !hasPolicy && !hasApplication && !hasMeeting
+          : true;
+        return belongs &&
         `${client.name} ${client.email || ""} ${client.phone || ""}`
           .toLowerCase()
-          .includes(search.toLowerCase())
-      ),
-    [clients, search]
-  );
+          .includes(search.toLowerCase());
+      });
+  }, [clients, policiesQuery.data, search, crmView]);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -309,7 +324,10 @@ export default function AdminCrm({
         {agentMode && (
           <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2">
             {([
-              ["clients", "Clientes e histórico"],
+              ["leads", "Leads"],
+              ["followup", "Follow-up"],
+              ["new_business", "New Business"],
+              ["clients", "INFORCE"],
               ["automations", "Mensagens automáticas"],
               ["history", "Registro de envios"],
             ] as const).map(([value, label]) => (
@@ -493,7 +511,7 @@ export default function AdminCrm({
                 Nenhum cliente encontrado.
               </Card>
             )}
-            {filtered.map(client => {
+            {filtered.map((client: any) => {
               const status = statuses.find(
                 item => item.value === client.status
               )!;

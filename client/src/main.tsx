@@ -63,34 +63,9 @@ const trpcClient = trpc.createClient({
         return {};
       },
       fetch(input, init) {
-        const request = {
+        return globalThis.fetch(input, {
           ...(init ?? {}),
-          credentials: "include" as RequestCredentials,
-          cache: "no-store" as RequestCache,
-        };
-
-        return globalThis.fetch(input, request).then(async response => {
-          const contentType = response.headers.get("content-type") ?? "";
-          if (contentType.toLowerCase().includes("json")) return response;
-
-          // A stale Cloudflare asset/SPA fallback can occasionally answer an API
-          // request with index.html. Retry once without any edge/browser cache so
-          // tRPC never attempts JSON.parse("<!DOCTYPE ...").
-          const retryResponse = await globalThis.fetch(input, {
-            ...request,
-            headers: {
-              ...Object.fromEntries(new Headers(request.headers).entries()),
-              "x-affinity-json-retry": "1",
-            },
-          });
-          const retryType = retryResponse.headers.get("content-type") ?? "";
-          if (retryType.toLowerCase().includes("json")) return retryResponse;
-
-          throw new Error(
-            retryResponse.status === 401 || retryResponse.status === 403
-              ? "Sua sessão expirou. Entre novamente para continuar."
-              : "O portal recebeu uma resposta inválida. Atualize a página e tente novamente."
-          );
+          credentials: "include",
         });
       },
     }),

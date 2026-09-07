@@ -12220,6 +12220,9 @@ async function sendAgentEmail(env, agentEmail, options) {
 function emailHtml(title, content) {
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222"><h2 style="color:#b28a2e">${title}</h2>${content}<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#666;font-size:12px">Affinity Financial Consulting Inc.<br>247 Washington St, Stoughton, MA<br>(857) 421-8325</p></div>`;
 }
+function clientEmailHtml(content) {
+  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222">${content}<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#666;font-size:12px">Affinity Financial Consulting Inc.<br>247 Washington St, Stoughton, MA<br>(857) 421-8325</p></div>`;
+}
 var import_nodemailer;
 var init_cloudflare_email = __esm({
   "worker/cloudflare-email.ts"() {
@@ -12233,6 +12236,7 @@ var init_cloudflare_email = __esm({
     __name(sendEmail, "sendEmail");
     __name(sendAgentEmail, "sendAgentEmail");
     __name(emailHtml, "emailHtml");
+    __name(clientEmailHtml, "clientEmailHtml");
   }
 });
 
@@ -50179,7 +50183,7 @@ Ap\xF3lice n\xBA {apolice}`;
     const sent = await sendAgentEmail(env, owner, {
       to: String(resolvedMatch.email),
       subject: subjectToClient,
-      html: emailHtml(escapeHtml(subjectToClient), `<p>${safeMessage}</p>`)
+      html: clientEmailHtml(`<p>${safeMessage}</p>`)
     });
     await env.DB.batch([
       env.DB.prepare(
@@ -53482,7 +53486,7 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
     if (existingClient) continue;
     const composedAddress = [application.address, application.city, application.state, application.zipCode].filter((value) => String(value || "").trim()).join(", ");
     const completed = ["submitted", "completed", "complete", "concluida", "concluido"].includes(String(application.status || "").toLowerCase());
-    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplicação").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, completed ? "client" : "proposal", "Aplicação do portal", owner, `Ficha criada automaticamente a partir da aplicação nº ${Number(application.id)}.`).run();
+    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplicação").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, "followup_application", "Aplicação do portal", owner, `Ficha criada automaticamente a partir da aplicação nº ${Number(application.id)}.`).run();
     clients.push({ id: Number(inserted.meta.last_row_id), name: String(application.clientName || "Cliente da aplicação").trim(), email: applicationEmail || null, phone: String(application.clientPhone || "").trim() || null, whatsapp: String(application.clientPhone || "").trim() || null, birthDate: String(application.birthDate || "").trim() || null, address: composedAddress || null });
   }
   const emailMap = new Map(), phoneMap = new Map(), nameMap = new Map();
@@ -54440,7 +54444,7 @@ Detalhes: ${details}` : ""}`;
       const sent = await sendAgentEmail(env, owner, {
         to: recipient,
         subject,
-        html: emailHtml(escapeAutomationHtml(subject), `<p>${escapeAutomationHtml(body).replaceAll("\n", "<br>")}</p>`),
+        html: clientEmailHtml(`<p>${escapeAutomationHtml(body).replaceAll("\n", "<br>")}</p>`),
         replyTo: String(config.fromEmail)
       });
       const externalId = String(sent.messageId || `portal:${owner}:${Date.now()}`);
@@ -54477,6 +54481,18 @@ Detalhes: ${details}` : ""}`;
     if (name === "agent.listApplications") {
       await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
       await env.DB.prepare("UPDATE agentApplications SET clientToken=lower(hex(randomblob(16))) WHERE lower(agentEmail)=? AND (clientToken IS NULL OR trim(clientToken)='')").bind(owner).run();
+      // A completed application must always have a real policy. Older logic
+      // incorrectly completed an application just because its CRM profile was
+      // labelled as a client.
+      await env.DB.prepare(`UPDATE agentApplications SET
+        status=CASE WHEN submittedAt IS NOT NULL THEN 'submitted' ELSE 'draft' END,
+        matchedPolicyId=NULL,completedAt=NULL,updatedAt=CURRENT_TIMESTAMP
+        WHERE lower(agentEmail)=? AND status='completed'
+        AND (matchedPolicyId IS NULL OR NOT EXISTS (
+          SELECT 1 FROM agentPolicies p
+          WHERE p.id=agentApplications.matchedPolicyId
+          AND lower(p.agentEmail)=lower(agentApplications.agentEmail)
+        ))`).bind(owner).run();
       await env.DB.prepare(`UPDATE agentApplications AS a SET
         status='completed',
         matchedPolicyId=(SELECT p.id FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId
@@ -54492,14 +54508,6 @@ Detalhes: ${details}` : ""}`;
           AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(coalesce(c.email,p.clientEmail,'')))=lower(trim(a.clientEmail)))
             OR (a.clientPhone IS NOT NULL AND trim(a.clientPhone)<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,p.clientPhone,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10))
             OR lower(trim(coalesce(c.name,p.clientName,'')))=lower(trim(a.clientName))))`).bind(owner).run();
-      await env.DB.prepare(`UPDATE agentApplications AS a SET
-        status='completed',completedAt=COALESCE(completedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP
-        WHERE lower(a.agentEmail)=? AND a.status IN ('draft','submitted')
-        AND EXISTS (SELECT 1 FROM crmClients c
-          WHERE lower(c.assignedAdminEmail)=lower(a.agentEmail) AND c.status='client'
-          AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(c.email))=lower(trim(a.clientEmail)))
-            OR (a.clientPhone IS NOT NULL AND trim(a.clientPhone)<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10))
-            OR lower(trim(c.name))=lower(trim(a.clientName))))`).bind(owner).run();
       const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount,
         EXISTS(SELECT 1 FROM applicationDeletionRequests d WHERE d.applicationId=a.id AND d.status='pending') AS deletionPending,
         (SELECT token FROM reviewInvites r WHERE r.applicationId=a.id AND r.usedAt IS NULL ORDER BY r.id DESC LIMIT 1) AS reviewToken,
@@ -54952,7 +54960,7 @@ Detalhes: ${details}` : ""}`;
     const sent = await sendAgentEmail(env, adminEmail, {
       to: String(customer.email),
       subject,
-      html: emailHtml(subject, `<p>${safeBody}</p>`),
+      html: clientEmailHtml(`<p>${safeBody}</p>`),
       replyTo: String(config.fromEmail),
       inReplyTo,
       references: inReplyTo ? [inReplyTo] : void 0
@@ -55154,7 +55162,7 @@ Detalhes: ${details}` : ""}`;
     const sent = await sendAgentEmail(env, owner, {
       to: recipient,
       subject,
-      html: emailHtml(escapeAutomationHtml(subject), `<p>${escapeAutomationHtml(body).replaceAll("\n", "<br>")}</p>`),
+      html: clientEmailHtml(`<p>${escapeAutomationHtml(body).replaceAll("\n", "<br>")}</p>`),
       replyTo: String(config.fromEmail),
       inReplyTo,
       references: inReplyTo ? [inReplyTo] : void 0
@@ -57013,7 +57021,8 @@ Affinity Financial Consulting`,
   }
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
-    if (accountType === "agent") {
+    const agentView = accountType === "agent" || Boolean(input.agentMode);
+    if (agentView) {
       await env.DB.batch([
         env.DB.prepare(
           "UPDATE agentPolicies SET clientId=(SELECT c.id FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))) ORDER BY CASE WHEN trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail)) THEN 0 WHEN trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10) THEN 1 ELSE 2 END,c.id DESC LIMIT 1) WHERE lower(agentEmail)=? AND (clientId IS NULL OR clientId=0) AND EXISTS (SELECT 1 FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))))"
@@ -57022,12 +57031,22 @@ Affinity Financial Consulting`,
           "UPDATE crmClients SET status='client',updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status<>'client' AND EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)"
         ).bind(crmOwner, crmOwner),
         env.DB.prepare(
+          `UPDATE crmClients SET status=CASE
+            WHEN EXISTS (SELECT 1 FROM agentApplications a WHERE lower(a.agentEmail)=? AND (
+              (trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.clientEmail))=lower(trim(crmClients.email))) OR
+              (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR
+              lower(trim(a.clientName))=lower(trim(crmClients.name)))) THEN 'followup_application'
+            ELSE 'followup_service' END,updatedAt=CURRENT_TIMESTAMP
+          WHERE lower(assignedAdminEmail)=? AND status IN ('client','completed')
+          AND NOT EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)`
+        ).bind(crmOwner, crmOwner, crmOwner),
+        env.DB.prepare(
           "UPDATE crmClients SET status='closed',notes=CASE WHEN instr(lower(coalesce(notes,'')),'contratado como agente')=0 THEN trim(coalesce(notes,'') || CASE WHEN trim(coalesce(notes,''))<>'' THEN char(10) ELSE '' END || 'Contratado como agente da Affinity Financial.') ELSE notes END,updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status IN ('new','contacted','meeting','proposal') AND EXISTS (SELECT 1 FROM adminAccounts a WHERE a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') AND ((trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.email))=lower(trim(crmClients.email))) OR (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND trim(coalesce(a.phone,a.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(a.phone,a.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR lower(trim(a.name))=lower(trim(crmClients.name))))"
         ).bind(crmOwner)
       ]);
       await mergeClientSourcesForAgent(env, crmOwner);
     }
-    const rows = accountType === "agent" ? await env.DB.prepare(
+    const rows = agentView ? await env.DB.prepare(
       "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
     ).bind(adminEmail.toLowerCase()).all() : await env.DB.prepare(
       "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
@@ -58161,8 +58180,7 @@ async function runMessageAutomations(env) {
           const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
             subject,
-            html: emailHtml(
-              personalizeAgent(automation.title || "Revis\xE3o anual"),
+            html: clientEmailHtml(
               `<p>${body.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replaceAll("\n", "<br>")}</p>`
             )
           });
@@ -58261,8 +58279,7 @@ async function runMessageAutomations(env) {
           {
             to: String(client.email),
             subject: personalize(automation.subject || automation.title),
-            html: emailHtml(
-              personalize(automation.title || "Mensagem"),
+            html: clientEmailHtml(
               `<p>${personalizedMessage.replaceAll("\n", "<br>")}</p>`
             )
           }

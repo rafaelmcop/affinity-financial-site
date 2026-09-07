@@ -143,7 +143,7 @@ function ue(a) {
   return i ? `${i[3]}-${i[1].padStart(2, "0")}-${i[2].padStart(2, "0")}` : a;
 }
 function Le({ agentMode: a = !1 }) {
-  const i = c.crm.list.useQuery(),
+  const i = c.crm.list.useQuery({ agentMode: a }),
     m = c.crm.assignees.useQuery(),
     J = c.crm.create.useMutation(),
     G = c.crm.update.useMutation(),
@@ -158,8 +158,10 @@ function Le({ agentMode: a = !1 }) {
     [w, X] = p.useState(""),
     [sortMode, setSortMode] = p.useState("name_asc"),
     [b, M] = p.useState(() =>
-      new URLSearchParams(location.search).get("setor") === "leads"
-        ? "leads"
+      ["leads", "followup", "new_business"].includes(
+        new URLSearchParams(location.search).get("setor")
+      )
+        ? new URLSearchParams(location.search).get("setor")
         : "clients"
     ),
     [page, setPage] = p.useState(1),
@@ -219,27 +221,24 @@ function Le({ agentMode: a = !1 }) {
       s => s.email.toLowerCase() === String(re.email || "").toLowerCase()
     ),
     W = p.useMemo(() => {
-      const s = [
-        "new",
-        "contacted",
-        "meeting",
-        "proposal",
-        "first_meeting",
-        "followup_documents",
-        "followup_service",
-        "followup_application",
-        "followup_review",
-      ];
+      const policies = Y.data || [];
       return S.filter(
-        l =>
-          (b === "leads"
-            ? s.includes(l.status)
-            : b === "clients"
-              ? !s.includes(l.status)
-              : true) &&
-          ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
+        l => {
+          const hasPolicy = policies.some(policy =>
+              Number(policy.clientId) === Number(l.id) ||
+              (!!l.email && policy.clientEmail?.toLowerCase() === l.email.toLowerCase())
+            ),
+            hasApplication = ["proposal", "followup_application"].includes(l.status),
+            hasMeeting = !!l.lastMeetingAt || ["meeting", "first_meeting", "contacted", "followup_service", "followup_documents", "followup_review"].includes(l.status),
+            belongs = b === "clients" ? hasPolicy
+              : b === "new_business" ? !hasPolicy && hasApplication
+              : b === "followup" ? !hasPolicy && !hasApplication && hasMeeting
+              : b === "leads" ? !hasPolicy && !hasApplication && !hasMeeting
+              : true;
+          return belongs && ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
             .toLowerCase()
-            .includes(w.toLowerCase())
+            .includes(w.toLowerCase());
+        }
       ).sort((l, o) => {
         if (sortMode.startsWith("date")) {
           const left = new Date(l.lastMeetingAt || l.createdAt || 0).getTime() || 0,
@@ -249,7 +248,7 @@ function Le({ agentMode: a = !1 }) {
         const result = String(l.name || "").localeCompare(String(o.name || ""), "pt-BR", { sensitivity: "base" });
         return sortMode === "name_desc" ? -result : result;
       });
-    }, [S, w, b, sortMode]),
+    }, [S, Y.data, w, b, sortMode]),
     totalPages = Math.max(1, Math.ceil(W.length / 10)),
     pageRows = W.slice((page - 1) * 10, page * 10),
     le = async s => {
@@ -599,7 +598,9 @@ function Le({ agentMode: a = !1 }) {
                 "flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2",
               children: [
                 ["leads", "Leads"],
-                ["clients", "Clientes e histórico"],
+                ["followup", "Follow-up"],
+                ["new_business", "New Business"],
+                ["clients", "INFORCE"],
                 ["automations", "Mensagens e automações"],
                 ["history", "Histórico"],
               ].map(([s, l]) =>
@@ -617,7 +618,7 @@ function Le({ agentMode: a = !1 }) {
             }),
           e.jsxs("div", {
             className:
-              a && !["clients", "leads"].includes(b) ? "hidden" : "contents",
+              a && !["clients", "leads", "followup", "new_business"].includes(b) ? "hidden" : "contents",
             children: [
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",
