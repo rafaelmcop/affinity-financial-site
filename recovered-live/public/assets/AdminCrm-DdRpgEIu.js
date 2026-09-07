@@ -158,11 +158,11 @@ function Le({ agentMode: a = !1 }) {
     [w, X] = p.useState(""),
     [sortMode, setSortMode] = p.useState("name_asc"),
     [b, M] = p.useState(() =>
-      ["followup", "new_business", "inforce"].includes(
+      ["leads", "followup", "new_business", "inforce"].includes(
         new URLSearchParams(location.search).get("setor")
       )
         ? new URLSearchParams(location.search).get("setor")
-        : "clients"
+        : "leads"
     ),
     [page, setPage] = p.useState(1),
     [loadHistory, setLoadHistory] = p.useState(!1),
@@ -171,6 +171,10 @@ function Le({ agentMode: a = !1 }) {
       { enabled: !!x && loadHistory, staleTime: 3e4 }
     ),
     Y = c.agent.listPolicies.useQuery(void 0, { enabled: a }),
+    applicationsQuery = c.agent.listApplications.useQuery(void 0, {
+      enabled: a,
+      staleTime: 3e4,
+    }),
     Z = c.agent.listMessages.useQuery(void 0, { enabled: a && !!x, staleTime: 3e4 }),
     L = c.agent.clientEmails.useQuery(
       { clientId: x || 0 },
@@ -221,19 +225,30 @@ function Le({ agentMode: a = !1 }) {
       s => s.email.toLowerCase() === String(re.email || "").toLowerCase()
     ),
     W = p.useMemo(() => {
-      const policies = Y.data || [];
+      const policies = Y.data || [],
+        applications = applicationsQuery.data || [],
+        normalizedPhone = value => F(String(value || "")).slice(-10),
+        belongsTo = (record, client) =>
+          (record.clientId && Number(record.clientId) === Number(client.id)) ||
+          (!!record.clientEmail && !!client.email && record.clientEmail.trim().toLowerCase() === client.email.trim().toLowerCase()) ||
+          (!!record.clientPhone && !!(client.phone || client.whatsapp) && normalizedPhone(record.clientPhone) === normalizedPhone(client.phone || client.whatsapp)) ||
+          (!!record.clientName && !!client.name && record.clientName.trim().toLowerCase() === client.name.trim().toLowerCase());
       return S.filter(
         l => {
-          const hasPolicy = policies.some(policy =>
-              Number(policy.clientId) === Number(l.id) ||
-              (!!l.email && policy.clientEmail?.toLowerCase() === l.email.toLowerCase())
-            ),
-            hasApplication = ["proposal", "followup_application"].includes(l.status),
-            hasMeeting = !!l.lastMeetingAt || ["meeting", "first_meeting", "contacted", "followup_service", "followup_documents", "followup_review"].includes(l.status),
-            belongs = b === "clients" ? true
-              : b === "inforce" ? hasPolicy
-              : b === "new_business" ? !hasPolicy && hasApplication
-              : b === "followup" ? !hasPolicy && !hasApplication && hasMeeting
+          const clientPolicies = policies.filter(policy => belongsTo(policy, l)),
+            hasPolicy = clientPolicies.length > 0,
+            hasInforcePolicy = clientPolicies.some(policy => ["active", "inforce", "in_force", "issued"].includes(String(policy.status || "").toLowerCase())),
+            clientApplications = applications.filter(application => belongsTo(application, l) && !application.matchedPolicyId && !application.policyNumber),
+            hasDraftApplication = clientApplications.some(application => application.status === "draft"),
+            hasCompletedApplication = clientApplications.some(application => application.status === "submitted"),
+            meetingTime = l.lastMeetingAt ? new Date(l.lastMeetingAt).getTime() : 0,
+            hasPastMeeting = meetingTime > 0 && meetingTime <= Date.now(),
+            manuallyFollowedUp = ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(l.status),
+            wasAttended = hasPastMeeting || manuallyFollowedUp,
+            belongs = b === "leads" ? !hasPolicy && !hasDraftApplication && !hasCompletedApplication && !wasAttended
+              : b === "inforce" ? hasInforcePolicy
+              : b === "new_business" ? !hasPolicy && hasCompletedApplication
+              : b === "followup" ? !hasPolicy && !hasDraftApplication && !hasCompletedApplication && wasAttended
               : true;
           return belongs && ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
             .toLowerCase()
@@ -248,7 +263,7 @@ function Le({ agentMode: a = !1 }) {
         const result = String(l.name || "").localeCompare(String(o.name || ""), "pt-BR", { sensitivity: "base" });
         return sortMode === "name_desc" ? -result : result;
       });
-    }, [S, Y.data, w, b, sortMode]),
+    }, [S, Y.data, applicationsQuery.data, w, b, sortMode]),
     totalPages = Math.max(1, Math.ceil(W.length / 10)),
     pageRows = W.slice((page - 1) * 10, page * 10),
     le = async s => {
@@ -597,7 +612,7 @@ function Le({ agentMode: a = !1 }) {
               className:
                 "flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2",
               children: [
-                ["clients", "Clientes"],
+                ["leads", "Leads"],
                 ["followup", "Follow-up"],
                 ["new_business", "New Business"],
                 ["inforce", "INFORCE"],
@@ -618,7 +633,7 @@ function Le({ agentMode: a = !1 }) {
             }),
           e.jsxs("div", {
             className:
-              a && !["clients", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
+              a && !["leads", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
             children: [
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",

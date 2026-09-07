@@ -57047,9 +57047,9 @@ Affinity Financial Consulting`,
       await mergeClientSourcesForAgent(env, crmOwner);
     }
     const rows = agentView ? await env.DB.prepare(
-      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
+      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
     ).bind(adminEmail.toLowerCase()).all() : await env.DB.prepare(
-      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
+      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
     ).all();
     return trpcResult(
       rows.results.map((row) => ({ ...row, id: Number(row.id) }))

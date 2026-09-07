@@ -1328,13 +1328,15 @@
   }).observe($("list"), { childList: true, subtree: true });
   function render() {
     const data = rows.filter(r =>
-      tab === "completed" ? r.status === "completed" : r.status !== "completed"
+      tab === "completed"
+        ? r.status === "submitted" && !r.policyNumber && !r.matchedPolicyId
+        : r.status === "draft"
     );
     $("list").innerHTML = data.length
       ? data
           .map(
             r =>
-              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || r.clientPhone || "Sem contato")}</div></div><span class="pill">${r.status === "draft" ? "Rascunho" : r.status === "submitted" ? "Submetida" : "Concluída"}</span></div>${r.policyNumber ? `<p>Apólice <b>${esc(r.policyNumber)}</b> · ${esc(r.product || "")}</p>` : ""}<div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Marcar como submetida</button>` : ""}</div></article>`
+              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || r.clientPhone || "Sem contato")}</div></div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div><div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
       : '<div class="empty">Nenhuma aplicação nesta categoria.</div>';
