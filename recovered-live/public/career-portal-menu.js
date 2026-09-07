@@ -27,7 +27,6 @@
     const reviews = elements.find(el => /avaliações|avaliacoes/i.test(el.textContent || ''));
     const settings = elements.find(el => /configurações|configuracoes/i.test(el.textContent || ''));
     if (agentPortal) {
-      if (settings) makeLink(settings, 'careers', '/candidaturas.html?portal=agent', 'Candidaturas', Number(info.pendingCount || 0));
       return;
     }
     if (users) makeLink(users, 'careers', '/candidaturas.html?portal=admin', 'Candidaturas', Number(info.pendingCount || 0));

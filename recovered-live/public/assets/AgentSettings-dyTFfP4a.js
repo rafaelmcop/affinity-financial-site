@@ -60,12 +60,16 @@ function se() {
     x = n.agent.syncFiveRings.useMutation(),
     k = n.agent.resetFiveRingsChallenge.useMutation(),
     Z = n.agent.saveNationalLifeConnection.useMutation(),
+    Y = n.agent.verifyNationalLifeConnection.useMutation(),
+    B = n.agent.submitNationalLifeCode.useMutation(),
     [t, l] = m.useState(D),
     [o, p] = m.useState(W),
     [g, h] = m.useState($),
     [G, H] = m.useState(K),
     [f, b] = m.useState(""),
-    [N, P] = m.useState("");
+    [N, P] = m.useState(""),
+    [nlCode, setNlCode] = m.useState(""),
+    view = new URLSearchParams(window.location.search).get("view") || "settings";
   return (
     m.useEffect(() => {
       u.data && l(a => ({ ...a, ...u.data, password: "" }));
@@ -96,8 +100,9 @@ function se() {
       children: [
         e.jsx(F, {}),
         e.jsxs("main", {
-          className: "mx-auto max-w-3xl space-y-6 px-4 py-8",
+          className: `mx-auto max-w-3xl space-y-6 px-4 py-8 ${view === "profile" ? "agent-settings-profile" : "agent-settings-integrations"}`,
           children: [
+            e.jsx("style", { children: ".agent-settings-profile > *:not(style):not(:nth-child(2)):not(#perfil){display:none!important}.agent-settings-integrations>#perfil{display:none!important}" }),
             e.jsxs("div", {
               children: [
                 e.jsx("p", {
@@ -107,12 +112,12 @@ function se() {
                 }),
                 e.jsx("h1", {
                   className: "mt-2 text-3xl font-bold",
-                  children: "Configurações",
+                  children: view === "profile" ? "Perfil" : "Configurações",
                 }),
                 e.jsx("p", {
                   className: "mt-2 text-gray-400",
                   children:
-                    "Gerencie seu perfil e os canais usados no acompanhamento dos clientes.",
+                    view === "profile" ? "Atualize seus dados pessoais, sua foto e sua assinatura profissional." : "Gerencie as integrações e os canais usados no acompanhamento dos clientes.",
                 }),
               ],
             }),
@@ -515,10 +520,16 @@ function se() {
               e.jsxs("label", { className: "block text-sm text-gray-300", children: ["E-mail do portal National Life", e.jsx(i, { className: "mt-2", type: "email", autoComplete: "username", value: G.portalEmail, onChange: a => H({ ...G, portalEmail: a.target.value }) })] }),
               e.jsxs("label", { className: "block text-sm text-gray-300", children: ["Senha do portal", e.jsx(i, { className: "mt-2", type: "password", autoComplete: "current-password", placeholder: V.data?.passwordConfigured ? "Deixe vazio para manter a senha atual" : "Informe sua senha", value: G.password, onChange: a => H({ ...G, password: a.target.value }) })] }),
               e.jsxs("label", { className: "flex items-center gap-3 rounded-lg border border-emerald-400/20 bg-black/20 p-3 text-sm text-emerald-100", children: [e.jsx("input", { type: "checkbox", checked: G.trustDevice !== !1, onChange: a => H({ ...G, trustDevice: a.target.checked }) }), "Confiar neste dispositivo quando o portal oferecer essa opção"] }),
-              V.data && e.jsx("div", { className: "rounded-lg bg-black/30 p-3 text-sm text-gray-300", children: `Status: ${V.data.passwordConfigured ? "Acesso protegido salvo" : "Aguardando configuração"}` }),
+              V.data && e.jsx("div", { className: "rounded-lg bg-black/30 p-3 text-sm text-gray-300", children: `Status: ${V.data.status === "connected" ? "Conectado ao portal oficial" : V.data.requiresCode ? "Aguardando código de confirmação" : V.data.passwordConfigured ? "Acesso salvo — falta conectar" : "Aguardando configuração"}` }),
               e.jsx(d, { className: "w-full bg-emerald-300 text-slate-950 hover:bg-emerald-200", disabled: !G.portalEmail || Z.isPending, onClick: async () => { try { await Z.mutateAsync(G); H(a => ({ ...a, password: "" })); await V.refetch(); r.success("Acesso National Life salvo com proteção"); } catch (a) { r.error(a instanceof Error ? a.message : "Não foi possível salvar o acesso"); } }, children: Z.isPending ? "Salvando..." : "Salvar conexão protegida" }),
-              e.jsx("a", { href: "https://nationallife.my.site.com/nlgpartnerportal/login?locale=us", target: "_blank", rel: "noreferrer", className: "block text-center text-sm text-emerald-300 underline", children: "Abrir portal oficial National Life" }),
-              e.jsx("p", { className: "text-xs leading-relaxed text-gray-500", children: "Esta primeira etapa guarda o acesso com segurança. A leitura automática será ativada após mapearmos o primeiro acesso e a confirmação do portal, sem permitir alterações na National Life." })
+              e.jsx(d, { type: "button", variant: "outline", className: "w-full border-emerald-300 text-emerald-200", disabled: Y.isPending || !V.data?.passwordConfigured, onClick: async () => { try { const a = await Y.mutateAsync(); await V.refetch(); a.requiresCode ? r.info("Informe o código enviado pela National Life") : r.success("National Life conectada dentro do portal"); } catch (a) { await V.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível conectar"); } }, children: Y.isPending ? "Conectando ao portal oficial..." : "Conectar e testar acesso" }),
+              V.data?.requiresCode && e.jsxs("div", { className: "space-y-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4", children: [
+                e.jsx("p", { className: "text-sm text-amber-100", children: "A National Life solicitou confirmação. Informe o código recebido para manter a sessão conectada." }),
+                e.jsx(i, { inputMode: "numeric", autoComplete: "one-time-code", placeholder: "Código de confirmação", value: nlCode, onChange: a => setNlCode(a.target.value.replace(/\D/g, "").slice(0, 10)) }),
+                e.jsx(d, { className: "w-full bg-amber-300 text-black", disabled: nlCode.length < 4 || B.isPending, onClick: async () => { try { await B.mutateAsync({ code: nlCode }); setNlCode(""); await V.refetch(); r.success("Código confirmado. National Life conectada."); } catch (a) { r.error(a instanceof Error ? a.message : "Código inválido"); } }, children: B.isPending ? "Confirmando..." : "Confirmar código" })
+              ] }),
+              V.data?.lastError && e.jsx("p", { className: "rounded-lg bg-red-500/10 p-3 text-sm text-red-200", children: V.data.lastError }),
+              e.jsx("p", { className: "text-xs leading-relaxed text-gray-500", children: "A conexão usa exclusivamente https://www.nationallife.com/agent/ em modo de consulta. O agente permanece nesta tela; nenhuma informação é alterada no portal da National Life." })
             ] }),
             e.jsxs(v, {
               id: "email",

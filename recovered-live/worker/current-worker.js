@@ -52458,6 +52458,79 @@ async function ensureCarrierConnectionTables(env) {
   }
 }
 __name(ensureCarrierConnectionTables, "ensureCarrierConnectionTables");
+const NATIONAL_LIFE_AGENT_URL = "https://www.nationallife.com/agent/";
+function nationalLifeConfig(html) {
+  const encoded = html.match(/window\.authconfigurations\s*=\s*window\.atob\(['"]([^'"]+)/i)?.[1];
+  if (!encoded) throw new Error("A National Life não forneceu a configuração segura do login");
+  try { return JSON.parse(atob(encoded)); } catch { throw new Error("A configuração de login da National Life não pôde ser interpretada"); }
+}
+__name(nationalLifeConfig, "nationalLifeConfig");
+async function nationalLifeFollow(url, cookies = "", init = {}, limit = 12) {
+  let current = url, jar = cookies, response, html = "";
+  for (let step = 0; step < limit; step += 1) {
+    response = await fiveRingsFetch(current, { ...init, redirect: "manual", headers: { ...(init.headers || {}), ...(jar ? { cookie: jar } : {}) } }, 2e4);
+    jar = mergeFiveRingsCookies(jar, response.headers);
+    const location = response.headers.get("location");
+    if (!location || response.status < 300 || response.status >= 400) { html = await response.text(); break; }
+    current = new URL(location, current).toString();
+    init = { method: "GET", headers: {} };
+  }
+  return { response, html, url: response?.url || current, cookies: jar };
+}
+__name(nationalLifeFollow, "nationalLifeFollow");
+function nationalLifeHiddenForm(html, pageUrl) {
+  const form = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)].find((item) => /type=["']hidden["']/i.test(item[2]));
+  if (!form) return null;
+  const action = new URL(form[1].match(/action=["']([^"']+)/i)?.[1] || pageUrl, pageUrl).toString();
+  const body = new URLSearchParams();
+  for (const input of form[2].matchAll(/<input\b[^>]*>/gi)) {
+    const name = input[0].match(/name=["']([^"']+)/i)?.[1], value = input[0].match(/value=["']([^"']*)/i)?.[1] || "";
+    if (name) body.set(name, value.replace(/&quot;/g, '"').replace(/&amp;/g, "&"));
+  }
+  return { action, body };
+}
+__name(nationalLifeHiddenForm, "nationalLifeHiddenForm");
+async function verifyNationalLifeLogin(portalEmail, password) {
+  const landing = await nationalLifeFollow(NATIONAL_LIFE_AGENT_URL);
+  const config = nationalLifeConfig(landing.html);
+  const authBase = String(config.authorizationServer?.url || `https://${config.auth0Domain}`).replace(/\/$/, "");
+  const payload = {
+    client_id: config.clientID,
+    credential_type: "http://auth0.com/oauth/grant-type/password-realm",
+    username: portalEmail,
+    password,
+    realm: config.connection || "NLGAgentsDB",
+    protocol: "oauth2",
+    scope: config.extraParams?.scope || "openid profile email",
+    audience: config.extraParams?.audience || "https://api.nlg.net/agent-portal"
+  };
+  const authResponse = await fiveRingsFetch(`${authBase}/co/authenticate`, {
+    method: "POST", redirect: "manual",
+    headers: { "content-type": "application/json", origin: authBase, referer: landing.url, ...(landing.cookies ? { cookie: landing.cookies } : {}) },
+    body: JSON.stringify(payload)
+  }, 2e4);
+  const authText = await authResponse.text();
+  let authResult = {}; try { authResult = JSON.parse(authText); } catch {}
+  if (authResult.error === "mfa_required" || authResult.mfa_token) return { requiresCode: true, challenge: { type: "mfa", mfaToken: authResult.mfa_token, authBase, clientId: config.clientID, cookies: landing.cookies } };
+  if (!authResponse.ok || !authResult.login_ticket) throw new Error(authResult.description || authResult.error_description || "Usuário ou senha recusados pela National Life");
+  const authorize = new URL(`${authBase}/authorize`);
+  const params = { ...(config.internalOptions || {}), ...(config.extraParams || {}), client_id: config.clientID, redirect_uri: config.callbackURL, login_ticket: authResult.login_ticket };
+  for (const [key, value] of Object.entries(params)) if (value != null && typeof value !== "object") authorize.searchParams.set(key, String(value));
+  let result = await nationalLifeFollow(authorize.toString(), mergeFiveRingsCookies(landing.cookies, authResponse.headers));
+  const callback = nationalLifeHiddenForm(result.html, result.url);
+  if (callback && new URL(callback.action).hostname.endsWith("nationallife.com")) result = await nationalLifeFollow(callback.action, result.cookies, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(result.url).origin, referer: result.url }, body: callback.body });
+  if (/id=["']loginForm["']|name=["']password["']/i.test(result.html) || !new URL(result.url).hostname.endsWith("nationallife.com")) throw new Error("A National Life não concluiu a sessão. Confirme seus dados de acesso.");
+  return { requiresCode: false, session: { cookies: result.cookies, url: result.url }, title: result.html.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() || "National Life" };
+}
+__name(verifyNationalLifeLogin, "verifyNationalLifeLogin");
+async function submitNationalLifeCode(challenge, code) {
+  if (challenge?.type !== "mfa" || !challenge.mfaToken) throw new Error("A confirmação expirou. Conecte novamente.");
+  const response = await fiveRingsFetch(`${challenge.authBase}/oauth/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grant_type: "http://auth0.com/oauth/grant-type/mfa-otp", client_id: challenge.clientId, mfa_token: challenge.mfaToken, otp: code }) }, 2e4);
+  const text = await response.text(); let result = {}; try { result = JSON.parse(text); } catch {}
+  if (!response.ok || !result.access_token) throw new Error(result.error_description || "Código incorreto ou expirado");
+  return { session: { accessToken: result.access_token, refreshToken: result.refresh_token || null, cookies: challenge.cookies || "", url: NATIONAL_LIFE_AGENT_URL } };
+}
+__name(submitNationalLifeCode, "submitNationalLifeCode");
 function fiveRingsCookies(headers) {
   const values = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [headers.get("set-cookie") || ""];
   return values.map((value) => value.split(";", 1)[0]).filter(Boolean).join("; ");
@@ -55926,6 +55999,42 @@ Affinity Financial Consulting`,
     if (!validEmail(String(input.portalEmail || "")) || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o e-mail e a senha do portal National Life Group");
     await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
     return trpcResult({ success: true, status: "configured" });
+  }
+  if (name === "agent.verifyNationalLifeConnection") {
+    await ensureCarrierConnectionTables(env);
+    const owner = adminEmail.toLowerCase();
+    const row = await env.DB.prepare("SELECT portalEmail,encryptedPassword FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
+    if (!row) return trpcError("Salve seu acesso da National Life primeiro");
+    try {
+      const password = await decryptSmtpPassword(String(row.encryptedPassword), env.JWT_SECRET);
+      const result = await verifyNationalLifeLogin(String(row.portalEmail), password);
+      if (result.requiresCode) {
+        const encryptedChallenge = await encryptSmtpPassword(JSON.stringify(result.challenge), env.JWT_SECRET);
+        await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='pending',encryptedChallenge=?,encryptedSession=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedChallenge, owner).run();
+        return trpcResult({ success: false, requiresCode: true });
+      }
+      const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
+      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
+      return trpcResult({ success: true, requiresCode: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Não foi possível conectar à National Life";
+      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(message.slice(0, 500), owner).run();
+      return trpcError(message);
+    }
+  }
+  if (name === "agent.submitNationalLifeCode") {
+    await ensureCarrierConnectionTables(env);
+    const owner = adminEmail.toLowerCase(), code = String(input.code || "").trim();
+    if (!/^\d{4,10}$/.test(code)) return trpcError("Informe o código recebido");
+    const row = await env.DB.prepare("SELECT encryptedChallenge FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
+    if (!row?.encryptedChallenge) return trpcError("Conecte novamente para solicitar outro código");
+    try {
+      const challenge = JSON.parse(await decryptSmtpPassword(String(row.encryptedChallenge), env.JWT_SECRET));
+      const result = await submitNationalLifeCode(challenge, code);
+      const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
+      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
+      return trpcResult({ success: true });
+    } catch (error) { return trpcError(error instanceof Error ? error.message : "Código incorreto ou expirado"); }
   }
   if (name === "agent.getPaymentReturnTemplate") {
     const row = await env.DB.prepare(

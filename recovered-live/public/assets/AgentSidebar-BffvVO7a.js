@@ -308,8 +308,8 @@ function E() {
         e.jsx("button", { type: "button", onClick: () => D(r => !r), "aria-label": "Abrir menu da conta", className: "flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border-2 border-gold bg-[#0f1f36] text-sm font-black text-gold shadow-xl", children: Q.data?.photoUrl ? e.jsx("img", { src: Q.data.photoUrl, alt: profileName, className: "h-full w-full object-cover" }) : initials }),
         O && e.jsxs("div", { className: "absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-gold/30 bg-[#0f1f36] p-2 text-white shadow-2xl", children: [
           e.jsxs("div", { className: "border-b border-white/10 px-3 py-3", children: [e.jsx("p", { className: "font-bold text-gold", children: profileName }), e.jsx("p", { className: "text-xs text-gray-400", children: Q.data?.email || "Portal do Agente" })] }),
-          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes#perfil"), className: "mt-2 w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Perfil" }),
-          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),
+          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes?view=profile"), className: "mt-2 w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Perfil" }),
+          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes?view=settings"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),
           e.jsx("button", { type: "button", onClick: logoutToHome, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10", children: "Sair" })
         ] })
       ] }),
