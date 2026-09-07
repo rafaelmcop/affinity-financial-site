@@ -57755,6 +57755,15 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-applications.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
+    // Never let an API URL fall through to the SPA's index.html. Returning
+    // HTML here is what produces `Unexpected token '<'` in every form that
+    // expects JSON.
+    if (url.pathname === "/api/trpc" || url.pathname === "/api/trpc/") {
+      return secureResponse(jsonResponse({ error: "Procedimento da API não informado" }, 400), { privateData: true });
+    }
+    if (url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/trpc/")) {
+      return secureResponse(jsonResponse({ error: "Endpoint da API não encontrado" }, 404), { privateData: true });
+    }
     if (!url.pathname.startsWith("/api/trpc/")) {
       const privateShell = /^\/(admin|agentes|afiliados)(\/|$)/.test(
         url.pathname
