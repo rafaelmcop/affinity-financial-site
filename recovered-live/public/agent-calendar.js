@@ -68,24 +68,41 @@ function meetingMoment(value) {
     }).format(date);
   return { label, time };
 }
+function agentSignature() {
+  const profile = state.agentProfile || {},
+    name = profile.name || "Seu agente Affinity",
+    phone = profile.phone || profile.whatsapp || "(857) 421-8325",
+    email = profile.contactEmail || profile.email || "";
+  return String(profile.messageSignature || "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org")
+    .replaceAll("{agente_nome}", name)
+    .replaceAll("{agente}", name)
+    .replaceAll("{agente_telefone}", phone)
+    .replaceAll("{telefone do agente}", phone)
+    .replaceAll("{agente_email}", email)
+    .replaceAll("{email do agente}", email)
+    .split("\n").filter(line => line.trim() && !(line.includes("✉️") && !email)).join("\n");
+}
+function signedAgendaMessage(body) {
+  return `${String(body || "").trim()}\n\n${agentSignature()}`.trim();
+}
 function reminderMessage(row) {
   const moment = meetingMoment(row.startTime),
     zoom = safeUrl(row.meetingUrl);
-  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nPassando para lembrar da nossa reunião de ${moment.label}, às ${moment.time} (horário de Nova York), com a Affinity Financial Consulting.${zoom !== "#" ? `\n\n🔗 Acesse a reunião pelo Zoom:\n${zoom}` : ""}\n\nNos vemos em breve!\n\nAffinity Financial Consulting`;
+  return signedAgendaMessage(`Olá, ${row.inviteeName || "tudo bem"}!\n\nPassando para lembrar da nossa reunião de ${moment.label}, às ${moment.time} (horário de Nova York), com a Affinity Financial Consulting.${zoom !== "#" ? `\n\n🔗 Acesse a reunião pelo Zoom:\n${zoom}` : ""}\n\nNos vemos em breve!`);
 }
 function secondCallMessage(row) {
   const reschedule = safeUrl(row.rescheduleUrl || state.profile?.calendlyUrl);
-  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nGostaria de retomar nosso atendimento exatamente de onde paramos e dar continuidade ao que conversamos.\n\nQuando for conveniente, responda esta mensagem ou escolha um horário para continuarmos.${reschedule !== "#" ? `\n\n📅 Escolha seu horário:\n${reschedule}` : ""}\n\nFico à disposição.\n\nAffinity Financial Consulting`;
+  return signedAgendaMessage(`Olá, ${row.inviteeName || "tudo bem"}!\n\nGostaria de retomar nosso atendimento exatamente de onde paramos e dar continuidade ao que conversamos.\n\nQuando for conveniente, responda esta mensagem ou escolha um horário para continuarmos.${reschedule !== "#" ? `\n\n📅 Escolha seu horário:\n${reschedule}` : ""}\n\nFico à disposição.`);
 }
 function noShowMessage(row) {
   const reschedule = safeUrl(row.rescheduleUrl || state.profile?.calendlyUrl);
-  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nNão conseguimos nos encontrar no horário marcado. Espero que esteja tudo bem.\n\nSe desejar, podemos reagendar nossa conversa para um momento mais conveniente.${reschedule !== "#" ? `\n\n📅 Reagende aqui:\n${reschedule}` : ""}\n\nFico à disposição.\n\nAffinity Financial Consulting`;
+  return signedAgendaMessage(`Olá, ${row.inviteeName || "tudo bem"}!\n\nNão conseguimos nos encontrar no horário marcado. Espero que esteja tudo bem.\n\nSe desejar, podemos reagendar nossa conversa para um momento mais conveniente.${reschedule !== "#" ? `\n\n📅 Reagende aqui:\n${reschedule}` : ""}\n\nFico à disposição.`);
 }
 function referralMessage(row) {
-  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nFoi um prazer conversar com você. Se conhece alguém que também possa se beneficiar de uma orientação financeira cuidadosa e personalizada, ficarei muito feliz com a sua recomendação.\n\nPode me enviar o nome e o telefone da pessoa por aqui. Entrarei em contato com todo cuidado e respeito.\n\nMuito obrigado pela confiança!\n\nAffinity Financial Consulting`;
+  return signedAgendaMessage(`Olá, ${row.inviteeName || "tudo bem"}!\n\nFoi um prazer conversar com você. Se conhece alguém que também possa se beneficiar de uma orientação financeira cuidadosa e personalizada, ficarei muito feliz com a sua recomendação.\n\nPode me enviar o nome e o telefone da pessoa por aqui. Entrarei em contato com todo cuidado e respeito.\n\nMuito obrigado pela confiança!`);
 }
 function feedbackMessage(row, link) {
-  return `Olá, ${row.inviteeName || "tudo bem"}!\n\nObrigado por conversar comigo hoje. Sua opinião é muito importante para que eu possa melhorar cada vez mais meu atendimento.\n\nPreparei um formulário rápido para você me contar como foi nossa conversa, se ficou alguma dúvida e o que gostaria de analisar melhor antes de tomar uma decisão:\n\n${link}\n\nPode responder com total sinceridade. Ficarei à disposição para esclarecer qualquer dúvida.\n\nAffinity Financial Consulting`;
+  return signedAgendaMessage(`Olá, ${row.inviteeName || "tudo bem"}!\n\nObrigado por conversar comigo hoje. Sua opinião é muito importante para que eu possa melhorar cada vez mais meu atendimento.\n\nPreparei um formulário rápido para você me contar como foi nossa conversa, se ficou alguma dúvida e o que gostaria de analisar melhor antes de tomar uma decisão:\n\n${link}\n\nPode responder com total sinceridade. Ficarei à disposição para esclarecer qualquer dúvida.`);
 }
 async function prepareFeedback(id) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id));
@@ -474,7 +491,8 @@ async function openRecap(id) {
 }
 async function load() {
   try {
-    state = (await api("agent.getCalendly")) || {};
+    const [calendly, agentProfile] = await Promise.all([api("agent.getCalendly"), api("agent.getProfile")]);
+    state = { ...(calendly || {}), agentProfile: agentProfile || {} };
     if (state.connection) await loadMeetings();
     else
       $("meetings").innerHTML =
