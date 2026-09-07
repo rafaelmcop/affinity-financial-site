@@ -52459,6 +52459,7 @@ async function ensureCarrierConnectionTables(env) {
 }
 __name(ensureCarrierConnectionTables, "ensureCarrierConnectionTables");
 const NATIONAL_LIFE_AGENT_URL = "https://www.nationallife.com/agent/";
+const NATIONAL_LIFE_INFORCE_URL = "https://www.nationallife.com/agent/book-of-business/inforce-book/all-clients/all-clients-agent";
 function nationalLifeConfig(html) {
   const encoded = html.match(/window\.authconfigurations\s*=\s*window\.atob\(['"]([^'"]+)/i)?.[1];
   if (!encoded) throw new Error("A National Life não forneceu a configuração segura do login");
@@ -52499,10 +52500,7 @@ async function verifyNationalLifeLogin(portalEmail, password) {
     credential_type: "http://auth0.com/oauth/grant-type/password-realm",
     username: portalEmail,
     password,
-    realm: config.connection || "NLGAgentsDB",
-    protocol: "oauth2",
-    scope: config.extraParams?.scope || "openid profile email",
-    audience: config.extraParams?.audience || "https://api.nlg.net/agent-portal"
+    realm: config.connection || "NLGAgentsDB"
   };
   const authResponse = await fiveRingsFetch(`${authBase}/co/authenticate`, {
     method: "POST", redirect: "manual",
@@ -52520,9 +52518,25 @@ async function verifyNationalLifeLogin(portalEmail, password) {
   const callback = nationalLifeHiddenForm(result.html, result.url);
   if (callback && new URL(callback.action).hostname.endsWith("nationallife.com")) result = await nationalLifeFollow(callback.action, result.cookies, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(result.url).origin, referer: result.url }, body: callback.body });
   if (/id=["']loginForm["']|name=["']password["']/i.test(result.html) || !new URL(result.url).hostname.endsWith("nationallife.com")) throw new Error("A National Life não concluiu a sessão. Confirme seus dados de acesso.");
-  return { requiresCode: false, session: { cookies: result.cookies, url: result.url }, title: result.html.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() || "National Life" };
+  const inforce = await nationalLifeFollow(NATIONAL_LIFE_INFORCE_URL, result.cookies);
+  if (/id=["']loginForm["']|name=["']password["']/i.test(inforce.html) || new URL(inforce.url).hostname.includes("auth0.com")) throw new Error("A National Life não manteve a sessão para consultar o Book of Business");
+  return { requiresCode: false, session: { cookies: inforce.cookies, url: NATIONAL_LIFE_INFORCE_URL, html: inforce.html }, title: inforce.html.match(/<title[^>]*>([^<]+)/i)?.[1]?.trim() || "National Life" };
 }
 __name(verifyNationalLifeLogin, "verifyNationalLifeLogin");
+async function readNationalLifeRecords(session) {
+  const page = await nationalLifeFollow(NATIONAL_LIFE_INFORCE_URL, String(session?.cookies || ""));
+  if (/id=["']loginForm["']|name=["']password["']/i.test(page.html) || new URL(page.url).hostname.includes("auth0.com")) throw new Error("Sua sessão da National Life expirou. Clique em conectar novamente.");
+  const rows = [...fiveRingsTableRecords(page.html), ...fiveRingsJsonRecords(page.html)];
+  const records = rows.map((row) => normalizeFiveRingsRecord(row)).filter((record) => record.clientName || record.policyNumber);
+  const unique = new Map();
+  for (const record of records) {
+    const key = record.policyNumber || record.email || `${record.clientName}|${record.phone}`;
+    const current = unique.get(key) || {};
+    unique.set(key, { ...current, ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0)) });
+  }
+  return { records: [...unique.values()], session: { cookies: page.cookies, url: NATIONAL_LIFE_INFORCE_URL, html: page.html } };
+}
+__name(readNationalLifeRecords, "readNationalLifeRecords");
 async function submitNationalLifeCode(challenge, code) {
   if (challenge?.type !== "mfa" || !challenge.mfaToken) throw new Error("A confirmação expirou. Conecte novamente.");
   const response = await fiveRingsFetch(`${challenge.authBase}/oauth/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grant_type: "http://auth0.com/oauth/grant-type/mfa-otp", client_id: challenge.clientId, mfa_token: challenge.mfaToken, otp: code }) }, 2e4);
@@ -56033,6 +56047,45 @@ Affinity Financial Consulting`,
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
       return trpcResult({ success: true });
     } catch (error) { return trpcError(error instanceof Error ? error.message : "Código incorreto ou expirado"); }
+  }
+  if (name === "agent.syncNationalLife") {
+    await ensureCarrierConnectionTables(env);
+    const owner = adminEmail.toLowerCase();
+    const row = await env.DB.prepare("SELECT encryptedSession FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
+    if (!row?.encryptedSession) return trpcError("Conecte e teste o acesso da National Life antes de sincronizar");
+    try {
+      const saved = JSON.parse(await decryptSmtpPassword(String(row.encryptedSession), env.JWT_SECRET));
+      const result = await readNationalLifeRecords(saved);
+      let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
+      for (const record of result.records) {
+        const normalizedPolicy = String(record.policyNumber || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+        const existingPolicy = normalizedPolicy ? await env.DB.prepare("SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND upper(replace(replace(policyNumber,'-',''),' ',''))=? LIMIT 1").bind(owner, normalizedPolicy).first() : null;
+        let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(email)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.email, owner).first() : null;
+        if (!client && record.phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ','')=replace(replace(replace(replace(?,'(',''),')',''),'-',''),' ','') AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.phone, owner).first();
+        if (!client && record.clientName) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.clientName, owner).first();
+        let clientId = Number(client?.id || 0);
+        if (clientId) {
+          await env.DB.prepare("UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status=CASE WHEN ?=1 THEN 'client' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? 1 : 0, clientId, owner).run();
+        } else if (record.clientName) {
+          const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,'National Life',?,'Importado automaticamente em modo somente leitura')").bind(record.clientName, record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? "client" : "new", owner).run();
+          clientId = Number(inserted.meta.last_row_id); importedClients += 1;
+        }
+        if (!record.policyNumber || !clientId) continue;
+        const targetPremium = record.targetPremium || record.annualPremium || (record.premiumAmount ? record.premiumAmount * 12 : 0), points = Math.max(0, Math.round(targetPremium));
+        if (existingPolicy) {
+          await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName || null, record.email || null, record.phone || null, record.status, record.product || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existingPolicy.id), owner).run(); updatedPolicies += 1;
+        } else {
+          await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run(); importedPolicies += 1;
+        }
+      }
+      const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
+      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
+      return trpcResult({ success: true, found: result.records.length, importedClients, importedPolicies, updatedPolicies });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Não foi possível sincronizar a National Life";
+      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(message.slice(0, 500), owner).run();
+      return trpcError(message);
+    }
   }
   if (name === "agent.getPaymentReturnTemplate") {
     const row = await env.DB.prepare(

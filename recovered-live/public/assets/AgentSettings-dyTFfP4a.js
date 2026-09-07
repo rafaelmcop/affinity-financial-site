@@ -62,6 +62,7 @@ function se() {
     Z = n.agent.saveNationalLifeConnection.useMutation(),
     Y = n.agent.verifyNationalLifeConnection.useMutation(),
     B = n.agent.submitNationalLifeCode.useMutation(),
+    nlSync = n.agent.syncNationalLife.useMutation(),
     [t, l] = m.useState(D),
     [o, p] = m.useState(W),
     [g, h] = m.useState($),
@@ -523,6 +524,7 @@ function se() {
               V.data && e.jsx("div", { className: "rounded-lg bg-black/30 p-3 text-sm text-gray-300", children: `Status: ${V.data.status === "connected" ? "Conectado ao portal oficial" : V.data.requiresCode ? "Aguardando código de confirmação" : V.data.passwordConfigured ? "Acesso salvo — falta conectar" : "Aguardando configuração"}` }),
               e.jsx(d, { className: "w-full bg-emerald-300 text-slate-950 hover:bg-emerald-200", disabled: !G.portalEmail || Z.isPending, onClick: async () => { try { await Z.mutateAsync(G); H(a => ({ ...a, password: "" })); await V.refetch(); r.success("Acesso National Life salvo com proteção"); } catch (a) { r.error(a instanceof Error ? a.message : "Não foi possível salvar o acesso"); } }, children: Z.isPending ? "Salvando..." : "Salvar conexão protegida" }),
               e.jsx(d, { type: "button", variant: "outline", className: "w-full border-emerald-300 text-emerald-200", disabled: Y.isPending || !V.data?.passwordConfigured, onClick: async () => { try { const a = await Y.mutateAsync(); await V.refetch(); a.requiresCode ? r.info("Informe o código enviado pela National Life") : r.success("National Life conectada dentro do portal"); } catch (a) { await V.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível conectar"); } }, children: Y.isPending ? "Conectando ao portal oficial..." : "Conectar e testar acesso" }),
+              V.data?.status === "connected" && e.jsx(d, { type: "button", className: "w-full bg-gold text-black hover:bg-yellow-300", disabled: nlSync.isPending, onClick: async () => { try { const a = await nlSync.mutateAsync(); await V.refetch(); r.success(`${a.found || 0} registros encontrados · ${a.importedClients || 0} clientes novos · ${a.importedPolicies || 0} apólices novas · ${a.updatedPolicies || 0} apólices atualizadas`); } catch (a) { await V.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível sincronizar"); } }, children: nlSync.isPending ? "Sincronizando Book of Business..." : "Sincronizar clientes e apólices" }),
               V.data?.requiresCode && e.jsxs("div", { className: "space-y-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4", children: [
                 e.jsx("p", { className: "text-sm text-amber-100", children: "A National Life solicitou confirmação. Informe o código recebido para manter a sessão conectada." }),
                 e.jsx(i, { inputMode: "numeric", autoComplete: "one-time-code", placeholder: "Código de confirmação", value: nlCode, onChange: a => setNlCode(a.target.value.replace(/\D/g, "").slice(0, 10)) }),
