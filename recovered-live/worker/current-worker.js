@@ -55971,6 +55971,9 @@ Affinity Financial Consulting`,
     ).bind(adminEmail.toLowerCase()).run();
     return trpcResult({ success: true });
   }
+  if (["agent.getNationalLifeConnection", "agent.saveNationalLifeConnection", "agent.verifyNationalLifeConnection", "agent.submitNationalLifeCode", "agent.syncNationalLife"].includes(name)) {
+    return trpcError("Integração temporariamente desativada", 404);
+  }
   if (name === "agent.getNationalLifeConnection") {
     await ensureCarrierConnectionTables(env);
     const row = await env.DB.prepare("SELECT portalEmail,status,lastSyncAt,lastError,encryptedChallenge,trustDevice FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(adminEmail.toLowerCase()).first();

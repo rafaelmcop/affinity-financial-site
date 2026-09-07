@@ -44,13 +44,11 @@ const D = {
     messageSignature:
       "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org",
   },
-  $ = { portalEmail: "", password: "", trustDevice: !0 },
-  K = { portalEmail: "", password: "", trustDevice: !0 };
+  $ = { portalEmail: "", password: "", trustDevice: !0 };
 function se() {
   const u = n.agent.getEmailSettings.useQuery(),
     c = n.agent.getProfile.useQuery(),
     s = n.agent.getFiveRingsConnection.useQuery(),
-    V = n.agent.getNationalLifeConnection.useQuery(),
     j = n.agent.saveEmailSettings.useMutation(),
     y = n.agent.testEmailSettings.useMutation(),
     C = n.agent.updateProfile.useMutation(),
@@ -59,17 +57,11 @@ function se() {
     S = n.agent.submitFiveRingsCode.useMutation(),
     x = n.agent.syncFiveRings.useMutation(),
     k = n.agent.resetFiveRingsChallenge.useMutation(),
-    Z = n.agent.saveNationalLifeConnection.useMutation(),
-    Y = n.agent.verifyNationalLifeConnection.useMutation(),
-    B = n.agent.submitNationalLifeCode.useMutation(),
-    nlSync = n.agent.syncNationalLife.useMutation(),
     [t, l] = m.useState(D),
     [o, p] = m.useState(W),
     [g, h] = m.useState($),
-    [G, H] = m.useState(K),
     [f, b] = m.useState(""),
     [N, P] = m.useState(""),
-    [nlCode, setNlCode] = m.useState(""),
     view = new URLSearchParams(window.location.search).get("view") || "settings";
   return (
     m.useEffect(() => {
@@ -93,9 +85,6 @@ function se() {
     m.useEffect(() => {
       s.data && h({ portalEmail: s.data.portalEmail, password: "", trustDevice: s.data.trustDevice !== !1 });
     }, [s.data]),
-    m.useEffect(() => {
-      V.data && H({ portalEmail: V.data.portalEmail || "", password: "", trustDevice: V.data.trustDevice !== !1 });
-    }, [V.data]),
     e.jsxs("div", {
       className: "min-h-screen bg-black text-white lg:pl-64",
       children: [
@@ -515,24 +504,6 @@ function se() {
                 }),
               ],
             }),
-            e.jsxs(v, { id: "national-life", className: "space-y-5 border-emerald-400/20 bg-[#0b1524] p-6", children: [
-              e.jsxs("h2", { className: "flex items-center gap-2 text-xl font-bold text-emerald-300", children: [e.jsx(A, {}), "Portal National Life Group"] }),
-              e.jsx("div", { className: "rounded-lg border border-emerald-400/20 bg-emerald-500/10 p-4 text-sm leading-relaxed text-emerald-100", children: "Estrutura inicial da conexão individual e protegida. O acesso será usado somente para consultar e completar dados dos seus próprios clientes e apólices." }),
-              e.jsxs("label", { className: "block text-sm text-gray-300", children: ["Nome de usuário do portal National Life", e.jsx(i, { className: "mt-2", type: "text", autoComplete: "username", placeholder: "Informe seu nome de usuário", value: G.portalEmail, onChange: a => H({ ...G, portalEmail: a.target.value }) })] }),
-              e.jsxs("label", { className: "block text-sm text-gray-300", children: ["Senha do portal", e.jsx(i, { className: "mt-2", type: "password", autoComplete: "current-password", placeholder: V.data?.passwordConfigured ? "Deixe vazio para manter a senha atual" : "Informe sua senha", value: G.password, onChange: a => H({ ...G, password: a.target.value }) })] }),
-              e.jsxs("label", { className: "flex items-center gap-3 rounded-lg border border-emerald-400/20 bg-black/20 p-3 text-sm text-emerald-100", children: [e.jsx("input", { type: "checkbox", checked: G.trustDevice !== !1, onChange: a => H({ ...G, trustDevice: a.target.checked }) }), "Confiar neste dispositivo quando o portal oferecer essa opção"] }),
-              V.data && e.jsx("div", { className: "rounded-lg bg-black/30 p-3 text-sm text-gray-300", children: `Status: ${V.data.status === "connected" ? "Conectado ao portal oficial" : V.data.requiresCode ? "Aguardando código de confirmação" : V.data.passwordConfigured ? "Acesso salvo — falta conectar" : "Aguardando configuração"}` }),
-              e.jsx(d, { className: "w-full bg-emerald-300 text-slate-950 hover:bg-emerald-200", disabled: !G.portalEmail || Z.isPending, onClick: async () => { try { await Z.mutateAsync(G); H(a => ({ ...a, password: "" })); await V.refetch(); r.success("Acesso National Life salvo com proteção"); } catch (a) { r.error(a instanceof Error ? a.message : "Não foi possível salvar o acesso"); } }, children: Z.isPending ? "Salvando..." : "Salvar conexão protegida" }),
-              e.jsx(d, { type: "button", variant: "outline", className: "w-full border-emerald-300 text-emerald-200", disabled: Y.isPending || !V.data?.passwordConfigured, onClick: async () => { try { const a = await Y.mutateAsync(); await V.refetch(); a.requiresCode ? r.info("Informe o código enviado pela National Life") : r.success("National Life conectada dentro do portal"); } catch (a) { await V.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível conectar"); } }, children: Y.isPending ? "Conectando ao portal oficial..." : "Conectar e testar acesso" }),
-              V.data?.status === "connected" && e.jsx(d, { type: "button", className: "w-full bg-gold text-black hover:bg-yellow-300", disabled: nlSync.isPending, onClick: async () => { try { const a = await nlSync.mutateAsync(); await V.refetch(); r.success(`${a.found || 0} registros encontrados · ${a.importedClients || 0} clientes novos · ${a.importedPolicies || 0} apólices novas · ${a.updatedPolicies || 0} apólices atualizadas`); } catch (a) { await V.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível sincronizar"); } }, children: nlSync.isPending ? "Sincronizando Book of Business..." : "Sincronizar clientes e apólices" }),
-              V.data?.requiresCode && e.jsxs("div", { className: "space-y-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4", children: [
-                e.jsx("p", { className: "text-sm text-amber-100", children: "A National Life solicitou confirmação. Informe o código recebido para manter a sessão conectada." }),
-                e.jsx(i, { inputMode: "numeric", autoComplete: "one-time-code", placeholder: "Código de confirmação", value: nlCode, onChange: a => setNlCode(a.target.value.replace(/\D/g, "").slice(0, 10)) }),
-                e.jsx(d, { className: "w-full bg-amber-300 text-black", disabled: nlCode.length < 4 || B.isPending, onClick: async () => { try { await B.mutateAsync({ code: nlCode }); setNlCode(""); await V.refetch(); r.success("Código confirmado. National Life conectada."); } catch (a) { r.error(a instanceof Error ? a.message : "Código inválido"); } }, children: B.isPending ? "Confirmando..." : "Confirmar código" })
-              ] }),
-              V.data?.lastError && e.jsx("p", { className: "rounded-lg bg-red-500/10 p-3 text-sm text-red-200", children: V.data.lastError }),
-              e.jsx("p", { className: "text-xs leading-relaxed text-gray-500", children: "A conexão usa exclusivamente https://www.nationallife.com/agent/ em modo de consulta. O agente permanece nesta tela; nenhuma informação é alterada no portal da National Life." })
-            ] }),
             e.jsxs(v, {
               id: "email",
               className: "space-y-6 border-gold/20 bg-[#0b1524] p-6",
