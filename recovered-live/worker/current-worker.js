@@ -57022,37 +57022,32 @@ Affinity Financial Consulting`,
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
     const agentView = accountType === "agent" || Boolean(input.agentMode);
-    if (agentView) {
-      await env.DB.batch([
-        env.DB.prepare(
-          "UPDATE agentPolicies SET clientId=(SELECT c.id FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))) ORDER BY CASE WHEN trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail)) THEN 0 WHEN trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10) THEN 1 ELSE 2 END,c.id DESC LIMIT 1) WHERE lower(agentEmail)=? AND (clientId IS NULL OR clientId=0) AND EXISTS (SELECT 1 FROM crmClients c WHERE lower(c.assignedAdminEmail)=? AND ((trim(coalesce(agentPolicies.clientEmail,''))<>'' AND lower(trim(c.email))=lower(trim(agentPolicies.clientEmail))) OR (trim(coalesce(agentPolicies.clientPhone,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(agentPolicies.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR (trim(coalesce(agentPolicies.clientName,''))<>'' AND lower(trim(c.name))=lower(trim(agentPolicies.clientName)))))"
-        ).bind(crmOwner, crmOwner, crmOwner),
-        env.DB.prepare(
-          "UPDATE crmClients SET status='client',updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status<>'client' AND EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)"
-        ).bind(crmOwner, crmOwner),
-        env.DB.prepare(
-          `UPDATE crmClients SET status=CASE
-            WHEN EXISTS (SELECT 1 FROM agentApplications a WHERE lower(a.agentEmail)=? AND (
-              (trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.clientEmail))=lower(trim(crmClients.email))) OR
-              (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR
-              lower(trim(a.clientName))=lower(trim(crmClients.name)))) THEN 'proposal'
-            ELSE 'contacted' END,updatedAt=CURRENT_TIMESTAMP
-          WHERE lower(assignedAdminEmail)=? AND status IN ('client','completed')
-          AND NOT EXISTS (SELECT 1 FROM agentPolicies p WHERE lower(p.agentEmail)=? AND p.clientId=crmClients.id)`
-        ).bind(crmOwner, crmOwner, crmOwner),
-        env.DB.prepare(
-          "UPDATE crmClients SET status='closed',notes=CASE WHEN instr(lower(coalesce(notes,'')),'contratado como agente')=0 THEN trim(coalesce(notes,'') || CASE WHEN trim(coalesce(notes,''))<>'' THEN char(10) ELSE '' END || 'Contratado como agente da Affinity Financial.') ELSE notes END,updatedAt=CURRENT_TIMESTAMP WHERE lower(assignedAdminEmail)=? AND status IN ('new','contacted','meeting','proposal') AND EXISTS (SELECT 1 FROM adminAccounts a WHERE a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') AND ((trim(coalesce(crmClients.email,''))<>'' AND lower(trim(a.email))=lower(trim(crmClients.email))) OR (trim(coalesce(crmClients.phone,crmClients.whatsapp,''))<>'' AND trim(coalesce(a.phone,a.whatsapp,''))<>'' AND substr(replace(replace(replace(replace(replace(coalesce(a.phone,a.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(coalesce(crmClients.phone,crmClients.whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)) OR lower(trim(a.name))=lower(trim(crmClients.name))))"
-        ).bind(crmOwner)
-      ]);
-      await mergeClientSourcesForAgent(env, crmOwner);
-    }
-    const rows = agentView ? await env.DB.prepare(
-      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
-    ).bind(adminEmail.toLowerCase()).all() : await env.DB.prepare(
-      "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC, c.id ASC"
-    ).all();
+    const [rows, policyStages, applicationStages] = agentView ? await Promise.all([
+      env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").bind(crmOwner).all(),
+      env.DB.prepare("SELECT id,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(crmOwner).all(),
+      env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,status,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(crmOwner).all()
+    ]) : [
+      await env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").all(),
+      { results: [] },
+      { results: [] }
+    ];
+    const matchesClient = (record, client) => Number(record.clientId || 0) === Number(client.id) ||
+      (sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email)) ||
+      (sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp)) ||
+      (sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name));
     return trpcResult(
-      rows.results.map((row) => ({ ...row, id: Number(row.id) }))
+      rows.results.map((row) => {
+        const policies = (policyStages.results || []).filter((record) => matchesClient(record, row));
+        const applications = (applicationStages.results || []).filter((record) => !record.matchedPolicyId && matchesClient(record, row));
+        return {
+          ...row,
+          id: Number(row.id),
+          hasPolicy: policies.length > 0,
+          hasInforcePolicy: policies.some((record) => ["active", "inforce", "in_force", "issued"].includes(String(record.status || "").toLowerCase())),
+          hasDraftApplication: applications.some((record) => record.status === "draft"),
+          hasCompletedApplication: applications.some((record) => record.status === "submitted")
+        };
+      })
     );
   }
   if (name === "crm.assignees") {

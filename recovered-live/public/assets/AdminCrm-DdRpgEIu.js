@@ -170,11 +170,7 @@ function Le({ agentMode: a = !1 }) {
       { clientId: x || 0 },
       { enabled: !!x && loadHistory, staleTime: 3e4 }
     ),
-    Y = c.agent.listPolicies.useQuery(void 0, { enabled: a }),
-    applicationsQuery = c.agent.listApplications.useQuery(void 0, {
-      enabled: a,
-      staleTime: 3e4,
-    }),
+    Y = c.agent.listPolicies.useQuery(void 0, { enabled: a && !!x }),
     Z = c.agent.listMessages.useQuery(void 0, { enabled: a && !!x, staleTime: 3e4 }),
     L = c.agent.clientEmails.useQuery(
       { clientId: x || 0 },
@@ -225,30 +221,16 @@ function Le({ agentMode: a = !1 }) {
       s => s.email.toLowerCase() === String(re.email || "").toLowerCase()
     ),
     W = p.useMemo(() => {
-      const policies = Y.data || [],
-        applications = applicationsQuery.data || [],
-        normalizedPhone = value => F(String(value || "")).slice(-10),
-        belongsTo = (record, client) =>
-          (record.clientId && Number(record.clientId) === Number(client.id)) ||
-          (!!record.clientEmail && !!client.email && record.clientEmail.trim().toLowerCase() === client.email.trim().toLowerCase()) ||
-          (!!record.clientPhone && !!(client.phone || client.whatsapp) && normalizedPhone(record.clientPhone) === normalizedPhone(client.phone || client.whatsapp)) ||
-          (!!record.clientName && !!client.name && record.clientName.trim().toLowerCase() === client.name.trim().toLowerCase());
       return S.filter(
         l => {
-          const clientPolicies = policies.filter(policy => belongsTo(policy, l)),
-            hasPolicy = clientPolicies.length > 0,
-            hasInforcePolicy = clientPolicies.some(policy => ["active", "inforce", "in_force", "issued"].includes(String(policy.status || "").toLowerCase())),
-            clientApplications = applications.filter(application => belongsTo(application, l) && !application.matchedPolicyId && !application.policyNumber),
-            hasDraftApplication = clientApplications.some(application => application.status === "draft"),
-            hasCompletedApplication = clientApplications.some(application => application.status === "submitted"),
-            meetingTime = l.lastMeetingAt ? new Date(l.lastMeetingAt).getTime() : 0,
+          const meetingTime = l.lastMeetingAt ? new Date(l.lastMeetingAt).getTime() : 0,
             hasPastMeeting = meetingTime > 0 && meetingTime <= Date.now(),
             manuallyFollowedUp = ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(l.status),
             wasAttended = hasPastMeeting || manuallyFollowedUp,
-            belongs = b === "leads" ? !hasPolicy && !hasDraftApplication && !hasCompletedApplication && !wasAttended
-              : b === "inforce" ? hasInforcePolicy
-              : b === "new_business" ? !hasPolicy && hasCompletedApplication
-              : b === "followup" ? !hasPolicy && !hasDraftApplication && !hasCompletedApplication && wasAttended
+            belongs = b === "leads" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && !wasAttended
+              : b === "inforce" ? l.hasInforcePolicy
+              : b === "new_business" ? !l.hasPolicy && l.hasCompletedApplication
+              : b === "followup" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && wasAttended
               : true;
           return belongs && ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
             .toLowerCase()
@@ -263,7 +245,7 @@ function Le({ agentMode: a = !1 }) {
         const result = String(l.name || "").localeCompare(String(o.name || ""), "pt-BR", { sensitivity: "base" });
         return sortMode === "name_desc" ? -result : result;
       });
-    }, [S, Y.data, applicationsQuery.data, w, b, sortMode]),
+    }, [S, w, b, sortMode]),
     totalPages = Math.max(1, Math.ceil(W.length / 10)),
     pageRows = W.slice((page - 1) * 10, page * 10),
     le = async s => {
