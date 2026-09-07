@@ -126,9 +126,9 @@ export default function AdminCrm({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
-  const [crmView, setCrmView] = useState<"leads" | "followup" | "new_business" | "clients" | "automations" | "history">(() => {
+  const [crmView, setCrmView] = useState<"clients" | "followup" | "new_business" | "inforce" | "automations" | "history">(() => {
     const section = new URLSearchParams(window.location.search).get("setor");
-    return section === "leads" || section === "followup" || section === "new_business" ? section : "clients";
+    return section === "followup" || section === "new_business" || section === "inforce" ? section : "clients";
   });
   const activitiesQuery = trpc.crm.activities.useQuery(
     { clientId: selectedId || 0 },
@@ -193,10 +193,10 @@ export default function AdminCrm({
         );
         const hasApplication = clientRecord.status === "proposal" || clientRecord.status === "followup_application";
         const hasMeeting = Boolean(clientRecord.lastMeetingAt) || ["meeting", "first_meeting", "contacted", "followup_service", "followup_documents", "followup_review"].includes(clientRecord.status);
-        const belongs = crmView === "clients" ? hasPolicy
+        const belongs = crmView === "clients" ? true
+          : crmView === "inforce" ? hasPolicy
           : crmView === "new_business" ? !hasPolicy && hasApplication
           : crmView === "followup" ? !hasPolicy && !hasApplication && hasMeeting
-          : crmView === "leads" ? !hasPolicy && !hasApplication && !hasMeeting
           : true;
         return belongs &&
         `${client.name} ${client.email || ""} ${client.phone || ""}`
@@ -324,10 +324,10 @@ export default function AdminCrm({
         {agentMode && (
           <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2">
             {([
-              ["leads", "Leads"],
+              ["clients", "Clientes"],
               ["followup", "Follow-up"],
               ["new_business", "New Business"],
-              ["clients", "INFORCE"],
+              ["inforce", "INFORCE"],
               ["automations", "Mensagens automáticas"],
               ["history", "Registro de envios"],
             ] as const).map(([value, label]) => (
@@ -342,7 +342,7 @@ export default function AdminCrm({
             ))}
           </div>
         )}
-        <div className={agentMode && crmView !== "clients" ? "hidden" : "contents"}>
+        <div className={agentMode && !["clients", "followup", "new_business", "inforce"].includes(crmView) ? "hidden" : "contents"}>
         <Card className="border-gold/20 bg-[#0b1524] p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <Input

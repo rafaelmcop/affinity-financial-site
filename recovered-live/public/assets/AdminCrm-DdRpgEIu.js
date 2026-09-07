@@ -158,7 +158,7 @@ function Le({ agentMode: a = !1 }) {
     [w, X] = p.useState(""),
     [sortMode, setSortMode] = p.useState("name_asc"),
     [b, M] = p.useState(() =>
-      ["leads", "followup", "new_business"].includes(
+      ["followup", "new_business", "inforce"].includes(
         new URLSearchParams(location.search).get("setor")
       )
         ? new URLSearchParams(location.search).get("setor")
@@ -230,10 +230,10 @@ function Le({ agentMode: a = !1 }) {
             ),
             hasApplication = ["proposal", "followup_application"].includes(l.status),
             hasMeeting = !!l.lastMeetingAt || ["meeting", "first_meeting", "contacted", "followup_service", "followup_documents", "followup_review"].includes(l.status),
-            belongs = b === "clients" ? hasPolicy
+            belongs = b === "clients" ? true
+              : b === "inforce" ? hasPolicy
               : b === "new_business" ? !hasPolicy && hasApplication
               : b === "followup" ? !hasPolicy && !hasApplication && hasMeeting
-              : b === "leads" ? !hasPolicy && !hasApplication && !hasMeeting
               : true;
           return belongs && ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
             .toLowerCase()
@@ -597,10 +597,10 @@ function Le({ agentMode: a = !1 }) {
               className:
                 "flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2",
               children: [
-                ["leads", "Leads"],
+                ["clients", "Clientes"],
                 ["followup", "Follow-up"],
                 ["new_business", "New Business"],
-                ["clients", "INFORCE"],
+                ["inforce", "INFORCE"],
                 ["automations", "Mensagens e automações"],
                 ["history", "Histórico"],
               ].map(([s, l]) =>
@@ -618,7 +618,7 @@ function Le({ agentMode: a = !1 }) {
             }),
           e.jsxs("div", {
             className:
-              a && !["clients", "leads", "followup", "new_business"].includes(b) ? "hidden" : "contents",
+              a && !["clients", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
             children: [
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",
