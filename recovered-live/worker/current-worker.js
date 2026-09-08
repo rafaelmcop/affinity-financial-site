@@ -54832,13 +54832,13 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.extractPolicyDocument") {
     const base64 = String(input.base64 || "");
-    if (!base64 || base64.length > 36_000_000) return trpcError("O PDF está vazio ou excede o limite de leitura");
+    if (!base64 || base64.length > 70_000_000) return trpcError("O PDF está vazio ou excede o limite de 50 MB para leitura");
     try {
       const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
-      const converted = await env.AI.toMarkdown({ name: String(input.fileName || "policy.pdf"), blob: new Blob([bytes], { type: "application/pdf" }) }, { conversionOptions: { pdf: { metadata: true }, output: { format: "text" } } });
+      const converted = await env.AI.toMarkdown({ name: String(input.fileName || "policy.pdf"), blob: new Blob([bytes], { type: "application/pdf" }) }, { conversionOptions: { pdf: { metadata: true }, image: { descriptionLanguage: "en" }, output: { format: "text" } } });
       const result = Array.isArray(converted) ? converted[0] : converted;
-      if (!result || result.format === "error" || !String(result.data || "").trim()) return trpcError(String(result?.error || "Não foi possível reconhecer o conteúdo desta apólice"));
-      return trpcResult({ text: String(result.data), method: "cloudflare-document-reader" });
+      if (!result || result.format === "error" || !String(result.data || "").trim()) return trpcError(String(result?.error || "Esta apólice é digitalizada. Não foi possível reconhecer as imagens do documento"));
+      return trpcResult({ text: String(result.data), method: "cloudflare-document-reader-ocr" });
     } catch (error) {
       return trpcError(`Não foi possível reconhecer esta apólice: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -54926,6 +54926,25 @@ Detalhes: ${details}` : ""}`;
       adminEmail.toLowerCase()
     ).run();
     return trpcResult({ success: true });
+  }
+  if (name === "agent.requestPolicyDeletion") {
+    const owner = adminEmail.toLowerCase(), policyId = Number(input.id || 0), reason = String(input.reason || "").trim();
+    if (!policyId || reason.length < 5) return trpcError("Informe o motivo da solicitação com pelo menos 5 caracteres");
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS policyDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,policyId INTEGER NOT NULL,agentEmail TEXT NOT NULL,clientId INTEGER,clientName TEXT,policyNumber TEXT,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
+    const policy = await env.DB.prepare("SELECT id,clientId,clientName,policyNumber FROM agentPolicies WHERE id=? AND lower(agentEmail)=?").bind(policyId, owner).first();
+    if (!policy) return trpcError("Apólice não encontrada", "NOT_FOUND", 404);
+    if (accountType === "both") {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=NULL WHERE matchedPolicyId=? AND lower(agentEmail)=?").bind(policyId, owner),
+        env.DB.prepare("DELETE FROM policyDeletionRequests WHERE policyId=?").bind(policyId),
+        env.DB.prepare("DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=?").bind(policyId, owner)
+      ]);
+      return trpcResult({ success: true, deleted: true, requiresApproval: false });
+    }
+    const pending = await env.DB.prepare("SELECT id FROM policyDeletionRequests WHERE policyId=? AND status='pending' LIMIT 1").bind(policyId).first();
+    if (pending) return trpcError("Já existe uma solicitação aguardando o administrador");
+    await env.DB.prepare("INSERT INTO policyDeletionRequests (policyId,agentEmail,clientId,clientName,policyNumber,reason) VALUES (?,?,?,?,?,?)").bind(policyId,owner,Number(policy.clientId||0)||null,String(policy.clientName||"Cliente"),String(policy.policyNumber||""),reason).run();
+    return trpcResult({ success: true, deleted: false, requiresApproval: true });
   }
   if (name === "agent.listClients") {
     const rows = await env.DB.prepare(
@@ -56505,6 +56524,7 @@ Affinity Financial Consulting`,
   }
   if (name === "admin.getStats") {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,applicationId INTEGER NOT NULL,agentEmail TEXT NOT NULL,applicationName TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS policyDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,policyId INTEGER NOT NULL,agentEmail TEXT NOT NULL,clientId INTEGER,clientName TEXT,policyNumber TEXT,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
     const results = await env.DB.batch([
       env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending FROM affiliates"),
       env.DB.prepare("SELECT COUNT(*) total, SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) pending, SUM(CASE WHEN status='approved' THEN 1 ELSE 0 END) approved FROM policies"),
@@ -56512,7 +56532,7 @@ Affinity Financial Consulting`,
       env.DB.prepare("SELECT COUNT(DISTINCT email) total FROM (SELECT lower(email) email FROM adminAccounts WHERE status='pending' UNION ALL SELECT lower(email) email FROM affiliates WHERE status='pending')"),
       env.DB.prepare("SELECT COUNT(*) total FROM affiliateReferrals WHERE status='pending'"),
       env.DB.prepare("SELECT COUNT(*) total FROM testimonials WHERE source='client' AND adminDecision='pending'"),
-      env.DB.prepare("SELECT (SELECT COUNT(*) FROM clientDeletionRequests WHERE status='pending') + (SELECT COUNT(*) FROM applicationDeletionRequests WHERE status='pending') AS total")
+      env.DB.prepare("SELECT (SELECT COUNT(*) FROM clientDeletionRequests WHERE status='pending') + (SELECT COUNT(*) FROM applicationDeletionRequests WHERE status='pending') + (SELECT COUNT(*) FROM policyDeletionRequests WHERE status='pending') AS total")
     ]);
     const [affiliates, policies, commissions, pendingUsers, pendingLeads, pendingReviews, pendingClientDeletions] = results.map((result) => result.results?.[0]);
     return trpcResult({
@@ -57216,18 +57236,20 @@ Affinity Financial Consulting`,
     if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,applicationId INTEGER NOT NULL,agentEmail TEXT NOT NULL,applicationName TEXT NOT NULL,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
-    const [rows, applications] = await Promise.all([env.DB.prepare(
+    await env.DB.prepare("CREATE TABLE IF NOT EXISTS policyDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,policyId INTEGER NOT NULL,agentEmail TEXT NOT NULL,clientId INTEGER,clientName TEXT,policyNumber TEXT,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
+    const [rows, applications, policies] = await Promise.all([env.DB.prepare(
       "SELECT r.*,a.name agentName FROM clientDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC"
-    ).all(), env.DB.prepare("SELECT r.*,a.name agentName FROM applicationDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC").all()]);
+    ).all(), env.DB.prepare("SELECT r.*,a.name agentName FROM applicationDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC").all(), env.DB.prepare("SELECT r.*,a.name agentName FROM policyDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC").all()]);
     return trpcResult([
       ...rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })),
-      ...applications.results.map((row) => ({ ...row, id: `application-${row.id}`, clientId: Number(row.applicationId), clientName: `Aplicação: ${row.applicationName}`, entityType: "application" }))
+      ...applications.results.map((row) => ({ ...row, id: `application-${row.id}`, clientId: Number(row.applicationId), clientName: `Aplicação: ${row.applicationName}`, entityType: "application" })),
+      ...policies.results.map((row) => ({ ...row, id: `policy-${row.id}`, clientId: Number(row.clientId || 0), clientName: `Apólice ${row.policyNumber || "sem número"} · ${row.clientName || "Cliente"}`, entityType: "policy" }))
     ].sort((a,b)=>(a.status==="pending"?-1:1)-(b.status==="pending"?-1:1) || String(b.requestedAt).localeCompare(String(a.requestedAt))));
   }
   if (name === "crm.reviewClientDeletionRequest") {
     if (!["admin", "both"].includes(accountType))
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-    const rawId = String(input.id || ""), isApplication = rawId.startsWith("application-"), id = Number(isApplication ? rawId.slice(12) : rawId), decision = String(input.decision || "");
+    const rawId = String(input.id || ""), isApplication = rawId.startsWith("application-"), isPolicy = rawId.startsWith("policy-"), id = Number(isApplication ? rawId.slice(12) : isPolicy ? rawId.slice(7) : rawId), decision = String(input.decision || "");
     if (!id || !["approved", "rejected"].includes(decision))
       return trpcError("Decis\xE3o inv\xE1lida");
     if (isApplication) {
@@ -57235,6 +57257,16 @@ Affinity Financial Consulting`,
       if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
       if (decision === "approved") await env.DB.prepare("DELETE FROM agentApplications WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.applicationId),String(requestRow.agentEmail)).run();
       await env.DB.prepare("UPDATE applicationDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision,adminEmail.toLowerCase(),String(input.adminNote||"").trim()||null,id).run();
+      return trpcResult({ success: true });
+    }
+    if (isPolicy) {
+      const requestRow = await env.DB.prepare("SELECT * FROM policyDeletionRequests WHERE id=? AND status='pending'").bind(id).first();
+      if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
+      if (decision === "approved") await env.DB.batch([
+        env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=NULL WHERE matchedPolicyId=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.policyId),String(requestRow.agentEmail)),
+        env.DB.prepare("DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.policyId),String(requestRow.agentEmail))
+      ]);
+      await env.DB.prepare("UPDATE policyDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision,adminEmail.toLowerCase(),String(input.adminNote||"").trim()||null,id).run();
       return trpcResult({ success: true });
     }
     const requestRow = await env.DB.prepare(

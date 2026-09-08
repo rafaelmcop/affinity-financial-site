@@ -98,6 +98,21 @@ const chatBody = (value: unknown) =>
     .trim();
 const cleanName = (value: unknown) =>
   String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const fileBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error("Não foi possível preparar este PDF para leitura"));
+  reader.onload = () => resolve(String(reader.result || "").split(",").pop() || "");
+  reader.readAsDataURL(file);
+});
+const policyFromOcr = (text: string) => {
+  const value = String(text || "").replace(/\r/g, "");
+  const money = (raw: string) => Number(String(raw || "").replace(/[$,\s]/g, "")) || 0;
+  const policyNumber = value.match(/(?:Policy\s*(?:Number|No\.?|#)|Ap[oó]lice)\s*[:#]?\s*(LS\s*\d[\d\s-]{5,})/i)?.[1]?.replace(/[\s-]/g, "") || value.match(/\b(LS\s*\d{6,})\b/i)?.[1]?.replace(/\s/g, "") || "";
+  const clientName = value.match(/(?:Policy\s*(?:Number|No\.?)\s*[^\n-]*[-–]\s*|For\s+)([A-ZÀ-Ý][A-ZÀ-Ý' -]{5,})/i)?.[1]?.trim() || "";
+  const premium = value.match(/(?:paying|Modal Premium|Premium)\D{0,30}(\$\s*[\d,]+(?:\.\d{2})?)/i)?.[1] || "";
+  const coverage = value.match(/(?:Face Amount|death benefit|If I Die Tomorrow)\D{0,40}(\$\s*[\d,]+(?:\.\d{2})?)/i)?.[1] || "";
+  return { clientName, policyNumber, product: /FlexLife/i.test(value) ? "FlexLife" : "", premiumAmount: money(premium), premiumFrequency: /Monthly/i.test(value) ? "Mensal" : "", targetPremium: money(premium) * 12, points: Math.round(money(premium) * 12), coverageAmount: money(coverage) };
+};
 
 export default function AgentClients() {
   const [search, setSearch] = useState(""),
@@ -107,12 +122,15 @@ export default function AgentClients() {
     [selectedId, setSelectedId] = useState<number | null>(null),
     [form, setForm] = useState<Form | null>(null),
     [policyForm, setPolicyForm] = useState<PolicyEditForm | null>(null),
+    [policyDeletionReason, setPolicyDeletionReason] = useState(""),
     [emailSubject, setEmailSubject] = useState(""),
     [emailBody, setEmailBody] = useState("");
   const clients = trpc.agent.listClients.useQuery(),
     policies = trpc.agent.listPolicies.useQuery();
   const saveClient = trpc.agent.saveClient.useMutation(),
     requestDeletion = trpc.agent.requestClientDeletion.useMutation(),
+    requestPolicyDeletion = (trpc.agent as any).requestPolicyDeletion.useMutation(),
+    extractPolicyDocument = (trpc.agent as any).extractPolicyDocument.useMutation(),
     updatePolicy = trpc.agent.updatePolicyDetails.useMutation(),
     importSpreadsheet = trpc.agent.importSpreadsheet.useMutation(),
     savePcSheet = trpc.agent.savePcSheet.useMutation();
@@ -297,12 +315,34 @@ export default function AgentClients() {
       toast.error(error instanceof Error ? error.message : "Não foi possível atualizar a apólice");
     }
   };
+  const deletePolicy = async () => {
+    if (!policyForm) return;
+    if (policyDeletionReason.trim().length < 5) {
+      toast.error("Explique o motivo com pelo menos 5 caracteres");
+      return;
+    }
+    if (!window.confirm("Confirmar a solicitação de exclusão desta apólice?")) return;
+    try {
+      const result = await requestPolicyDeletion.mutateAsync({ id: policyForm.id, reason: policyDeletionReason.trim() });
+      await policies.refetch();
+      setPolicyForm(null);
+      setPolicyDeletionReason("");
+      toast.success(result.deleted ? "Apólice excluída imediatamente pelo seu acesso administrativo" : "Solicitação enviada para aprovação do administrador");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Não foi possível solicitar a exclusão");
+    }
+  };
   const completeFromFile = async (file: File) => {
     if (!selected) return;
     try {
       const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
       if (isPdf) {
-        const extracted = await readPcSheet(file);
+        let extracted = await readPcSheet(file);
+        if (!extracted.clientName || !extracted.policyNumber) {
+          toast.info("PDF digitalizado detectado. Fazendo leitura visual das páginas...");
+          const recognized = await extractPolicyDocument.mutateAsync({ fileName: file.name, base64: await fileBase64(file) });
+          extracted = { ...extracted, ...Object.fromEntries(Object.entries(policyFromOcr(recognized.text)).filter(([, value]) => value !== "" && value !== 0)) };
+        }
         const selectedName = cleanName(selected.name);
         const extractedName = cleanName(extracted.clientName);
         const knownPolicyNumbers = selectedPolicies.map(policy => String(policy.policyNumber || "").replace(/\s/g, ""));
@@ -705,6 +745,14 @@ export default function AgentClients() {
                   <label className="text-sm text-gray-300">Beneficiários<Input className="mt-2" value={policyForm.beneficiaries} onChange={e => setPolicyForm({ ...policyForm, beneficiaries: e.target.value })} /></label>
                   <Button className="bg-gold text-black md:col-span-2">Salvar e concluir dados da apólice</Button>
                 </form>
+                <div className="mt-6 rounded-xl border border-red-400/30 bg-red-500/5 p-4">
+                  <p className="font-bold text-red-300">Excluir apólice ou informação incorreta</p>
+                  <p className="mt-1 text-sm text-gray-400">Informe exatamente o que está incorreto e por quê. Agentes aguardam aprovação; quem também é administrador conclui a ação imediatamente.</p>
+                  <textarea className="mt-3 min-h-24 w-full rounded-md border border-white/15 bg-black/40 p-3 text-sm text-white" placeholder="Ex.: esta apólice pertence à Fernanda e foi vinculada por engano à Gisele." value={policyDeletionReason} onChange={event => setPolicyDeletionReason(event.target.value)} />
+                  <Button type="button" variant="destructive" className="mt-3" disabled={requestPolicyDeletion.isPending} onClick={deletePolicy}>
+                    <Trash2 className="mr-2 h-4 w-4" />Solicitar exclusão desta apólice
+                  </Button>
+                </div>
               </Card>
             )}
             <div className="grid gap-4">
