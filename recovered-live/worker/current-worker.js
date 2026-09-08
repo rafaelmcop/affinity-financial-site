@@ -55224,16 +55224,16 @@ Detalhes: ${details}` : ""}`;
         "Use uma data de anivers\xE1rio v\xE1lida no formato MM/DD/AAAA"
       );
     const storedBirthDate = birthday?.iso || null;
-    const existingPolicy = await env.DB.prepare(
-      "SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=?"
-    ).bind(owner, policyNumber).first();
-    let client = existingPolicy?.clientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(existingPolicy.clientId), owner).first() : clientEmail ? await env.DB.prepare(
+    const ownerPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+    const existingPolicy = (ownerPolicies.results || []).find((row) => paymentPolicyNumbersMatch(row.policyNumber, policyNumber)) || null;
+    const selectedClientId = Math.max(0, Number(input.clientId || 0));
+    let client = selectedClientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(selectedClientId, owner).first() : existingPolicy?.clientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(existingPolicy.clientId), owner).first() : clientEmail ? await env.DB.prepare(
       "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?"
     ).bind(clientEmail, owner).first() : null;
     if (!client && clientPhone)
       client = await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE phone=? AND lower(assignedAdminEmail)=?"
-      ).bind(clientPhone, owner).first();
+        "SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND substr(replace(replace(replace(replace(replace(coalesce(phone,whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=? LIMIT 1"
+      ).bind(owner, clientPhone.replace(/\D/g, "").slice(-10)).first();
     if (!client)
       client = await env.DB.prepare(
         "SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1"
@@ -55421,6 +55421,7 @@ Detalhes: ${details}` : ""}`;
       const phone = String(row.clientPhone || "").trim();
       const birthDate = normalizeBirthDate(row.birthDate) || null;
       let client = email ? await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1").bind(owner, email).first() : null;
+      if (!client && phone) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND substr(replace(replace(replace(replace(replace(coalesce(phone,whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=? LIMIT 1").bind(owner, phone.replace(/\D/g, "").slice(-10)).first();
       if (!client)
         client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(name)=lower(?) LIMIT 1").bind(owner, clientName).first();
       let clientId;
@@ -55439,9 +55440,8 @@ Detalhes: ${details}` : ""}`;
       }
       const policyNumber = String(row.policyNumber || "").trim();
       if (!policyNumber) continue;
-      const policy = await env.DB.prepare(
-        "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? AND policyNumber=? LIMIT 1"
-      ).bind(owner, policyNumber).first();
+      const possiblePolicies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+      const policy = (possiblePolicies.results || []).find((candidate) => paymentPolicyNumbersMatch(candidate.policyNumber, policyNumber)) || null;
       const product = String(row.product || "").trim() || null;
       const frequency = String(row.premiumFrequency || "").trim() || null;
       const beneficiaries = String(row.beneficiaries || "").trim() || null;
