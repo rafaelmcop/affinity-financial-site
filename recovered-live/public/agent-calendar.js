@@ -496,7 +496,7 @@ async function load() {
     if (state.connection) await loadMeetings();
     else
       $("meetings").innerHTML =
-        '<p class="muted">Sua agenda ainda não está conectada. <a class="button" href="/agentes/configuracoes">Configurar Calendly</a></p>';
+        '<p class="muted">Sua agenda ainda não está conectada. <a class="button" href="/agentes/configuracoes-agenda">Configurar Calendly</a></p>';
   } catch (e) {
     notice(e.message, true);
     $("meetings").innerHTML = `<p class="muted">${escapeHtml(e.message)}</p>`;
