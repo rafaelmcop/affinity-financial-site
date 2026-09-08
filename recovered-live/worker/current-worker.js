@@ -54820,18 +54820,32 @@ Detalhes: ${details}` : ""}`;
     });
   }
   if (name === "agent.listPolicies") {
-    const rows = await env.DB.prepare(
-      "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC"
-    ).bind(adminEmail.toLowerCase()).all();
+    const owner = adminEmail.toLowerCase();
+    const [rows, applications] = await env.DB.batch([
+      env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(owner),
+      env.DB.prepare("SELECT id,matchedPolicyId,clientName,clientEmail,clientPhone,state,applicationData FROM agentApplications WHERE lower(agentEmail)=?").bind(owner)
+    ]);
+    const normalized = (value) => String(value || "").replace(/\D/g, "").slice(-10);
+    const applicationsList = applications.results || [];
     return trpcResult(
-      rows.results.map((row) => ({
-        ...row,
-        id: Number(row.id),
-        premiumAmount: Number(row.premiumAmount || 0),
-        targetPremium: Number(row.targetPremium || 0),
-        points: Math.round(Number(row.points || 0)),
-        coverageAmount: Number(row.coverageAmount || 0)
-      }))
+      rows.results.map((row) => {
+        const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) ||
+          applicationsList.find((item) => String(item.clientEmail || "").trim().toLowerCase() && String(item.clientEmail).trim().toLowerCase() === String(row.clientEmail || "").trim().toLowerCase()) ||
+          applicationsList.find((item) => normalized(item.clientPhone) && normalized(item.clientPhone) === normalized(row.clientPhone)) ||
+          applicationsList.find((item) => String(item.clientName || "").trim().toLowerCase() === String(row.clientName || "").trim().toLowerCase());
+        let applicationData = {};
+        try { applicationData = JSON.parse(String(application?.applicationData || "{}")); } catch {}
+        return {
+          ...row,
+          id: Number(row.id),
+          premiumAmount: Number(row.premiumAmount || 0),
+          targetPremium: Number(row.targetPremium || 0),
+          points: Math.round(Number(row.points || 0)),
+          coverageAmount: Number(row.coverageAmount || 0),
+          clientState: String(application?.state || applicationData.state || "").toUpperCase(),
+          clientGender: String(applicationData.gender || applicationData.sex || "")
+        };
+      })
     );
   }
   if (name === "agent.updatePolicyDetails") {
@@ -55224,8 +55238,9 @@ Detalhes: ${details}` : ""}`;
         "Use uma data de anivers\xE1rio v\xE1lida no formato MM/DD/AAAA"
       );
     const storedBirthDate = birthday?.iso || null;
-    const ownerPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+    const ownerPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     const existingPolicy = (ownerPolicies.results || []).find((row) => paymentPolicyNumbersMatch(row.policyNumber, policyNumber)) || null;
+    const extractedBeneficiaries = String(input.beneficiaries ?? "").trim();
     const selectedClientId = Math.max(0, Number(input.clientId || 0));
     let client = selectedClientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(selectedClientId, owner).first() : existingPolicy?.clientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(existingPolicy.clientId), owner).first() : clientEmail ? await env.DB.prepare(
       "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?"
@@ -55279,7 +55294,7 @@ Detalhes: ${details}` : ""}`;
       Number(input.targetPremium || 0),
       Math.max(0, Math.round(Number(input.points || 0))),
       Number(input.coverageAmount || 0),
-      String(input.beneficiaries ?? "").trim() || null,
+      extractedBeneficiaries || null,
       String(input.issuedAt ?? "").trim() || null
     ];
     if (policy)
@@ -55301,7 +55316,7 @@ Detalhes: ${details}` : ""}`;
         Math.max(0, Math.round(Number(input.points || 0))),
         Number(input.coverageAmount || 0),
         Number(input.coverageAmount || 0),
-        String(input.beneficiaries ?? "").trim(),
+        extractedBeneficiaries,
         String(input.issuedAt ?? "").trim(),
         Number(policy.id),
         owner
