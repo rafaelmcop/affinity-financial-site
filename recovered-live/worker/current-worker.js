@@ -54843,6 +54843,23 @@ Detalhes: ${details}` : ""}`;
       return trpcError(`Não foi possível reconhecer esta apólice: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  if (name === "agent.extractPolicyImages") {
+    const images = Array.isArray(input.images) ? input.images.slice(0, 24) : [];
+    if (!images.length) return trpcError("Nenhuma página foi recebida para leitura visual");
+    try {
+      const files = images.map((base64, index) => {
+        const bytes = Uint8Array.from(atob(String(base64 || "")), character => character.charCodeAt(0));
+        return { name: `policy-page-${index + 1}.jpg`, blob: new Blob([bytes], { type: "image/jpeg" }) };
+      });
+      const converted = await env.AI.toMarkdown(files, { conversionOptions: { image: { descriptionLanguage: "en" }, output: { format: "text" } } });
+      const results = Array.isArray(converted) ? converted : [converted];
+      const text = results.filter(result => result && result.format !== "error").map(result => String(result.data || "")).filter(Boolean).join("\n\n");
+      if (!text.trim()) return trpcError("Não foi possível reconhecer o conteúdo visual das páginas selecionadas");
+      return trpcResult({ text, method: "cloudflare-page-image-ocr", pages: images.length });
+    } catch (error) {
+      return trpcError(`A leitura visual não foi concluída: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
     const [clientsQuery, policiesQuery, reviewsQuery, internalQuery, messagesQuery, tasksQuery] = await env.DB.batch([
