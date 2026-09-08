@@ -53374,7 +53374,8 @@ async function ensureCalendlyTables(env) {
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agentCalendlyConnections (agentEmail TEXT PRIMARY KEY,encryptedToken TEXT NOT NULL,userUri TEXT,organizationUri TEXT,schedulingUrl TEXT,status TEXT NOT NULL DEFAULT 'connected',lastSyncAt TEXT,lastError TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS calendlyMeetings (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,eventUri TEXT NOT NULL,inviteeUri TEXT,eventName TEXT,inviteeName TEXT,inviteeEmail TEXT,inviteePhone TEXT,startTime TEXT,endTime TEXT,status TEXT NOT NULL DEFAULT 'active',locationType TEXT,meetingUrl TEXT,cancelUrl TEXT,rescheduleUrl TEXT,clientId INTEGER,questionsJson TEXT,lastSyncedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(agentEmail,eventUri,inviteeUri))"),
-    env.DB.prepare("CREATE TABLE IF NOT EXISTS agentPublicProfiles (agentEmail TEXT PRIMARY KEY,slug TEXT NOT NULL UNIQUE,headline TEXT,bio TEXT,sinceYear INTEGER,photoUrl TEXT,calendlyUrl TEXT,isPublished INTEGER NOT NULL DEFAULT 1,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agentPublicProfiles (agentEmail TEXT PRIMARY KEY,slug TEXT NOT NULL UNIQUE,headline TEXT,bio TEXT,sinceYear INTEGER,photoUrl TEXT,calendlyUrl TEXT,isPublished INTEGER NOT NULL DEFAULT 1,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
+    env.DB.prepare("CREATE TABLE IF NOT EXISTS agentDirectContacts (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientId INTEGER,name TEXT NOT NULL,email TEXT,phone TEXT,message TEXT NOT NULL,readAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
   ]);
   const profileColumns = ["jobTitle TEXT", "companies TEXT", "specialties TEXT", "professionalHistory TEXT", "education TEXT", "licenses TEXT", "languages TEXT", "achievements TEXT", "website TEXT", "linkedInUrl TEXT", "instagramUrl TEXT", "facebookUrl TEXT", "additionalInfo TEXT"];
   const existingColumns = new Set(((await env.DB.prepare("PRAGMA table_info(agentPublicProfiles)").all()).results || []).map((column) => String(column.name)));
@@ -54231,6 +54232,7 @@ Detalhes: ${details}` : ""}`;
     let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=lower(?) AND lower(email)=? LIMIT 1").bind(String(agent.agentEmail),email).first() : null;
     if (!client) { const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,status,source,assignedAdminEmail,notes) VALUES (?,?,?,'new','Perfil público',?,?)").bind(clientName,email||null,phone||null,String(agent.agentEmail).toLowerCase(),message).run(); client={id:Number(inserted.meta.last_row_id)}; }
     await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'note',?,?)").bind(Number(client.id),`Contato pelo perfil público: ${message}`,email||phone).run();
+    await env.DB.prepare("INSERT INTO agentDirectContacts (agentEmail,clientId,name,email,phone,message) VALUES (?,?,?,?,?,?)").bind(String(agent.agentEmail).toLowerCase(),Number(client.id),clientName,email||null,phone||null,message).run();
     await sendEmailIfConfigured(env,{to:String(agent.contactEmail||agent.email),subject:`Novo contato pelo seu perfil: ${clientName}`,html:emailHtml("Novo contato no site",`<p><strong>${escapeAutomationHtml(clientName)}</strong> enviou uma mensagem pelo seu perfil.</p><p>${escapeAutomationHtml(message)}</p><p>E-mail: ${escapeAutomationHtml(email||"Não informado")}<br>Telefone: ${escapeAutomationHtml(phone||"Não informado")}</p>`)});
     return trpcResult({success:true});
   }
@@ -54758,6 +54760,29 @@ Detalhes: ${details}` : ""}`;
       env.DB.prepare("UPDATE agentMailboxEmails SET clientId=?,policyNumber=?,actionStatus='needs_review',actionDetail='Cliente e apólice identificados; mensagem pronta para envio' WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=?").bind(clientId,policyNumber,owner,uid)
     ]);
     return trpcResult({ success: true, clientId, policyId: Number(policy.id), merged: Boolean(client) });
+  }
+  if (name === "agent.listDirectContacts") {
+    await ensureCalendlyTables(env);
+    const rows = await env.DB.prepare("SELECT id,clientId,name,email,phone,message,readAt,createdAt FROM agentDirectContacts WHERE lower(agentEmail)=? ORDER BY CASE WHEN readAt IS NULL THEN 0 ELSE 1 END, datetime(createdAt) DESC LIMIT 250").bind(adminEmail.toLowerCase()).all();
+    return trpcResult((rows.results || []).map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId || 0) || null })));
+  }
+  if (name === "agent.markDirectContactRead") {
+    await ensureCalendlyTables(env);
+    await env.DB.prepare("UPDATE agentDirectContacts SET readAt=COALESCE(readAt,CURRENT_TIMESTAMP) WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id),adminEmail.toLowerCase()).run();
+    return trpcResult({ success: true });
+  }
+  if (name === "agent.extractPolicyDocument") {
+    const base64 = String(input.base64 || "");
+    if (!base64 || base64.length > 36_000_000) return trpcError("O PDF está vazio ou excede o limite de leitura");
+    try {
+      const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+      const converted = await env.AI.toMarkdown({ name: String(input.fileName || "policy.pdf"), blob: new Blob([bytes], { type: "application/pdf" }) }, { conversionOptions: { pdf: { metadata: true }, output: { format: "text" } } });
+      const result = Array.isArray(converted) ? converted[0] : converted;
+      if (!result || result.format === "error" || !String(result.data || "").trim()) return trpcError(String(result?.error || "Não foi possível reconhecer o conteúdo desta apólice"));
+      return trpcResult({ text: String(result.data), method: "cloudflare-document-reader" });
+    } catch (error) {
+      return trpcError(`Não foi possível reconhecer esta apólice: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
@@ -57751,6 +57776,10 @@ var cloudflare_staging_default = {
     }
     if (url.pathname === "/agentes/pagina-publica") {
       url.pathname = "/agent-public-profile-settings.html";
+      return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
+    }
+    if (url.pathname === "/agentes/contato-direto") {
+      url.pathname = "/agent-direct-contacts.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
     if (/^\/consultor\/[a-z0-9-]+\/?$/i.test(url.pathname)) {

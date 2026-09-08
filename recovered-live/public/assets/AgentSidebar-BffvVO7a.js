@@ -62,7 +62,7 @@ import { E as z } from "./external-link-CEjUwZyT.js";
   ];
 function E() {
   const [t, s] = u(),
-    x = t === "/agentes/crm" || t === "/agentes/mensagens",
+    x = t === "/agentes/crm" || t === "/agentes/mensagens" || t === "/agentes/contato-direto",
     [l, m] = f.useState(x),
     [P, R] = f.useState(t === "/agentes/clientes"),
     [T, H] = f.useState(t === "/agentes/configuracoes"),
@@ -157,6 +157,11 @@ function E() {
                         e.jsx(M, { size: 15 }),
                         " Mensagens e automações",
                       ],
+                    }),
+                    e.jsxs("button", {
+                      onClick: () => window.location.assign("/agentes/contato-direto"),
+                      className: `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${t === "/agentes/contato-direto" ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`,
+                      children: [e.jsx(M, { size: 15 }), " Contato direto"],
                     }),
                   ],
                 }),
