@@ -53450,6 +53450,12 @@ async function localizeTestimonials(rows, target, env) {
 }
 __name(localizeTestimonials, "localizeTestimonials");
 async function ensureCalendlyTables(env) {
+  const tables = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('agentCalendlyConnections','calendlyMeetings','agentPublicProfiles','agentDirectContacts')").all();
+  if (tables.results.length === 4) {
+    const columns = await env.DB.prepare("PRAGMA table_info(agentPublicProfiles)").all();
+    const names = new Set(columns.results.map((column) => String(column.name)));
+    if (["jobTitle","companies","specialties","professionalHistory","education","licenses","languages","achievements","website","linkedInUrl","instagramUrl","facebookUrl","additionalInfo"].every((name) => names.has(name))) return;
+  }
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agentCalendlyConnections (agentEmail TEXT PRIMARY KEY,encryptedToken TEXT NOT NULL,userUri TEXT,organizationUri TEXT,schedulingUrl TEXT,status TEXT NOT NULL DEFAULT 'connected',lastSyncAt TEXT,lastError TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
     env.DB.prepare("CREATE TABLE IF NOT EXISTS calendlyMeetings (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,eventUri TEXT NOT NULL,inviteeUri TEXT,eventName TEXT,inviteeName TEXT,inviteeEmail TEXT,inviteePhone TEXT,startTime TEXT,endTime TEXT,status TEXT NOT NULL DEFAULT 'active',locationType TEXT,meetingUrl TEXT,cancelUrl TEXT,rescheduleUrl TEXT,clientId INTEGER,questionsJson TEXT,lastSyncedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(agentEmail,eventUri,inviteeUri))"),
@@ -54332,7 +54338,14 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
   if (name.startsWith("careers.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-  await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(adminEmail.toLowerCase()).run();
+  // Presence is optional telemetry, not a prerequisite for reading portal data.
+  if (name === "crm.presence") {
+    try {
+      await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-2 minutes'))").bind(adminEmail.toLowerCase()).run();
+    } catch (error) {
+      console.warn("Presence heartbeat unavailable", error instanceof Error ? error.message : String(error));
+    }
+  }
   const auditedActions = {
     "agent.saveClient": "Criou ou alterou um cliente",
     "agent.requestClientDeletion": "Solicitou a exclus\xE3o de um cliente",
@@ -54460,6 +54473,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument", "agent.sendApplicationEmail"].includes(name)) {
     const owner = adminEmail.toLowerCase();
+    if (!["agent.listApplications", "agent.getApplication", "agent.getApplicationDocument"].includes(name)) {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       agentEmail TEXT NOT NULL,
@@ -54511,6 +54525,7 @@ Detalhes: ${details}` : ""}`;
     )`).run();
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+    }
     if (name === "agent.sendApplicationEmail") {
       const applicationId = Number(input.applicationId || 0);
       const subject = String(input.subject || "").trim();
@@ -54560,6 +54575,7 @@ Detalhes: ${details}` : ""}`;
       return trpcResult({ name: document.name, type: document.type, data: `data:${document.type};base64,${parts.join("")}` });
     }
     if (name === "agent.listApplications") {
+      try {
       await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
       await env.DB.prepare("UPDATE agentApplications SET clientToken=lower(hex(randomblob(16))) WHERE lower(agentEmail)=? AND (clientToken IS NULL OR trim(clientToken)='')").bind(owner).run();
       // A completed application must always have a real policy. Older logic
@@ -54589,6 +54605,10 @@ Detalhes: ${details}` : ""}`;
           AND ((a.clientEmail IS NOT NULL AND trim(a.clientEmail)<>'' AND lower(trim(coalesce(c.email,p.clientEmail,'')))=lower(trim(a.clientEmail)))
             OR (a.clientPhone IS NOT NULL AND trim(a.clientPhone)<>'' AND substr(replace(replace(replace(replace(replace(coalesce(c.phone,c.whatsapp,p.clientPhone,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=substr(replace(replace(replace(replace(replace(a.clientPhone,'(',''),')',''),'-',''),' ',''),'+',''),-10))
             OR lower(trim(coalesce(c.name,p.clientName,'')))=lower(trim(a.clientName))))`).bind(owner).run();
+      } catch (error) {
+        if (!/daily row write limit/i.test(String(error?.message || error))) throw error;
+        console.warn("Application maintenance deferred: daily write limit");
+      }
       const rows = await env.DB.prepare(`SELECT a.*,p.policyNumber,p.product,p.status AS policyStatus,p.coverageAmount,p.premiumAmount,
         EXISTS(SELECT 1 FROM applicationDeletionRequests d WHERE d.applicationId=a.id AND d.status='pending') AS deletionPending,
         (SELECT token FROM reviewInvites r WHERE r.applicationId=a.id AND r.usedAt IS NULL ORDER BY r.id DESC LIMIT 1) AS reviewToken,
@@ -56389,15 +56409,8 @@ Affinity Financial Consulting`,
   if (name === "agent.calendlyMeetings") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase();
-    const connection = await env.DB.prepare("SELECT lastSyncAt FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND status='connected' LIMIT 1").bind(owner).first();
-    const lastSyncAt = connection?.lastSyncAt ? Date.parse(`${String(connection.lastSyncAt).replace(" ", "T")}Z`) : 0;
-    if (connection && (!Number.isFinite(lastSyncAt) || Date.now() - lastSyncAt > 2 * 60 * 1e3)) {
-      try {
-        await syncCalendlyForAgent(env, owner);
-      } catch (error) {
-        await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0, 500), owner).run();
-      }
-    }
+    // The scheduled 15-minute sync updates meetings; reading must stay available
+    // even when the provider or database writes are temporarily unavailable.
     const [rows, applications, policies, agents, closedClients] = await Promise.all([
       env.DB.prepare("SELECT m.*,COALESCE(NULLIF(m.inviteePhone,''),(SELECT COALESCE(NULLIF(c.phone,''),NULLIF(c.whatsapp,'')) FROM crmClients c WHERE lower(c.assignedAdminEmail)=lower(m.agentEmail) AND (c.id=m.clientId OR (m.inviteeEmail IS NOT NULL AND lower(trim(c.email))=lower(trim(m.inviteeEmail)))) ORDER BY CASE WHEN c.id=m.clientId THEN 0 ELSE 1 END,c.id DESC LIMIT 1)) AS resolvedPhone FROM calendlyMeetings m WHERE lower(m.agentEmail)=? ORDER BY datetime(m.startTime) DESC LIMIT 250").bind(owner).all(),
       env.DB.prepare("SELECT clientName AS name,clientEmail AS email,clientPhone AS phone FROM agentApplications WHERE lower(agentEmail)=? AND lower(coalesce(status,'')) IN ('submitted','completed','complete','concluida','concluido')").bind(owner).all(),
@@ -58037,7 +58050,9 @@ var cloudflare_staging_default = {
       );
       return secureResponse(
         jsonResponse(
-          [trpcError("Erro interno da pr\xE9via", "INTERNAL_SERVER_ERROR", 500)],
+          [trpcError(/daily row write limit/i.test(String(error?.message || error))
+            ? "O banco atingiu o limite diário de gravações do Cloudflare. Esta operação não pôde ser concluída. O administrador precisa liberar o plano Workers/D1 ou aguardar a renovação às 00:00 UTC."
+            : "Erro interno do portal", "INTERNAL_SERVER_ERROR", 500)],
           500
         ),
         { privateData: true }

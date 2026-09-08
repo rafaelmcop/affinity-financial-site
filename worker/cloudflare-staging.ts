@@ -1002,8 +1002,15 @@ async function runProcedure(
   if (name.startsWith("admin.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
 
-  await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=?")
-    .bind(adminEmail.toLowerCase()).run();
+  // Presence is optional telemetry, not a prerequisite for reading portal data.
+  if (name === "crm.presence") {
+    try {
+      await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-2 minutes'))")
+        .bind(adminEmail.toLowerCase()).run();
+    } catch (error) {
+      console.warn("Presence heartbeat unavailable", error instanceof Error ? error.message : String(error));
+    }
+  }
   const auditedActions: Record<string, string> = {
     "agent.saveClient": "Criou ou alterou um cliente",
     "agent.requestClientDeletion": "Solicitou a exclusão de um cliente",
