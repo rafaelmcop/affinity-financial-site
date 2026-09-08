@@ -50611,6 +50611,20 @@ __name(isValidMediaUrl, "isValidMediaUrl");
 // shared/clientProfile.ts
 var present = /* @__PURE__ */ __name((value) => value !== null && value !== void 0 && String(value).trim() !== "", "present");
 var positive = /* @__PURE__ */ __name((value) => Number(value || 0) > 0, "positive");
+function primaryBeneficiaryName(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed) && parsed.length)
+      return String(parsed[0]?.name || parsed[0]?.fullName || parsed[0]?.beneficiaryName || "").trim();
+  } catch {}
+  return text
+    .split(/\s+(?:—|-)\s+(?:Parentesco|Relationship|Porcentagem|Percentage)\s*:/i)[0]
+    .split(/;|\n/)[0]
+    .replace(/^(?:Primary|Principal)(?: Beneficiary| Beneficiário)?\s*[:\-]?\s*/i, "")
+    .trim();
+}
 function missingClientProfileFields(client, policies) {
   const inactiveStatuses = new Set(["inactive", "inativa", "lapse", "lapsed", "cancelled", "canceled", "cancelada", "declined", "recusada", "surrendered", "terminated", "expired"]);
   const activePolicies = policies.filter((policy) => !inactiveStatuses.has(String(policy.status || "").trim().toLowerCase()));
@@ -54843,7 +54857,8 @@ Detalhes: ${details}` : ""}`;
           points: Math.round(Number(row.points || 0)),
           coverageAmount: Number(row.coverageAmount || 0),
           clientState: String(application?.state || applicationData.state || "").toUpperCase(),
-          clientGender: String(applicationData.gender || applicationData.sex || "")
+          clientGender: String(applicationData.gender || applicationData.sex || ""),
+          beneficiaries: primaryBeneficiaryName(row.beneficiaries)
         };
       })
     );
@@ -54860,7 +54875,7 @@ Detalhes: ${details}` : ""}`;
       Math.max(0, Number(input.targetPremium || 0)),
       Math.max(0, Math.round(Number(input.points || 0))),
       Math.max(0, Number(input.coverageAmount || 0)),
-      String(input.beneficiaries || "").trim() || null,
+      primaryBeneficiaryName(input.beneficiaries) || null,
       Number(input.id),
       adminEmail.toLowerCase()
     ).run();
@@ -55240,7 +55255,7 @@ Detalhes: ${details}` : ""}`;
     const storedBirthDate = birthday?.iso || null;
     const ownerPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     const existingPolicy = (ownerPolicies.results || []).find((row) => paymentPolicyNumbersMatch(row.policyNumber, policyNumber)) || null;
-    const extractedBeneficiaries = String(input.beneficiaries ?? "").trim();
+    const extractedBeneficiaries = primaryBeneficiaryName(input.beneficiaries);
     const selectedClientId = Math.max(0, Number(input.clientId || 0));
     let client = selectedClientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(selectedClientId, owner).first() : existingPolicy?.clientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(existingPolicy.clientId), owner).first() : clientEmail ? await env.DB.prepare(
       "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?"
@@ -55459,7 +55474,7 @@ Detalhes: ${details}` : ""}`;
       const policy = (possiblePolicies.results || []).find((candidate) => paymentPolicyNumbersMatch(candidate.policyNumber, policyNumber)) || null;
       const product = String(row.product || "").trim() || null;
       const frequency = String(row.premiumFrequency || "").trim() || null;
-      const beneficiaries = String(row.beneficiaries || "").trim() || null;
+      const beneficiaries = primaryBeneficiaryName(row.beneficiaries) || null;
       const issuedAt = String(row.issuedAt || "").trim() || null;
       const premium = Math.max(0, Number(row.premiumAmount || 0));
       const target = Math.max(0, Number(row.targetPremium || 0));
