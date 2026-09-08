@@ -212,8 +212,8 @@ export default function AgentClients() {
       id: client.id,
       name: client.name,
       email: client.email || "",
-      phone: client.phone || "",
-      whatsapp: client.whatsapp || "",
+      phone: client.phone || client.whatsapp || "",
+      whatsapp: client.phone || client.whatsapp || "",
       birthDate: isoDate(client.birthDate),
       status: client.status,
       source: client.source || "Cadastro manual",
@@ -263,7 +263,7 @@ export default function AgentClients() {
     event.preventDefault();
     if (!form) return;
     try {
-      await saveClient.mutateAsync(form);
+      await saveClient.mutateAsync({ ...form, whatsapp: form.phone });
       await Promise.all([clients.refetch(), policies.refetch()]);
       toast.success(form.id ? "Cliente atualizado" : "Cliente adicionado");
       returnToClientList();
@@ -418,12 +418,7 @@ export default function AgentClients() {
                 className={missingFields.includes("telefone") ? "border-amber-400 bg-amber-400/5" : ""}
                 placeholder="Telefone"
                 value={form.phone}
-                onChange={e => setForm({ ...form, phone: e.target.value })}
-              />
-              <Input
-                placeholder="WhatsApp"
-                value={form.whatsapp}
-                onChange={e => setForm({ ...form, whatsapp: e.target.value })}
+                onChange={e => setForm({ ...form, phone: e.target.value, whatsapp: e.target.value })}
               />
               <label className="text-sm text-gray-300">
                 Data de nascimento
@@ -668,10 +663,9 @@ export default function AgentClients() {
                   ],
                   [
                     "Telefone",
-                    selected.phone || primaryPolicy?.clientPhone,
+                    selected.phone || selected.whatsapp || primaryPolicy?.clientPhone,
                     "telefone",
                   ],
-                  ["WhatsApp", selected.whatsapp, ""],
                   [
                     "Data de nascimento",
                     displayDate(selected.birthDate || primaryPolicy?.birthDate),

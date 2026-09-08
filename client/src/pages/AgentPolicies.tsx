@@ -117,7 +117,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
     return {
       clientName: spreadsheetValue(row, ["nome completo", "nome cliente", "client name", "cliente", "nome"]),
       clientEmail: spreadsheetValue(row, ["e mail", "email"]),
-      clientPhone: spreadsheetValue(row, ["telefone", "celular", "phone", "whatsapp"]),
+      clientPhone: spreadsheetValue(row, ["telefone", "celular", "phone", "phone number", "mobile", "cell", "whatsapp"]),
       birthDate: spreadsheetBirthDate(spreadsheetValue(row, ["data nascimento", "nascimento", "date of birth", "dob"])),
       policyNumber: spreadsheetValue(row, ["numero apolice", "apolice numero", "policy number", "apolice"]),
       product: spreadsheetValue(row, ["tipo apolice", "produto", "product"]),
@@ -195,7 +195,7 @@ export async function readClientSpreadsheet(file: File): Promise<SpreadsheetRow[
     return [{
       clientName,
       clientEmail: rightValue(["email", "e mail"], personalStart, personalEnd),
-      clientPhone: rightValue(["telefone", "celular", "phone", "whatsapp"], personalStart, personalEnd),
+      clientPhone: rightValue(["telefone", "celular", "phone", "phone number", "mobile", "cell", "whatsapp"], personalStart, personalEnd),
       birthDate: spreadsheetBirthDate(rightValue(["data de nascimento", "data nascimento", "date of birth", "dob"], personalStart, personalEnd)),
       policyNumber, product, policyStatus: "active" as const,
       premiumAmount, premiumFrequency, targetPremium,
@@ -296,13 +296,13 @@ export async function readPcSheet(file: File) {
     afterLine(cover, /Proposed Insured:.*Agent:/i) ||
     afterLine(cover, /^Proposed Insured:?$/i) ||
     find(all, /Name \(print first, middle, last\)[^\n]*\n([^|\n]+)/i);
-  const contactLine =
-    pageLines.flat().find(line => line.includes(email) && /\d/.test(line)) ||
-    "";
-  const phoneDigits = contactLine
-    .replace(email, "")
-    .replace(/\D/g, "")
-    .slice(0, 10);
+  const contactLine = pageLines.flat().find(line => line.includes(email) && /\d/.test(line)) || "";
+  const phoneCandidate =
+    find(all, /(?:Primary\s+)?(?:Phone|Telephone|Mobile|Cell(?:ular)?|Telefone|Celular|WhatsApp)(?:\s+(?:Number|No\.?))?\s*[:#-]?\s*(\+?1?[\s().-]*\d{3}[\s().-]*\d{3}[\s.-]*\d{4})/i) ||
+    find(all, /(?:Home|Business|Work)\s+Phone\s*[:#-]?\s*(\+?1?[\s().-]*\d{3}[\s().-]*\d{3}[\s.-]*\d{4})/i) ||
+    contactLine.replace(email, "");
+  const rawPhoneDigits = phoneCandidate.replace(/\D/g, "");
+  const phoneDigits = rawPhoneDigits.length >= 10 ? rawPhoneDigits.slice(-10) : "";
   let phone =
     phoneDigits.length === 10
       ? `(${phoneDigits.slice(0, 3)}) ${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`
@@ -322,18 +322,18 @@ export async function readPcSheet(file: File) {
   const primaryLine =
     primaryIndex >= 0 ? flatLines[primaryIndex + 1] || "" : "";
   const beneficiaryLines = [
-    ...flatLines.filter(line => /Relationship to Insured:/i.test(line)),
+    ...flatLines.filter(line => /^(?:Primary Beneficiary|Beneficiary Name|Name of Beneficiary)\s*:/i.test(line)),
     primaryLine,
   ];
   const beneficiaries = beneficiaryLines
     .map(line =>
       line
-        .split("Relationship to Insured:")[0]
-        .replace(/^.*Primary:\s*/i, "")
+        .replace(/^(?:Primary Beneficiary|Beneficiary Name|Name of Beneficiary|Primary)\s*:\s*/i, "")
         .replace(/\s*\|\s*/g, " ")
         .trim()
     )
-    .filter(value => /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{3,}$/.test(value));
+    .filter(value => /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{3,}$/.test(value))
+    .filter(value => !/(?:national life|life insurance|insurance company|centralized|mailing address|montpelier|one national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(value));
   const nationalLife =
     /National Life Insurance Company|Life Insurance Company of the Southwest|National Life Group/i.test(
       all

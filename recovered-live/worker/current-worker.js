@@ -50066,21 +50066,29 @@ function extractPaymentAmount(subject, body) {
   return 0;
 }
 function paymentPolicyNumbersMatch(left, right) {
-  const a = normalizePolicyNumber(String(left || ""));
-  const b = normalizePolicyNumber(String(right || ""));
+  const a = policyNumberIdentity(left);
+  const b = policyNumberIdentity(right);
   if (!a || !b) return false;
   if (a === b) return true;
   // Carrier messages sometimes omit the product prefix stored in the CRM
   // (for example 811046300 in the e-mail and LS811046300 in the policy).
   return Math.min(a.length, b.length) >= 7 && (a.endsWith(b) || b.endsWith(a));
 }
+function policyNumberIdentity(value) {
+  const normalized = normalizePolicyNumber(String(value || ""));
+  return normalized.replace(/^LS(?=\d)/, "");
+}
+__name(policyNumberIdentity, "policyNumberIdentity");
 var normalizePolicyNumber;
 var init_paymentNotice = __esm({
   "shared/paymentNotice.ts"() {
     "use strict";
     normalizePolicyNumber = /* @__PURE__ */ __name((value) => {
       const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-      return compact.replace(/^LS(\d{7})00$/, "LS$1");
+      const prefix = compact.match(/^[A-Z]+/)?.[0] || "";
+      let digits = compact.replace(/^[A-Z]+/, "");
+      if (digits.length === 9 && digits.endsWith("00")) digits = digits.slice(0, -2);
+      return `${prefix}${digits}`;
     }, "normalizePolicyNumber");
     __name(classifyPaymentNotice, "classifyPaymentNotice");
     __name(classifyMailboxTopic, "classifyMailboxTopic");
@@ -50615,18 +50623,29 @@ __name(isValidMediaUrl, "isValidMediaUrl");
 var present = /* @__PURE__ */ __name((value) => value !== null && value !== void 0 && String(value).trim() !== "", "present");
 var positive = /* @__PURE__ */ __name((value) => Number(value || 0) > 0, "positive");
 function primaryBeneficiaryName(value) {
+  const beneficiaryCandidate = (candidate) => {
+    const name2 = String(candidate || "").trim();
+    if (!name2 || /(?:national\s+life|life\s+insurance|insurance\s+company|centralized|mailing\s+address|montpelier|one\s+national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(name2) || /\d{4,}/.test(name2) || name2.length > 100) return "";
+    return name2;
+  };
+  if (Array.isArray(value)) {
+    const first = value.find((item) => beneficiaryCandidate(item?.name || item?.fullName || item?.beneficiaryName));
+    return beneficiaryCandidate(first?.name || first?.fullName || first?.beneficiaryName);
+  }
+  if (value && typeof value === "object") return beneficiaryCandidate(value.name || value.fullName || value.beneficiaryName);
   const text = String(value || "").trim();
   if (!text) return "";
   try {
     const parsed = JSON.parse(text);
-    if (Array.isArray(parsed) && parsed.length)
-      return String(parsed[0]?.name || parsed[0]?.fullName || parsed[0]?.beneficiaryName || "").trim();
+    if (Array.isArray(parsed) && parsed.length) return primaryBeneficiaryName(parsed);
+    if (parsed && typeof parsed === "object") return primaryBeneficiaryName(parsed);
   } catch {}
-  return text
+  const name = text
     .split(/\s+(?:—|-)\s+(?:Parentesco|Relationship|Porcentagem|Percentage)\s*:/i)[0]
     .split(/;|\n/)[0]
     .replace(/^(?:Primary|Principal)(?: Beneficiary| Beneficiário)?\s*[:\-]?\s*/i, "")
     .trim();
+  return beneficiaryCandidate(name);
 }
 function missingClientProfileFields(client, policies) {
   const inactiveStatuses = new Set(["inactive", "inativa", "lapse", "lapsed", "cancelled", "canceled", "cancelada", "declined", "recusada", "surrendered", "terminated", "expired"]);
@@ -53232,14 +53251,15 @@ async function mergePaddedPolicyDuplicates(env, owner) {
   const query = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
   const groups = /* @__PURE__ */ new Map();
   for (const row of query.results || []) {
-    const key = normalizePolicyNumber(row.policyNumber);
+    const key = policyNumberIdentity(row.policyNumber);
     if (!key) continue;
     const group = groups.get(key) || [];
     group.push(row);
     groups.set(key, group);
   }
-  for (const [canonical, group] of groups) {
+  for (const [identity, group] of groups) {
     if (group.length < 2) continue;
+    const canonical = `${group.some(row => String(row.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "").startsWith("LS")) ? "LS" : ""}${identity}`;
     group.sort((left, right) => {
       const leftCanonical = String(left.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === canonical ? 1 : 0;
       const rightCanonical = String(right.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === canonical ? 1 : 0;
@@ -54900,10 +54920,24 @@ Detalhes: ${details}` : ""}`;
     await mergePaddedPolicyDuplicates(env, owner);
     const [rows, applications] = await env.DB.batch([
       env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(owner),
-      env.DB.prepare("SELECT id,matchedPolicyId,clientName,clientEmail,clientPhone,state,applicationData FROM agentApplications WHERE lower(agentEmail)=?").bind(owner)
+      env.DB.prepare("SELECT id,matchedPolicyId,clientName,clientEmail,clientPhone,state,beneficiaryName,applicationData FROM agentApplications WHERE lower(agentEmail)=?").bind(owner)
     ]);
     const normalized = (value) => String(value || "").replace(/\D/g, "").slice(-10);
     const applicationsList = applications.results || [];
+    for (const row of rows.results || []) {
+      const currentBeneficiary = primaryBeneficiaryName(row.beneficiaries);
+      const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) ||
+        applicationsList.find((item) => String(item.clientEmail || "").trim().toLowerCase() && String(item.clientEmail).trim().toLowerCase() === String(row.clientEmail || "").trim().toLowerCase()) ||
+        applicationsList.find((item) => normalized(item.clientPhone) && normalized(item.clientPhone) === normalized(row.clientPhone));
+      let applicationData = {};
+      try { applicationData = JSON.parse(String(application?.applicationData || "{}")); } catch {}
+      const applicationBeneficiary = primaryBeneficiaryName(application?.beneficiaryName || applicationData.beneficiaryName || applicationData.beneficiaries || "");
+      const correctedBeneficiary = applicationBeneficiary || currentBeneficiary;
+      if (String(row.beneficiaries || "").trim() !== correctedBeneficiary) {
+        await env.DB.prepare("UPDATE agentPolicies SET beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(correctedBeneficiary || null,Number(row.id),owner).run();
+        row.beneficiaries = correctedBeneficiary || null;
+      }
+    }
     return trpcResult(
       rows.results.map((row) => {
         const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) ||
@@ -54964,9 +54998,15 @@ Detalhes: ${details}` : ""}`;
     return trpcResult({ success: true, deleted: false, requiresApproval: true });
   }
   if (name === "agent.listClients") {
+    const owner = adminEmail.toLowerCase();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE crmClients SET phone=COALESCE(NULLIF(phone,''),(SELECT NULLIF(p.clientPhone,'') FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=? AND trim(coalesce(p.clientPhone,''))<>'' ORDER BY p.updatedAt DESC LIMIT 1)),updatedAt=updatedAt WHERE lower(assignedAdminEmail)=? AND trim(coalesce(phone,''))='' ").bind(owner, owner),
+      env.DB.prepare("UPDATE crmClients SET phone=COALESCE(NULLIF(phone,''),(SELECT NULLIF(a.clientPhone,'') FROM agentApplications a WHERE lower(a.agentEmail)=? AND trim(coalesce(a.clientPhone,''))<>'' AND (a.matchedPolicyId IN (SELECT p.id FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=?) OR (trim(coalesce(crmClients.email,''))<>'' AND lower(a.clientEmail)=lower(crmClients.email)) OR lower(trim(a.clientName))=lower(trim(crmClients.name))) ORDER BY a.updatedAt DESC LIMIT 1)),updatedAt=updatedAt WHERE lower(assignedAdminEmail)=? AND trim(coalesce(phone,''))='' ").bind(owner, owner, owner),
+      env.DB.prepare("UPDATE crmClients SET whatsapp=phone,updatedAt=updatedAt WHERE lower(assignedAdminEmail)=? AND trim(coalesce(phone,''))<>'' AND trim(coalesce(whatsapp,''))='' ").bind(owner)
+    ]);
     const rows = await env.DB.prepare(
       "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
-    ).bind(adminEmail.toLowerCase()).all();
+    ).bind(owner).all();
     return trpcResult(
       rows.results.map((row) => ({ ...row, id: Number(row.id) }))
     );
