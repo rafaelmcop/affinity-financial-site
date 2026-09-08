@@ -275,7 +275,10 @@ export async function readPcSheet(file: File) {
     const index = lines.findIndex(line => label.test(line));
     return index >= 0 ? (lines[index + 1] || "").split("|")[0].trim() : "";
   };
-  let email = find(all, /([\w.+-]+@[\w.-]+\.[A-Za-z]{2,})/);
+  const extractedEmails = all.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) || [];
+  let email = extractedEmails.find(value =>
+    !/(?:national-?life|nationallife|fiveringsfinancial|service@|customerservice@)/i.test(value)
+  ) || "";
   let dob =
     cover.find(line => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(line.trim()))?.trim() ||
     find(
@@ -302,7 +305,8 @@ export async function readPcSheet(file: File) {
     find(all, /(?:Home|Business|Work)\s+Phone\s*[:#-]?\s*(\+?1?[\s().-]*\d{3}[\s().-]*\d{3}[\s.-]*\d{4})/i) ||
     contactLine.replace(email, "");
   const rawPhoneDigits = phoneCandidate.replace(/\D/g, "");
-  const phoneDigits = rawPhoneDigits.length >= 10 ? rawPhoneDigits.slice(-10) : "";
+  const possiblePhoneDigits = rawPhoneDigits.length >= 10 ? rawPhoneDigits.slice(-10) : "";
+  const phoneDigits = ["8007328939", "8022297054"].includes(possiblePhoneDigits) ? "" : possiblePhoneDigits;
   let phone =
     phoneDigits.length === 10
       ? `(${phoneDigits.slice(0, 3)}) ${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`

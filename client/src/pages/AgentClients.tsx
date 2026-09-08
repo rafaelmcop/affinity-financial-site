@@ -823,8 +823,6 @@ export default function AgentClients() {
                             policy.beneficiaries,
                             "beneficiários",
                           ],
-                          ["E-mail extraído", policy.clientEmail, ""],
-                          ["Telefone extraído", policy.clientPhone, ""],
                         ].map(([label, value, missingKey]) => (
                           <div
                             key={label}
