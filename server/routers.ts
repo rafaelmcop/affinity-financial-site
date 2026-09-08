@@ -31,6 +31,7 @@ import {
   DEFAULT_PAYMENT_RETURN_MESSAGE,
   DEFAULT_PAYMENT_RETURN_SUBJECT,
 } from "../shared/paymentReturnTemplate";
+import { normalizePolicyNumber } from "../shared/paymentNotice";
 import {
   DEFAULT_FLEX_LIFE_REVIEW_MESSAGE,
   DEFAULT_FLEX_LIFE_REVIEW_SUBJECT,
@@ -718,10 +719,13 @@ export const appRouter = router({
         if (!db) throw new Error("Database not available");
         const owner = ctx.adminEmail.toLowerCase();
         const birth = parseAmericanBirthDate(input.birthDate);
-        const [existingPolicy] = await db.select().from(agentPolicies).where(and(
-          eq(agentPolicies.agentEmail, owner),
-          eq(agentPolicies.policyNumber, input.policyNumber)
-        )).limit(1);
+        const ownerPolicies = await db.select().from(agentPolicies).where(
+          eq(agentPolicies.agentEmail, owner)
+        );
+        const canonicalPolicyNumber = normalizePolicyNumber(input.policyNumber);
+        const existingPolicy = ownerPolicies.find(policy =>
+          normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber
+        );
         let [client] = existingPolicy?.clientId
           ? await db.select().from(crmClients).where(eq(crmClients.id, existingPolicy.clientId)).limit(1)
           : input.clientEmail
@@ -777,6 +781,7 @@ export const appRouter = router({
         const policy = existingPolicy;
         const values = {
           ...input,
+          policyNumber: canonicalPolicyNumber,
           agentEmail: owner,
           clientId: client.id,
           clientEmail: input.clientEmail || null,

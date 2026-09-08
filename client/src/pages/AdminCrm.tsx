@@ -328,8 +328,6 @@ export default function AdminCrm({
               ["followup", "Follow-up"],
               ["new_business", "New Business"],
               ["inforce", "INFORCE"],
-              ["automations", "Mensagens automáticas"],
-              ["history", "Registro de envios"],
             ] as const).map(([value, label]) => (
               <Button
                 key={value}

@@ -1,5 +1,9 @@
-export const normalizePolicyNumber = (value: unknown) =>
-  String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+export const normalizePolicyNumber = (value: unknown) => {
+  const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  // Five Rings pads seven-digit LS contract numbers with two trailing zeroes
+  // in exports (LS208529400), while carrier documents use LS2085294.
+  return compact.replace(/^LS(\d{7})00$/, "LS$1");
+};
 
 export function classifyPaymentNotice(subject: string, body: string) {
   const text = `${subject}\n${body}`.toLowerCase();

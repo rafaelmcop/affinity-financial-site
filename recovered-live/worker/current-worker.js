@@ -50078,7 +50078,10 @@ var normalizePolicyNumber;
 var init_paymentNotice = __esm({
   "shared/paymentNotice.ts"() {
     "use strict";
-    normalizePolicyNumber = /* @__PURE__ */ __name((value) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, ""), "normalizePolicyNumber");
+    normalizePolicyNumber = /* @__PURE__ */ __name((value) => {
+      const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      return compact.replace(/^LS(\d{7})00$/, "LS$1");
+    }, "normalizePolicyNumber");
     __name(classifyPaymentNotice, "classifyPaymentNotice");
     __name(classifyMailboxTopic, "classifyMailboxTopic");
     __name(extractPolicyNumbers, "extractPolicyNumbers");
@@ -53218,6 +53221,48 @@ function normalizePolicy(row) {
   };
 }
 __name(normalizePolicy, "normalizePolicy");
+function policyCompletenessScore(row) {
+  const textFields = ["clientName", "clientEmail", "clientPhone", "product", "premiumFrequency", "beneficiaries", "issuedAt"];
+  const numberFields = ["premiumAmount", "targetPremium", "points", "coverageAmount"];
+  return textFields.reduce((total, field) => total + (String(row[field] || "").trim() ? 1 : 0), 0) +
+    numberFields.reduce((total, field) => total + (Number(row[field] || 0) > 0 ? 1 : 0), 0);
+}
+__name(policyCompletenessScore, "policyCompletenessScore");
+async function mergePaddedPolicyDuplicates(env, owner) {
+  const query = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+  const groups = /* @__PURE__ */ new Map();
+  for (const row of query.results || []) {
+    const key = normalizePolicyNumber(row.policyNumber);
+    if (!key) continue;
+    const group = groups.get(key) || [];
+    group.push(row);
+    groups.set(key, group);
+  }
+  for (const [canonical, group] of groups) {
+    if (group.length < 2) continue;
+    group.sort((left, right) => {
+      const leftCanonical = String(left.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === canonical ? 1 : 0;
+      const rightCanonical = String(right.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === canonical ? 1 : 0;
+      return rightCanonical - leftCanonical || policyCompletenessScore(right) - policyCompletenessScore(left) || Number(left.id) - Number(right.id);
+    });
+    const keeper = group[0];
+    const newest = [...group].sort((left, right) => String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || "")))[0];
+    const firstText = (field) => String(keeper[field] || "").trim() || String(group.find((row) => String(row[field] || "").trim())?.[field] || "").trim() || null;
+    const firstNumber = (field) => Number(keeper[field] || 0) > 0 ? Number(keeper[field]) : Number(group.find((row) => Number(row[field] || 0) > 0)?.[field] || 0);
+    const clientId = Number(keeper.clientId || group.find((row) => Number(row.clientId || 0) > 0)?.clientId || 0) || null;
+    await env.DB.prepare("UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,policyNumber=?,status=?,product=?,issuedAt=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(
+      clientId, firstText("clientName"), firstText("clientEmail"), firstText("clientPhone"), firstText("birthDate"), canonical,
+      String(newest.status || keeper.status || "active"), firstText("product"), firstText("issuedAt"), firstNumber("premiumAmount"),
+      firstText("premiumFrequency"), firstNumber("targetPremium"), Math.round(firstNumber("points")), firstNumber("coverageAmount"),
+      firstText("beneficiaries"), Number(keeper.id), owner
+    ).run();
+    for (const duplicate of group.slice(1)) {
+      await env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=? WHERE matchedPolicyId=? AND lower(agentEmail)=?").bind(Number(keeper.id), Number(duplicate.id), owner).run();
+      await env.DB.prepare("DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=?").bind(Number(duplicate.id), owner).run();
+    }
+  }
+}
+__name(mergePaddedPolicyDuplicates, "mergePaddedPolicyDuplicates");
 async function sendEmailIfConfigured(env, options) {
   try {
     await sendEmail(env, options);
@@ -54835,6 +54880,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.listPolicies") {
     const owner = adminEmail.toLowerCase();
+    await mergePaddedPolicyDuplicates(env, owner);
     const [rows, applications] = await env.DB.batch([
       env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(owner),
       env.DB.prepare("SELECT id,matchedPolicyId,clientName,clientEmail,clientPhone,state,applicationData FROM agentApplications WHERE lower(agentEmail)=?").bind(owner)
@@ -55244,7 +55290,7 @@ Detalhes: ${details}` : ""}`;
     }
   }
   if (name === "agent.savePcSheet") {
-    const owner = adminEmail.toLowerCase(), policyNumber = String(input.policyNumber ?? "").trim(), clientName = String(input.clientName ?? "").trim(), clientEmail = String(input.clientEmail ?? "").trim().toLowerCase(), clientPhone = String(input.clientPhone ?? "").trim(), birthDate = String(input.birthDate ?? "").trim();
+    const owner = adminEmail.toLowerCase(), policyNumber = normalizePolicyNumber(input.policyNumber), clientName = String(input.clientName ?? "").trim(), clientEmail = String(input.clientEmail ?? "").trim().toLowerCase(), clientPhone = String(input.clientPhone ?? "").trim(), birthDate = String(input.birthDate ?? "").trim();
     if (!policyNumber || !clientName)
       return trpcError("Revise os dados extra\xEDdos");
     const birthday = parseAmericanBirthDate(birthDate);
@@ -55937,8 +55983,10 @@ Affinity Financial Consulting`,
       if (activeSession) {
         const records2 = await readFiveRingsRecords(activeSession, activeSession.sections);
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
+        const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
         for (const record of records2) {
-          const existingPolicy = record.policyNumber ? await env.DB.prepare("SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND upper(replace(replace(policyNumber,'-',''),' ',''))=? LIMIT 1").bind(owner, record.policyNumber).first() : null;
+          const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
+          const existingPolicy = canonicalPolicyNumber ? (knownPolicies2.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
           let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.email, owner).first() : null;
           if (!client && record.phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE phone=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.phone, owner).first();
           if (!client) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.clientName, owner).first();
@@ -55957,7 +56005,8 @@ Affinity Financial Consulting`,
             await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
             updatedPolicies2 += 1;
           } else {
-            await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+            const insertedPolicy = await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, canonicalPolicyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+            knownPolicies2.results.push({ id: Number(insertedPolicy.meta.last_row_id), clientId, policyNumber: canonicalPolicyNumber });
             await schedulePolicyWelcome(env, owner, clientId, record.clientName, record.policyNumber);
             importedPolicies2 += 1;
           }
@@ -55976,8 +56025,10 @@ Affinity Financial Consulting`,
       }
       const records = await readFiveRingsRecords(login.session, login.sections);
       let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
+      const knownPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
       for (const record of records) {
-        const existingPolicy = record.policyNumber ? await env.DB.prepare("SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND upper(replace(replace(policyNumber,'-',''),' ',''))=? LIMIT 1").bind(owner, record.policyNumber).first() : null;
+        const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
+        const existingPolicy = canonicalPolicyNumber ? (knownPolicies.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
         let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare(
           "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=? LIMIT 1"
         ).bind(record.email, owner).first() : null;
@@ -56011,9 +56062,10 @@ Affinity Financial Consulting`,
           ).bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
           updatedPolicies += 1;
         } else {
-          await env.DB.prepare(
+          const insertedPolicy = await env.DB.prepare(
             "INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-          ).bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+          ).bind(owner, clientId, record.clientName, record.email || null, record.phone || null, canonicalPolicyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+          knownPolicies.results.push({ id: Number(insertedPolicy.meta.last_row_id), clientId, policyNumber: canonicalPolicyNumber });
           await schedulePolicyWelcome(env, owner, clientId, record.clientName, record.policyNumber);
           importedPolicies += 1;
         }
@@ -56222,8 +56274,16 @@ Affinity Financial Consulting`,
   if (name === "agent.getPublicProfile") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase();
-    const profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
     const account = await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail FROM adminAccounts WHERE lower(email)=?").bind(owner).first();
+    let profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
+    if (!profile && account) {
+      const parts = String(account.name || owner.split("@")[0]).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[a-z0-9]+/g) || ["consultor"];
+      const base = [parts[0], parts.length > 1 ? parts[parts.length - 1] : ""].filter(Boolean).join("-");
+      let slug = base, suffix = 1;
+      while (await env.DB.prepare("SELECT 1 FROM agentPublicProfiles WHERE slug=?").bind(slug).first()) slug = `${base}-${++suffix}`;
+      await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,isPublished) VALUES (?,?,?,'',1)").bind(owner, slug, "Consultor financeiro").run();
+      profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
+    }
     return trpcResult({ profile: profile || null, account: account || null });
   }
   if (name === "agent.connectCalendly") {
@@ -56396,10 +56456,19 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.savePublicProfile") {
     await ensureCalendlyTables(env);
-    const owner = adminEmail.toLowerCase(), slug = String(input.slug || '').trim().toLowerCase().replace(/[^a-z0-9-]/g,'').replace(/-+/g,'-').replace(/^-|-$/g,'');
-    if (slug.length < 3) return trpcError("Escolha um endereço com pelo menos 3 caracteres");
+    const owner = adminEmail.toLowerCase();
     try {
       const text = (value, limit = 4000) => String(value || "").trim().slice(0, limit) || null;
+      const account = await env.DB.prepare("SELECT name FROM adminAccounts WHERE lower(email)=?").bind(owner).first();
+      const current = await env.DB.prepare("SELECT slug FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
+      const parts = String(account?.name || owner.split("@")[0]).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[a-z0-9]+/g) || ["consultor"];
+      const base = [parts[0], parts.length > 1 ? parts[parts.length - 1] : ""].filter(Boolean).join("-");
+      let slug = String(current?.slug || "");
+      if (!slug) {
+        slug = base;
+        let suffix = 1;
+        while (await env.DB.prepare("SELECT 1 FROM agentPublicProfiles WHERE slug=? AND lower(agentEmail)<>?").bind(slug, owner).first()) slug = `${base}-${++suffix}`;
+      }
       await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET slug=excluded.slug,headline=excluded.headline,bio=excluded.bio,sinceYear=excluded.sinceYear,photoUrl=excluded.photoUrl,calendlyUrl=excluded.calendlyUrl,jobTitle=excluded.jobTitle,companies=excluded.companies,specialties=excluded.specialties,professionalHistory=excluded.professionalHistory,education=excluded.education,licenses=excluded.licenses,languages=excluded.languages,achievements=excluded.achievements,website=excluded.website,linkedInUrl=excluded.linkedInUrl,instagramUrl=excluded.instagramUrl,facebookUrl=excluded.facebookUrl,additionalInfo=excluded.additionalInfo,isPublished=excluded.isPublished,updatedAt=CURRENT_TIMESTAMP").bind(owner, slug, text(input.headline, 180) || "Consultor financeiro", text(input.bio), Number(input.sinceYear || 0) || null, text(input.photoUrl, 500000), text(input.calendlyUrl, 1000), text(input.jobTitle, 180), text(input.companies, 2000), text(input.specialties, 2000), text(input.professionalHistory, 6000), text(input.education, 3000), text(input.licenses, 3000), text(input.languages, 1000), text(input.achievements, 3000), text(input.website, 1000), text(input.linkedInUrl, 1000), text(input.instagramUrl, 1000), text(input.facebookUrl, 1000), text(input.additionalInfo, 6000), input.isPublished === false ? 0 : 1).run();
       return trpcResult({ success: true, url: `https://www.affinityfc.org/consultor/${slug}` });
     } catch(error) { return trpcError(String(error).includes('UNIQUE')?'Este endereço já está sendo usado por outro agente':'Não foi possível salvar o perfil'); }

@@ -857,10 +857,10 @@ export default function AgentPolicies({
                   onChange={event => setSearch(event.target.value)}
                 />
               </div>
-              <details className="group mt-3 rounded-xl border border-white/10 bg-black/20">
+              <details open className="group mt-3 rounded-xl border border-white/10 bg-black/20">
                 <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold text-gold">
                   <SlidersHorizontal className="h-4 w-4" />
-                  Filtros e ordenação
+                  Filtros e ordenação — incluindo pendências
                   <ChevronDown className="ml-auto h-4 w-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="grid gap-3 border-t border-white/10 p-4 sm:grid-cols-2 lg:grid-cols-4">

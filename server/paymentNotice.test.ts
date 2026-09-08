@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPaymentNotice, extractPolicyNumbers } from "../shared/paymentNotice";
+import { classifyPaymentNotice, extractPolicyNumbers, normalizePolicyNumber } from "../shared/paymentNotice";
 
 describe("payment notice recognition", () => {
   it("recognizes a returned payment and policy number", () => {
@@ -14,5 +14,10 @@ describe("payment notice recognition", () => {
 
   it("ignores unrelated messages", () => {
     expect(classifyPaymentNotice("Welcome", "Your document is ready")).toBeNull();
+  });
+
+  it("treats Five Rings LS padding as the same policy", () => {
+    expect(normalizePolicyNumber("LS208529400")).toBe("LS2085294");
+    expect(normalizePolicyNumber("LS-2085294")).toBe("LS2085294");
   });
 });

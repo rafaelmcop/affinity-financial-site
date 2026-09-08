@@ -598,8 +598,6 @@ function Le({ agentMode: a = !1 }) {
                 ["followup", "Follow-up"],
                 ["new_business", "New Business"],
                 ["inforce", "INFORCE"],
-                ["automations", "Mensagens e automações"],
-                ["history", "Histórico"],
               ].map(([s, l]) =>
                 e.jsx(
                   d,
