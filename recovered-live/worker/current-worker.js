@@ -57851,6 +57851,12 @@ var cloudflare_staging_default = {
     // on a cold Worker, regardless of whether an inbox sync ran beforehand.
     init_icloud_email();
     const url = new URL(request.url);
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+      const origin = request.headers.get("Origin");
+      const headers = { "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "Content-Type,Authorization", "Vary": "Origin" };
+      if (origin === url.origin) headers["Access-Control-Allow-Origin"] = origin;
+      return secureResponse(new Response(null, { status: 204, headers }));
+    }
     if (url.hostname === "affinityfc.org") {
       url.hostname = "www.affinityfc.org";
       return secureResponse(Response.redirect(url.toString(), 301));
@@ -57861,6 +57867,9 @@ var cloudflare_staging_default = {
     if (request.method === "GET" && url.pathname === "/assets/pdf-D4EPeiVb.js") {
       url.pathname = "/vendor/pdf.mjs";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
+    }
+    if (request.method === "GET" && url.pathname === "/.well-known/security.txt") {
+      return secureResponse(new Response("Contact: mailto:security@affinityfc.org\nPolicy: https://www.affinityfc.org/\nExpires: 2027-09-08T00:00:00.000Z\n", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" } }));
     }
     if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
       try {
@@ -58032,12 +58041,13 @@ var cloudflare_staging_default = {
         "content-type": "application/json; charset=utf-8"
       });
       for (const cookie of cookies) headers.append("set-cookie", cookie);
+      const responseStatus = responses.some((item) => item?.error?.json?.data?.httpStatus) ? Number(responses.find((item) => item?.error?.json?.data?.httpStatus)?.error?.json?.data?.httpStatus || 500) : 200;
       return secureResponse(
         new Response(
           JSON.stringify(
             url.searchParams.get("batch") === "1" ? responses : responses[0]
           ),
-          { status: 200, headers }
+          { status: responseStatus, headers }
         ),
         { privateData: true }
       );
