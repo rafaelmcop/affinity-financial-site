@@ -30,7 +30,7 @@ type Status =
   | "proposal"
   | "client"
   | "closed";
-type SortKey = "name" | "date" | "type" | "coverage" | "premium";
+type SortKey = "name" | "date" | "type" | "coverage" | "premium" | "target";
 type Form = {
   id?: number;
   name: string;
@@ -103,7 +103,7 @@ export default function AgentClients() {
   const [search, setSearch] = useState(""),
     [sortKey, setSortKey] = useState<SortKey>("name"),
     [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
-    [pendingFilter, setPendingFilter] = useState<"all" | "pending" | "complete">("all"),
+    [pendingFilter, setPendingFilter] = useState(false),
     [selectedId, setSelectedId] = useState<number | null>(null),
     [form, setForm] = useState<Form | null>(null),
     [policyForm, setPolicyForm] = useState<PolicyEditForm | null>(null),
@@ -149,6 +149,7 @@ export default function AgentClients() {
         return String(policy?.product || "").toLowerCase();
       if (sortKey === "coverage") return Number(policy?.coverageAmount || 0);
       if (sortKey === "premium") return Number(policy?.premiumAmount || 0);
+      if (sortKey === "target") return Number(policy?.targetPremium || 0);
       return String(client.name || "").toLowerCase();
     };
     return rows
@@ -157,7 +158,7 @@ export default function AgentClients() {
           policy => Number(policy.clientId) === Number(client.id)
         );
         const hasPending = missingClientProfileFields(client, clientPolicies).length > 0;
-        return (pendingFilter === "all" || (pendingFilter === "pending" ? hasPending : !hasPending)) && `${client.name} ${client.email || ""} ${client.phone || ""} ${client.whatsapp || ""} ${clientPolicies.map(policy => `${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`).join(" ")}`
+        return (!pendingFilter || hasPending) && `${client.name} ${client.email || ""} ${client.phone || ""} ${client.whatsapp || ""} ${clientPolicies.map(policy => `${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`).join(" ")}`
           .toLowerCase()
           .includes(term);
       })
@@ -441,18 +442,9 @@ export default function AgentClients() {
               </div>
               <details open className="group mt-3 rounded-xl border border-white/10 bg-black/20">
                 <summary className="cursor-pointer list-none px-4 py-3 font-semibold text-gold">
-                  Filtros e ordenação — incluindo pendências
+                  Filtrar e ordenar
                 </summary>
                 <div className="border-t border-white/10 p-4">
-                  <select
-                    className="mb-3 h-10 w-full max-w-sm rounded-md border border-white/20 bg-black px-3 text-sm"
-                    value={pendingFilter}
-                    onChange={event => setPendingFilter(event.target.value as typeof pendingFilter)}
-                  >
-                    <option value="all">Todas as apólices concluídas</option>
-                    <option value="pending">Somente com pendências</option>
-                    <option value="complete">Somente sem pendências</option>
-                  </select>
                   <div className="flex flex-wrap gap-2">
                 {(
                   [
@@ -461,6 +453,7 @@ export default function AgentClients() {
                     ["type", "Tipo de apólice"],
                     ["coverage", "Cobertura"],
                     ["premium", "Premium"],
+                    ["target", "Target premium"],
                   ] as const
                 ).map(([key, label]) => (
                   <Button
@@ -482,6 +475,15 @@ export default function AgentClients() {
                       ))}
                   </Button>
                 ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPendingFilter(current => !current)}
+                    className={pendingFilter ? "border-amber-400 bg-amber-400 text-black" : ""}
+                  >
+                    Pendências
+                  </Button>
                   </div>
                 </div>
               </details>
