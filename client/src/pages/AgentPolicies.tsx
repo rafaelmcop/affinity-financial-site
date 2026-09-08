@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, FileSpreadsheet, Search, Upload, ShieldCheck, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, FileSpreadsheet, Search, SlidersHorizontal, Upload, ShieldCheck, X } from "lucide-react";
 import { extractApplicationDate, extractPdfCreationDate } from "../../../shared/pcSheet";
 import { extractIssuedPolicyData } from "../../../shared/issuedPolicy";
 type PolicyForm = {
@@ -771,6 +771,14 @@ export default function AgentPolicies({
     "name" | "date" | "type" | "coverage" | "premium"
   >("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [stateFilter, setStateFilter] = useState("");
+  const [genderFilter, setGenderFilter] = useState("");
+  const [productFilter, setProductFilter] = useState("");
+  const [pendingFilter, setPendingFilter] = useState<"all" | "pending" | "complete">("all");
+  const [premiumMin, setPremiumMin] = useState("");
+  const [premiumMax, setPremiumMax] = useState("");
+  const [targetMin, setTargetMin] = useState("");
+  const [targetMax, setTargetMax] = useState("");
   const policies = useMemo(() => {
     const term = search.trim().toLowerCase();
     const valueFor = (policy: NonNullable<typeof q.data>[number]) => {
@@ -781,11 +789,24 @@ export default function AgentPolicies({
       return String(policy.clientName || "").toLowerCase();
     };
     return (q.data || [])
-      .filter(policy =>
-        `${policy.clientName} ${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`
-          .toLowerCase()
-          .includes(term)
-      )
+      .filter(policy => {
+        const data = policy as typeof policy & { clientState?: string; clientGender?: string };
+        const hasPending = [policy.product, policy.issuedAt, policy.premiumAmount,
+          policy.targetPremium, policy.coverageAmount, policy.beneficiaries]
+          .some(value => value == null || String(value).trim() === "" || Number(value) === 0);
+        const premium = Number(policy.premiumAmount || 0);
+        const target = Number(policy.targetPremium || 0);
+        return `${policy.clientName} ${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`
+          .toLowerCase().includes(term)
+          && (!stateFilter || String(data.clientState || "").toUpperCase() === stateFilter)
+          && (!genderFilter || String(data.clientGender || "").toLowerCase() === genderFilter)
+          && (!productFilter || String(policy.product || "") === productFilter)
+          && (pendingFilter === "all" || (pendingFilter === "pending" ? hasPending : !hasPending))
+          && (premiumMin === "" || premium >= Number(premiumMin))
+          && (premiumMax === "" || premium <= Number(premiumMax))
+          && (targetMin === "" || target >= Number(targetMin))
+          && (targetMax === "" || target <= Number(targetMax));
+      })
       .sort((a, b) => {
         const first = valueFor(a),
           second = valueFor(b);
@@ -797,7 +818,8 @@ export default function AgentPolicies({
               });
         return sortDirection === "asc" ? result : -result;
       });
-  }, [q.data, search, sortKey, sortDirection]);
+  }, [q.data, search, sortKey, sortDirection, stateFilter, genderFilter,
+    productFilter, pendingFilter, premiumMin, premiumMax, targetMin, targetMax]);
   const changeSort = (key: typeof sortKey) => {
     if (sortKey === key)
       setSortDirection(current => (current === "asc" ? "desc" : "asc"));
@@ -835,7 +857,37 @@ export default function AgentPolicies({
                   onChange={event => setSearch(event.target.value)}
                 />
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <details className="group mt-3 rounded-xl border border-white/10 bg-black/20">
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 font-semibold text-gold">
+                  <SlidersHorizontal className="h-4 w-4" />
+                  Filtros e ordenação
+                  <ChevronDown className="ml-auto h-4 w-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <div className="grid gap-3 border-t border-white/10 p-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <select className="h-10 rounded-md border border-white/20 bg-black px-3 text-sm" value={stateFilter} onChange={event => setStateFilter(event.target.value)}>
+                    <option value="">Todos os estados</option>
+                    {Array.from(new Set((q.data || []).map(policy => String((policy as any).clientState || "").toUpperCase()).filter(Boolean))).sort().map(state => <option key={state} value={state}>{state}</option>)}
+                  </select>
+                  <select className="h-10 rounded-md border border-white/20 bg-black px-3 text-sm" value={genderFilter} onChange={event => setGenderFilter(event.target.value)}>
+                    <option value="">Todos os sexos</option>
+                    <option value="male">Masculino</option>
+                    <option value="female">Feminino</option>
+                  </select>
+                  <select className="h-10 rounded-md border border-white/20 bg-black px-3 text-sm" value={productFilter} onChange={event => setProductFilter(event.target.value)}>
+                    <option value="">Todos os tipos de apólice</option>
+                    {Array.from(new Set((q.data || []).map(policy => String(policy.product || "")).filter(Boolean))).sort().map(product => <option key={product} value={product}>{product}</option>)}
+                  </select>
+                  <select className="h-10 rounded-md border border-white/20 bg-black px-3 text-sm" value={pendingFilter} onChange={event => setPendingFilter(event.target.value as typeof pendingFilter)}>
+                    <option value="all">Todas as apólices</option>
+                    <option value="pending">Com documentos ou dados pendentes</option>
+                    <option value="complete">Sem pendências</option>
+                  </select>
+                  <Input type="number" min="0" placeholder="Premium mínimo" value={premiumMin} onChange={event => setPremiumMin(event.target.value)} />
+                  <Input type="number" min="0" placeholder="Premium máximo" value={premiumMax} onChange={event => setPremiumMax(event.target.value)} />
+                  <Input type="number" min="0" placeholder="Target mínimo" value={targetMin} onChange={event => setTargetMin(event.target.value)} />
+                  <Input type="number" min="0" placeholder="Target máximo" value={targetMax} onChange={event => setTargetMax(event.target.value)} />
+                </div>
+                <div className="flex flex-wrap gap-2 border-t border-white/10 p-4">
                 {(
                   [
                     ["name", "Nome"],
@@ -864,7 +916,8 @@ export default function AgentPolicies({
                       ))}
                   </Button>
                 ))}
-              </div>
+                </div>
+              </details>
             </Card>
             {policies.map(p => (
               <Card key={p.id} className="border-gold/20 bg-[#0b1524] p-5">

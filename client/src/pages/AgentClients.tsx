@@ -179,6 +179,13 @@ export default function AgentClients() {
       setSortDirection("asc");
     }
   };
+  const returnToClientList = () => {
+    setSelectedId(null);
+    setForm(null);
+    setPolicyForm(null);
+    window.history.replaceState({}, "", "/agentes/clientes");
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  };
   const edit = (client: any) => {
     setForm({
       id: client.id,
@@ -236,9 +243,9 @@ export default function AgentClients() {
     if (!form) return;
     try {
       await saveClient.mutateAsync(form);
-      await clients.refetch();
-      setForm(null);
+      await Promise.all([clients.refetch(), policies.refetch()]);
       toast.success(form.id ? "Cliente atualizado" : "Cliente adicionado");
+      returnToClientList();
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Não foi possível salvar"
@@ -281,8 +288,8 @@ export default function AgentClients() {
     try {
       await updatePolicy.mutateAsync(policyForm);
       await policies.refetch();
-      setPolicyForm(null);
       toast.success("Dados da apólice atualizados");
+      returnToClientList();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível atualizar a apólice");
     }
@@ -303,6 +310,7 @@ export default function AgentClients() {
         await savePcSheet.mutateAsync(extracted);
         await Promise.all([clients.refetch(), policies.refetch()]);
         toast.success("PC Sheet conferido e cadastro completado");
+        returnToClientList();
         return;
       }
       const parsed = await readClientSpreadsheet(file);
@@ -315,6 +323,7 @@ export default function AgentClients() {
       const result = await importSpreadsheet.mutateAsync({ rows: [match] });
       await Promise.all([clients.refetch(), policies.refetch()]);
       toast.success(`Ficha conferida: ${result.updatedClients + result.updatedPolicies} cadastro(s) completado(s).`);
+      returnToClientList();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Não foi possível usar este arquivo");
     }
