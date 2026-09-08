@@ -50625,7 +50625,7 @@ var positive = /* @__PURE__ */ __name((value) => Number(value || 0) > 0, "positi
 function primaryBeneficiaryName(value) {
   const beneficiaryCandidate = (candidate) => {
     const name2 = String(candidate || "").trim();
-    if (!name2 || /(?:national\s+life|life\s+insurance|insurance\s+company|centralized|mailing\s+address|montpelier|one\s+national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(name2) || /\d{4,}/.test(name2) || name2.length > 100) return "";
+    if (!name2 || /(?:as\s+stated\s+in\s+the\s+application|unless\s+later\s+changed|see\s+(?:the\s+)?application|continued\s+(?:on|in)|national\s+life|life\s+insurance|insurance\s+company|centralized|mailing\s+address|montpelier|one\s+national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(name2) || /\d{4,}/.test(name2) || name2.length > 100) return "";
     return name2;
   };
   if (Array.isArray(value)) {

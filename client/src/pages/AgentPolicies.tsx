@@ -333,7 +333,7 @@ export async function readPcSheet(file: File) {
         .trim()
     )
     .filter(value => /^[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{3,}$/.test(value))
-    .filter(value => !/(?:national life|life insurance|insurance company|centralized|mailing address|montpelier|one national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(value));
+    .filter(value => !/(?:as stated in the application|unless later changed|see (?:the )?application|continued (?:on|in)|national life|life insurance|insurance company|centralized|mailing address|montpelier|one national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(value));
   const nationalLife =
     /National Life Insurance Company|Life Insurance Company of the Southwest|National Life Group/i.test(
       all
