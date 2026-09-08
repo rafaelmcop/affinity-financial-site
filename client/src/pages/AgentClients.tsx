@@ -103,6 +103,7 @@ export default function AgentClients() {
   const [search, setSearch] = useState(""),
     [sortKey, setSortKey] = useState<SortKey>("name"),
     [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc"),
+    [pendingFilter, setPendingFilter] = useState<"all" | "pending" | "complete">("all"),
     [selectedId, setSelectedId] = useState<number | null>(null),
     [form, setForm] = useState<Form | null>(null),
     [policyForm, setPolicyForm] = useState<PolicyEditForm | null>(null),
@@ -155,7 +156,8 @@ export default function AgentClients() {
         const clientPolicies = (policies.data || []).filter(
           policy => Number(policy.clientId) === Number(client.id)
         );
-        return `${client.name} ${client.email || ""} ${client.phone || ""} ${client.whatsapp || ""} ${clientPolicies.map(policy => `${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`).join(" ")}`
+        const hasPending = missingClientProfileFields(client, clientPolicies).length > 0;
+        return (pendingFilter === "all" || (pendingFilter === "pending" ? hasPending : !hasPending)) && `${client.name} ${client.email || ""} ${client.phone || ""} ${client.whatsapp || ""} ${clientPolicies.map(policy => `${policy.policyNumber} ${policy.product || ""} ${policy.issuedAt || ""} ${policy.coverageAmount || ""} ${policy.premiumAmount || ""}`).join(" ")}`
           .toLowerCase()
           .includes(term);
       })
@@ -170,7 +172,7 @@ export default function AgentClients() {
               });
         return sortDirection === "asc" ? result : -result;
       });
-  }, [rows, policies.data, search, sortKey, sortDirection]);
+  }, [rows, policies.data, search, sortKey, sortDirection, pendingFilter]);
   const changeSort = (key: SortKey) => {
     if (sortKey === key)
       setSortDirection(current => (current === "asc" ? "desc" : "asc"));
@@ -437,7 +439,21 @@ export default function AgentClients() {
                   onChange={e => setSearch(e.target.value)}
                 />
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
+              <details open className="group mt-3 rounded-xl border border-white/10 bg-black/20">
+                <summary className="cursor-pointer list-none px-4 py-3 font-semibold text-gold">
+                  Filtros e ordenação — incluindo pendências
+                </summary>
+                <div className="border-t border-white/10 p-4">
+                  <select
+                    className="mb-3 h-10 w-full max-w-sm rounded-md border border-white/20 bg-black px-3 text-sm"
+                    value={pendingFilter}
+                    onChange={event => setPendingFilter(event.target.value as typeof pendingFilter)}
+                  >
+                    <option value="all">Todas as apólices concluídas</option>
+                    <option value="pending">Somente com pendências</option>
+                    <option value="complete">Somente sem pendências</option>
+                  </select>
+                  <div className="flex flex-wrap gap-2">
                 {(
                   [
                     ["name", "Nome"],
@@ -466,7 +482,9 @@ export default function AgentClients() {
                       ))}
                   </Button>
                 ))}
-              </div>
+                  </div>
+                </div>
+              </details>
             </Card>
             <Card className="overflow-hidden border-gold/20 bg-[#0b1524]">
               {filtered.map(client =>

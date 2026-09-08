@@ -21,7 +21,7 @@
         <div><label>Foto profissional<input id="photo-file" type="file" accept="image/jpeg,image/png,image/webp"></label><p class="muted">Escolha uma foto vertical e bem iluminada. Ela será otimizada automaticamente.</p><label>Ou use o endereço de uma foto<input id="photoUrl" type="url" placeholder="https://..."></label></div>
       </div>
       <div class="grid" style="margin-top:18px">
-        <label>Endereço exclusivo<div style="display:flex;align-items:center;gap:7px"><span>affinityfc.org/consultor/</span><input id="slug" readonly aria-readonly="true" title="Gerado automaticamente pelo primeiro e último nome"></div><span class="muted" style="font-size:12px">Este endereço é fixo. Se uma correção for necessária, solicite a um administrador.</span></label>
+        <div><span class="muted">Sua página pública</span><div style="margin-top:10px"><a id="open-profile" class="button" target="_blank" rel="noopener" hidden>Abrir minha página pública</a></div></div>
         <label>Cargo ou função<input id="jobTitle" placeholder="Consultor financeiro"></label>
         <label class="wide">Frase de destaque<input id="headline" placeholder="Proteção e planejamento para cada fase da sua vida"></label>
         <label>Ano em que começou na profissão<input id="sinceYear" type="number" min="1950" max="2100"></label>
@@ -51,10 +51,10 @@
         <label>Facebook<input id="facebookUrl" type="url" placeholder="https://facebook.com/..."></label>
       </div>
       <label class="switch" style="margin-top:18px"><input id="published" type="checkbox" checked> Página pública ativa e disponível para divulgação</label>
-      <div class="actions"><button id="save" class="primary">Salvar página pública</button><a id="open-profile" class="button" target="_blank" hidden>Abrir minha página</a></div>
+      <div class="actions"><button id="save" class="primary">Salvar página pública</button></div>
     </section>
   </main>
-  <script src="/agent-public-profile-settings.js?v=20260828-1" defer></script>
+  <script src="/agent-public-profile-settings.js?v=20260908-1" defer></script>
   <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
 </body>
 </html>
