@@ -54999,11 +54999,6 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.listClients") {
     const owner = adminEmail.toLowerCase();
-    await env.DB.batch([
-      env.DB.prepare("UPDATE crmClients SET phone=COALESCE(NULLIF(phone,''),(SELECT NULLIF(p.clientPhone,'') FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=? AND trim(coalesce(p.clientPhone,''))<>'' ORDER BY p.updatedAt DESC LIMIT 1)),updatedAt=updatedAt WHERE lower(assignedAdminEmail)=? AND trim(coalesce(phone,''))='' ").bind(owner, owner),
-      env.DB.prepare("UPDATE crmClients SET phone=COALESCE(NULLIF(phone,''),(SELECT NULLIF(a.clientPhone,'') FROM agentApplications a WHERE lower(a.agentEmail)=? AND trim(coalesce(a.clientPhone,''))<>'' AND (a.matchedPolicyId IN (SELECT p.id FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=?) OR (trim(coalesce(crmClients.email,''))<>'' AND lower(a.clientEmail)=lower(crmClients.email)) OR lower(trim(a.clientName))=lower(trim(crmClients.name))) ORDER BY a.updatedAt DESC LIMIT 1)),updatedAt=updatedAt WHERE lower(assignedAdminEmail)=? AND trim(coalesce(phone,''))='' ").bind(owner, owner, owner),
-      env.DB.prepare("UPDATE crmClients SET whatsapp=phone,updatedAt=updatedAt WHERE lower(assignedAdminEmail)=? AND trim(coalesce(phone,''))<>'' AND trim(coalesce(whatsapp,''))='' ").bind(owner)
-    ]);
     const rows = await env.DB.prepare(
       "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
     ).bind(owner).all();
