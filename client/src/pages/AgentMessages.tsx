@@ -78,6 +78,7 @@ export function ScheduledMessagesPanel({
     update = trpc.agent.updateMessage.useMutation(),
     remove = trpc.agent.deleteMessage.useMutation();
   const [form, setForm] = useState<Form | null>(null);
+  const [upcomingWindow, setUpcomingWindow] = useState("all");
   const session = (() => {
     try {
       return JSON.parse(localStorage.getItem("agentSession") || "{}");
@@ -115,6 +116,13 @@ export function ScheduledMessagesPanel({
             custom => custom.clientId === clientId && custom.occasion === row.occasion
           ));
     return true;
+  }).filter(row => {
+    if (upcomingWindow === "all") return true;
+    const date = new Date(String(row.scheduledAt || "")).getTime();
+    if (!Number.isFinite(date)) return false;
+    const now = Date.now();
+    const days = Number(upcomingWindow);
+    return date >= now && date <= now + days * 86400000;
   });
   const newMessage = () =>
     setForm({
@@ -459,6 +467,15 @@ export function ScheduledMessagesPanel({
             </Button>
           </div>
         </Card>
+      )}
+      {scope === "all" && (
+        <div className="flex items-center gap-3 rounded-xl border border-gold/20 bg-[#0b1524] p-4">
+          <label className="text-sm text-gray-300">Próximas mensagens
+            <select className="ml-3 h-9 rounded-md border border-white/20 bg-black px-3" value={upcomingWindow} onChange={e => setUpcomingWindow(e.target.value)}>
+              <option value="all">Todas</option><option value="7">Próximos 7 dias</option><option value="15">Próximos 15 dias</option><option value="30">Próximos 30 dias</option>
+            </select>
+          </label>
+        </div>
       )}
       <div className="grid gap-4 md:grid-cols-2">
         {visibleMessages.map(row => (

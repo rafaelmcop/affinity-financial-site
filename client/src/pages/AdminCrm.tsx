@@ -126,6 +126,8 @@ export default function AdminCrm({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
+  const [historyFolder, setHistoryFolder] = useState("all");
+  const [historyRange, setHistoryRange] = useState("all");
   const [crmView, setCrmView] = useState<"clients" | "followup" | "new_business" | "inforce" | "automations" | "history">(() => {
     const section = new URLSearchParams(window.location.search).get("setor");
     return section === "followup" || section === "new_business" || section === "inforce" ? section : "clients";
@@ -147,6 +149,22 @@ export default function AdminCrm({
     { clientId: selectedId || 0 },
     { enabled: agentMode && Boolean(selectedId), refetchInterval: 15000 }
   );
+  const filteredMessageHistory = useMemo(() => {
+    const now = Date.now();
+    const ranges: Record<string, number> = { day: 1, days7: 7, days30: 30, months6: 183, year: 365 };
+    const cutoff = historyRange === "all" ? 0 : now - (ranges[historyRange] || 0) * 86400000;
+    return (messageHistoryQuery.data || []).filter((item: any) => {
+      const text = `${item.title || ""} ${item.content || ""} ${item.subject || ""}`.toLowerCase();
+      const folder = historyFolder === "all" ||
+        (historyFolder === "welcome" && /(bem.vind|boas.vind)/.test(text)) ||
+        (historyFolder === "birthday" && /anivers/.test(text)) ||
+        (historyFolder === "monthly" && /(setembro|outubro|novembro|dezembro|janeiro|fevereiro|março|abril|maio|junho|julho|agosto|mensal|mês)/.test(text)) ||
+        (historyFolder === "payment" && /(pagamento|premium|devolvid|atras)/.test(text)) ||
+        (historyFolder === "other" && !/(bem.vind|boas.vind|anivers|pagamento|premium|devolvid|atras|mensal|mês)/.test(text));
+      const timestamp = new Date(String(item.createdAt || item.sentAt || "")).getTime();
+      return folder && (!cutoff || (Number.isFinite(timestamp) && timestamp >= cutoff));
+    });
+  }, [messageHistoryQuery.data, historyFolder, historyRange]);
   const tasksQuery = trpc.agent.listTasks.useQuery(undefined, {
     enabled: agentMode,
   });
@@ -805,8 +823,20 @@ export default function AdminCrm({
             <p className="mt-1 text-sm text-gray-400">
               Histórico geral das mensagens enviadas pelo CRM. Clique para abrir o cliente.
             </p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm text-gray-300">Pasta
+                <select className="mt-1 h-10 w-full rounded-md border border-white/20 bg-black px-3" value={historyFolder} onChange={e => setHistoryFolder(e.target.value)}>
+                  <option value="all">Todas as mensagens</option><option value="welcome">Boas-vindas</option><option value="birthday">Aniversário</option><option value="monthly">Mensagens mensais</option><option value="payment">Pagamento devolvido/atrasado</option><option value="other">Outras mensagens</option>
+                </select>
+              </label>
+              <label className="text-sm text-gray-300">Período de envio
+                <select className="mt-1 h-10 w-full rounded-md border border-white/20 bg-black px-3" value={historyRange} onChange={e => setHistoryRange(e.target.value)}>
+                  <option value="all">Todo o histórico</option><option value="day">Último dia</option><option value="days7">Últimos 7 dias</option><option value="days30">Últimos 30 dias</option><option value="months6">Últimos 6 meses</option><option value="year">Último ano</option>
+                </select>
+              </label>
+            </div>
             <div className="mt-5 space-y-3">
-              {(messageHistoryQuery.data || []).map(item => (
+              {filteredMessageHistory.map(item => (
                 <button
                   key={item.id}
                   className="w-full rounded-xl border border-white/10 bg-black/25 p-4 text-left hover:border-gold/50"
@@ -820,7 +850,7 @@ export default function AdminCrm({
                   <span className="mt-2 block text-sm text-gray-300">{item.content}</span>
                 </button>
               ))}
-              {!messageHistoryQuery.data?.length && (
+              {!filteredMessageHistory.length && (
                 <p className="py-8 text-center text-sm text-gray-500">Nenhum envio registrado.</p>
               )}
             </div>
