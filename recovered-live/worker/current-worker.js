@@ -57857,7 +57857,8 @@ var cloudflare_staging_default = {
       if (origin === url.origin) headers["Access-Control-Allow-Origin"] = origin;
       return secureResponse(new Response(null, { status: 204, headers }));
     }
-    if (url.hostname === "affinityfc.org") {
+    if (url.hostname === "affinityfc.org" || url.protocol === "http:") {
+      url.protocol = "https:";
       url.hostname = "www.affinityfc.org";
       return secureResponse(Response.redirect(url.toString(), 301));
     }
@@ -57869,7 +57870,7 @@ var cloudflare_staging_default = {
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
     }
     if (request.method === "GET" && url.pathname === "/.well-known/security.txt") {
-      return secureResponse(new Response("Contact: mailto:security@affinityfc.org\nPolicy: https://www.affinityfc.org/\nExpires: 2027-09-08T00:00:00.000Z\n", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" } }));
+      return secureResponse(new Response("Contact: mailto:rafael.cunha@affinityfc.org\nCanonical: https://www.affinityfc.org/.well-known/security.txt\nPreferred-Languages: pt, en, es\nExpires: 2027-09-08T00:00:00.000Z\n", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" } }));
     }
     if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
       try {
@@ -58041,7 +58042,8 @@ var cloudflare_staging_default = {
         "content-type": "application/json; charset=utf-8"
       });
       for (const cookie of cookies) headers.append("set-cookie", cookie);
-      const responseStatus = responses.some((item) => item?.error?.json?.data?.httpStatus) ? Number(responses.find((item) => item?.error?.json?.data?.httpStatus)?.error?.json?.data?.httpStatus || 500) : 200;
+      const statuses = new Set(responses.map((item) => Number(item?.error?.json?.data?.httpStatus || 200)));
+      const responseStatus = statuses.size === 1 ? [...statuses][0] : 207;
       return secureResponse(
         new Response(
           JSON.stringify(
