@@ -53053,7 +53053,7 @@ var contentSecurityPolicy = [
   "object-src 'none'",
   "frame-ancestors 'none'",
   "form-action 'self'",
-  "script-src 'self' 'unsafe-inline' https://forge.butterfly-effect.dev https://maps.googleapis.com https://maps.gstatic.com https://assets.calendly.com",
+  "script-src 'self' 'unsafe-inline' https://maps.googleapis.com https://maps.gstatic.com https://assets.calendly.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://assets.calendly.com",
   "font-src 'self' data: https://fonts.gstatic.com",
   "img-src 'self' data: blob: https:",
@@ -53074,11 +53074,30 @@ function secureResponse(response, options = {}) {
     "camera=(self), microphone=(), geolocation=()"
   );
   secured.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+  // Stage the stricter policy without breaking legacy portals or third-party
+  // media. Nonces are unique per response; never cache a rewritten document.
+  const isHtml = (secured.headers.get("Content-Type") || "").includes("text/html");
+  const nonce = isHtml ? toBase64Url(crypto.getRandomValues(new Uint8Array(24))) : null;
+  if (nonce) {
+    secured.headers.set("Content-Security-Policy-Report-Only", contentSecurityPolicy
+      .replace("'unsafe-inline'", `'nonce-${nonce}'`)
+      .replace("connect-src 'self' https:", "connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com https://calendly.com https://assets.calendly.com https://player.vimeo.com https://vimeo.com")
+      + "; worker-src 'self' blob:; script-src-attr 'none'");
+    secured.headers.set("Cache-Control", "private, no-store, max-age=0");
+    secured.headers.delete("ETag");
+    secured.headers.delete("Content-Length");
+    secured.headers.set("Referrer-Policy", "no-referrer");
+  }
   if (options.privateData) {
     secured.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
     secured.headers.set("Cache-Control", "private, no-store, max-age=0");
     secured.headers.set("Pragma", "no-cache");
     secured.headers.set("Vary", "Cookie, Authorization");
+  }
+  if (nonce) {
+    return new HTMLRewriter().on("script", {
+      element(element) { element.setAttribute("nonce", nonce); }
+    }).transform(secured);
   }
   return secured;
 }
