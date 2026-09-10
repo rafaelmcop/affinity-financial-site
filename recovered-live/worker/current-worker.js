@@ -54460,7 +54460,7 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(),meetingId||null,clientName||null,clientEmail||null,token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
-  if (name === "agent.logMeetingMessage") {
+  if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), meetingId = Number(input.meetingId || 0);
     const message = String(input.message || "").trim().slice(0, 1e4);
@@ -54469,6 +54469,8 @@ Detalhes: ${details}` : ""}`;
     if (!meetingId || !message) return trpcError("Mensagem ou compromisso inválido");
     const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
     if (!meeting) return trpcError("Compromisso não encontrado", "NOT_FOUND", 404);
+    const sendMeetingEmail = name === "agent.sendMeetingEmail";
+    if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso não possui e-mail válido");
     let clientId = Number(meeting.clientId || 0);
     if (!clientId) {
       const email = String(meeting.inviteeEmail || "").trim().toLowerCase();
@@ -54481,7 +54483,14 @@ Detalhes: ${details}` : ""}`;
       } else clientId = Number(client.id);
       await env.DB.prepare("UPDATE calendlyMeetings SET clientId=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(clientId, meetingId).run();
     }
-    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, channel, `${template}\n${message}`, owner).run();
+    if (sendMeetingEmail) {
+      const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+      if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
+      const subject = String(input.subject || "Seu atendimento — Affinity Financial Consulting").trim().slice(0, 300);
+      const sent = await sendAgentEmail(env, owner, { to: String(meeting.inviteeEmail), subject, html: clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n", "<br>")}</p>`), replyTo: String(config.fromEmail) });
+      await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message, String(config.fromEmail), String(meeting.inviteeEmail)).run();
+    }
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : channel, `${template}\n${message}`, owner).run();
     return trpcResult({ success: true, clientId });
   }
   if (name === "admin.deleteApplication") {

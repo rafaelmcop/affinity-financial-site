@@ -893,7 +893,21 @@ function J() {
     u = s.data || [],
     [x, g] = v.useState("all"),
     [expandedId, setExpandedId] = v.useState(null),
-    o = x === "all" ? u : u.filter(i => i.status === x),
+    [folder, setFolder] = v.useState("all"),
+    [period, setPeriod] = v.useState("all"),
+    folders = [...new Set(u.map(i => String(i.title || i.subject || "Outras mensagens")))].sort((a,b) => a.localeCompare(b,"pt-BR")),
+    o = u.filter(i => {
+      if (x !== "all" && i.status !== x) return false;
+      if (folder !== "all" && String(i.title || i.subject || "Outras mensagens") !== folder) return false;
+      if (period === "all") return true;
+      const raw = String(i.date || ""), date = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? raw.replace(" ","T")+"Z" : raw).getTime();
+      if (!Number.isFinite(date)) return false;
+      const now = Date.now(), cutoff = new Date(now);
+      if (period === "months6") cutoff.setMonth(cutoff.getMonth()-6);
+      else if (period === "year") cutoff.setFullYear(cutoff.getFullYear()-1);
+      else cutoff.setTime(now-Number(period)*86400000);
+      return date >= cutoff.getTime() && date <= now;
+    }),
     b = i => {
       if (!i) return "Horário automático";
       const raw = String(i),
@@ -963,6 +977,10 @@ function J() {
           )
         ),
       }),
+      e.jsxs("div", {className:"mt-4 flex flex-wrap gap-3", children:[
+        e.jsxs("label", {children:["Pasta ", e.jsx("select", {className:"rounded border border-white/20 bg-black p-2", value:folder, onChange:event=>setFolder(event.target.value), children:[e.jsx("option",{value:"all",children:"Todas as pastas"}),...folders.map(value=>e.jsx("option",{value,children:value},value))]})]}),
+        e.jsxs("label", {children:["Enviadas em ",e.jsx("select",{className:"rounded border border-white/20 bg-black p-2",value:period,onChange:event=>{setPeriod(event.target.value);if(event.target.value!=="all")g("sent")},children:[["all","Todo o histórico"],["1","Último dia"],["7","Últimos 7 dias"],["30","Últimos 30 dias"],["months6","Últimos 6 meses"],["year","Último ano"]].map(([value,label])=>e.jsx("option",{value,children:label},value))})]})
+      ]}),
       e.jsxs("div", {
         className: "mt-5 max-h-[34rem] space-y-3 overflow-y-auto pr-1",
         children: [

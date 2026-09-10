@@ -153,6 +153,22 @@ async function copyMessage(id) {
     notice("Mensagem copiada.");
   }
 }
+async function sendMeetingEmail(id, button) {
+  const row = window.calendarRows.find(item => Number(item.id) === Number(id));
+  const message = $(`message-${id}`).value.trim();
+  if (!row?.inviteeEmail) return notice("Este compromisso não possui e-mail informado.", true);
+  if (!message) return notice("Escreva a mensagem antes de enviar.", true);
+  if (!confirm(`Enviar esta mensagem para ${row.inviteeName || "cliente"} (${row.inviteeEmail}) pelo seu e-mail configurado?`)) return;
+  button.disabled = true;
+  button.textContent = "Enviando…";
+  const type = $(`composer-${id}`).dataset.type;
+  const subjects = { reminder: "Lembrete da nossa reunião", second: "Vamos continuar nosso atendimento?", "no-show": "Sentimos sua falta na reunião", feedback: "Como foi seu atendimento?", referral: "Conhece alguém que podemos ajudar?", blank: "Mensagem do seu consultor" };
+  try {
+    await api("agent.sendMeetingEmail", { meetingId: Number(id), message, template: subjects[type] || "Mensagem", subject: subjects[type] || "Mensagem do seu consultor" }, "POST");
+    notice("E-mail enviado e registrado no histórico do cliente.");
+  } catch (error) { notice(error.message || "Não foi possível enviar o e-mail.", true); }
+  finally { button.disabled = false; button.textContent = "Enviar por e-mail"; }
+}
 async function openWhatsApp(id) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id)),
     phone = whatsappPhone(row?.inviteePhone),
@@ -267,8 +283,17 @@ function renderMeetings(rows) {
   document
     .querySelectorAll("[data-whatsapp-message]")
     .forEach(
-      button =>
-        (button.onclick = () => openWhatsApp(button.dataset.whatsappMessage))
+      button => {
+        button.onclick = () => openWhatsApp(button.dataset.whatsappMessage);
+        if (!button.parentElement.querySelector("[data-email-message]")) {
+          const emailButton = document.createElement("button");
+          emailButton.type = "button";
+          emailButton.dataset.emailMessage = button.dataset.whatsappMessage;
+          emailButton.textContent = "Enviar por e-mail";
+          emailButton.onclick = () => sendMeetingEmail(emailButton.dataset.emailMessage, emailButton);
+          button.after(emailButton);
+        }
+      }
     );
   document
     .querySelectorAll("[data-close-message]")
