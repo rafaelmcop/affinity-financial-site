@@ -50671,7 +50671,8 @@ function primaryBeneficiaryName(value) {
 function missingClientProfileFields(client, policies) {
   const inactiveStatuses = new Set(["inactive", "inativa", "lapse", "lapsed", "cancelled", "canceled", "cancelada", "declined", "recusada", "surrendered", "terminated", "expired"]);
   const activePolicies = policies.filter((policy) => !inactiveStatuses.has(String(policy.status || "").trim().toLowerCase()));
-  if (policies.length > 0 && activePolicies.length === 0) return [];
+  // This badge belongs to the policy portfolio, not leads without policies.
+  if (activePolicies.length === 0) return [];
   const missing = [];
   if (!present(client.email)) missing.push("e-mail");
   if (!present(client.phone)) missing.push("telefone");
@@ -53084,6 +53085,7 @@ var contentSecurityPolicy = [
   "upgrade-insecure-requests"
 ].join("; ");
 function secureResponse(response, options = {}) {
+  response = applySiteBranding(response);
   const secured = new Response(response.body, response);
   secured.headers.set("Strict-Transport-Security", "max-age=31536000");
   secured.headers.set("Content-Security-Policy", contentSecurityPolicy);
@@ -54481,18 +54483,20 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(),meetingId||null,clientName||null,clientEmail||null,token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
-  if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail") {
+  if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail" || name === "agent.openMeetingClient") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), meetingId = Number(input.meetingId || 0);
     const message = String(input.message || "").trim().slice(0, 1e4);
     const template = String(input.template || "Mensagem").trim().slice(0, 120);
     const channel = String(input.channel || "whatsapp").toLowerCase() === "email" ? "email" : "whatsapp";
-    if (!meetingId || !message) return trpcError("Mensagem ou compromisso inválido");
+    const openClient = name === "agent.openMeetingClient";
+    if (!meetingId || (!openClient && !message)) return trpcError("Mensagem ou compromisso inválido");
     const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
     if (!meeting) return trpcError("Compromisso não encontrado", "NOT_FOUND", 404);
     const sendMeetingEmail = name === "agent.sendMeetingEmail";
     if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso não possui e-mail válido");
     let clientId = Number(meeting.clientId || 0);
+    if (clientId && !await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first()) clientId = 0;
     if (!clientId) {
       const email = String(meeting.inviteeEmail || "").trim().toLowerCase();
       const phone = String(meeting.inviteePhone || "").replace(/\D/g, "").slice(-10);
@@ -54504,6 +54508,7 @@ Detalhes: ${details}` : ""}`;
       } else clientId = Number(client.id);
       await env.DB.prepare("UPDATE calendlyMeetings SET clientId=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(clientId, meetingId).run();
     }
+    if (openClient) return trpcResult({ success: true, clientId });
     if (sendMeetingEmail) {
       const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
@@ -57285,11 +57290,11 @@ Affinity Financial Consulting`,
     const agentView = accountType === "agent" || Boolean(input.agentMode);
     const [rows, policyStages, applicationStages] = agentView ? await Promise.all([
       env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").bind(crmOwner).all(),
-      env.DB.prepare("SELECT id,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(crmOwner).all(),
+      env.DB.prepare("SELECT id,agentEmail,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(crmOwner).all(),
       env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,status,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(crmOwner).all()
     ]) : [
       await env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").all(),
-      { results: [] },
+      await env.DB.prepare("SELECT id,agentEmail,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies").all(),
       { results: [] }
     ];
     const matchesClient = (record, client) => Number(record.clientId || 0) === Number(client.id) ||
@@ -57304,7 +57309,7 @@ Affinity Financial Consulting`,
           ...row,
           id: Number(row.id),
           hasPolicy: policies.length > 0,
-          hasInforcePolicy: policies.some((record) => ["active", "inforce", "in_force", "issued"].includes(String(record.status || "").toLowerCase())),
+          hasInforcePolicy: (policyStages.results || []).some((record) => policyBelongsToCrmClient(record,row) && isActiveClientPolicy(record)),
           hasDraftApplication: applications.some((record) => record.status === "draft"),
           hasCompletedApplication: applications.some((record) => record.status === "submitted")
         };
@@ -57328,16 +57333,29 @@ Affinity Financial Consulting`,
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
     const owner = String(input.agentEmail || "").trim().toLowerCase();
     if (!validEmail(owner)) return trpcError("Selecione um agente");
-    const [clients, policies] = await Promise.all([
+    const [clients, policies, applications] = await Promise.all([
       env.DB.prepare(
-        "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name"
+        "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE"
       ).bind(owner).all(),
       env.DB.prepare(
         "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY clientName,policyNumber"
-      ).bind(owner).all()
+      ).bind(owner).all(),
+      env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,status,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(owner).all()
     ]);
+    const matches = (record, client) => Number(record.clientId || 0) === Number(client.id) ||
+      (sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email)) ||
+      (sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp)) ||
+      (sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name));
+    const portfolioClients = clients.results.map(row => {
+      const linkedPolicies = policies.results.filter(record => matches(record, row));
+      const linkedApplications = applications.results.filter(record => !record.matchedPolicyId && matches(record, row));
+      const attended = Boolean(row.lastMeetingAt) || ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(row.status);
+      const sector = linkedPolicies.length ? "inforce" : linkedApplications.length ? "applications" : attended ? "followup" : "leads";
+      return { ...row, id: Number(row.id), sector, hasCompletedApplication: linkedApplications.some(application => application.status === "submitted"), applicationCount: linkedApplications.length, policyCount: linkedPolicies.length };
+    });
     return trpcResult({
-      clients: clients.results.map((row) => ({ ...row, id: Number(row.id) })),
+      clients: portfolioClients,
+      sectorCounts: Object.fromEntries(["leads", "followup", "applications", "inforce"].map(sector => [sector, portfolioClients.filter(client => client.sector === sector).length])),
       policies: policies.results.map((row) => ({
         ...row,
         id: Number(row.id),
@@ -57651,6 +57669,12 @@ Affinity Financial Consulting`,
       ).bind(id, adminEmail.toLowerCase()).first();
       if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     }
+    if (status === "client") {
+      const existing = await env.DB.prepare("SELECT id,email,phone,whatsapp,assignedAdminEmail FROM crmClients WHERE id=?").bind(id).first();
+      if (!existing) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+      const candidates = await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(String(existing.assignedAdminEmail||'').toLowerCase()).all();
+      if (!(candidates.results || []).some(policy => policyBelongsToCrmClient(policy,existing) && isActiveClientPolicy(policy))) return trpcError("A etapa Cliente é destinada a quem possui uma apólice ativa vinculada. Use Fechado ou Follow-up enquanto a apólice não estiver ativa.");
+    }
     await env.DB.prepare(
       "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
     ).bind(...values, id).run();
@@ -57894,6 +57918,8 @@ Affinity Financial Consulting`,
 __name(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async fetch(request, env) {
+    const branding = await siteBrandingRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
+    if (branding) return secureResponse(branding);
     // The payment helpers come from a lazily initialized module in this
     // recovered bundle. Initialize it for every request before any route can
     // call normalizePolicyNumber/extractPolicyNumbers on a cold Worker.
@@ -58610,9 +58636,9 @@ async function runMessageAutomations(env) {
   }
 }
 __name(runMessageAutomations, "runMessageAutomations");
-export {
-  cloudflare_staging_default as default
-};
+import { siteBrandingRoute, applySiteBranding } from './site-branding.js';
+import { isActiveClientPolicy, policyBelongsToCrmClient } from './crm-stage.js';
+export { cloudflare_staging_default as default };
 /*! Bundled license information:
 
 he/he.js:

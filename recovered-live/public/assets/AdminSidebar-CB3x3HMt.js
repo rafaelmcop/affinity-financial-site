@@ -108,6 +108,7 @@ function H({ onLogout: o }) {
   const [b, g] = y(),
     [i, n] = c.useState(!1),
     [accountOpen, setAccountOpen] = c.useState(!1),
+    portalAccess = j.auth.me.useQuery(),
     p = j.admin.getStats.useQuery(void 0, {
       refetchInterval: 3e4,
       staleTime: 25e3,
@@ -121,7 +122,7 @@ function H({ onLogout: o }) {
       s("pendingReviews") +
       s("pendingClientDeletions"),
     adminSession = (() => { try { return JSON.parse(localStorage.getItem("adminSession") || "{}"); } catch { return {}; } })(),
-    adminName = adminSession.name || adminSession.email || "Administrador",
+    adminName = portalAccess.data?.name || adminSession.name || adminSession.email || "Administrador",
     adminInitials = adminName.split(/\s+/).filter(Boolean).slice(0,1).concat(adminName.split(/\s+/).filter(Boolean).slice(-1)).map(t => t[0]).join("").slice(0,2).toUpperCase(),
     logoutToHome = async () => { try { await o?.(); } catch {} localStorage.removeItem("adminSession"); window.location.assign("/"); };
   (v("portal", f, "affinity-admin-pending"),
@@ -289,6 +290,8 @@ function H({ onLogout: o }) {
           e.jsxs("div", { className: "border-b border-white/10 px-3 py-3", children: [e.jsx("p", { className: "font-bold text-gold", children: adminName }), e.jsx("p", { className: "text-xs text-gray-400", children: "Administrador" })] }),
           e.jsx("button", { type: "button", onClick: () => r("/admin/usuarios"), className: "mt-2 w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Perfil" }),
           e.jsx("button", { type: "button", onClick: () => r("/admin/smtp-config"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),
+          portalAccess.data?.adminRole === "master" && e.jsx("a", { href: "/admin/site-branding", className: "block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Marca e imagens do site" }),
+          portalAccess.data?.accountType === "both" && e.jsx("button", { type: "button", onClick: () => { localStorage.setItem("agentSession", JSON.stringify(portalAccess.data)); window.location.assign("/agentes/dashboard"); }, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-gold hover:bg-white/10", children: "Entrar como agente" }),
           e.jsx("button", { type: "button", onClick: logoutToHome, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10", children: "Sair" })
         ] })
       ] }),

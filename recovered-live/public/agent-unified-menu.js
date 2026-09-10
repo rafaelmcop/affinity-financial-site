@@ -33,6 +33,14 @@
   side.querySelector(".agent-menu-toggle")?.addEventListener("click", () => side.classList.toggle("menu-open"));
   side.querySelector(".agent-brand-button")?.addEventListener("click", logoutToHome);
   const trigger = account.querySelector(".agent-account-trigger"), popover = account.querySelector(".agent-account-popover");
+  trpc("auth.me").then(user => {
+    if (user?.accountType !== "both") return;
+    const link = document.createElement("a");
+    link.href = "/admin/dashboard";
+    link.textContent = "Painel administrativo";
+    link.addEventListener("click", () => localStorage.setItem("adminSession", JSON.stringify(user)));
+    popover.insertBefore(link, account.querySelector("#agent-account-logout"));
+  }).catch(() => {});
   trigger.addEventListener("click", () => { popover.hidden = !popover.hidden; });
   account.querySelector("#agent-account-logout").addEventListener("click", logoutToHome);
   document.addEventListener("click", event => { if (!account.contains(event.target)) popover.hidden = true; });

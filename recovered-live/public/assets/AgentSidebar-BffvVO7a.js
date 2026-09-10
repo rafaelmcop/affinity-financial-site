@@ -69,6 +69,7 @@ function E() {
     [O, D] = f.useState(!1),
     p = g.auth.logout.useMutation(),
     Q = g.agent.getProfile.useQuery(),
+    portalAccess = g.auth.me.useQuery(),
     d = g.agent.pendingCounts.useQuery(void 0, {
       refetchInterval: 6e4,
       staleTime: 3e4,
@@ -308,6 +309,7 @@ function E() {
           e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes?view=settings"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),
           e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes-agenda"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Agenda e Calendly" }),
           e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/pagina-publica"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Página pública do agente" }),
+          portalAccess.data?.accountType === "both" && e.jsx("button", { type: "button", onClick: () => { localStorage.setItem("adminSession", JSON.stringify(portalAccess.data)); window.location.assign("/admin/dashboard"); }, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-gold hover:bg-white/10", children: "Painel administrativo" }),
           e.jsx("button", { type: "button", onClick: logoutToHome, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10", children: "Sair" })
         ] })
       ] }),

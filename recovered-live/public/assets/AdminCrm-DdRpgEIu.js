@@ -90,7 +90,7 @@ const D = {
     },
     {
       value: "client",
-      label: "Cliente com apólice",
+      label: "Cliente",
       color: "bg-green-500/15 text-green-300",
     },
     {

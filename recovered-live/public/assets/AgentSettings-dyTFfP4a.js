@@ -685,12 +685,13 @@ function se() {
                     }),
                   ],
                 }),
+                e.jsxs("label", {className:"block text-sm text-gray-300",children:["Assinatura pessoal do e-mail",e.jsx("textarea",{className:"mt-2 min-h-40 w-full rounded-md border border-gray-700 bg-black/40 px-3 py-3 text-sm text-white",value:o.messageSignature,onChange:a=>p({...o,messageSignature:a.target.value})}),e.jsx("span",{className:"mt-2 block text-xs text-gray-400",children:"Use {agente_nome}, {agente_telefone} e {agente_email}. Esta assinatura também personaliza as mensagens da agenda e automações."})]}),
                 e.jsxs(d, {
                   className: "w-full bg-gold text-black",
-                  disabled: j.isPending,
+                  disabled: j.isPending || c.isLoading,
                   onClick: async () => {
                     try {
-                      (await j.mutateAsync(t),
+                      (await j.mutateAsync({...t, messageSignature:o.messageSignature}),
                         await u.refetch(),
                         r.success(
                           "Envio e recebimento de e-mail configurados"

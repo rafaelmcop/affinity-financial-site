@@ -94,8 +94,40 @@
       const referralMessage = `Olá, ${firstName}! Tudo bem?\n\nFoi um prazer conversar com você. Se conhece alguém que também possa se beneficiar de uma orientação financeira cuidadosa e personalizada, ficarei muito feliz com a sua indicação.\n\nPode me enviar o nome e o telefone da pessoa por aqui. Entrarei em contato com todo cuidado e respeito.\n\nMuito obrigado pela confiança!\n\n${personalSignature}`;
       let selectedTemplate = "Primeira chamada";
       content.className = "card";
-      content.innerHTML = `<h2>${esc(meeting.inviteeName || meeting.eventName || "Compromisso")}</h2><p class="muted">${esc(meeting.eventName || "Reunião")}</p><div class="grid"><div class="field"><b>Data e horário</b>${esc(format(meeting.startTime))}</div><div class="field"><b>Término previsto</b>${esc(format(meeting.endTime))}</div><div class="field"><b>Telefone</b>${esc(phone || "Não informado")}</div><div class="field"><b>E-mail</b>${esc(email || "Não informado")}</div></div><div class="actions">${meeting.meetingUrl ? `<a class="primary" href="${esc(meeting.meetingUrl)}" target="_blank" rel="noopener">Entrar na reunião</a>` : ""}${clientId ? `<a href="/agentes/clientes?cliente=${clientId}">Abrir ficha completa</a>` : ""}<a href="/agentes/agenda">Voltar para a agenda</a></div>${whatsapp ? `<div class="card"><div class="eyebrow">Contato rápido</div><h2>Preparar mensagem</h2><div class="actions"><button id="template-first" class="primary">Primeira chamada</button><button id="template-second">Segunda chamada</button><button id="template-no-show">Não compareceu</button><button id="template-feedback">Pedir avaliação</button><button id="template-referral">Pedir indicação</button><button id="template-blank">Mensagem em branco</button></div><textarea id="meeting-message" style="width:100%;min-height:220px;margin-top:12px;border:1px solid #293b52;border-radius:10px;background:#050d18;color:#fff;padding:14px">${esc(firstMessage)}</textarea><div class="actions"><button id="send-whatsapp" class="primary" style="border:1px solid #dfb934;border-radius:10px;background:#dfb934;color:#050505;padding:12px 16px;font-weight:800">Abrir direto no WhatsApp</button></div></div>` : ""}`;
+      content.innerHTML = `<h2>${esc(meeting.inviteeName || meeting.eventName || "Compromisso")}</h2><p class="muted">${esc(meeting.eventName || "Reunião")}</p><div class="grid"><div class="field"><b>Data e horário</b>${esc(format(meeting.startTime))}</div><div class="field"><b>Término previsto</b>${esc(format(meeting.endTime))}</div><div class="field"><b>Telefone</b>${esc(phone || "Não informado")}</div><div class="field"><b>E-mail</b>${esc(email || "Não informado")}</div></div><div class="actions">${meeting.meetingUrl ? `<a class="primary" href="${esc(meeting.meetingUrl)}" target="_blank" rel="noopener">Entrar na reunião</a>` : ""}<button id="open-contact">Abrir ficha e histórico</button><a href="/agentes/agenda">Voltar para a agenda</a></div>${(whatsapp || email) ? `<div class="card"><div class="eyebrow">Contato rápido</div><h2>Preparar mensagem</h2><div class="actions"><button id="template-first" class="primary">Primeira chamada</button><button id="template-second">Segunda chamada</button><button id="template-no-show">Não compareceu</button><button id="template-feedback">Pedir avaliação</button><button id="template-referral">Pedir indicação</button><button id="template-blank">Mensagem em branco</button></div><textarea id="meeting-message" style="width:100%;min-height:220px;margin-top:12px;border:1px solid #293b52;border-radius:10px;background:#050d18;color:#fff;padding:14px">${esc(firstMessage)}</textarea><div class="actions"><button id="send-email">Enviar por e-mail</button><button id="send-whatsapp" class="primary" style="border:1px solid #dfb934;border-radius:10px;background:#dfb934;color:#050505;padding:12px 16px;font-weight:800">Abrir direto no WhatsApp</button></div></div>` : ""}`;
+      document.getElementById("open-contact").onclick = async function () {
+        this.disabled = true;
+        try {
+          const result = await api("agent.openMeetingClient", { meetingId }, "POST");
+          if (!result?.clientId) throw new Error("Não foi possível abrir a ficha.");
+          location.href = `/agentes/cliente?clientId=${Number(result.clientId)}`;
+        } catch (error) { alert(error.message); this.disabled = false; }
+      };
       const area = document.getElementById("meeting-message");
+      const emailButton = document.getElementById("send-email");
+      if (emailButton) {
+        emailButton.disabled = !email;
+        emailButton.title = email ? `Enviar para ${email}` : "E-mail não informado";
+        emailButton.addEventListener("click", async () => {
+          const message = area.value.trim();
+          if (!message) return alert("Escreva a mensagem antes de enviar.");
+          if (!confirm(`Enviar esta mensagem para ${meeting.inviteeName || "cliente"} (${email}) pelo seu e-mail configurado?`)) return;
+          emailButton.disabled = true;
+          emailButton.textContent = "Enviando…";
+          const subjects = { "Primeira chamada": "Lembrete da nossa reunião", "Segunda chamada": "Vamos continuar nosso atendimento?", "Não compareceu": "Sentimos sua falta na reunião", "Avaliação": "Como foi seu atendimento?", "Pedido de indicação": "Conhece alguém que podemos ajudar?" };
+          try {
+            await api("agent.sendMeetingEmail", { meetingId, message, template: selectedTemplate, subject: subjects[selectedTemplate] || "Mensagem do seu consultor" }, "POST");
+            alert("E-mail enviado e registrado no histórico do cliente.");
+          } catch (error) {
+            alert(error.message || "Não foi possível enviar o e-mail.");
+          } finally {
+            emailButton.disabled = false;
+            emailButton.textContent = "Enviar por e-mail";
+          }
+        });
+      }
+      const whatsappButton = document.getElementById("send-whatsapp");
+      if (whatsappButton) whatsappButton.disabled = !whatsapp;
       const choose = (id, label, message) => document.getElementById(id)?.addEventListener("click", () => {
         selectedTemplate = label;
         area.value = message;

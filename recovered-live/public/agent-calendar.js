@@ -202,14 +202,14 @@ function openClientWhatsApp(withReminder) {
   location.href = `whatsapp://send?phone=${phone}${message ? `&text=${encodeURIComponent(message)}` : ""}`;
 }
 let selectedClientRow = null;
-function openClientPopup(id) {
+async function openClientPopup(id) {
   const row = window.calendarRows.find(item => Number(item.id) === Number(id));
   if (!row) return;
-  selectedClientRow = row;
-  $("client-dialog-name").textContent = row.inviteeName || "Não informado";
-  $("client-dialog-email").textContent = row.inviteeEmail || "Não informado";
-  $("client-dialog-phone").textContent = row.inviteePhone || "Não informado";
-  $("client-dialog").showModal();
+  try {
+    const result = await api("agent.openMeetingClient", { meetingId: Number(id) }, "POST");
+    if (!result?.clientId) throw new Error("Não foi possível abrir a ficha deste contato.");
+    location.href = `/agentes/cliente?clientId=${Number(result.clientId)}`;
+  } catch (error) { alert(error.message); }
 }
 function composerHtml(row) {
   return `<div id="composer-${row.id}" class="message-composer hidden"><div class="message-tabs"><button class="active" data-template="reminder" data-id="${row.id}">Primeira chamada</button><button data-template="second" data-id="${row.id}">Segunda chamada</button><button data-template="no-show" data-id="${row.id}">Não compareceu</button><button data-template="feedback" data-id="${row.id}">Avaliação</button><button data-template="referral" data-id="${row.id}">Pedir recomendação</button><button data-template="blank" data-id="${row.id}">Mensagem em branco</button></div><p class="message-help">Você pode personalizar o texto antes de copiar ou abrir o WhatsApp. Ao abrir o WhatsApp, a mensagem será registrada no histórico do cliente.</p><textarea id="message-${row.id}" aria-label="Mensagem para ${escapeHtml(row.inviteeName || "cliente")}"></textarea><div class="actions"><button class="primary" data-copy-message="${row.id}">Copiar mensagem</button><button data-whatsapp-message="${row.id}">Abrir no WhatsApp</button><button data-close-message="${row.id}">Fechar</button></div></div>`;
