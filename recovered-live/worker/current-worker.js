@@ -12220,8 +12220,29 @@ async function sendAgentEmail(env, agentEmail, options) {
 function emailHtml(title, content) {
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222"><h2 style="color:#b28a2e">${title}</h2>${content}<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#666;font-size:12px">Affinity Financial Consulting Inc.<br>247 Washington St, Stoughton, MA<br>(857) 421-8325</p></div>`;
 }
-function clientEmailHtml(content) {
-  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222">${content}<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#666;font-size:12px">Affinity Financial Consulting Inc.<br>247 Washington St, Stoughton, MA<br>(857) 421-8325</p></div>`;
+async function appendAgentEmailSignature(env, owner, body) {
+  await ensureAgentMessageSignatureColumn(env);
+  const profile = await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail,email,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner.toLowerCase()).first();
+  if (!profile) throw new Error("Perfil do remetente não encontrado");
+  const signature = String(profile.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE)
+    .replaceAll("{agente_nome}", String(profile.name || ""))
+    .replaceAll("{agente}", String(profile.name || ""))
+    .replaceAll("{agente_telefone}", String(profile.phone || profile.whatsapp || ""))
+    .replaceAll("{telefone do agente}", String(profile.phone || profile.whatsapp || ""))
+    .replaceAll("{agente_whatsapp}", String(profile.whatsapp || profile.phone || ""))
+    .replaceAll("{agente_email}", String(profile.contactEmail || profile.email || ""))
+    .replaceAll("{email do agente}", String(profile.contactEmail || profile.email || "")).trim();
+  const text = String(body || "").trim();
+  return !signature || text.endsWith(signature) ? text : `${text}\n\n${signature}`;
+}
+async function signedClientEmailHtml(env, owner, body) {
+  const signature = await appendAgentEmailSignature(env, owner, "");
+  let message = String(body || "").trim();
+  if (signature && message.endsWith(signature)) message = message.slice(0, -signature.length).trimEnd();
+  return clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n", "<br>")}</p>`, signature);
+}
+function clientEmailHtml(content, signature = "") {
+  return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222">${content}${signature ? `<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#444;font-size:14px;line-height:1.6">${escapeAutomationHtml(signature).replaceAll("\n", "<br>")}</p>` : ""}</div>`;
 }
 var import_nodemailer;
 var init_cloudflare_email = __esm({
@@ -55154,7 +55175,8 @@ Detalhes: ${details}` : ""}`;
     return trpcResult({ success: true });
   }
   if (name === "agent.sendClientEmail") {
-    const clientId = Number(input.clientId), body = String(input.body ?? "").trim(), requestedSubject = String(input.subject ?? "").trim();
+    const clientId = Number(input.clientId), requestedSubject = String(input.subject ?? "").trim();
+    let body = String(input.body ?? "").trim();
     const customer = await env.DB.prepare(
       "SELECT id,name,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?"
     ).bind(clientId, adminEmail.toLowerCase()).first();
@@ -55175,11 +55197,11 @@ Detalhes: ${details}` : ""}`;
     );
     const subject = previous ? `Re: ${previousSubject || requestedSubject || "Mensagem da Affinity Financial"}` : requestedSubject || "Mensagem da Affinity Financial";
     const inReplyTo = String(previous?.externalId || "").trim() || void 0;
-    const safeBody = escapeAutomationHtml(body).replaceAll("\n", "<br>");
+    body = await appendAgentEmailSignature(env, adminEmail, body);
     const sent = await sendAgentEmail(env, adminEmail, {
       to: String(customer.email),
       subject,
-      html: clientEmailHtml(`<p>${safeBody}</p>`),
+      html: await signedClientEmailHtml(env, adminEmail, body),
       replyTo: String(config.fromEmail),
       inReplyTo,
       references: inReplyTo ? [inReplyTo] : void 0
@@ -55352,7 +55374,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.sendMailboxEmail") {
     const owner = adminEmail.toLowerCase();
-    const body = String(input.body || "").trim();
+    let body = String(input.body || "").trim();
     const requestedSubject = String(input.subject || "").trim();
     const replyToId = Number(input.replyToId || 0);
     const requestedClientId = Number(input.clientId || 0);
@@ -55378,10 +55400,11 @@ Detalhes: ${details}` : ""}`;
     if (!subject) subject = "Mensagem da Affinity Financial";
     const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
+    body = await appendAgentEmailSignature(env, owner, body);
     const sent = await sendAgentEmail(env, owner, {
       to: recipient,
       subject,
-      html: clientEmailHtml(`<p>${escapeAutomationHtml(body).replaceAll("\n", "<br>")}</p>`),
+      html: await signedClientEmailHtml(env, owner, body),
       replyTo: String(config.fromEmail),
       inReplyTo,
       references: inReplyTo ? [inReplyTo] : void 0
@@ -56355,6 +56378,10 @@ Affinity Financial Consulting`,
     await env.DB.prepare(
       "UPDATE adminAccounts SET contactEmail=? WHERE lower(email)=?"
     ).bind(String(input.fromEmail), owner).run();
+    if (typeof input.messageSignature === "string") {
+      await ensureAgentMessageSignatureColumn(env);
+      await env.DB.prepare("UPDATE adminAccounts SET messageSignature=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(input.messageSignature.trim().slice(0,2000) || DEFAULT_AGENT_MESSAGE_SIGNATURE, owner).run();
+    }
     return trpcResult({ success: true });
   }
   if (name === "agent.testEmailSettings") {
@@ -56364,10 +56391,7 @@ Affinity Financial Consulting`,
       await sendAgentEmail(env, adminEmail, {
         to: email,
         subject: "Teste de e-mail - Affinity Financial",
-        html: emailHtml(
-          "Configura\xE7\xE3o conclu\xEDda",
-          "<p>Seu e-mail pessoal est\xE1 conectado ao Portal do Agente.</p>"
-        )
+        html: await signedClientEmailHtml(env, adminEmail, "Seu e-mail pessoal está conectado ao Portal do Agente.")
       });
     } catch {
       return trpcError(
@@ -58232,7 +58256,7 @@ function escapeAutomationHtml(value) {
   return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 __name(escapeAutomationHtml, "escapeAutomationHtml");
-var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org";
+var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nLicense Agent\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n📱 {agente_whatsapp}\n✉️ {agente_email}\n🌐 www.affinityfc.org";
 var DEFAULT_MONDAY_SUBJECT = "Uma ótima segunda-feira para você, {nome}! ☀️";
 var DEFAULT_MONDAY_MESSAGE = "Olá, {nome}! ☀️\n\nBom dia e uma excelente segunda-feira!\n\nA cada semana, o sistema prepara uma mensagem diferente, motivadora e acolhedora para começar a segunda-feira com energia e confiança.\n\nQue sua semana seja leve, produtiva e cheia de boas notícias. Sempre que precisar, conte conosco.";
 function mondayMessageVariation(year, month, day) {
@@ -58355,7 +58379,8 @@ async function runMessageAutomations(env) {
     const agentEmail = escapeAutomationHtml(
       agentProfile?.contactEmail || agentProfile?.email || automation.agentEmail
     );
-    const personalizeAgent = /* @__PURE__ */ __name((value) => escapeAutomationHtml(value).replaceAll("{agente_nome}", agentName).replaceAll("{agente_telefone}", agentPhone).replaceAll("{agente_email}", agentEmail).replaceAll("{agente}", agentName).replaceAll("{telefone do agente}", agentPhone).replaceAll("{email do agente}", agentEmail), "personalizeAgent");
+    const agentWhatsapp = escapeAutomationHtml(agentProfile?.whatsapp || agentProfile?.phone || agentPhone);
+    const personalizeAgent = /* @__PURE__ */ __name((value) => escapeAutomationHtml(value).replaceAll("{agente_nome}", agentName).replaceAll("{agente_telefone}", agentPhone).replaceAll("{agente_whatsapp}", agentWhatsapp).replaceAll("{agente_email}", agentEmail).replaceAll("{agente}", agentName).replaceAll("{telefone do agente}", agentPhone).replaceAll("{email do agente}", agentEmail), "personalizeAgent");
     const addPersonalSignature = /* @__PURE__ */ __name((value) => {
       const message = personalizeAgent(value);
       const normalizedAgentName = agentName.replaceAll("**", "").trim().toLowerCase();
