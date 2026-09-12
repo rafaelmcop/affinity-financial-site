@@ -53,6 +53,9 @@ export const adminAccounts = mysqlTable("adminAccounts", {
     .default("approved")
     .notNull(),
   isActive: int("isActive").default(1).notNull(),
+  presenceStatus: mysqlEnum("presenceStatus", ["available", "away", "meeting"])
+    .default("available").notNull(),
+  lastSeenAt: timestamp("lastSeenAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -85,6 +88,21 @@ export const crmClients = mysqlTable("crmClients", {
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
 
+export const clientDeletionRequests = mysqlTable("clientDeletionRequests", {
+  id: int("id").autoincrement().primaryKey(),
+  clientId: int("clientId").notNull(),
+  agentEmail: varchar("agentEmail", { length: 320 }).notNull(),
+  clientName: varchar("clientName", { length: 255 }).notNull(),
+  reason: text("reason").notNull(),
+  status: mysqlEnum("status", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
+  requestedAt: timestamp("requestedAt").defaultNow().notNull(),
+  reviewedAt: timestamp("reviewedAt"),
+  reviewedBy: varchar("reviewedBy", { length: 320 }),
+  adminNote: text("adminNote"),
+});
+
 export const crmActivities = mysqlTable("crmActivities", {
   id: int("id").autoincrement().primaryKey(),
   clientId: int("clientId").notNull(),
@@ -115,6 +133,32 @@ export const clientEmails = mysqlTable("clientEmails", {
   toEmail: varchar("toEmail", { length: 320 }).notNull(),
   sentAt: timestamp("sentAt").defaultNow().notNull(),
   readAt: timestamp("readAt"),
+  visibility: mysqlEnum("visibility", ["client", "central"])
+    .default("client")
+    .notNull(),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: varchar("deletedBy", { length: 320 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export const portalMessages = mysqlTable("portalMessages", {
+  id: int("id").autoincrement().primaryKey(),
+  senderEmail: varchar("senderEmail", { length: 320 }).notNull(),
+  recipientEmail: varchar("recipientEmail", { length: 320 }).notNull(),
+  body: text("body").notNull(),
+  sentAt: timestamp("sentAt").defaultNow().notNull(),
+  readAt: timestamp("readAt"),
+  deletedAt: timestamp("deletedAt"),
+  deletedBy: varchar("deletedBy", { length: 320 }),
+});
+
+export const portalAuditLogs = mysqlTable("portalAuditLogs", {
+  id: int("id").autoincrement().primaryKey(),
+  actorEmail: varchar("actorEmail", { length: 320 }).notNull(),
+  action: varchar("action", { length: 255 }).notNull(),
+  entityType: varchar("entityType", { length: 100 }),
+  targetId: varchar("targetId", { length: 320 }),
+  details: text("details"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
@@ -127,6 +171,9 @@ export const agentPolicies = mysqlTable("agentPolicies", {
   clientPhone: varchar("clientPhone", { length: 30 }),
   birthDate: timestamp("birthDate"),
   policyNumber: varchar("policyNumber", { length: 100 }).notNull(),
+  status: mysqlEnum("status", ["active", "lapse", "declined", "cancelled"])
+    .default("active")
+    .notNull(),
   product: varchar("product", { length: 120 }),
   premiumAmount: decimal("premiumAmount", { precision: 12, scale: 2 }).default(
     "0.00"
@@ -207,6 +254,8 @@ export const agentEmailSettings = mysqlTable("agentEmailSettings", {
   imapPort: int("imapPort").default(993).notNull(),
   imapUser: varchar("imapUser", { length: 320 }),
   lastImapSyncAt: timestamp("lastImapSyncAt"),
+  paymentReturnSubject: varchar("paymentReturnSubject", { length: 500 }),
+  paymentReturnMessage: text("paymentReturnMessage"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });
@@ -334,6 +383,16 @@ export const testimonials = mysqlTable("testimonials", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 255 }).notNull(),
   role: varchar("role", { length: 255 }).notNull(),
+  city: varchar("city", { length: 120 }),
+  state: varchar("state", { length: 2 }),
+  agentEmail: varchar("agentEmail", { length: 320 }),
+  agentDecision: mysqlEnum("agentDecision", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
+  agentReviewedAt: timestamp("agentReviewedAt"),
+  adminDecision: mysqlEnum("adminDecision", ["pending", "approved", "rejected"])
+    .default("pending")
+    .notNull(),
   quote: text("quote").notNull(),
   email: varchar("email", { length: 320 }),
   rating: int("rating").default(5).notNull(),
