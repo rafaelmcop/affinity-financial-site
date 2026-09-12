@@ -19,7 +19,7 @@ try{
  });
  await page.goto('https://whatsapp-ui.test/agentes/whatsapp');
  await page.getByRole('button',{name:'15555550101',exact:true}).click();
- await page.getByText('Mensagem de teste',{exact:true}).waitFor();
+ await page.locator('#messages article').filter({hasText:'Mensagem de teste'}).waitFor();
  await page.getByLabel('Mensagem',{exact:true}).fill('Resposta de teste');
  await page.getByRole('button',{name:'Enviar mensagem',exact:true}).click();
  await page.getByText('Mensagem enviada.',{exact:true}).waitFor();
