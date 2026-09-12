@@ -22,6 +22,7 @@
   <details ${matches("/agentes/crm", "/agentes/mensagens", "/agentes/contato-direto") ? "open" : ""}><summary>CRM <span>›</span></summary><div class="agent-sub"><a${active(path === "/agentes/crm")} href="/agentes/crm?setor=clients">Clientes</a><a${active(matches("/agentes/mensagens"))} href="/agentes/mensagens">Mensagens e automações</a><a${active(matches("/agentes/contato-direto"))} href="/agentes/contato-direto">Contato direto</a></div></details>
   <details ${matches("/agent-applications", "/agentes/clientes") ? "open" : ""}><summary>Aplicações <span>›</span></summary><div class="agent-sub"><a${active(matches("/agent-applications"))} href="/agent-applications">Novas aplicações</a><a${active(matches("/agentes/clientes"))} href="/agentes/clientes">Aplicações concluídas <b id="unified-applications-badge" class="agent-menu-badge" hidden></b></a></div></details>
   <a${active(matches("/agentes/agenda", "/agent-meeting-detail"))} href="/agentes/agenda">Agenda</a>
+  <a${active(matches("/agentes/whatsapp", "/agent-whatsapp.html"))} href="/agentes/whatsapp">WhatsApp · teste</a>
   <a${active(matches("/agentes/email"))} href="/agentes/email">E-mail <b id="unified-email-badge" class="agent-menu-badge" hidden></b></a>
   <a${active(matches("/agentes/avaliacoes", "/agent-review-invites"))} href="/agentes/avaliacoes">Avaliações <b id="unified-reviews-badge" class="agent-menu-badge" hidden></b></a></nav>`;
   const account = document.createElement("div"); account.className = "agent-account-menu";

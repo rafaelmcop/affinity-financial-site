@@ -57,6 +57,7 @@ import { E as z } from "./external-link-CEjUwZyT.js";
   ]),
   A = [
     ["Agenda", "/agentes/agenda", S],
+    ["WhatsApp · teste", "/agentes/whatsapp", M],
     ["E-mail", "/agentes/email", M],
     ["Avaliações", "/agentes/avaliacoes", k],
   ];
@@ -216,6 +217,7 @@ function E() {
                     onClick: () =>
                       a === "/agentes/email" ||
                       a === "/agentes/agenda" ||
+                      a === "/agentes/whatsapp" ||
                       a === "/agent-review-invites.html"
                         ? window.location.assign(a)
                         : s(a),

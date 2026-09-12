@@ -57925,6 +57925,8 @@ Affinity Financial Consulting`,
 __name(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async fetch(request, env) {
+    const whatsappResponse = await whatsappRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
+    if (whatsappResponse) return secureResponse(whatsappResponse, {privateData:true});
     const branding = await siteBrandingRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
     if (branding) return secureResponse(branding);
     // The payment helpers come from a lazily initialized module in this
@@ -58648,6 +58650,7 @@ async function runMessageAutomations(env) {
 }
 __name(runMessageAutomations, "runMessageAutomations");
 import { siteBrandingRoute, applySiteBranding } from './site-branding.js';
+import { whatsappRoute } from './whatsapp.js';
 import { isActiveClientPolicy, policyBelongsToCrmClient } from './crm-stage.js';
 export { cloudflare_staging_default as default };
 /*! Bundled license information:
