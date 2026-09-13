@@ -4,6 +4,12 @@ Serviço próprio, sem intermediário pago, usando a biblioteca aberta whatsapp-
 
 ## Executar
 
+### Teste local no Mac
+
+Com as dependências instaladas, execute `npm run test:local` nesta pasta. Abra o link de acesso impresso pelo inicializador no navegador e clique em **Conectar número de teste**. No celular, use **Aparelhos conectados → Conectar aparelho** para ler o QR code. O link inicial é de uso único; mantenha a aba aberta. Para novo acesso, reinicie o inicializador.
+
+O inicializador usa somente `127.0.0.1`, cria credenciais temporárias automaticamente e mantém sessões e histórico em `data/`, fora do Git. Não expõe o computador à internet e não ativa a integração do site público. O computador e o processo precisam continuar ligados durante o teste. Encerre com Ctrl+C. Por ser uma integração não oficial, há risco de bloqueio do número; use somente o número separado de teste.
+
 Node >=22.13, Chrome/Chromium e armazenamento persistente são necessários. Instale com `npm ci` nesta pasta. Configure `.env` com:
 
 ```
