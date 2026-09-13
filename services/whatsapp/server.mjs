@@ -6,6 +6,7 @@ import {DatabaseSync} from 'node:sqlite';
 import whatsapp from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import {verifyTicket} from './auth.mjs';
+import {sendText,sendErrorCode} from './send.mjs';
 
 const {Client,LocalAuth}=whatsapp;
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
@@ -70,10 +71,10 @@ const server=http.createServer(async(req,res)=>{
       s.busy=true;
       db.prepare("INSERT INTO sends(owner,requestId,state) VALUES(?,?,'pending')").run(owner,requestId);
       try{
-        const m=await s.client.sendMessage(chat,text);save(owner,m);
+        const m=await sendText(s.client,chat,text);save(owner,m);
         db.prepare("UPDATE sends SET state='sent',messageId=? WHERE owner=? AND requestId=?").run(m.id._serialized,owner,requestId);s.lastSend=Date.now();
         return reply({state:'sent',messageId:m.id._serialized});
-      }catch{db.prepare("UPDATE sends SET state='uncertain' WHERE owner=? AND requestId=?").run(owner,requestId);return reply({error:'Não foi possível confirmar o envio. Confira no celular antes de tentar novamente.',state:'uncertain'},502);}finally{s.busy=false;}
+      }catch(error){const code=sendErrorCode(error);console.error(JSON.stringify({event:'whatsapp_send_failed',code}));db.prepare("UPDATE sends SET state='uncertain' WHERE owner=? AND requestId=?").run(owner,requestId);return reply({error:code==='number_not_registered'?'Este telefone não foi encontrado no WhatsApp. Confira o país e o número.':'Não foi possível confirmar o envio ('+code+'). Confira no celular antes de tentar novamente.',state:'uncertain',code},502);}finally{s.busy=false;}
     }
     return reply({error:'Não encontrado'},404);
   }catch{return reply({error:'A conexão não respondeu. Confira o status e tente novamente.'},503);}
