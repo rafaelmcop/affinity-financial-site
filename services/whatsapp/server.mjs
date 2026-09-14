@@ -30,7 +30,7 @@ function save(owner,m){
   db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=excluded.ack').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
 }
 async function connect(owner){
-  if(sessions.get(owner)?.state==='error'){
+  if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
     await sessions.get(owner).client.destroy().catch(()=>{});
     sessions.delete(owner);
   }
