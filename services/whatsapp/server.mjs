@@ -30,6 +30,10 @@ function save(owner,m){
   db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=excluded.ack').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
 }
 async function connect(owner){
+  if(sessions.get(owner)?.state==='error'){
+    await sessions.get(owner).client.destroy().catch(()=>{});
+    sessions.delete(owner);
+  }
   if(sessions.has(owner))return sessions.get(owner);
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
   const key=createHash('sha256').update(owner).digest('hex');
@@ -42,7 +46,7 @@ async function connect(owner){
   client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;save(owner,m);db.prepare('UPDATE messages SET ack=? WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
   client.on('auth_failure',()=>{s.state='auth_failure';s.qr=null;});
   client.on('disconnected',()=>{s.state='disconnected';s.qr=null;});
-  s.initialization=client.initialize().catch(()=>{s.state='error';s.qr=null;});
+  s.initialization=client.initialize().catch(error=>{s.state='error';s.qr=null;console.error(JSON.stringify({event:'whatsapp_initialization_failed',name:error?.name,reason:String(error?.message||'').replace(/https?:\/\/\S+/g,'[url]').replace(/\b\d{8,}\b/g,'[id]').slice(0,400)}));});
   return s;
 }
 async function body(req){let size=0;const chunks=[];for await(const c of req){size+=c.length;if(size>20000)throw Error('Mensagem muito grande.');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString()||'{}');}
