@@ -1,12 +1,14 @@
+import {normalizeMessage,serializedKey} from './message.mjs';
+
 export async function sendText(client, chat, text) {
   let destination = chat;
   if (chat.endsWith('@c.us')) {
     const registered = await client.getNumberId(chat.split('@')[0]);
-    if (!registered?._serialized) throw Error('WHATSAPP_NUMBER_NOT_REGISTERED');
-    destination = registered._serialized;
+    if (!serializedKey(registered)) throw Error('WHATSAPP_NUMBER_NOT_REGISTERED');
+    destination = serializedKey(registered);
   }
   // Sending a message must not depend on marking earlier messages as read.
-  const message = await client.sendMessage(destination, text, {sendSeen:false});
+  const message = normalizeMessage(await client.sendMessage(destination, text, {sendSeen:false}));
   if (!message?.id?._serialized) throw Error('WHATSAPP_NO_SEND_CONFIRMATION');
   return message;
 }

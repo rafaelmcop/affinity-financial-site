@@ -7,6 +7,7 @@ import whatsapp from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
+import {normalizeMessage} from './message.mjs';
 
 const {Client,LocalAuth}=whatsapp;
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
@@ -23,6 +24,7 @@ const sessions=new Map();
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
 function save(owner,m){
+  normalizeMessage(m);
   const chat=m.fromMe?m.to:m.from;
   if(!safeChat(chat)||!m.id?._serialized)return;
   db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=excluded.ack').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
@@ -37,7 +39,7 @@ async function connect(owner){
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
   client.on('ready',()=>{s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;});
   client.on('message_create',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
-  client.on('message_ack',(m,ack)=>{try{db.prepare('UPDATE messages SET ack=? WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
+  client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;save(owner,m);db.prepare('UPDATE messages SET ack=? WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
   client.on('auth_failure',()=>{s.state='auth_failure';s.qr=null;});
   client.on('disconnected',()=>{s.state='disconnected';s.qr=null;});
   s.initialization=client.initialize().catch(()=>{s.state='error';s.qr=null;});
