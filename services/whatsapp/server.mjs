@@ -1,6 +1,6 @@
 import http from 'node:http';
 import {createHash} from 'node:crypto';
-import {mkdirSync} from 'node:fs';
+import {mkdirSync,existsSync,renameSync} from 'node:fs';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import whatsapp from 'whatsapp-web.js';
@@ -54,7 +54,20 @@ const server=http.createServer(async(req,res)=>{
     const s=sessions.get(owner);
     if(action==='/status'&&req.method==='GET')return reply({state:s?.state||'disconnected',number:s?.number||null,qr:s?.qr&&Date.now()-s.qrAt<45000?await QRCode.toDataURL(s.qr,{width:280,margin:2}):null});
     if(action==='/disconnect'&&req.method==='POST'){
-      if(s){s.state='disconnecting';await s.client.logout();await s.client.destroy().catch(()=>{});sessions.delete(owner);}return reply({ok:true});
+      if(!s)return reply({ok:true});
+      if(s.state==='disconnecting')return reply({error:'Aguarde a desconexão atual.'},409);
+      s.state='disconnecting';s.qr=null;
+      let revoked=false;
+      try{
+        try{await s.client.logout();revoked=true;}catch{console.error('whatsapp_logout_failed');}
+        // Logout can fail before destroying Chrome. Always close it before
+        // replacing the local credentials; keep message history untouched.
+        await s.client.destroy();
+        const directory=s.client.authStrategy.userDataDir;
+        if(directory&&existsSync(directory))renameSync(directory,directory+'.disconnected-'+Date.now());
+        sessions.delete(owner);
+        return reply({ok:true,warning:revoked?null:'Conexão local removida. Confira Aparelhos conectados no celular e remova a sessão antiga, se ela ainda aparecer.'});
+      }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
     }
     if(action==='/chats'&&req.method==='GET')return reply(db.prepare('SELECT chat,MAX(stamp) AS stamp,COUNT(*) AS count FROM messages WHERE owner=? GROUP BY chat ORDER BY stamp DESC LIMIT 100').all(owner));
     if(action==='/messages'&&req.method==='GET'){
