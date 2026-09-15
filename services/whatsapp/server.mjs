@@ -1,0 +1,135 @@
+import http from 'node:http';
+import {createHash} from 'node:crypto';
+import {mkdirSync,existsSync,renameSync} from 'node:fs';
+import path from 'node:path';
+import {DatabaseSync} from 'node:sqlite';
+import whatsapp from 'whatsapp-web.js';
+import QRCode from 'qrcode';
+import {verifyTicket} from './auth.mjs';
+import {sendText,sendErrorCode} from './send.mjs';
+import {normalizeMessage,serializedKey} from './message.mjs';
+import {installKeyCompatibility} from './compat.mjs';
+import {closeClient} from './close-client.mjs';
+import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
+
+const {Client,LocalAuth}=whatsapp;
+const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
+if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
+const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');
+mkdirSync(dataDir,{recursive:true,mode:0o700});
+process.umask(0o077);
+const db=new DatabaseSync(path.join(dataDir,'history.sqlite'));
+db.exec(`PRAGMA journal_mode=WAL;
+CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,chat TEXT NOT NULL,body TEXT NOT NULL,direction TEXT NOT NULL,stamp INTEGER NOT NULL,ack INTEGER DEFAULT 0,PRIMARY KEY(owner,id));
+CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
+CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
+const sessions=new Map();
+initializeContacts(db);
+const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
+const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
+function save(owner,m){
+  normalizeMessage(m);
+  const chat=m.fromMe?m.to:m.from;
+  if(!safeChat(chat)||!m.id?._serialized){console.error(JSON.stringify({event:'whatsapp_message_shape',keys:Object.keys(m||{}),idKeys:Object.keys(m?.id||{}),rawKeys:Object.keys(m?._data||{}),hasChat:safeChat(chat),hasId:!!m?.id?._serialized}));return;}
+  db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=MAX(messages.ack,excluded.ack)').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
+}
+async function connect(owner){
+  if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
+    const old=sessions.get(owner);
+    if(!old.closing)old.closing=closeClient(old.client).then(()=>{if(sessions.get(owner)===old)sessions.delete(owner);}).finally(()=>{old.closing=null;});
+    await old.closing;
+  }
+  if(sessions.has(owner))return sessions.get(owner);
+  if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
+  const key=createHash('sha256').update(owner).digest('hex');
+  const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
+  const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
+  client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
+  client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
+  client.on('ready',()=>{void (async()=>{try{
+    const compatibility=await client.pupPage.evaluate(installKeyCompatibility);
+    if(!compatibility.wid||!compatibility.message)throw Error('Key compatibility unavailable');
+    s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
+  }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
+  client.on('message_create',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
+  client.on('message',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
+  client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;save(owner,m);db.prepare('UPDATE messages SET ack=MAX(ack,?) WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
+  client.on('auth_failure',()=>{s.state='auth_failure';s.qr=null;});
+  client.on('disconnected',()=>{s.state='disconnected';s.qr=null;});
+  s.initialization=client.initialize().catch(error=>{s.state='error';s.qr=null;console.error(JSON.stringify({event:'whatsapp_initialization_failed',name:error?.name,reason:String(error?.message||'').replace(/https?:\/\/\S+/g,'[url]').replace(/\b\d{8,}\b/g,'[id]').slice(0,400)}));});
+  return s;
+}
+async function body(req){let size=0;const chunks=[];for await(const c of req){size+=c.length;if(size>20000)throw Error('Mensagem muito grande.');chunks.push(c);}return JSON.parse(Buffer.concat(chunks).toString()||'{}');}
+const server=http.createServer(async(req,res)=>{
+  const reply=(data,status=200)=>{res.writeHead(status,{'content-type':'application/json','cache-control':'no-store','x-content-type-options':'nosniff'});res.end(JSON.stringify(data));};
+  if(req.url==='/health'&&req.method==='GET')return reply({ok:true});
+  let owner;try{owner=verifyTicket(req.headers.authorization?.replace(/^Bearer /,''),secret);}catch{return reply({error:'Unauthorized'},401);}
+  const url=new URL(req.url,'http://localhost'),action=url.pathname;
+  try{
+    if(action==='/connect'&&req.method==='POST'){await connect(owner);return reply({ok:true});}
+    const s=sessions.get(owner);
+    if(action==='/status'&&req.method==='GET')return reply({state:s?.state||'disconnected',number:s?.number||null,qr:s?.qr&&Date.now()-s.qrAt<45000?await QRCode.toDataURL(s.qr,{width:280,margin:2}):null});
+    if(action==='/disconnect'&&req.method==='POST'){
+      if(!s)return reply({ok:true});
+      if(s.state==='disconnecting')return reply({error:'Aguarde a desconexão atual.'},409);
+      s.state='disconnecting';s.qr=null;
+      let revoked=false;
+      try{
+        try{await s.client.logout();revoked=true;}catch{console.error('whatsapp_logout_failed');}
+        // Logout can fail before destroying Chrome. Always close it before
+        // replacing the local credentials; keep message history untouched.
+        await closeClient(s.client);
+        const directory=s.client.authStrategy.userDataDir;
+        if(directory&&existsSync(directory))renameSync(directory,directory+'.disconnected-'+Date.now());
+        sessions.delete(owner);
+        return reply({ok:true,warning:revoked?null:'Conexão local removida. Confira Aparelhos conectados no celular e remova a sessão antiga, se ela ainda aparecer.'});
+      }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
+    }
+    if(action==='/chats'&&req.method==='GET')return reply(listContacts(db,owner));
+    if(action==='/messages'&&req.method==='GET'){
+      const chat=url.searchParams.get('chat')||'';if(!safeChat(chat))return reply({error:'Selecione uma conversa.'},400);
+      // Reconcile the selected conversation, including messages received while
+      // the test was disconnected. A single in-flight read per chat prevents overlap.
+      if(s?.state==='ready'){
+        const previous=s.refreshes.get(chat);
+        if(!previous||(!previous.promise&&Date.now()-previous.at>15000)){
+          const refresh={at:Date.now(),promise:null};s.refreshes.set(chat,refresh);
+          refresh.promise=(async()=>{try{
+            try{for(const pair of await s.client.getContactLidAndPhone([chat]))rememberContact(db,owner,pair);}catch{/* Identity lookup must not block history. */}
+            const conversation=await s.client.getChatById(chat);
+            conversation.id={...conversation.id,_serialized:serializedKey(conversation.id)||chat};
+            const items=await conversation.fetchMessages({limit:30});
+            for(const item of items)save(owner,item);
+            console.log(JSON.stringify({event:'whatsapp_history_reconciled',count:items.length}));
+          }catch(error){
+            const reason=String(error?.message||'');
+            if(/detached Frame|Target closed|Session closed|browser has disconnected/i.test(reason)){s.state='error';s.qr=null;}
+            console.error(JSON.stringify({event:'whatsapp_history_read_failed',reason:reason.replace(/https?:\/\/\S+/g,'[url]').replace(/\b\d{8,}\b/g,'[id]').slice(0,300)}));
+          }finally{refresh.at=Date.now();refresh.promise=null;}})();
+        }
+      }
+      const ids=contactIds(db,owner,chat);
+      return reply(db.prepare('SELECT id,body,direction,stamp,ack FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse());
+    }
+    if(action==='/send'&&req.method==='POST'){
+      if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
+      const input=await body(req),chat=String(input.chat||''),text=String(input.text||'').trim(),requestId=String(input.requestId||'');
+      if(!safeChat(chat)||!text||text.length>4000||!/^[-a-f0-9]{36}$/.test(requestId))return reply({error:'Revise o telefone e a mensagem.'},400);
+      const old=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,requestId);
+      if(old)return reply({...old,...(old.state==='sent'?{}:{error:'Este envio ainda não foi confirmado. Confira no celular antes de tentar novamente.'})},old.state==='sent'?200:409);
+      if(s.busy||Date.now()-s.lastSend<3000)return reply({error:'Aguarde o envio atual.'},429);
+      s.busy=true;
+      db.prepare("INSERT INTO sends(owner,requestId,state) VALUES(?,?,'pending')").run(owner,requestId);
+      try{
+        const m=await sendText(s.client,chat,text);save(owner,m);
+        db.prepare("UPDATE sends SET state='sent',messageId=? WHERE owner=? AND requestId=?").run(m.id._serialized,owner,requestId);s.lastSend=Date.now();
+        return reply({state:'sent',messageId:m.id._serialized});
+      }catch(error){const code=sendErrorCode(error);console.error(JSON.stringify({event:'whatsapp_send_failed',code}));db.prepare("UPDATE sends SET state='uncertain' WHERE owner=? AND requestId=?").run(owner,requestId);return reply({error:code==='number_not_registered'?'Este telefone não foi encontrado no WhatsApp. Confira o país e o número.':'Não foi possível confirmar o envio ('+code+'). Confira no celular antes de tentar novamente.',state:'uncertain',code},502);}finally{s.busy=false;}
+    }
+    return reply({error:'Não encontrado'},404);
+  }catch{return reply({error:'A conexão não respondeu. Confira o status e tente novamente.'},503);}
+});
+server.requestTimeout=20000;
+server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port})));
+async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
+process.on('SIGTERM',()=>{void stop();});process.on('SIGINT',()=>{void stop();});

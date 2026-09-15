@@ -1,0 +1,182 @@
+(() => {
+  if (document.querySelector('[data-affinity-messenger], [aria-label^="Abrir chat"]')) return;
+
+  async function api(name, input = {}, method = 'GET') {
+    const options = { credentials: 'include', cache: 'no-store' };
+    let url = `/api/trpc/${name}`;
+    if (method === 'GET') url += `?input=${encodeURIComponent(JSON.stringify({ json: input }))}&fresh=${Date.now()}`;
+    else {
+      options.method = 'POST';
+      options.headers = { 'content-type': 'application/json' };
+      options.body = JSON.stringify({ json: input });
+    }
+    const response = await fetch(url, options);
+    const text = await response.text();
+    let payload;
+    try { payload = JSON.parse(text); }
+    catch { throw new Error('O portal não respondeu corretamente.'); }
+    if (!response.ok || payload?.error) throw new Error(payload?.error?.json?.message || payload?.error?.message || 'Não foi possível concluir.');
+    return payload?.result?.data?.json;
+  }
+
+  const root = document.createElement('section');
+  root.dataset.affinityMessenger = 'true';
+  root.innerHTML = `<button type="button" class="af-chat-launcher" aria-label="Abrir chat"><span class="af-chat-symbol">◯</span><span>Mensagens</span><b class="af-chat-badge" hidden></b></button><div class="af-chat-panel" hidden><header><div><strong data-chat-identity>Usuário (Agente)</strong><small>Conversando com: <span data-chat-recipient>Administração</span></small></div><button type="button" data-chat-close aria-label="Minimizar chat">−</button></header><div class="af-chat-tools"><div class="af-chat-own-status"><span data-own-status-dot class="af-presence offline"></span><select data-own-status aria-label="Meu status"><option value="available">Disponível</option><option value="away">Ausente</option><option value="meeting">Em reunião</option></select></div><div class="af-chat-contact-row"><button type="button" class="af-chat-arrow" data-chat-prev aria-label="Mostrar contatos anteriores">‹</button><div class="af-chat-contacts" aria-label="Contatos"></div><button type="button" class="af-chat-arrow" data-chat-next aria-label="Mostrar próximos contatos">›</button></div><select data-chat-contact hidden aria-hidden="true"><option value="__admin__">Administração</option></select></div><div class="af-chat-messages"><p>Carregando conversa…</p></div><form class="af-chat-compose"><input data-chat-input maxlength="10000" placeholder="Escreva uma mensagem" autocomplete="off"><button type="submit">Enviar</button></form></div>`;
+  document.body.appendChild(root);
+  const style = document.createElement('style');
+  style.textContent = `[data-affinity-messenger]{font-family:Lato,Arial,sans-serif}.af-chat-launcher{position:fixed!important;right:24px!important;bottom:22px!important;z-index:1000!important;display:flex!important;align-items:center!important;gap:10px!important;height:56px!important;padding:0 20px!important;border:1px solid #dfb934!important;border-radius:999px!important;background:#122742!important;color:#fff!important;font-weight:900!important;box-shadow:0 16px 40px #0009!important;cursor:pointer!important}.af-chat-launcher:hover{background:#193554!important}.af-chat-symbol{display:grid;width:24px;height:24px;place-items:center;border:2px solid #dfb934;border-radius:50%;color:#dfb934}.af-chat-badge{position:absolute;right:-3px;top:-6px;min-width:22px;height:22px;padding:3px 6px;border-radius:999px;background:#ef4444;color:#fff;font-size:11px;text-align:center}.af-chat-panel{position:fixed;right:24px;bottom:22px;z-index:1001;width:min(400px,calc(100vw - 28px));height:min(650px,calc(100vh - 44px));overflow:hidden;border:1px solid #806b2e;border-radius:18px;background:#0b1524;color:#fff;box-shadow:0 20px 55px #000c}.af-chat-panel:not([hidden]){display:flex!important;flex-direction:column}.af-chat-panel header{display:flex;align-items:center;justify-content:space-between;padding:15px 16px;border-bottom:1px solid #554822;background:#122742}.af-chat-panel header small{display:block;margin-top:3px;color:#aeb7c5}.af-chat-panel header button{border:0;background:transparent;color:#fff;font-size:26px;cursor:pointer}.af-chat-tools{padding:10px 12px;border-bottom:1px solid #24364d}.af-chat-own-status{display:flex;align-items:center;gap:8px;margin-bottom:9px}.af-chat-own-status select{flex:1;padding:7px 9px;border:1px solid #354a63;border-radius:8px;background:#06101d;color:#fff}.af-chat-contact-row{display:grid;grid-template-columns:30px minmax(0,1fr) 30px;align-items:center;gap:5px}.af-chat-arrow{display:grid!important;width:30px!important;height:30px!important;place-items:center!important;padding:0!important;border:1px solid #53647a!important;border-radius:50%!important;background:#122742!important;color:#dfb934!important;font-size:24px!important;line-height:1!important;cursor:pointer!important}.af-chat-arrow:hover{background:#193554!important}.af-chat-contacts{display:flex;gap:7px;overflow-x:hidden;padding:2px 0 5px;scroll-behavior:smooth}.af-contact-chip{display:flex;flex:none;align-items:center;gap:7px;padding:7px 11px;border:0;border-radius:999px;background:#ffffff12;color:#e8edf4;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap}.af-contact-chip.active{background:#dfb934;color:#050505}.af-presence{display:inline-block;width:10px;height:10px;flex:none;border-radius:50%}.af-presence.available{background:#34d399}.af-presence.away{background:#fbbf24}.af-presence.meeting{background:#ef4444}.af-presence.offline{background:#6b7280}.af-chat-messages{display:flex;flex:1;flex-direction:column;gap:9px;overflow-y:auto;padding:14px;background:#050b13}.af-chat-messages>p{margin:auto;color:#9ca8b8}.af-chat-message{max-width:84%;padding:10px 12px;border-radius:15px;background:#193554;white-space:pre-wrap;overflow-wrap:anywhere}.af-chat-message.mine{align-self:flex-end;background:#dfb934;color:#050505}.af-chat-message small{display:block;margin-top:5px;font-size:10px;opacity:.65;text-align:right}.af-chat-compose{display:flex;gap:8px;padding:11px;border-top:1px solid #24364d}.af-chat-compose input{min-width:0;flex:1;padding:11px;border:1px solid #354a63;border-radius:9px;background:#050b13;color:#fff}.af-chat-compose button{padding:10px 14px;border:0;border-radius:9px;background:#dfb934;color:#050505;font-weight:900;cursor:pointer}@media(max-width:899px){.af-chat-launcher{right:14px!important;bottom:14px!important}.af-chat-panel{right:7px;bottom:7px;width:calc(100vw - 14px);height:calc(100vh - 14px)}}`;
+  document.head.appendChild(style);
+
+  const launcher = root.querySelector('.af-chat-launcher');
+  const panel = root.querySelector('.af-chat-panel');
+  const contact = root.querySelector('[data-chat-contact]');
+  const messages = root.querySelector('.af-chat-messages');
+  const input = root.querySelector('[data-chat-input]');
+  const badge = root.querySelector('.af-chat-badge');
+  const identity = root.querySelector('[data-chat-identity]');
+  const recipient = root.querySelector('[data-chat-recipient]');
+  const contacts = root.querySelector('.af-chat-contacts');
+  const ownStatus = root.querySelector('[data-own-status]');
+  const ownStatusDot = root.querySelector('[data-own-status-dot]');
+  let sessionName = '';
+  let sessionEmail = '';
+  try {
+    const session = JSON.parse(localStorage.getItem('agentSession') || '{}');
+    sessionEmail = String(session.email || '').toLowerCase();
+    sessionName = String(session.name || '');
+  } catch {}
+  const peer = () => contact.value === '__admin__' ? '' : contact.value;
+  const effectivePresence = row => {
+    const seen = new Date(String(row?.lastSeenAt || '')).getTime();
+    if (!Number.isFinite(seen) || Date.now() - seen > 120000) return 'offline';
+    return ['available', 'away', 'meeting'].includes(String(row?.presenceStatus)) ? String(row.presenceStatus) : 'available';
+  };
+
+  function render(rows) {
+    messages.replaceChildren();
+    if (!Array.isArray(rows) || !rows.length) {
+      const empty = document.createElement('p');
+      empty.textContent = 'Comece uma conversa.';
+      messages.appendChild(empty);
+      return;
+    }
+    rows.forEach(row => {
+      const mine = String(row.senderEmail || '').toLowerCase() === sessionEmail;
+      const bubble = document.createElement('div');
+      bubble.className = `af-chat-message${mine ? ' mine' : ''}`;
+      const body = document.createElement('div');
+      body.textContent = row.body || '';
+      const meta = document.createElement('small');
+      const sent = row.sentAt ? new Date(row.sentAt).toLocaleString('pt-BR') : '';
+      meta.textContent = `${sent}${mine ? ` · ${row.readAt ? 'Lido' : 'Enviado'}` : ''}`;
+      bubble.append(body, meta);
+      messages.appendChild(bubble);
+    });
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  async function refreshUnread() {
+    try {
+      const data = await api('crm.internalUnreadCount', { mode: 'agent' });
+      const count = Number(data?.count || 0);
+      badge.hidden = count <= 0;
+      badge.textContent = count > 99 ? '99+' : String(count);
+      launcher.setAttribute('aria-label', count ? `Abrir chat, ${count} mensagem(ns) nova(s)` : 'Abrir chat');
+    } catch {}
+  }
+
+  async function loadConversation() {
+    messages.innerHTML = '<p>Carregando conversa…</p>';
+    try {
+      const peerEmail = peer();
+      const inputData = { mode: 'agent', ...(peerEmail ? { peerEmail } : {}) };
+      render(await api('crm.internalMessages', inputData));
+      await api('crm.markInternalMessagesRead', inputData, 'POST');
+      refreshUnread();
+    } catch (error) {
+      messages.replaceChildren();
+      const warning = document.createElement('p');
+      warning.textContent = error.message;
+      messages.appendChild(warning);
+    }
+  }
+
+  async function loadContacts() {
+    try {
+      const [rows, presence] = await Promise.all([api('crm.assignees'), api('crm.presence')]);
+      sessionEmail = String(presence?.currentEmail || sessionEmail).toLowerCase();
+      const current = (presence?.users || []).find(row => String(row.email || '').toLowerCase() === sessionEmail);
+      sessionName = String(current?.name || sessionName || sessionEmail || 'Usuário');
+      identity.textContent = `${sessionName} (Agente)`;
+      recipient.textContent = contact.value === '__admin__' ? sessionName : recipient.textContent;
+      ownStatus.value = ['available', 'away', 'meeting'].includes(String(current?.presenceStatus)) ? current.presenceStatus : 'available';
+      ownStatusDot.className = `af-presence ${effectivePresence(current)}`;
+      const presenceUsers = Array.isArray(presence?.users) ? presence.users : [];
+      const adminStates = presenceUsers.filter(row => ['admin', 'both'].includes(String(row.accountType || ''))).map(effectivePresence);
+      const adminPresence = adminStates.includes('available') ? 'available' : adminStates.includes('meeting') ? 'meeting' : adminStates.includes('away') ? 'away' : 'offline';
+      const selected = contact.value || '__admin__';
+      contact.innerHTML = `<option value="__admin__">${sessionName}</option>`;
+      contacts.replaceChildren();
+      const entries = [{ email: '__admin__', name: sessionName, presence: adminPresence }];
+      (Array.isArray(rows) ? rows : []).filter(row => ['agent', 'both'].includes(String(row.accountType || '')) && String(row.email || '').toLowerCase() !== sessionEmail).forEach(row => {
+        const option = document.createElement('option');
+        option.value = String(row.email || '').toLowerCase();
+        option.textContent = row.name || row.email;
+        contact.appendChild(option);
+        const statusRow = presenceUsers.find(item => String(item.email || '').toLowerCase() === option.value);
+        entries.push({ email: option.value, name: option.textContent, presence: effectivePresence(statusRow) });
+      });
+      contact.value = entries.some(item => item.email === selected) ? selected : '__admin__';
+      entries.forEach(item => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = `af-contact-chip${item.email === contact.value ? ' active' : ''}`;
+        chip.title = item.presence === 'available' ? 'Disponível' : item.presence === 'away' ? 'Ausente' : item.presence === 'meeting' ? 'Em reunião' : 'Offline';
+        const dot = document.createElement('span');
+        dot.className = `af-presence ${item.presence}`;
+        chip.append(dot, document.createTextNode(item.name));
+        chip.addEventListener('click', () => {
+          contact.value = item.email;
+          recipient.textContent = item.name;
+          contacts.querySelectorAll('.af-contact-chip').forEach(button => button.classList.toggle('active', button === chip));
+          chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          loadConversation();
+        });
+        contacts.appendChild(chip);
+      });
+    } catch {}
+  }
+
+  launcher.addEventListener('click', () => { panel.hidden = false; launcher.hidden = true; loadConversation(); });
+  root.querySelector('[data-chat-close]').addEventListener('click', () => { panel.hidden = true; launcher.hidden = false; });
+  root.querySelector('[data-chat-prev]').addEventListener('click', () => contacts.scrollBy({ left: -220, behavior: 'smooth' }));
+  root.querySelector('[data-chat-next]').addEventListener('click', () => contacts.scrollBy({ left: 220, behavior: 'smooth' }));
+  contact.addEventListener('change', loadConversation);
+  contact.addEventListener('change', () => { recipient.textContent = contact.options[contact.selectedIndex]?.textContent || 'Contato'; });
+  ownStatus.addEventListener('change', async () => {
+    try {
+      await api('crm.setPresence', { status: ownStatus.value }, 'POST');
+      ownStatusDot.className = `af-presence ${ownStatus.value}`;
+      await loadContacts();
+    } catch (error) { alert(error.message); }
+  });
+  root.querySelector('.af-chat-compose').addEventListener('submit', async event => {
+    event.preventDefault();
+    const body = input.value.trim();
+    if (!body) return;
+    const button = event.currentTarget.querySelector('button');
+    button.disabled = true;
+    try {
+      const peerEmail = peer();
+      await api('crm.sendInternalMessage', { mode: 'agent', ...(peerEmail ? { peerEmail } : {}), body }, 'POST');
+      input.value = '';
+      await loadConversation();
+    } catch (error) { alert(error.message); }
+    finally { button.disabled = false; }
+  });
+  loadContacts();
+  refreshUnread();
+  setInterval(refreshUnread, 10000);
+  setInterval(() => { if (!panel.hidden) loadConversation(); }, 10000);
+  setInterval(loadContacts, 30000);
+})();
