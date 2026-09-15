@@ -55910,10 +55910,14 @@ Affinity Financial Consulting`,
       rows.results.map((row) => ({ ...row, id: Number(row.id) }))
     );
   }
-  if (name === "agent.setAutomationSubscription") {
+  if (name === "agent.setAutomationSubscription" || name === "agent.automationSubscriptions") {
     const owner = adminEmail.toLowerCase(), clientId = Number(input.clientId || 0), occasion = String(input.occasion || '').trim().slice(0,80);
-    if (!clientId || !occasion) return trpcError("Cliente ou automação inválidos");
+    if (!Number.isSafeInteger(clientId) || clientId<=0) return trpcError("Cliente inválido");
+    const assigned = await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId,owner).first();
+    if (!assigned) return trpcError("Cliente não encontrado ou sem permissão de acesso");
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS crmAutomationSubscriptions (agentEmail TEXT NOT NULL,clientId INTEGER NOT NULL,occasion TEXT NOT NULL,isActive INTEGER NOT NULL DEFAULT 1,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(agentEmail,clientId,occasion))").run();
+    if(name === "agent.automationSubscriptions")return trpcResult((await env.DB.prepare("SELECT occasion,isActive,updatedAt FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=?").bind(owner,clientId).all()).results);
+    if (!/^[a-z_]+(?::\d+)?$/.test(occasion) || typeof input.isActive!=='boolean') return trpcError("Automação inválida");
     await env.DB.prepare("INSERT INTO crmAutomationSubscriptions(agentEmail,clientId,occasion,isActive,updatedAt) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,clientId,occasion) DO UPDATE SET isActive=excluded.isActive,updatedAt=CURRENT_TIMESTAMP").bind(owner,clientId,occasion,input.isActive===false?0:1).run();
     return trpcResult({success:true,isActive:input.isActive!==false});
   }
@@ -58461,6 +58465,10 @@ async function runMessageAutomations(env) {
       const policies = await env.DB.prepare(policySql).bind(...policyBinds).all();
       for (const policy of policies.results) {
         if (deliveryBudget <= 0) return;
+        try {
+          const preference=await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=? AND occasion='policy_anniversary'").bind(String(automation.agentEmail).toLowerCase(),Number(policy.clientId)).first();
+          if(preference && Number(preference.isActive)===0)continue;
+        } catch(error){if(!String(error).includes('no such table: crmAutomationSubscriptions'))throw error;}
         const reviewDates = flexLifeReviewDates(String(policy.issuedAt));
         if (!reviewDates) continue;
         const noticeDay = reviewDates.noticeAt.toISOString().slice(0, 10);
@@ -58574,9 +58582,10 @@ async function runMessageAutomations(env) {
     for (const client of clients.results) {
       if (deliveryBudget <= 0) return;
       try {
-        const unsub = await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE lower(agentEmail)=? AND clientId=? AND occasion=? LIMIT 1").bind(String(automation.agentEmail).toLowerCase(),Number(client.id),occasion).first();
+        const scope=occasion==='monthly'?`monthly:${automation.monthNumber}`:occasion==='custom'?`custom:${automation.id}`:occasion;
+        const unsub = await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE lower(agentEmail)=? AND clientId=? AND occasion=? LIMIT 1").bind(String(automation.agentEmail).toLowerCase(),Number(client.id),scope).first();
         if (unsub && Number(unsub.isActive)===0) continue;
-      } catch {}
+      } catch(error) { if(!String(error).includes('no such table: crmAutomationSubscriptions'))throw error; }
       if (occasion === "birthday" && !automation.clientId) {
         const customized = await env.DB.prepare(
           "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND clientId=? AND isActive=1 LIMIT 1"
