@@ -4,6 +4,14 @@ import {createHmac} from 'node:crypto';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage} from './message.mjs';
+import {installKeyCompatibility} from './compat.mjs';
+test('Compatibility restores keys inside the send library, not just after sending',()=>{
+ class Wid{constructor(){this.user='123456789';this.server='c.us';}}
+ class Key{constructor(data){Object.assign(this,data);}}
+ const previous=globalThis.window;
+ globalThis.window={require:name=>name==='WAWebWidFactory'?{createWid:()=>new Wid()}:Key};
+ try{assert.deepEqual(installKeyCompatibility(),{wid:true,message:true});assert.equal(new Key({fromMe:true,remote:new Wid(),id:'ABC'})._serialized,'true_123456789@c.us_ABC');}finally{globalThis.window=previous;}
+});
 import {DatabaseSync} from 'node:sqlite';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 test('Phone and internal identity share history only within their owner',()=>{

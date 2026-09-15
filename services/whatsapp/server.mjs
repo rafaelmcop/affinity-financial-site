@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
+import {installKeyCompatibility} from './compat.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
@@ -43,7 +44,11 @@ async function connect(owner){
   const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
   client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
-  client.on('ready',()=>{s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;});
+  client.on('ready',()=>{void (async()=>{try{
+    const compatibility=await client.pupPage.evaluate(installKeyCompatibility);
+    if(!compatibility.wid||!compatibility.message)throw Error('Key compatibility unavailable');
+    s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
+  }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
   client.on('message_create',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
   client.on('message',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
   client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;save(owner,m);db.prepare('UPDATE messages SET ack=MAX(ack,?) WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});

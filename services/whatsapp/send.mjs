@@ -8,7 +8,7 @@ export async function sendText(client, chat, text) {
     destination = serializedKey(registered);
   }
   // Sending a message must not depend on marking earlier messages as read.
-  const message = normalizeMessage(await client.sendMessage(destination, text, {sendSeen:false}));
+  const message = normalizeMessage(await client.sendMessage(destination, text, {sendSeen:false,waitUntilMsgSent:true}));
   if (!message?.id?._serialized) throw Error('WHATSAPP_NO_SEND_CONFIRMATION');
   return message;
 }
