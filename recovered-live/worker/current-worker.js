@@ -53350,6 +53350,12 @@ async function parseInputs(request) {
     const encoded = new URL(request.url).searchParams.get("input");
     return encoded ? JSON.parse(encoded) : {};
   }
+  if(new URL(request.url).pathname.includes('agent.sendMailboxEmail')){
+    const reader=request.body?.getReader();if(!reader)return {};
+    let size=0;const parts=[];
+    while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>15*1024*1024){await reader.cancel();throw Error('Os anexos devem somar no máximo 10 MB.');}parts.push(value);}
+    return JSON.parse(await new Blob(parts).text());
+  }
   return await request.json();
 }
 __name(parseInputs, "parseInputs");
@@ -55379,6 +55385,8 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.sendMailboxEmail") {
     const owner = adminEmail.toLowerCase();
+    let attachments;
+    try { attachments=parseMailAttachments(input.attachments); } catch(error){return trpcError(error.message);}
     let body = String(input.body || "").trim();
     const requestedSubject = String(input.subject || "").trim();
     const replyToId = Number(input.replyToId || 0);
@@ -55410,11 +55418,13 @@ Detalhes: ${details}` : ""}`;
       to: recipient,
       subject,
       html: await signedClientEmailHtml(env, owner, body),
+      attachments,
       replyTo: String(config.fromEmail),
       inReplyTo,
       references: inReplyTo ? [inReplyTo] : void 0
     });
     const externalId = String(sent.messageId || `portal:${owner}:${Date.now()}`);
+    if(attachments.length)body+='\n\nAnexos enviados: '+attachments.map(a=>a.filename).join(', ');
     const topic = classifyMailboxTopic(subject, body);
     const statements = [env.DB.prepare("INSERT INTO agentMailboxEmails (agentEmail,clientId,externalId,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'sent','Enviado diretamente pelo portal',?)").bind(owner, clientId, externalId, String(config.fromEmail), recipient, subject, body, topic)];
     if (clientId) {
@@ -55915,10 +55925,10 @@ Affinity Financial Consulting`,
     if (!Number.isSafeInteger(clientId) || clientId<=0) return trpcError("Cliente inválido");
     const assigned = await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId,owner).first();
     if (!assigned) return trpcError("Cliente não encontrado ou sem permissão de acesso");
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS crmAutomationSubscriptions (agentEmail TEXT NOT NULL,clientId INTEGER NOT NULL,occasion TEXT NOT NULL,isActive INTEGER NOT NULL DEFAULT 1,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(agentEmail,clientId,occasion))").run();
-    if(name === "agent.automationSubscriptions")return trpcResult((await env.DB.prepare("SELECT occasion,isActive,updatedAt FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=?").bind(owner,clientId).all()).results);
+    await ensurePreferences(env.DB);
+    if(name === "agent.automationSubscriptions")return trpcResult((await env.DB.prepare("SELECT occasion,isActive,updatedAt,requestedBy FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=?").bind(owner,clientId).all()).results);
     if (!/^[a-z_]+(?::\d+)?$/.test(occasion) || typeof input.isActive!=='boolean') return trpcError("Automação inválida");
-    await env.DB.prepare("INSERT INTO crmAutomationSubscriptions(agentEmail,clientId,occasion,isActive,updatedAt) VALUES(?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,clientId,occasion) DO UPDATE SET isActive=excluded.isActive,updatedAt=CURRENT_TIMESTAMP").bind(owner,clientId,occasion,input.isActive===false?0:1).run();
+    await env.DB.prepare("INSERT INTO crmAutomationSubscriptions(agentEmail,clientId,occasion,isActive,updatedAt,requestedBy) VALUES(?,?,?,?,CURRENT_TIMESTAMP,'agent') ON CONFLICT(agentEmail,clientId,occasion) DO UPDATE SET isActive=excluded.isActive,updatedAt=CURRENT_TIMESTAMP,requestedBy='agent'").bind(owner,clientId,occasion,input.isActive===false?0:1).run();
     return trpcResult({success:true,isActive:input.isActive!==false});
   }
   if (name === "agent.messageHistory") {
@@ -56120,6 +56130,16 @@ Affinity Financial Consulting`,
       return trpcError(message);
     }
   }
+  if (name === "agent.fiveRingsCredits") {
+    const owner=adminEmail.toLowerCase(),cached=await cachedFiveRingsCredits(env.DB,owner);
+    if(cached && !input.refresh)return trpcResult({...cached,error:null});
+    const connection=await env.DB.prepare('SELECT encryptedSession FROM agentFiveRingsConnections WHERE lower(agentEmail)=?').bind(owner).first();
+    if(!connection?.encryptedSession)return trpcResult({...cached,error:'Conecte ou sincronize o Five Rings nas configurações.'});
+    try{
+      const session=JSON.parse(await decryptSmtpPassword(String(connection.encryptedSession),env.JWT_SECRET));
+      return trpcResult({...await refreshFiveRingsCredits(env,owner,session,fiveRingsFetch),error:null});
+    }catch(error){return trpcResult({...cached,error:String(error.message||'Não foi possível atualizar os créditos.')});}
+  }
   if (name === "agent.syncFiveRings") {
     const owner = adminEmail.toLowerCase();
     const row = await env.DB.prepare(
@@ -56140,6 +56160,7 @@ Affinity Financial Consulting`,
       const login = activeSession ? null : await verifyFiveRingsLogin(String(row.portalEmail), password);
       if (activeSession) {
         const records2 = await readFiveRingsRecords(activeSession, activeSession.sections);
+        await refreshFiveRingsCredits(env,owner,activeSession,fiveRingsFetch).catch(()=>{});
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
         const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
         for (const record of records2) {
@@ -56182,6 +56203,7 @@ Affinity Financial Consulting`,
         return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0, message: "Código solicitado. Informe-o para continuar sem recarregar a página." });
       }
       const records = await readFiveRingsRecords(login.session, login.sections);
+      await refreshFiveRingsCredits(env,owner,login.session,fiveRingsFetch).catch(()=>{});
       let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
       const knownPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
       for (const record of records) {
@@ -57929,6 +57951,8 @@ Affinity Financial Consulting`,
 __name(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async fetch(request, env) {
+    const preferenceResponse=await preferenceRoute(request,env);
+    if(preferenceResponse)return preferenceResponse;
     const whatsappResponse = await whatsappRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
     if (whatsappResponse) return secureResponse(whatsappResponse, {privateData:true});
     const branding = await siteBrandingRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
@@ -58510,9 +58534,9 @@ async function runMessageAutomations(env) {
           const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
             subject,
-            html: clientEmailHtml(
+            html: await automationFooter(env,automation,policy,clientEmailHtml(
               `<p>${body.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replaceAll("\n", "<br>")}</p>`
-            )
+            ))
           });
           await env.DB.batch([
             env.DB.prepare(
@@ -58614,9 +58638,9 @@ async function runMessageAutomations(env) {
           {
             to: String(client.email),
             subject: personalize(automation.subject || automation.title),
-            html: clientEmailHtml(
+            html: await automationFooter(env,automation,client,clientEmailHtml(
               `<p>${personalizedMessage.replaceAll("\n", "<br>")}</p>`
-            )
+            ))
           }
         );
         const statements = [
@@ -58660,6 +58684,9 @@ async function runMessageAutomations(env) {
 __name(runMessageAutomations, "runMessageAutomations");
 import { siteBrandingRoute, applySiteBranding } from './site-branding.js';
 import { whatsappRoute } from './whatsapp.js';
+import { parseMailAttachments } from './mail-attachments.js';
+import {ensurePreferences,automationFooter,preferenceRoute} from './automation-preferences.js';
+import {cachedFiveRingsCredits,refreshFiveRingsCredits} from './five-rings-credits.js';
 import { isActiveClientPolicy, policyBelongsToCrmClient } from './crm-stage.js';
 export { cloudflare_staging_default as default };
 /*! Bundled license information:

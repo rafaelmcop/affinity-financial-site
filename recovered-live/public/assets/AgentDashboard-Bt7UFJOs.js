@@ -29,6 +29,9 @@ import "./send-u-E2Isyn.js";
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }],
 ]);
 function H() {
+  const [credits,setCredits]=k.useState(null),[creditLoading,setCreditLoading]=k.useState(true);
+  async function updateCredits(refresh=false){setCreditLoading(true);try{const response=await fetch('/api/trpc/agent.fiveRingsCredits?input='+encodeURIComponent(JSON.stringify({json:{refresh}})),{credentials:'include',cache:'no-store'});const data=await response.json();if(data.error)throw Error(data.error.json?.message||'Não foi possível consultar os créditos');setCredits(data.result.data.json);}catch(error){setCredits(previous=>({...previous,error:error.message}));}finally{setCreditLoading(false);}}
+  k.useEffect(()=>{void updateCredits();},[]);
   const [, o] = w(),
     r = i.agent.dashboard.useQuery(void 0, {
       staleTime: 0,
@@ -95,10 +98,10 @@ function H() {
   A("portal", d, "affinity-agent-pending");
   const N = [
     ["Agenda de hoje", s?.todayMeetingCount ?? s?.todayMeetings?.length ?? 0, x],
-    ["Pontuação atual", l.data?.score ?? E.score ?? y ?? s?.score, M],
+    ["Total Credits · Five Rings", credits?.totalCredits?.toLocaleString('pt-BR') ?? (creditLoading?'…':'Não sincronizado'), M],
     [
-      "Pontos de todo o tempo",
-      l.data?.lifetimeScore ?? E.lifetimeScore ?? s?.lifetimeScore ?? y,
+      "Leadership · Five Rings",
+      credits?.leadershipCurrent?.toLocaleString('pt-BR') ?? (creditLoading?'…':'Não sincronizado'),
       M,
     ],
   ];
@@ -144,6 +147,8 @@ function H() {
                       className: "mt-1 text-3xl font-bold text-white",
                       children: a ?? (l.isError && r.isError ? "Erro" : "…"),
                     }),
+                    t.startsWith('Leadership') && e.jsxs('div',{className:'mt-3 text-sm text-gray-300',children:[e.jsx('p',{children:'Meta: '+(credits?.leadershipGoal?.toLocaleString('pt-BR')??'—')}),e.jsx('p',{children:'Faltam: '+(credits?.leadershipRemaining?.toLocaleString('pt-BR')??'—')})]}),
+                    t.startsWith('Total Credits') && e.jsxs('div',{className:'mt-3 text-xs text-gray-400',children:[e.jsx('p',{children:credits?.updatedAt?'Atualizado em '+new Date(credits.updatedAt.replace(' ','T')+'Z').toLocaleString('pt-BR'):'Valores oficiais da Five Rings'}),credits?.error&&e.jsx('p',{children:credits.error}),e.jsx('button',{type:'button',disabled:creditLoading,onClick:()=>updateCredits(true),className:'mt-2 text-gold underline',children:creditLoading?'Atualizando…':'Atualizar créditos'})]}),
                   ],
                 },
                 t
