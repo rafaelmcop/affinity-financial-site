@@ -34,6 +34,8 @@ const server=http.createServer(async(req,res)=>{
    return reply(html,200,'text/html;charset=utf-8');
   }
   if(url.pathname==='/agent-whatsapp.js'&&req.method==='GET')return reply(readFileSync(new URL('agent-whatsapp.js',root)),200,'text/javascript');
+  if(url.pathname==='/whatsapp-phone.mjs'&&req.method==='GET')return reply(readFileSync(new URL('whatsapp-phone.mjs',root)),200,'text/javascript');
+  if(url.pathname==='/api/agent/whatsapp/contacts'&&req.method==='GET')return reply('[]');
   const action=url.pathname.replace('/api/agent/whatsapp/','');
   if(!url.pathname.startsWith('/api/agent/whatsapp/')||!['status','connect','disconnect','chats','messages','send'].includes(action))return reply('{"error":"Não encontrado"}',404);
   const mutation=['connect','disconnect','send'].includes(action);

@@ -4,6 +4,17 @@ import {createHmac} from 'node:crypto';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage} from './message.mjs';
+import {phoneNumber,matchContact} from '../../recovered-live/public/whatsapp-phone.mjs';
+test('Country prefix defaults to USA without doubling codes; ambiguous contacts stay unlinked',()=>{
+ assert.equal(phoneNumber('(857) 555-0123'),'18575550123');
+ assert.equal(phoneNumber('18575550123'),'18575550123');
+ assert.equal(phoneNumber('+55 11 99999-8888'),'5511999998888');
+ assert.equal(phoneNumber('11 99999-8888','BR'),'5511999998888');
+ assert.equal(phoneNumber('123'),'');
+ const rows=[{id:1,name:'Example',phone:'8575550123'}];
+ assert.equal(matchContact(rows,'18575550123').id,1);
+ assert.equal(matchContact([...rows,{id:2,phone:'+18575550123'}],'18575550123'),null);
+});
 import {installKeyCompatibility} from './compat.mjs';
 test('Compatibility restores keys inside the send library, not just after sending',()=>{
  class Wid{constructor(){this.user='123456789';this.server='c.us';}}

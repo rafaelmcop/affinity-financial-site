@@ -10,6 +10,10 @@ export async function whatsappRoute(request,env,auth){
     if(!account||!Number(account.isActive)||account.status!=='approved'||!['agent','both'].includes(account.accountType))return json({error:'Acesso restrito ao agente.'},403);
     if(page)return env.ASSETS.fetch(new Request(new URL('/agent-whatsapp.html',url),request));
     const action=url.pathname.split('/').at(-1),method=request.method;
+    if(action==='contacts'&&method==='GET'){
+      const rows=await env.DB.prepare('SELECT id,name,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name COLLATE NOCASE').bind(email.toLowerCase()).all();
+      return json(rows.results||[]);
+    }
     if(action==='contact'&&method==='GET'){
       const id=Number(url.searchParams.get('clientId'));
       if(!Number.isInteger(id)||id<=0)return json({error:'Cliente inválido.'},400);
