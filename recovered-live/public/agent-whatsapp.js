@@ -10,6 +10,7 @@ $('disconnect').onclick=async()=>{if(!confirm('Desconectar este WhatsApp do port
 $('open').onclick=()=>{const number=$('phone').value.replace(/\D/g,'');if(!/^\d{8,15}$/.test(number))return notice('Informe o país e o telefone completo.');chat=number+'@c.us';$('contact').textContent='+'+number;$('send').disabled=state!=='ready';void messages().catch(e=>notice(e.message));};
 $('send').onclick=async()=>{const text=$('text').value.trim();if(!text||!chat||sending)return;sending=true;$('send').disabled=true;requestId=requestId||crypto.randomUUID();try{await api('send',{chat,text,requestId});$('text').value='';requestId=null;notice('Mensagem enviada.');await messages();}catch(e){notice(e.message);}finally{sending=false;$('send').disabled=state!=='ready';}};
 $('text').oninput=()=>{requestId=null;};
+$('text').onkeydown=event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();if(!$('send').disabled)$('send').click();}};
 async function start(){const clientId=Number(new URLSearchParams(location.search).get('clientId'));if(clientId)try{const c=await api('contact?clientId='+clientId);$('phone').value=c.phone;const number=c.phone.replace(/\D/g,'');$('contact').textContent=c.name;if(number.length>=8){chat=number+'@c.us';}notice('Confira o código do país no telefone antes de enviar.');}catch(e){notice(e.message);}void poll();}
 async function poll(){await refresh();if(!stopped)setTimeout(poll,state==='qr'||state==='connecting'?3000:8000);}window.addEventListener('pagehide',()=>{stopped=true;});void start();
 })();
