@@ -7,7 +7,7 @@ import whatsapp from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
-import {normalizeMessage} from './message.mjs';
+import {normalizeMessage,serializedKey} from './message.mjs';
 
 const {Client,LocalAuth}=whatsapp;
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
@@ -26,7 +26,7 @@ const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(valu
 function save(owner,m){
   normalizeMessage(m);
   const chat=m.fromMe?m.to:m.from;
-  if(!safeChat(chat)||!m.id?._serialized)return;
+  if(!safeChat(chat)||!m.id?._serialized){console.error(JSON.stringify({event:'whatsapp_message_shape',keys:Object.keys(m||{}),idKeys:Object.keys(m?.id||{}),rawKeys:Object.keys(m?._data||{}),hasChat:safeChat(chat),hasId:!!m?.id?._serialized}));return;}
   db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=excluded.ack').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
 }
 async function connect(owner){
@@ -38,7 +38,7 @@ async function connect(owner){
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
   const key=createHash('sha256').update(owner).digest('hex');
   const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
-  const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0};sessions.set(owner,s);
+  const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
   client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
   client.on('ready',()=>{s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;});
@@ -78,6 +78,25 @@ const server=http.createServer(async(req,res)=>{
     if(action==='/chats'&&req.method==='GET')return reply(db.prepare('SELECT chat,MAX(stamp) AS stamp,COUNT(*) AS count FROM messages WHERE owner=? GROUP BY chat ORDER BY stamp DESC LIMIT 100').all(owner));
     if(action==='/messages'&&req.method==='GET'){
       const chat=url.searchParams.get('chat')||'';if(!safeChat(chat))return reply({error:'Selecione uma conversa.'},400);
+      // Reconcile the selected conversation, including messages received while
+      // the test was disconnected. A single in-flight read per chat prevents overlap.
+      if(s?.state==='ready'){
+        const previous=s.refreshes.get(chat);
+        if(!previous||(!previous.promise&&Date.now()-previous.at>15000)){
+          const refresh={at:Date.now(),promise:null};s.refreshes.set(chat,refresh);
+          refresh.promise=(async()=>{try{
+            const conversation=await s.client.getChatById(chat);
+            conversation.id={...conversation.id,_serialized:serializedKey(conversation.id)||chat};
+            const items=await conversation.fetchMessages({limit:30});
+            for(const item of items)save(owner,item);
+            console.log(JSON.stringify({event:'whatsapp_history_reconciled',count:items.length}));
+          }catch(error){
+            const reason=String(error?.message||'');
+            if(/detached Frame|Target closed|Session closed|browser has disconnected/i.test(reason)){s.state='error';s.qr=null;}
+            console.error(JSON.stringify({event:'whatsapp_history_read_failed',reason:reason.replace(/https?:\/\/\S+/g,'[url]').replace(/\b\d{8,}\b/g,'[id]').slice(0,300)}));
+          }finally{refresh.at=Date.now();refresh.promise=null;}})();
+        }
+      }
       return reply(db.prepare('SELECT id,body,direction,stamp,ack FROM messages WHERE owner=? AND chat=? ORDER BY stamp DESC LIMIT 100').all(owner,chat).reverse());
     }
     if(action==='/send'&&req.method==='POST'){

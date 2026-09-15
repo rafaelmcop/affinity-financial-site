@@ -2,7 +2,15 @@
 // _serialized. Keep the bridge compatible with both wire formats.
 export function serializedKey(key) {
   if (typeof key === 'string') return key;
-  return key?._serialized || key?.$1 || '';
+  if (!key || typeof key !== 'object') return '';
+  if (key._serialized || key.$1) return key._serialized || key.$1;
+  // Some builds omit the serialized property but retain the key components.
+  if (typeof key.user === 'string' && typeof key.server === 'string') return key.user+'@'+key.server;
+  const remote = typeof key.remote === 'string' ? key.remote : serializedKey(key.remote);
+  if (typeof key.fromMe === 'boolean' && remote && typeof key.id === 'string') {
+    return String(key.fromMe)+'_'+remote+'_'+key.id+(key.participant?'_'+serializedKey(key.participant):'');
+  }
+  return Object.values(key).find(value=>typeof value==='string' && /^(?:true|false)_\d+@(?:c\.us|lid)_[A-Za-z0-9]+$/.test(value)) || '';
 }
 
 export function normalizeMessage(message) {

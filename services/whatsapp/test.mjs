@@ -4,6 +4,13 @@ import {createHmac} from 'node:crypto';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage} from './message.mjs';
+test('Reconstruct message keys without losing received replies',()=>{
+ const message=normalizeMessage({id:{fromMe:false,remote:{user:'123456789',server:'lid'},id:'ABC'},body:'reply'});
+ assert.equal(message.id._serialized,'false_123456789@lid_ABC');
+ assert.equal(message.from,'123456789@lid');
+ assert.equal(message.fromMe,false);
+ assert.equal(normalizeMessage(message).id._serialized,'false_123456789@lid_ABC');
+});
 test('New WhatsApp keys preserve incoming/outgoing messages and acknowledgments',async()=>{
  const incoming=normalizeMessage({id:{$1:'false_123456789@c.us_ABC',fromMe:false},_data:{from:{$1:'123456789@c.us'},to:{$1:'987654321@c.us'}},body:'reply'});
  assert.equal(incoming.id._serialized,'false_123456789@c.us_ABC');
