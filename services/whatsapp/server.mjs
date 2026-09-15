@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
+import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
@@ -21,13 +22,14 @@ CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,chat TE
 CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
 CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
 const sessions=new Map();
+initializeContacts(db);
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
 function save(owner,m){
   normalizeMessage(m);
   const chat=m.fromMe?m.to:m.from;
   if(!safeChat(chat)||!m.id?._serialized){console.error(JSON.stringify({event:'whatsapp_message_shape',keys:Object.keys(m||{}),idKeys:Object.keys(m?.id||{}),rawKeys:Object.keys(m?._data||{}),hasChat:safeChat(chat),hasId:!!m?.id?._serialized}));return;}
-  db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=excluded.ack').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
+  db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=MAX(messages.ack,excluded.ack)').run(owner,m.id._serialized,chat,String(m.body|| (m.hasMedia?'[Anexo recebido no WhatsApp]':'')).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0);
 }
 async function connect(owner){
   if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
@@ -43,7 +45,8 @@ async function connect(owner){
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
   client.on('ready',()=>{s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;});
   client.on('message_create',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
-  client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;save(owner,m);db.prepare('UPDATE messages SET ack=? WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
+  client.on('message',m=>{try{save(owner,m);}catch{console.error('whatsapp_history_write_failed');s.state='history_error';}});
+  client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;save(owner,m);db.prepare('UPDATE messages SET ack=MAX(ack,?) WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
   client.on('auth_failure',()=>{s.state='auth_failure';s.qr=null;});
   client.on('disconnected',()=>{s.state='disconnected';s.qr=null;});
   s.initialization=client.initialize().catch(error=>{s.state='error';s.qr=null;console.error(JSON.stringify({event:'whatsapp_initialization_failed',name:error?.name,reason:String(error?.message||'').replace(/https?:\/\/\S+/g,'[url]').replace(/\b\d{8,}\b/g,'[id]').slice(0,400)}));});
@@ -75,7 +78,7 @@ const server=http.createServer(async(req,res)=>{
         return reply({ok:true,warning:revoked?null:'Conexão local removida. Confira Aparelhos conectados no celular e remova a sessão antiga, se ela ainda aparecer.'});
       }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
     }
-    if(action==='/chats'&&req.method==='GET')return reply(db.prepare('SELECT chat,MAX(stamp) AS stamp,COUNT(*) AS count FROM messages WHERE owner=? GROUP BY chat ORDER BY stamp DESC LIMIT 100').all(owner));
+    if(action==='/chats'&&req.method==='GET')return reply(listContacts(db,owner));
     if(action==='/messages'&&req.method==='GET'){
       const chat=url.searchParams.get('chat')||'';if(!safeChat(chat))return reply({error:'Selecione uma conversa.'},400);
       // Reconcile the selected conversation, including messages received while
@@ -85,6 +88,7 @@ const server=http.createServer(async(req,res)=>{
         if(!previous||(!previous.promise&&Date.now()-previous.at>15000)){
           const refresh={at:Date.now(),promise:null};s.refreshes.set(chat,refresh);
           refresh.promise=(async()=>{try{
+            try{for(const pair of await s.client.getContactLidAndPhone([chat]))rememberContact(db,owner,pair);}catch{/* Identity lookup must not block history. */}
             const conversation=await s.client.getChatById(chat);
             conversation.id={...conversation.id,_serialized:serializedKey(conversation.id)||chat};
             const items=await conversation.fetchMessages({limit:30});
@@ -97,14 +101,15 @@ const server=http.createServer(async(req,res)=>{
           }finally{refresh.at=Date.now();refresh.promise=null;}})();
         }
       }
-      return reply(db.prepare('SELECT id,body,direction,stamp,ack FROM messages WHERE owner=? AND chat=? ORDER BY stamp DESC LIMIT 100').all(owner,chat).reverse());
+      const ids=contactIds(db,owner,chat);
+      return reply(db.prepare('SELECT id,body,direction,stamp,ack FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse());
     }
     if(action==='/send'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
       const input=await body(req),chat=String(input.chat||''),text=String(input.text||'').trim(),requestId=String(input.requestId||'');
       if(!safeChat(chat)||!text||text.length>4000||!/^[-a-f0-9]{36}$/.test(requestId))return reply({error:'Revise o telefone e a mensagem.'},400);
       const old=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,requestId);
-      if(old)return reply(old,old.state==='sent'?200:409);
+      if(old)return reply({...old,...(old.state==='sent'?{}:{error:'Este envio ainda não foi confirmado. Confira no celular antes de tentar novamente.'})},old.state==='sent'?200:409);
       if(s.busy||Date.now()-s.lastSend<3000)return reply({error:'Aguarde o envio atual.'},429);
       s.busy=true;
       db.prepare("INSERT INTO sends(owner,requestId,state) VALUES(?,?,'pending')").run(owner,requestId);

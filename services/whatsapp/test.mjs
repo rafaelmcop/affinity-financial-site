@@ -4,6 +4,24 @@ import {createHmac} from 'node:crypto';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage} from './message.mjs';
+import {DatabaseSync} from 'node:sqlite';
+import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
+test('Phone and internal identity share history only within their owner',()=>{
+ const db=new DatabaseSync(':memory:');
+ try{
+  initializeContacts(db);
+  db.exec('CREATE TABLE messages(owner TEXT,chat TEXT,stamp INTEGER);');
+  db.prepare('INSERT INTO messages VALUES(?,?,?)').run('one','123456789@lid',1);
+  db.prepare('INSERT INTO messages VALUES(?,?,?)').run('one','987654321@c.us',2);
+  assert.equal(rememberContact(db,'one',{lid:'123456789@lid',pn:'987654321@c.us'}),true);
+  assert.deepEqual(contactIds(db,'one','987654321@c.us'),['987654321@c.us','123456789@lid']);
+  assert.deepEqual(contactIds(db,'two','987654321@c.us'),['987654321@c.us']);
+  assert.equal(listContacts(db,'one').length,1);
+  assert.equal(listContacts(db,'one')[0].label,'+987654321');
+  assert.equal(listContacts(db,'one')[0].count,2);
+  assert.equal(rememberContact(db,'one',{lid:'bad',pn:'987654321@c.us'}),false);
+ }finally{db.close();}
+});
 test('Reconstruct message keys without losing received replies',()=>{
  const message=normalizeMessage({id:{fromMe:false,remote:{user:'123456789',server:'lid'},id:'ABC'},body:'reply'});
  assert.equal(message.id._serialized,'false_123456789@lid_ABC');
