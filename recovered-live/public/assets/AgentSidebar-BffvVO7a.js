@@ -57,7 +57,7 @@ import { E as z } from "./external-link-CEjUwZyT.js";
   ]),
   A = [
     ["Agenda", "/agentes/agenda", S],
-    ["WhatsApp · teste", "/agentes/whatsapp", M],
+    ["WhatsApp · Beta", "/agentes/whatsapp", M],
     ["E-mail", "/agentes/email", M],
     ["Avaliações", "/agentes/avaliacoes", k],
   ];

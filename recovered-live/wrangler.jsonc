@@ -24,6 +24,7 @@
   "vars": {
     "ADMIN_EMAIL": "preview@affinityfc.org",
     "VITE_FRONTEND_URL": "https://www.affinityfc.org",
+    "WHATSAPP_BRIDGE_URL": "https://whatsapp-bridge.affinityfc.org",
   },
   "observability": {
     "enabled": true,

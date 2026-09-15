@@ -31,4 +31,12 @@ Nenhum servidor foi contratado ou configurado por estes arquivos. Sem essa hospe
 
 ## Verificação
 
+### Beta conectado ao portal neste Mac
+
+O túnel `affinity-whatsapp-beta` encaminha somente a API autenticada em `127.0.0.1:3088`. A interface de teste em `60713` não é publicada pelo túnel. A chave privada e a configuração local ficam em `data/`, excluídas do Git; o Worker guarda a mesma chave como secret. Não compartilhe esses arquivos.
+
+Após reiniciar o computador, execute `node services/whatsapp/beta.mjs` a partir do repositório, usando Node 22.13 ou superior, e mantenha o processo aberto. Não execute uma segunda cópia enquanto o Beta estiver rodando. O limite inicial é de três sessões simultâneas; não há garantia de disponibilidade quando o Mac dorme, desliga ou perde internet. O agente conecta seu próprio número em `/agentes/whatsapp`.
+
+O diretório de clientes/leads é lido pelo Worker usando a identidade autenticada do agente. A interface local isolada não recebe dados do CRM de produção. Telefones ambíguos não recebem nome automaticamente.
+
 `npm test` cobre assinatura, expiração, isolamento de identidade e acesso ao proxy. Validar leitura de QR, envio e recebimento reais exige o número de teste do usuário. Credenciais e banco em `data/` estão excluídos do Git; proteja o disco e os backups do servidor.

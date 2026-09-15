@@ -9,6 +9,7 @@ import {verifyTicket} from './auth.mjs';
 import {sendText,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
 import {installKeyCompatibility} from './compat.mjs';
+import {closeClient} from './close-client.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
@@ -34,8 +35,9 @@ function save(owner,m){
 }
 async function connect(owner){
   if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
-    await sessions.get(owner).client.destroy().catch(()=>{});
-    sessions.delete(owner);
+    const old=sessions.get(owner);
+    if(!old.closing)old.closing=closeClient(old.client).then(()=>{if(sessions.get(owner)===old)sessions.delete(owner);}).finally(()=>{old.closing=null;});
+    await old.closing;
   }
   if(sessions.has(owner))return sessions.get(owner);
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
@@ -76,7 +78,7 @@ const server=http.createServer(async(req,res)=>{
         try{await s.client.logout();revoked=true;}catch{console.error('whatsapp_logout_failed');}
         // Logout can fail before destroying Chrome. Always close it before
         // replacing the local credentials; keep message history untouched.
-        await s.client.destroy();
+        await closeClient(s.client);
         const directory=s.client.authStrategy.userDataDir;
         if(directory&&existsSync(directory))renameSync(directory,directory+'.disconnected-'+Date.now());
         sessions.delete(owner);
@@ -129,5 +131,5 @@ const server=http.createServer(async(req,res)=>{
 });
 server.requestTimeout=20000;
 server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port})));
-async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>s.client.destroy()));db.close();process.exit(0);}
+async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
 process.on('SIGTERM',()=>{void stop();});process.on('SIGINT',()=>{void stop();});

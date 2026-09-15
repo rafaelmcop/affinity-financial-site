@@ -5,10 +5,10 @@ import {readFileSync} from 'node:fs';
 
 // Loopback-only test launcher. Neither bridge credentials nor the signing key
 // are given to the browser or saved in Git. Sessions/history persist in data/.
-const secret=randomBytes(32).toString('hex'),cookie=randomBytes(32).toString('hex');
+const secret=process.env.WHATSAPP_SECRET_FILE?readFileSync(process.env.WHATSAPP_SECRET_FILE,'utf8').trim():randomBytes(32).toString('hex'),cookie=randomBytes(32).toString('hex');
 let entrance=randomBytes(24).toString('hex');
 const owner=process.env.WHATSAPP_TEST_OWNER||'rafael.cunha@affinityfc.org';
-const bridge=spawn(process.execPath,['server.mjs'],{cwd:import.meta.dirname,env:{...process.env,WHATSAPP_BRIDGE_SECRET:secret,HOST:'127.0.0.1',PORT:'0',CHROME_PATH:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'},stdio:['ignore','pipe','pipe']});
+const bridge=spawn(process.execPath,['server.mjs'],{cwd:import.meta.dirname,env:{...process.env,WHATSAPP_BRIDGE_SECRET:secret,HOST:'127.0.0.1',PORT:process.env.WHATSAPP_BRIDGE_PORT||'0',CHROME_PATH:process.env.CHROME_PATH||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'},stdio:['ignore','pipe','pipe']});
 bridge.stderr.on('data',data=>process.stderr.write(data));
 const bridgePort=await new Promise((resolve,reject)=>{
  const timer=setTimeout(()=>reject(Error('O serviço não iniciou.')),15000);
