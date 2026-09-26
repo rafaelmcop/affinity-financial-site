@@ -13,6 +13,20 @@ export async function sendText(client, chat, text) {
   return message;
 }
 
+export async function sendMedia(client,chat,{data,mime,filename='',caption='',voice=false},MediaClass=null) {
+  let destination=chat;
+  if(chat.endsWith('@c.us')){
+    const registered=await client.getNumberId(chat.split('@')[0]);
+    if(!serializedKey(registered))throw Error('WHATSAPP_NUMBER_NOT_REGISTERED');
+    destination=serializedKey(registered);
+  }
+  const MessageMedia=MediaClass||(await import('whatsapp-web.js')).default.MessageMedia;
+  const media=new MessageMedia(mime,data,filename||undefined);
+  const message=normalizeMessage(await client.sendMessage(destination,media,{caption,sendAudioAsVoice:voice,sendSeen:false,waitUntilMsgSent:true}));
+  if(!message?.id?._serialized)throw Error('WHATSAPP_NO_SEND_CONFIRMATION');
+  return message;
+}
+
 export function sendErrorCode(error) {
   const message = String(error?.message || '');
   if (message.includes('WHATSAPP_NUMBER_NOT_REGISTERED')) return 'number_not_registered';

@@ -1,6 +1,6 @@
 # WhatsApp de teste da Affinity
 
-Serviço próprio, sem intermediário pago, usando a biblioteca aberta whatsapp-web.js (Apache-2.0). A biblioteca automatiza o WhatsApp Web; esta conexão não é a API oficial. Versão inicial: QR, mensagens individuais de texto, conversas por agente, histórico SQLite e confirmação de entrega/leitura. Não envia campanhas nem importa automaticamente todo o histórico antigo. Anexos são sinalizados, mas continuam no celular.
+Serviço próprio, sem intermediário pago, usando a biblioteca aberta whatsapp-web.js (Apache-2.0). A biblioteca automatiza o WhatsApp Web; esta conexão não é a API oficial. A versão atual oferece QR, mensagens individuais de texto, imagens, mensagens de voz, conversas por agente, histórico SQLite e confirmação de entrega/leitura. Não envia campanhas nem importa automaticamente todo o histórico antigo.
 
 ## Executar
 
@@ -38,5 +38,7 @@ O túnel `affinity-whatsapp-beta` encaminha somente a API autenticada em `127.0.
 Após reiniciar o computador, execute `node services/whatsapp/beta.mjs` a partir do repositório, usando Node 22.13 ou superior, e mantenha o processo aberto. Não execute uma segunda cópia enquanto o Beta estiver rodando. O limite inicial é de três sessões simultâneas; não há garantia de disponibilidade quando o Mac dorme, desliga ou perde internet. O agente conecta seu próprio número em `/agentes/whatsapp`.
 
 O diretório de clientes/leads é lido pelo Worker usando a identidade autenticada do agente. A interface local isolada não recebe dados do CRM de produção. Telefones ambíguos não recebem nome automaticamente.
+
+Imagens JPEG, PNG e WebP e áudios OGG, WebM, MP3, MP4 ou WAV podem ter até 8 MB. Mídias recebidas são baixadas do WhatsApp, guardadas em `data/media/` com nome opaco e entregues apenas por uma rota autenticada vinculada ao agente. O banco guarda somente os metadados e a referência do arquivo. A gravação de voz solicita acesso ao microfone apenas quando o agente clica em **Gravar voz**.
 
 `npm test` cobre assinatura, expiração, isolamento de identidade e acesso ao proxy. Validar leitura de QR, envio e recebimento reais exige o número de teste do usuário. Credenciais e banco em `data/` estão excluídos do Git; proteja o disco e os backups do servidor.
