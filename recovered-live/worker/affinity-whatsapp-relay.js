@@ -13,6 +13,13 @@ export default {
       signal: request.signal,
     };
     if (!['GET', 'HEAD'].includes(request.method)) init.body = request.body;
-    return fetch(target, init);
+    try {
+      const response = await fetch(target, init);
+      console.log(JSON.stringify({event:'whatsapp_relay_response',method:request.method,path:incoming.pathname,status:response.status,type:response.headers.get('content-type')||'',length:response.headers.get('content-length')||''}));
+      return response;
+    } catch (error) {
+      console.error(JSON.stringify({event:'whatsapp_relay_error',method:request.method,path:incoming.pathname,name:error?.name||'Error'}));
+      throw error;
+    }
   },
 };
