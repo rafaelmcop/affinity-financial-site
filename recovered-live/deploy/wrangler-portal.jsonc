@@ -1,6 +1,6 @@
 {
   "name":"affinity-agent-whatsapp-portal",
-  "main":"./affinity-agent-whatsapp-portal.js",
+  "main":"../worker/affinity-agent-whatsapp-portal.js",
   "compatibility_date":"2026-08-06",
   "services":[{"binding":"PORTAL","service":"affinity-financial-staging"}]
 }
