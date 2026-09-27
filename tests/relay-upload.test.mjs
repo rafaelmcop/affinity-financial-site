@@ -8,6 +8,8 @@ test('relay streams realistic image and recorded-audio payloads without changing
     for (const media of [
       {kind:'image',mime:'image/png',filename:'screen.png',data:'A'.repeat(180_000)},
       {kind:'audio',mime:'audio/webm;codecs=opus',filename:'voice.webm',data:'B'.repeat(120_000)},
+      {kind:'file',mime:'application/pdf',filename:'document.pdf',data:'C'.repeat(140_000)},
+      {kind:'file',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename:'sheet.xlsx',data:'D'.repeat(160_000)},
     ]) {
       const body = JSON.stringify({chat:'15551234567@c.us',text:'',requestId:'00000000-0000-4000-a000-000000000000',media});
       let forwarded;

@@ -225,7 +225,10 @@ async function whatsappRoute(request, env, auth) {
     if (action === "media") target.searchParams.set("id", url.searchParams.get("id") || "");
     const response = await fetch(target, { method, headers: { authorization: "Bearer " + payload + "." + signature, "content-type": "application/json" }, ...method === "POST" ? { body: body || "{}" } : {}, redirect: "manual", signal: AbortSignal.timeout(["send", "media"].includes(action) ? 60000 : 20000) });
     if (action === "media" && response.ok) return new Response(response.body, {status: 200, headers: {"content-type": response.headers.get("content-type") || "application/octet-stream", "content-disposition": response.headers.get("content-disposition") || "inline", "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff"}});
-    if (!response.headers.get("content-type")?.includes("application/json")) return json2({ error: "O servi\xE7o de WhatsApp n\xE3o respondeu corretamente." }, 502);
+    if (!response.headers.get("content-type")?.includes("application/json")) {
+      console.error("whatsapp_bridge_non_json", JSON.stringify({action,status:response.status,type:response.headers.get("content-type")||"",length:response.headers.get("content-length")||""}));
+      return json2({ error: "O servi\xE7o de WhatsApp n\xE3o respondeu corretamente." }, 502);
+    }
     return new Response(response.body, { status: response.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
   } catch (error) {
     console.error("whatsapp_bridge_error", error instanceof Error ? error.message : String(error));
