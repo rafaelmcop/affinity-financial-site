@@ -136,7 +136,7 @@ const server=http.createServer(async(req,res)=>{
     if(action==='/send'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
       const input=await body(req,11500000),chat=String(input.chat||''),text=String(input.text||'').trim(),requestId=String(input.requestId||''),media=input.media;
-      const validMedia=media&&['image','audio'].includes(media.kind)&&typeof media.data==='string'&&media.data.length<=11200000&&((media.kind==='image'&&/^image\/(jpeg|png|webp)$/.test(media.mime))||(media.kind==='audio'&&/^audio\/(ogg|webm|mpeg|mp4|wav)(;.*)?$/.test(media.mime)));
+      const validMedia=media&&['image','audio','file'].includes(media.kind)&&typeof media.data==='string'&&media.data.length<=11200000&&((media.kind==='image'&&/^image\/(jpeg|png|webp)$/.test(media.mime))||(media.kind==='audio'&&/^audio\/(ogg|webm|mpeg|mp4|wav)(;.*)?$/.test(media.mime))||(media.kind==='file'&&media.mime==='application/pdf'&&/\.pdf$/i.test(String(media.filename||''))));
       if(!safeChat(chat)||(!text&&!validMedia)||text.length>4000||!/^[-a-f0-9]{36}$/.test(requestId))return reply({error:'Revise o telefone, a mensagem e o arquivo.'},400);
       const old=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,requestId);
       if(old)return reply({...old,...(old.state==='sent'?{}:{error:'Este envio ainda não foi confirmado. Confira no celular antes de tentar novamente.'})},old.state==='sent'?200:409);
