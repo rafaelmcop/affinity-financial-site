@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import relay from '../recovered-live/worker/affinity-whatsapp-relay.js';
 
-test('relay streams realistic image and recorded-audio payloads without changing JSON', async () => {
+test('relay forwards fixed media bodies without changing JSON', async () => {
   const original = globalThis.fetch;
   try {
     for (const media of [
@@ -26,4 +26,14 @@ test('relay streams realistic image and recorded-audio payloads without changing
       assert.deepEqual(JSON.parse(forwarded.body),JSON.parse(body));
     }
   } finally { globalThis.fetch = original; }
+});
+
+test('relay rejects oversized bodies before contacting the tunnel', async()=>{
+  const original=globalThis.fetch;let called=false;
+  try{
+    globalThis.fetch=async()=>{called=true;return Response.json({ok:true})};
+    const request=new Request('https://affinity-whatsapp-relay.example/send',{method:'POST',body:new Uint8Array(11500001)});
+    const response=await relay.fetch(request);
+    assert.equal(response.status,413);assert.equal(called,false);
+  }finally{globalThis.fetch=original}
 });
