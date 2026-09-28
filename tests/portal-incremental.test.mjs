@@ -12,9 +12,10 @@ test('polling appends messages without replacing an active audio player and rend
   try{
     const page=await browser.newPage();
     const messageReads=new Map();
+    let sentBody;
     let messages=[{id:'audio-1',body:'',direction:'received',stamp:1700000000,ack:0,mediaKind:'audio',mime:'audio/ogg',filename:'voice.ogg',mediaUrl:'/api/agent/whatsapp/media?id=audio-1'},{id:'pdf-1',body:'[Anexo]',direction:'received',stamp:1700000001,ack:0,mediaKind:'document',mime:'application/pdf',filename:'statement.pdf',mediaUrl:'/api/agent/whatsapp/media?id=pdf-1'},{id:'xls-1',body:'[Anexo]',direction:'received',stamp:1700000002,ack:0,mediaKind:'spreadsheet',mime:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',filename:'sheet.xlsx',mediaUrl:'/api/agent/whatsapp/media?id=xls-1'},{id:'video-1',body:'[Vídeo]',direction:'received',stamp:1700000003,ack:0,mediaKind:'video',mime:'video/mp4',filename:'clip.mp4',mediaState:'ready',mediaUrl:'/api/agent/whatsapp/media?id=video-1'},{id:'video-2',body:'[Vídeo maior que 8 MB]',direction:'received',stamp:1700000004,ack:0,mediaKind:'video',mime:'video/mp4',filename:'large.mp4',mediaState:'too_large'}];
     await page.route('https://portal.test/agentes/whatsapp',route=>route.fulfill({contentType:'text/html',body:html}));
-    await page.route('**/api/agent/whatsapp/**',async route=>{const u=new URL(route.request().url()),action=u.pathname.split('/').at(-1);if(action==='status')return route.fulfill({json:{state:'ready',number:'15551234567'}});if(action==='contacts')return route.fulfill({json:[]});if(action==='chats')return route.fulfill({json:[{chat:'15551234567@c.us'},{chat:'12345678901234@lid'},{chat:'22345678901234@lid'}]});if(action==='messages'){const chat=u.searchParams.get('chat');messageReads.set(chat,(messageReads.get(chat)||0)+1);return route.fulfill({json:chat==='15551234567@c.us'?messages:[]})}if(action==='media')return route.fulfill({status:200,contentType:u.searchParams.get('id')==='pdf-1'?'application/pdf':'audio/ogg',body:'media'});return route.fulfill({json:{state:'sent'}})});
+    await page.route('**/api/agent/whatsapp/**',async route=>{const u=new URL(route.request().url()),action=u.pathname.split('/').at(-1);if(action==='status')return route.fulfill({json:{state:'ready',number:'15551234567'}});if(action==='contacts')return route.fulfill({json:[]});if(action==='chats')return route.fulfill({json:[{chat:'15551234567@c.us'},{chat:'12345678901234@lid'},{chat:'22345678901234@lid'}]});if(action==='messages'){const chat=u.searchParams.get('chat');messageReads.set(chat,(messageReads.get(chat)||0)+1);return route.fulfill({json:chat==='15551234567@c.us'?messages:[]})}if(action==='media')return route.fulfill({status:200,contentType:u.searchParams.get('id')==='pdf-1'?'application/pdf':'audio/ogg',body:'media'});if(action==='send')sentBody=route.request().postDataJSON();return route.fulfill({json:{state:'sent'}})});
     await page.goto('https://portal.test/agentes/whatsapp');
     await page.locator('[data-chat]').click();
     await page.locator('#messages audio').waitFor();
@@ -34,5 +35,9 @@ test('polling appends messages without replacing an active audio player and rend
     assert.equal(await page.evaluate(()=>document.querySelector('.message audio')===window.savedAudio),true);
     assert.equal(messageReads.get('12345678901234@lid'),1);
     assert.equal(messageReads.get('22345678901234@lid'),1);
+    await page.locator('#mediaImage').setInputFiles({name:'sheet.xlsx',mimeType:'application/octet-stream',buffer:Buffer.from('xlsx')});
+    await page.locator('#composer').evaluate(form=>form.requestSubmit());
+    await page.waitForFunction(()=>document.querySelector('#mediaDraft').hidden);
+    assert.equal(sentBody.media.mime,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   }finally{await browser.close()}
 });
