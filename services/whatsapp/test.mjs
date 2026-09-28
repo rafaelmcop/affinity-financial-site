@@ -77,6 +77,8 @@ test('Image, voice, PDF and video media preserve type, caption and confirmation'
  assert.equal(image.id._serialized,'media-id');assert.equal(sent.media.mime,'image/png');assert.equal(sent.options.caption,'Legenda');assert.equal(sent.options.sendAudioAsVoice,false);
  await sendMedia(client,'123456789@c.us',{mime:'audio/ogg;codecs=opus',data:'AA==',voice:true},Media);
  assert.equal(sent.options.sendAudioAsVoice,true);assert.equal(sent.options.sendSeen,false);
+ await sendMedia(client,'123456789@c.us',{mime:'audio/webm;codecs=opus',data:'AA==',filename:'voz.webm',voice:true},Media);
+ assert.equal(sent.options.sendAudioAsVoice,false);assert.equal(sent.media.mime,'audio/webm;codecs=opus');
  await sendMedia(client,'123456789@c.us',{mime:'application/pdf',data:'AA==',filename:'documento.pdf'},Media);
  assert.equal(sent.media.mime,'application/pdf');assert.equal(sent.media.filename,'documento.pdf');assert.equal(sent.options.sendAudioAsVoice,false);
  await sendMedia(client,'123456789@c.us',{mime:'video/mp4',data:'AA==',filename:'clip.mp4'},Media);
