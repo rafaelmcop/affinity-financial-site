@@ -6,19 +6,21 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { US_STATES } from '@/lib/usStates';
 
 const copy = {
-  pt: { eyebrow: 'SUA EXPERIÊNCIA IMPORTA', title: 'Conte como foi sua experiência', subtitle: 'Sua avaliação ajuda outras famílias a escolherem com mais confiança.', rating: 'Escolha uma nota de 1 a 5 estrelas', ratingRequired: 'Escolha uma nota antes de enviar.', name: 'Seu nome', email: 'Seu e-mail (não será publicado)', role: 'Cidade e estado', review: 'Escreva sua avaliação', submit: 'Enviar avaliação', pending: 'Toda avaliação é revisada antes de ser publicada.', success: 'Obrigado! Sua avaliação foi enviada e aguarda aprovação.' },
-  en: { eyebrow: 'YOUR EXPERIENCE MATTERS', title: 'Tell us about your experience', subtitle: 'Your review helps other families make a confident choice.', rating: 'Choose a rating from 1 to 5 stars', ratingRequired: 'Choose a rating before submitting.', name: 'Your name', email: 'Your email (will not be published)', role: 'City and state', review: 'Write your review', submit: 'Submit review', pending: 'Every review is checked before it is published.', success: 'Thank you! Your review was submitted for approval.' },
-  es: { eyebrow: 'TU EXPERIENCIA IMPORTA', title: 'Cuéntanos sobre tu experiencia', subtitle: 'Tu reseña ayuda a otras familias a elegir con confianza.', rating: 'Elige una calificación de 1 a 5 estrellas', ratingRequired: 'Elige una calificación antes de enviar.', name: 'Tu nombre', email: 'Tu correo (no será publicado)', role: 'Ciudad y estado', review: 'Escribe tu reseña', submit: 'Enviar reseña', pending: 'Cada reseña se revisa antes de publicarse.', success: '¡Gracias! Tu reseña fue enviada para aprobación.' },
+  pt: { eyebrow: 'SUA EXPERIÊNCIA IMPORTA', title: 'Conte como foi sua experiência', subtitle: 'Sua avaliação ajuda outras famílias a escolherem com mais confiança.', rating: 'Escolha uma nota de 1 a 5 estrelas', ratingRequired: 'Escolha uma nota antes de enviar.', name: 'Seu nome', email: 'Seu e-mail (não será publicado)', city: 'Cidade', state: 'Estado', agent: 'Qual agente atendeu você?', review: 'Escreva sua avaliação', submit: 'Enviar avaliação', pending: 'A avaliação passa pelo agente e pela aprovação final da administração.', success: 'Obrigado! Sua avaliação foi enviada e aguarda aprovação.' },
+  en: { eyebrow: 'YOUR EXPERIENCE MATTERS', title: 'Tell us about your experience', subtitle: 'Your review helps other families make a confident choice.', rating: 'Choose a rating from 1 to 5 stars', ratingRequired: 'Choose a rating before submitting.', name: 'Your name', email: 'Your email (will not be published)', city: 'City', state: 'State', agent: 'Which agent helped you?', review: 'Write your review', submit: 'Submit review', pending: 'The agent reviews it first and administration makes the final decision.', success: 'Thank you! Your review was submitted for approval.' },
+  es: { eyebrow: 'TU EXPERIENCIA IMPORTA', title: 'Cuéntanos sobre tu experiencia', subtitle: 'Tu reseña ayuda a otras familias a elegir con confianza.', rating: 'Elige una calificación de 1 a 5 estrellas', ratingRequired: 'Elige una calificación antes de enviar.', name: 'Tu nombre', email: 'Tu correo (no será publicado)', city: 'Ciudad', state: 'Estado', agent: '¿Qué agente te atendió?', review: 'Escribe tu reseña', submit: 'Enviar reseña', pending: 'El agente la revisa primero y la administración toma la decisión final.', success: '¡Gracias! Tu reseña fue enviada para aprobación.' },
 };
 
 export function ReviewSubmissionSection() {
   const { language } = useLanguage();
   const text = copy[language];
   const mutation = trpc.testimonials.submitReview.useMutation();
+  const agents = trpc.testimonials.getAgentOptions.useQuery();
   const [rating, setRating] = useState(0);
-  const [form, setForm] = useState({ name: '', email: '', role: '', quote: '' });
+  const [form, setForm] = useState({ name: '', email: '', city: '', state: '', agentId: 0, quote: '' });
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -28,7 +30,7 @@ export function ReviewSubmissionSection() {
     }
     try {
       await mutation.mutateAsync({ ...form, rating, language });
-      setForm({ name: '', email: '', role: '', quote: '' });
+      setForm({ name: '', email: '', city: '', state: '', agentId: 0, quote: '' });
       setRating(0);
       toast.success(text.success);
     } catch (error) {
@@ -65,7 +67,15 @@ export function ReviewSubmissionSection() {
             <Input required minLength={2} maxLength={120} placeholder={text.name} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-12 bg-white/5 border-white/15 text-white placeholder:text-gray-500" />
             <Input required type="email" maxLength={320} placeholder={text.email} value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="h-12 bg-white/5 border-white/15 text-white placeholder:text-gray-500" />
           </div>
-          <Input required minLength={2} maxLength={120} placeholder={text.role} value={form.role} onChange={e => setForm({ ...form, role: e.target.value })} className="h-12 bg-white/5 border-white/15 text-white placeholder:text-gray-500" />
+          <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
+            <Input required minLength={2} maxLength={120} placeholder={text.city} value={form.city} onChange={e => setForm({ ...form, city: e.target.value })} className="h-12 bg-white/5 border-white/15 text-white placeholder:text-gray-500" />
+            <select required aria-label={text.state} value={form.state} onChange={e => setForm({ ...form, state: e.target.value })} className="h-12 rounded-md border border-white/15 bg-[#101a28] px-3 text-white">
+              <option value="">{text.state}</option>{US_STATES.map(state => <option key={state} value={state}>{state}</option>)}
+            </select>
+          </div>
+          <select required aria-label={text.agent} value={form.agentId || ''} onChange={e => setForm({ ...form, agentId: Number(e.target.value) })} className="h-12 w-full rounded-md border border-white/15 bg-[#101a28] px-3 text-white">
+            <option value="">{text.agent}</option>{(agents.data || []).map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+          </select>
           <Textarea required minLength={20} maxLength={1500} rows={6} placeholder={text.review} value={form.quote} onChange={e => setForm({ ...form, quote: e.target.value })} className="bg-white/5 border-white/15 text-white placeholder:text-gray-500 resize-none" />
           <Button disabled={mutation.isPending} className="w-full h-12 bg-gold hover:bg-gold/90 text-black font-bold">{mutation.isPending ? 'Enviando...' : <><Send size={18} className="mr-2" />{text.submit}</>}</Button>
         </form>
