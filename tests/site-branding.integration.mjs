@@ -61,6 +61,18 @@ try{
    assert((await call('crm.update',{...client,status:'client'})).result);
    assert.equal((await db.prepare('SELECT status FROM crmClients WHERE id=?').bind(client.id).first()).status,'client');
    console.log('PASS Cliente stage saved only with active policy');
+   // A draft must save even if unrelated portfolio reconciliation would fail.
+   await db.prepare("CREATE TRIGGER test_no_portfolio_write BEFORE UPDATE ON agentPolicies BEGIN SELECT RAISE(ABORT,'Unrelated portfolio write'); END").run();
+   const draftInput={clientName:client.name,clientEmail:client.email,clientPhone:client.phone,beneficiaryName:'Test Beneficiary',ssn:'000-00-0000'};
+   const draft=(await call('agent.saveApplication',draftInput)).result.data.json;
+   assert(Number(draft.id)>0);
+   assert.equal((await call('agent.saveApplication',{...draftInput,id:draft.id,notes:'Second step saved'})).result.data.json.success,true);
+   const saved=await db.prepare('SELECT notes,sensitiveData FROM agentApplications WHERE id=?').bind(draft.id).first();
+   assert.equal(saved.notes,'Second step saved');assert(saved.sensitiveData.startsWith('v1.'));assert(!saved.sensitiveData.includes('000-00-0000'));
+   const otherDraft=await db.prepare("INSERT INTO agentApplications(agentEmail,clientName) VALUES('agent@brand.test','Foreign draft')").run();
+   assert((await call('agent.saveApplication',{...draftInput,id:Number(otherDraft.meta.last_row_id)})).error);
+   await db.prepare('DROP TRIGGER test_no_portfolio_write').run();
+   console.log('PASS draft create/update preserves encryption, rejects foreign owner and never rewrites portfolio');
  }
  const png=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1000;c.height=300;const ctx=c.getContext('2d');ctx.fillStyle='#dbb537';ctx.fillRect(0,0,1000,300);ctx.fillStyle='#102239';ctx.font='bold 100px sans-serif';ctx.fillText('AFFINITY TEST',30,190);return c.toDataURL().split(',')[1];});
  page.on('dialog',d=>d.accept());

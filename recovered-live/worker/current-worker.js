@@ -54533,7 +54533,8 @@ Detalhes: ${details}` : ""}`;
   }
   if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument", "agent.sendApplicationEmail"].includes(name)) {
     const owner = adminEmail.toLowerCase();
-    if (!["agent.listApplications", "agent.getApplication", "agent.getApplicationDocument"].includes(name)) {
+    // Saving a draft uses the existing schema; never run migrations on each step.
+    if (!["agent.listApplications", "agent.getApplication", "agent.getApplicationDocument", "agent.saveApplication"].includes(name)) {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS agentApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       agentEmail TEXT NOT NULL,
@@ -54727,12 +54728,10 @@ Detalhes: ${details}` : ""}`;
       if (id) {
         const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),status=CASE WHEN status='submitted' THEN 'draft' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?`).bind(...values,id,owner).run();
         if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
-        await mergeClientSourcesForAgent(env, owner);
         return trpcResult({ success: true, id });
       }
       const accessCode = Array.from(crypto.getRandomValues(new Uint8Array(4)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,8).toUpperCase();
       const inserted = await env.DB.prepare(`INSERT INTO agentApplications (agentEmail,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,maritalStatus,occupation,annualIncome,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget,applicationReason,notes,applicationData,sensitiveData,accessCode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(owner,...values,accessCode).run();
-      await mergeClientSourcesForAgent(env, owner);
       return trpcResult({ success: true, id: Number(inserted.meta.last_row_id), accessCode });
     }
     if (name === "agent.submitApplication") {

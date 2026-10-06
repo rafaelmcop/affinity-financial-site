@@ -345,8 +345,11 @@
     } catch {
       throw Error("O servidor não respondeu corretamente");
     }
-    if (p.error)
-      throw Error(p.error.json?.message || "Não foi possível concluir");
+    if (Array.isArray(p)) p = p[0];
+    if (p?.error || !r.ok)
+      throw Error(p?.error?.json?.message || "Não foi possível salvar no servidor. Mantenha esta ficha aberta e tente novamente.");
+    if (!p?.result?.data || !("json" in p.result.data))
+      throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
     const data = p.result?.data?.json;
     if (name === "agent.submitApplication" && data?.reviewInvite)
       setTimeout(
@@ -1425,17 +1428,37 @@
       else notice(e.message, true);
     }
   }
+  let savingDraft = null;
+  let unsavedChanges = false;
+  $("form").addEventListener("input", () => { unsavedChanges = true; });
+  $("form").addEventListener("change", () => { unsavedChanges = true; });
+  window.addEventListener("beforeunload", event => {
+    if (!unsavedChanges && !savingDraft) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   async function saveDraft(silent = false) {
+    // Serialize saves so two clicks cannot create two applications without an ID.
+    while (savingDraft) await savingDraft;
+    const task = persistDraft(silent);
+    savingDraft = task;
+    try { return await task; }
+    finally { if (savingDraft === task) savingDraft = null; }
+  }
+  async function persistDraft(silent) {
+    const snapshot = collect();
     try {
-      const result = await api("agent.saveApplication", collect(), true);
+      const result = await api("agent.saveApplication", snapshot, true);
+      if (!Number(result?.id)) throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
       $("id").value = result.id;
+      unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id }) !== JSON.stringify(snapshot);
       if (!silent) {
         notice("Rascunho salvo com segurança.");
-        await load();
       }
       return true;
     } catch (e) {
-      if (!silent) notice(e.message, true);
+      unsavedChanges = true;
+      notice(`Não foi possível salvar: ${e.message} Os campos continuam nesta tela; não feche nem atualize a página.`, true);
       return false;
     }
   }

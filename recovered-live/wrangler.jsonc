@@ -9,7 +9,9 @@
     "binding": "ASSETS",
     "html_handling": "none",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true,
+    // Public bundles/readers do not need authentication or database processing.
+    // All HTML pages and API routes retain the existing Worker protections.
+    "run_worker_first": ["/*", "!/assets/*", "!/vendor/*"],
   },
   "d1_databases": [
     {

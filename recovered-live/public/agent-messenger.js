@@ -176,7 +176,8 @@
   });
   loadContacts();
   refreshUnread();
-  setInterval(refreshUnread, 10000);
-  setInterval(() => { if (!panel.hidden) loadConversation(); }, 10000);
-  setInterval(loadContacts, 30000);
+  // Background tabs must not multiply polling while the agent fills a form.
+  setInterval(() => { if (!document.hidden) refreshUnread(); }, 60000);
+  setInterval(() => { if (!document.hidden && !panel.hidden) loadConversation(); }, 10000);
+  setInterval(() => { if (!document.hidden && !panel.hidden) loadContacts(); }, 60000);
 })();
