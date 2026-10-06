@@ -8,6 +8,7 @@ import QRCode from 'qrcode';
 import {verifyTicket} from './auth.mjs';
 import {sendText,sendMedia,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
+import {mediaUpsert} from './media-record.mjs';
 import {installKeyCompatibility} from './compat.mjs';
 import {closeClient} from './close-client.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
@@ -50,7 +51,7 @@ async function save(owner,m,providedMedia=null){
     }catch{state='download_failed';console.error('whatsapp_media_download_failed');}
   }
   const label=kind==='image'?'Imagem':kind==='audio'?'Áudio':kind==='video'?'Vídeo':filename?'Arquivo: '+filename:'Anexo',fallback=m.hasMedia?'['+label+(state==='too_large'?' maior que 8 MB':state==='download_failed'?' não pôde ser baixado':state!=='ready'?' não disponível':'')+']':'';
-  db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,ack,mediaKey,mime,filename,mediaKind,mediaSize,mediaState) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(owner,id) DO UPDATE SET ack=MAX(messages.ack,excluded.ack),mediaKey=COALESCE(messages.mediaKey,excluded.mediaKey),mime=COALESCE(messages.mime,excluded.mime),filename=COALESCE(messages.filename,excluded.filename),mediaKind=COALESCE(messages.mediaKind,excluded.mediaKind),mediaSize=COALESCE(messages.mediaSize,excluded.mediaSize),mediaState=COALESCE(messages.mediaState,excluded.mediaState)').run(owner,m.id._serialized,chat,String(m.body||fallback).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0,key,mime,filename,kind,size,state);
+  db.prepare(mediaUpsert).run(owner,m.id._serialized,chat,String(m.body||fallback).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0,key,mime,filename,kind,size,state);
 }
 async function connect(owner){
   if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){

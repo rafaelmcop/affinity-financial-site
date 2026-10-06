@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 
-const playwrightUrl=pathToFileURL('C:/Users/usraf/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
+const playwrightUrl=pathToFileURL(process.env.PLAYWRIGHT_MODULE || 'C:/Users/usraf/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs');
 const {chromium}=await import(playwrightUrl.href);
 const portal=(await import('../recovered-live/worker/affinity-agent-whatsapp-portal.js')).default;
 
 test('polling appends messages without replacing an active audio player and renders PDFs safely',async()=>{
   const html=await (await portal.fetch(new Request('https://portal.test/agentes/whatsapp'),{PORTAL:{fetch:async()=>Response.json({state:'ready'})}})).text();
-  const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
   try{
     const page=await browser.newPage();
     const messageReads=new Map();
@@ -22,6 +22,11 @@ test('polling appends messages without replacing an active audio player and rend
     assert.equal(connectCalls,1);
     await page.locator('[data-chat]').click();
     await page.locator('#messages audio').waitFor();
+    messages=[...messages,{id:'late-image',body:'[Anexo]',mediaKind:'file',mediaState:'unavailable',direction:'received',stamp:1700000010}];
+    await page.locator('[data-message-id="late-image"]').waitFor({timeout:10000});
+    messages=messages.map(m=>m.id==='late-image'?{...m,mediaState:'ready',mime:'image/png',mediaUrl:'/api/agent/whatsapp/media?id=late-image'}:m);
+    await page.locator('[data-message-id="late-image"] img').waitFor({timeout:10000});
+    assert.equal(await page.locator('[data-message-id="late-image"] .message-body').textContent(),'');
     await page.evaluate(()=>{window.savedAudio=document.querySelector('.message audio');window.savedAudio.currentTime=4;window.savedAudio.dataset.playing='yes'});
     await page.waitForTimeout(4300);
     assert.equal(await page.evaluate(()=>document.querySelector('.message audio')===window.savedAudio),true);
@@ -30,6 +35,7 @@ test('polling appends messages without replacing an active audio player and rend
     const pdfLink=page.getByRole('link',{name:/statement\.pdf/});
     assert.equal(await pdfLink.getAttribute('href'),'/api/agent/whatsapp/media?id=pdf-1');
     assert.equal(await pdfLink.getAttribute('rel'),'noopener');
+    assert.equal(await pdfLink.getAttribute('download'),null);
     assert.equal(await page.getByRole('link',{name:/sheet\.xlsx/}).getAttribute('download'),'sheet.xlsx');
     assert.equal(await page.locator('video').getAttribute('src'),'/api/agent/whatsapp/media?id=video-1');
     await page.getByText('Arquivo maior que 8 MB; abra no celular').waitFor();
