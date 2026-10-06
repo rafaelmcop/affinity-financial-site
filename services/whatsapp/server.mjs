@@ -9,11 +9,13 @@ import {verifyTicket} from './auth.mjs';
 import {sendText,sendMedia,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
 import {mediaUpsert} from './media-record.mjs';
+import {retainingAuth,installAuthTimeoutGuard} from './session-retention.mjs';
 import {installKeyCompatibility} from './compat.mjs';
 import {closeClient} from './close-client.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
+const RetainedLocalAuth=retainingAuth(LocalAuth);
 const bridgeVersion='2026-09-28.1';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
@@ -26,6 +28,7 @@ CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,chat TE
 CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
 CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
 const sessions=new Map();
+installAuthTimeoutGuard(process,sessions);
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
 initializeContacts(db);
@@ -62,7 +65,7 @@ async function connect(owner){
   if(sessions.has(owner))return sessions.get(owner);
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
   const key=createHash('sha256').update(owner).digest('hex');
-  const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
+  const client=new Client({authStrategy:new RetainedLocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
   const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
   client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
