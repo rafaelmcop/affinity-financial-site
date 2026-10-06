@@ -1098,6 +1098,7 @@
     const measurements = americanMeasurements(row);
     sectionBlock("1. Produto e objetivo da aplicação", [
       ["Produto pretendido", row.productInterest],
+      ["Premium mensal", usd(row.premiumBudget)],
       ["Cobertura pretendida", usd(row.coverageRequested)],
       ["Motivo / objetivo da aplicação", row.applicationReason],
       ["Observações do agente", row.notes],
