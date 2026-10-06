@@ -1,48 +1,428 @@
-var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
+
+// worker/current-worker.js
+import libDefault from "events";
+import libDefault2 from "url";
+import libDefault3 from "util";
+import libDefault4 from "fs";
+import libDefault5 from "http";
+import libDefault6 from "https";
+import libDefault7 from "zlib";
+import libDefault8 from "stream";
+import libDefault9 from "net";
+import libDefault10 from "dns";
+import libDefault11 from "os";
+import libDefault12 from "path";
+import libDefault13 from "crypto";
+import libDefault14 from "tls";
+import libDefault15 from "child_process";
+import libDefault16 from "node:buffer";
+import libDefault17 from "buffer";
+import libDefault18 from "string_decoder";
+import libDefault19 from "node:stream";
+import { connect } from "cloudflare:sockets";
+import { Buffer as Buffer2 } from "node:buffer";
+import nodeCrypto from "crypto";
+
+// worker/site-branding.js
+var SLOTS = { logo: null, hero: "/family-hero.jpg", about: "/consulting.jpg" };
+var SCHEMA = `CREATE TABLE IF NOT EXISTS siteBrandImages(slot TEXT PRIMARY KEY, data TEXT NOT NULL, mime TEXT NOT NULL, revision TEXT NOT NULL, updatedBy TEXT NOT NULL, updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`;
+var json = /* @__PURE__ */ __name((body, status = 200) => Response.json(body, { status, headers: { "cache-control": "no-store" } }), "json");
+async function read(db, sql, ...values) {
+  try {
+    return await db.prepare(sql).bind(...values).all();
+  } catch (error) {
+    if (/no such table: siteBrandImages/.test(String(error))) return { results: [] };
+    throw error;
+  }
+}
+__name(read, "read");
+async function siteBrandingRoute(request, env, auth) {
+  const url = new URL(request.url), path = url.pathname;
+  const isPublic = path === "/api/site-branding" && request.method === "GET";
+  const imageSlot = Object.keys(SLOTS).find((s) => SLOTS[s] === path) || /^\/site-brand\/image\/(logo|hero|about)$/.exec(path)?.[1];
+  const isAdmin = path === "/api/admin/site-branding";
+  if (!isPublic && !imageSlot && !isAdmin && path !== "/admin/site-branding") return null;
+  try {
+    if (isPublic) {
+      const rows = await read(env.DB, "SELECT slot,revision FROM siteBrandImages");
+      const images = { logo: null, hero: SLOTS.hero, about: SLOTS.about };
+      for (const row of rows.results) if (Object.hasOwn(images, row.slot)) images[row.slot] = "/site-brand/image/" + row.slot + "?v=" + encodeURIComponent(row.revision);
+      return Response.json({ images }, { headers: { "cache-control": "public,max-age=60" } });
+    }
+    if (imageSlot) {
+      if (!["GET", "HEAD"].includes(request.method)) return json({ error: "M\xE9todo n\xE3o permitido." }, 405);
+      const row = (await read(env.DB, "SELECT data,mime,revision FROM siteBrandImages WHERE slot=?", imageSlot)).results[0];
+      if (!row) return SLOTS[imageSlot] ? env.ASSETS.fetch(new Request(new URL(SLOTS[imageSlot], url), request)) : new Response(null, { status: 404 });
+      const headers = { "content-type": row.mime, "cache-control": "public,max-age=60", "x-content-type-options": "nosniff", etag: '"' + row.revision + '"' };
+      if (request.headers.get("if-none-match") === headers.etag) return new Response(null, { status: 304, headers });
+      return new Response(request.method === "HEAD" ? null : Uint8Array.from(atob(row.data), (c) => c.charCodeAt(0)), { headers });
+    }
+    const email = await auth.email(request, env);
+    if (!email) return path === "/admin/site-branding" ? Response.redirect(new URL("/admin/login", url), 302) : json({ error: "Entre no painel administrativo." }, 401);
+    const access = await auth.access(email, env), account = access.account;
+    if (!access.isMaster || account && (!account.isActive || account.status !== "approved" || !["admin", "both"].includes(account.accountType))) return json({ error: "Somente o administrador principal pode alterar a identidade visual." }, 403);
+    if (path === "/admin/site-branding") return env.ASSETS.fetch(new Request(new URL("/admin-site-branding.html", url), request));
+    if (request.method !== "POST") return json({ error: "M\xE9todo n\xE3o permitido." }, 405);
+    if (request.headers.get("origin") !== url.origin || !request.headers.get("content-type")?.startsWith("application/json")) return json({ error: "Origem inv\xE1lida." }, 403);
+    const reader = request.body?.getReader();
+    if (!reader) return json({ error: "Selecione uma imagem." }, 400);
+    let size = 0;
+    const parts = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 12e5) {
+        await reader.cancel();
+        return json({ error: "A imagem otimizada deve ter at\xE9 800 KB." }, 413);
+      }
+      parts.push(value);
+    }
+    let body;
+    try {
+      body = JSON.parse(await new Blob(parts).text());
+    } catch {
+      return json({ error: "Solicita\xE7\xE3o inv\xE1lida." }, 400);
+    }
+    if (!Object.hasOwn(SLOTS, body.slot)) return json({ error: "Local da imagem inv\xE1lido." }, 400);
+    let bytes;
+    try {
+      if (typeof body.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(body.data)) throw Error();
+      bytes = Uint8Array.from(atob(body.data), (c) => c.charCodeAt(0));
+    } catch {
+      return json({ error: "Imagem inv\xE1lida." }, 400);
+    }
+    const png = bytes.length > 24 && [137, 80, 78, 71, 13, 10, 26, 10].every((v, i) => bytes[i] === v), jpg = bytes.length > 4 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+    if (bytes.length > 8e5 || !png && !jpg) return json({ error: "Use PNG ou JPG. O arquivo precisa ter at\xE9 800 KB ap\xF3s otimiza\xE7\xE3o." }, 400);
+    await env.DB.prepare(SCHEMA).run();
+    const revision = crypto.randomUUID();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO siteBrandImages(slot,data,mime,revision,updatedBy) VALUES(?,?,?,?,?) ON CONFLICT(slot) DO UPDATE SET data=excluded.data,mime=excluded.mime,revision=excluded.revision,updatedBy=excluded.updatedBy,updatedAt=CURRENT_TIMESTAMP").bind(body.slot, body.data, png ? "image/png" : "image/jpeg", revision, email),
+      env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId,details) VALUES(?,?,?,?,?)").bind(email, "Alterou imagem institucional", "siteBrandImages", body.slot, JSON.stringify({ revision }))
+    ]);
+    return json({ ok: true, url: "/site-brand/image/" + body.slot + "?v=" + revision });
+  } catch (error) {
+    console.error(JSON.stringify({ event: "site_branding_error", path, message: String(error?.message || error) }));
+    if (imageSlot && SLOTS[imageSlot]) return env.ASSETS.fetch(new Request(new URL(SLOTS[imageSlot], url), request));
+    if (isPublic) return Response.json({ images: { logo: null, hero: SLOTS.hero, about: SLOTS.about } }, { headers: { "cache-control": "no-store" } });
+    return json({ error: "N\xE3o foi poss\xEDvel salvar ou carregar a imagem. Tente novamente." }, 503);
+  }
+}
+__name(siteBrandingRoute, "siteBrandingRoute");
+function applySiteBranding(response) {
+  if (!response.headers.get("content-type")?.includes("text/html")) return response;
+  return new HTMLRewriter().on("head", { element(element) {
+    element.append('<script src="/site-branding.js?v=1" defer><\/script>', { html: true });
+  } }).transform(response);
+}
+__name(applySiteBranding, "applySiteBranding");
+
+/**
+ * Agent WhatsApp portal — recovered source of truth
+ *
+ * This page is served by the Cloudflare Worker after agent authentication.
+ * It keeps the existing /api/agent/whatsapp/* bridge endpoints intact.
+ */
+function agentWhatsAppPage() {
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WhatsApp | Portal do Agente</title>
+<style>
+:root{color-scheme:dark;--bg:#0b141a;--panel:#111b21;--line:#2a3942;--soft:#202c33;--text:#e9edef;--muted:#8696a0;--accent:#25d366;--sent:#005c4b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px Inter,system-ui,-apple-system,Segoe UI,sans-serif}.shell{display:grid;grid-template-columns:300px minmax(0,1fr);height:100vh}.sidebar,.chat{min-height:0;background:var(--panel)}.sidebar{border-right:1px solid var(--line);display:flex;flex-direction:column}.head{height:64px;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;background:var(--soft)}.brand{font-weight:700}.status{font-size:12px;color:var(--muted)}button,input,textarea{font:inherit}button{cursor:pointer}.icon,.action{border:0;background:transparent;color:var(--text);padding:8px;border-radius:50%}.icon:hover,.action:hover{background:#2a3942}.search,.number{display:flex;align-items:center;gap:8px;margin:8px 12px;background:#202c33;border-radius:8px;padding:0 10px}.search input,.number input{width:100%;border:0;outline:0;background:transparent;color:var(--text);padding:11px 0}.new{margin:4px 12px 8px;border:0;border-radius:8px;background:var(--accent);color:#102018;padding:10px;font-weight:700}.chats{overflow:auto;min-height:0;flex:1}.row{width:100%;border:0;border-bottom:1px solid #223039;background:none;color:var(--text);padding:13px 16px;text-align:left}.row:hover,.row.active{background:#202c33}.row b,.row small{display:block}.row small{color:var(--muted);margin-top:3px}.chat{display:grid;grid-template-rows:64px 1fr auto}.chathead{background:var(--soft);padding:12px 20px;display:flex;align-items:center;justify-content:space-between}.chathead h1{font-size:15px;margin:0}.messages{overflow:auto;padding:24px max(5%,28px);background:#0b141a}.empty{height:100%;display:grid;place-items:center;color:var(--muted);text-align:center}.bubble{max-width:min(70%,620px);padding:8px 10px;margin:6px 0;border-radius:8px;background:#202c33;white-space:pre-wrap}.bubble.out{margin-left:auto;background:var(--sent)}.meta{display:block;color:#b9c5cb;font-size:11px;text-align:right;margin-top:4px}.compose{background:var(--soft);display:flex;gap:10px;padding:10px 16px;align-items:center}.compose textarea{resize:none;min-height:42px;max-height:120px;flex:1;border:0;border-radius:8px;background:#2a3942;color:var(--text);padding:12px}.send{border:0;border-radius:50%;width:42px;height:42px;background:var(--accent);color:#102018;font-weight:700}.modal{position:fixed;inset:0;background:#000a;display:grid;place-items:center;padding:16px}.modal[hidden]{display:none}.dialog{width:min(520px,100%);max-height:80vh;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:18px}.dialog h2{margin:0 0 12px;font-size:18px}.dialog input{width:100%;background:#202c33;border:1px solid var(--line);border-radius:8px;color:var(--text);padding:12px}.countries button,.contact{display:block;width:100%;border:0;border-bottom:1px solid var(--line);padding:12px;background:transparent;color:var(--text);text-align:left}.countries button:hover,.contact:hover{background:#202c33}.entry{display:flex;gap:8px;margin:12px 0}.flag{min-width:52px;border:0;border-radius:8px;background:#2a3942;color:var(--text);font-size:18px}.primary{border:0;border-radius:8px;background:var(--accent);color:#102018;padding:10px 14px;font-weight:700}.note{color:var(--muted);font-size:12px;line-height:1.5}@media(max-width:760px){.shell{grid-template-columns:1fr}.sidebar{display:none}.shell.show-list .sidebar{display:flex}.shell.show-list .chat{display:none}.messages{padding:14px}.bubble{max-width:88%}}
+</style>
+</head><body>
+<div class="shell" id="shell">
+<aside class="sidebar"><div class="head"><div><div class="brand">WhatsApp</div><div class="status" id="bridgeStatus">Verificando conexão…</div></div><a class="icon" href="/agentes/configuracoes?view=settings" title="Configurações">⚙</a></div>
+<div class="search">⌕<input id="chatSearch" placeholder="Pesquisar ou iniciar conversa"></div><button class="new" id="newChat">＋ Nova conversa</button><div class="chats" id="chatList"></div></aside>
+<main class="chat"><header class="chathead"><button class="action" id="mobileList">☰</button><div><h1 id="contactName">Selecione uma conversa</h1><div class="status" id="contactPhone">Use a busca para encontrar um cliente ou digite um telefone.</div></div><a class="icon" href="/agentes/configuracoes?view=settings" title="Configurar WhatsApp">⚙</a></header>
+<section class="messages" id="messages"><div class="empty">Escolha uma conversa à esquerda.<br>As configurações de conexão ficam no seu perfil.</div></section>
+<form class="compose" id="composer"><textarea id="messageText" placeholder="Digite uma mensagem" disabled></textarea><button class="send" id="send" disabled aria-label="Enviar">➤</button></form></main></div>
+<div class="modal" id="newDialog" hidden><div class="dialog"><button class="action" id="closeNew" style="float:right">✕</button><h2>Nova conversa</h2><input id="contactSearch" placeholder="Buscar cliente ou lead"><div id="contactResults"></div><div class="entry"><button class="flag" id="countryButton" title="Escolher país">🇺🇸</button><input id="manualNumber" inputmode="tel" placeholder="Digite o telefone"></div><button class="primary" id="openNumber">Abrir conversa</button><p class="note">Clique na bandeira para escolher o país e ver o código. Você também pode digitar qualquer número manualmente.</p></div></div>
+<div class="modal" id="countryDialog" hidden><div class="dialog"><button class="action" id="closeCountry" style="float:right">✕</button><h2>Escolha o país</h2><div class="countries" id="countries"></div></div></div>
+<script type="module">
+const countries=[['US','1','🇺🇸','Estados Unidos'],['BR','55','🇧🇷','Brasil'],['CA','1','🇨🇦','Canadá'],['PT','351','🇵🇹','Portugal'],['MX','52','🇲🇽','México'],['ES','34','🇪🇸','Espanha']];
+let country=countries[0],contacts=[],chat='',selected;
+const $=s=>document.querySelector(s), esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(action,options={}){const r=await fetch('/api/agent/whatsapp/'+action,{credentials:'same-origin',headers:options.body?{'content-type':'application/json'}:{},...options});const data=await r.json().catch(()=>({}));if(!r.ok)throw Error(data.error||'Não foi possível concluir a ação');return data}
+function normalize(value){const digits=String(value||'').replace(/\\D/g,'');return digits.startsWith(country[1])?digits:country[1]+digits}
+function title(number){const digits=String(number||'').replace(/\\D/g,'');const match=contacts.find(c=>String(c.whatsapp||c.phone||'').replace(/\\D/g,'').endsWith(digits)||digits.endsWith(String(c.whatsapp||c.phone||'').replace(/\\D/g,'')));return match?.name||'Contato WhatsApp'}
+function showDialog(id,on){$(id).hidden=!on}function renderContacts(query=''){const q=query.toLowerCase();$('#contactResults').innerHTML=contacts.filter(c=>(c.name+' '+(c.whatsapp||c.phone||'')).toLowerCase().includes(q)).slice(0,12).map(c=>'<button class="contact" data-id="'+c.id+'"><b>'+esc(c.name)+'</b><small>'+esc(c.whatsapp||c.phone||'Sem telefone')+'</small></button>').join('')||'<p class="note">Nenhum contato encontrado. Digite o número abaixo.</p>';document.querySelectorAll('.contact').forEach(b=>b.onclick=()=>{const c=contacts.find(x=>x.id===Number(b.dataset.id));openChat(String(c.whatsapp||c.phone||''),c.name);showDialog('#newDialog',false)})}
+function setSelected(number,name){selected={number,name:name||title(number)};$('#contactName').textContent=selected.name;$('#contactPhone').textContent='+'+number;$('#messageText').disabled=false;$('#send').disabled=false;$('#shell').classList.remove('show-list')}
+function renderRows(rows){$('#chatList').innerHTML=rows.slice(0,120).map(row=>{const number=String(row.chat||row.id||'').split('@')[0].replace(/\\D/g,'');const name=title(number);return '<button class="row '+(chat===row.chat?'active':'')+'" data-chat="'+esc(row.chat||number+'@c.us')+'"><b>'+esc(name)+'</b><small>+'+esc(number)+'</small></button>'}).join('')||'<p class="note" style="padding:12px">Nenhuma conversa ainda.</p>';document.querySelectorAll('.row').forEach(b=>b.onclick=()=>openChat(b.dataset.chat.split('@')[0]))}
+function formatDate(value){try{return new Date(value).toLocaleString('pt-BR')}catch{return ''}}
+async function loadMessages(){if(!chat)return;const rows=await api('messages?chat='+encodeURIComponent(chat));const items=Array.isArray(rows)?rows:rows.messages||[];$('#messages').innerHTML=items.map(m=>{const out=m.fromMe||m.direction==='out'||m.sentByMe;const body=m.body||m.text||m.message||'';return '<div class="bubble '+(out?'out':'')+'">'+esc(body)+'<span class="meta">'+esc(formatDate(m.timestamp||m.createdAt||m.time))+'</span></div>'}).join('')||'<div class="empty">Ainda não há mensagens nesta conversa.</div>';$('#messages').scrollTop=$('#messages').scrollHeight}
+async function openChat(number,name){number=String(number||'').replace(/\\D/g,'');if(!number)return;chat=number+'@c.us';setSelected(number,name);await loadMessages();refreshChats()}
+async function refreshChats(){try{const status=await api('status');$('#bridgeStatus').textContent=status.state==='connected'?'Conectado':'Configure a conexão em Configurações';const rows=await api('chats');renderRows(Array.isArray(rows)?rows:rows.chats||[])}catch(e){$('#bridgeStatus').textContent='WhatsApp indisponível'}}
+$('#newChat').onclick=()=>{showDialog('#newDialog',true);renderContacts()};$('#closeNew').onclick=()=>showDialog('#newDialog',false);$('#countryButton').onclick=()=>showDialog('#countryDialog',true);$('#closeCountry').onclick=()=>showDialog('#countryDialog',false);$('#chatSearch').oninput=e=>renderContacts(e.target.value);$('#contactSearch').oninput=e=>renderContacts(e.target.value);
+$('#openNumber').onclick=()=>{const n=normalize($('#manualNumber').value);if(n.length<7)return alert('Digite um telefone válido.');openChat(n);showDialog('#newDialog',false)};
+$('#countries').innerHTML=countries.map((c,i)=>'<button data-country="'+i+'">'+c[2]+' '+c[3]+' (+'+c[1]+')</button>').join('');document.querySelectorAll('[data-country]').forEach(b=>b.onclick=()=>{country=countries[Number(b.dataset.country)];$('#countryButton').textContent=country[2];$('#manualNumber').placeholder='Telefone (+'+country[1]+')';showDialog('#countryDialog',false)});
+$('#mobileList').onclick=()=>$('#shell').classList.add('show-list');$('#composer').onsubmit=async e=>{e.preventDefault();const text=$('#messageText').value.trim();if(!text||!chat)return;$('#send').disabled=true;try{await api('send',{method:'POST',body:JSON.stringify({chat,text,requestId:crypto.randomUUID()})});$('#messageText').value='';await loadMessages()}catch(e){alert(e.message)}finally{$('#send').disabled=false}};
+$('#messageText').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#composer').requestSubmit()}};contacts=await api('contacts').catch(()=>[]);refreshChats();setInterval(refreshChats,30000);
+</script></body></html>`;
+}
+
+
+// worker/whatsapp.js
+var json2 = /* @__PURE__ */ __name((value, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store" } }), "json");
+var encode = /* @__PURE__ */ __name((bytes) => btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""), "encode");
+async function whatsappRoute(request, env, auth) {
+  const url = new URL(request.url), page = ["/agentes/whatsapp", "/agent-whatsapp.html"].includes(url.pathname);
+  if (!page && !url.pathname.startsWith("/api/agent/whatsapp/")) return null;
+  try {
+    const email = await auth.email(request, env);
+    if (!email) return page ? Response.redirect(new URL("/agentes/login", url), 302) : json2({ error: "Entre novamente no portal." }, 401);
+    const { account } = await auth.access(email, env);
+    if (!account || !Number(account.isActive) || account.status !== "approved" || !["agent", "both"].includes(account.accountType)) return json2({ error: "Acesso restrito ao agente." }, 403);
+    if (page) return new Response(agentWhatsAppPage(), { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
+    const action = url.pathname.split("/").at(-1), method = request.method;
+    if (action === "contacts" && method === "GET") {
+      const rows = await env.DB.prepare("SELECT id,name,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name COLLATE NOCASE").bind(email.toLowerCase()).all();
+      return json2(rows.results || []);
+    }
+    if (action === "contact" && method === "GET") {
+      const id = Number(url.searchParams.get("clientId"));
+      if (!Number.isInteger(id) || id <= 0) return json2({ error: "Cliente inv\xE1lido." }, 400);
+      const c = await env.DB.prepare("SELECT id,name,phone,whatsapp FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(id, email.toLowerCase()).first();
+      if (!c) return json2({ error: "Cliente n\xE3o encontrado." }, 404);
+      return json2({ id: c.id, name: c.name, phone: c.phone || c.whatsapp || "" });
+    }
+    if (!(["status", "chats", "messages", "media"].includes(action) && method === "GET") && !(["connect", "disconnect", "send"].includes(action) && method === "POST")) return json2({ error: "A\xE7\xE3o inv\xE1lida." }, 405);
+    if (method === "POST" && (request.headers.get("origin") !== url.origin || !request.headers.get("content-type")?.startsWith("application/json"))) return json2({ error: "Solicita\xE7\xE3o inv\xE1lida." }, 403);
+    if (!env.WHATSAPP_BRIDGE_URL || !env.WHATSAPP_BRIDGE_SECRET) return json2({ state: "setup_required", error: "A conex\xE3o de teste ainda precisa ser ativada pelo administrador." }, 503);
+    const base = new URL(env.WHATSAPP_BRIDGE_URL);
+    if (base.protocol !== "https:" && !(["localhost", "127.0.0.1"].includes(base.hostname) && url.hostname === "127.0.0.1")) return json2({ error: "Configura\xE7\xE3o da conex\xE3o inv\xE1lida." }, 503);
+    let body;
+    if (method === "POST") {
+      const reader = request.body?.getReader(), parts = [];
+      let size = 0;
+      if (reader) while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        size += value.length;
+        if (size > 11500000) {
+          await reader.cancel();
+          return json2({ error: "Mensagem muito grande." }, 413);
+        }
+        parts.push(value);
+      }
+      body = await new Blob(parts).text();
+      try {
+        JSON.parse(body || "{}");
+      } catch {
+        return json2({ error: "Solicita\xE7\xE3o inv\xE1lida." }, 400);
+      }
+    }
+    const encoder = new TextEncoder(), payload = encode(encoder.encode(JSON.stringify({ aud: "affinity-whatsapp", owner: email.toLowerCase(), exp: Math.floor(Date.now() / 1e3) + 60 })));
+    const key2 = await crypto.subtle.importKey("raw", encoder.encode(env.WHATSAPP_BRIDGE_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+    const signature = encode(new Uint8Array(await crypto.subtle.sign("HMAC", key2, encoder.encode(payload))));
+    const target = new URL("/" + action, base);
+    if (action === "messages") target.searchParams.set("chat", url.searchParams.get("chat") || "");
+    if (action === "media") target.searchParams.set("id", url.searchParams.get("id") || "");
+    const upstreamHeaders = { authorization: "Bearer " + payload + "." + signature, "content-type": "application/json" };
+    if (action === "media" && request.headers.get("range")) upstreamHeaders.range = request.headers.get("range");
+    const response = await fetch(target, { method, headers: upstreamHeaders, ...method === "POST" ? { body: body || "{}" } : {}, redirect: "manual", signal: AbortSignal.timeout(["send", "media"].includes(action) ? 60000 : 20000) });
+    if (action === "media" && response.ok) {
+      const headers = {"content-type": response.headers.get("content-type") || "application/octet-stream", "content-disposition": response.headers.get("content-disposition") || "inline", "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff"};
+      for (const name of ["accept-ranges", "content-range", "content-length"]) if (response.headers.get(name)) headers[name] = response.headers.get(name);
+      return new Response(response.body, {status: response.status, headers});
+    }
+    if (!response.headers.get("content-type")?.includes("application/json")) {
+      console.error("whatsapp_bridge_non_json", JSON.stringify({action,status:response.status,type:response.headers.get("content-type")||"",length:response.headers.get("content-length")||""}));
+      return json2({ error: "O servi\xE7o de WhatsApp n\xE3o respondeu corretamente." }, 502);
+    }
+    return new Response(response.body, { status: response.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+  } catch (error) {
+    console.error("whatsapp_bridge_error", error instanceof Error ? error.message : String(error));
+    return json2({ error: "N\xE3o foi poss\xEDvel acessar o WhatsApp agora. Tente novamente." }, 503);
+  }
+}
+__name(whatsappRoute, "whatsappRoute");
+
+// worker/mail-attachments.js
+var MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+function parseMailAttachments(input) {
+  if (input == null) return [];
+  if (!Array.isArray(input) || input.length > 10) throw Error("Selecione no m\xE1ximo 10 anexos.");
+  let total = 0;
+  return input.map((file) => {
+    if (!file || typeof file.filename !== "string" || typeof file.content !== "string" || !file.content.length || file.content.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(file.content)) throw Error("Anexo inv\xE1lido. Selecione o arquivo novamente.");
+    const size = file.content.length * 3 / 4 - (file.content.endsWith("==") ? 2 : file.content.endsWith("=") ? 1 : 0);
+    total += size;
+    if (total > MAX_ATTACHMENT_BYTES) throw Error("Os anexos devem somar no m\xE1ximo 10 MB.");
+    const filename = file.filename.split(/[\\/]/).pop().replace(/[\x00-\x1f\x7f]/g, "").slice(0, 180);
+    if (!filename) throw Error("Nome do anexo inv\xE1lido.");
+    return { filename, content: file.content, encoding: "base64", contentType: "application/octet-stream" };
+  });
+}
+__name(parseMailAttachments, "parseMailAttachments");
+
+// worker/automation-preferences.js
+var encode2 = /* @__PURE__ */ __name((value) => btoa(String.fromCharCode(...new TextEncoder().encode(value))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, ""), "encode");
+var decode = /* @__PURE__ */ __name((value) => Uint8Array.from(atob(value.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0)), "decode");
+var escape = /* @__PURE__ */ __name((value) => String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]), "escape");
+var automationScope = /* @__PURE__ */ __name((m) => m.occasion === "monthly" ? "monthly:" + m.monthNumber : m.occasion === "custom" ? "custom:" + m.id : m.occasion, "automationScope");
+async function key(secret) {
+  return crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+__name(key, "key");
+async function preferenceToken(secret, data) {
+  const payload = encode2(JSON.stringify({ ...data, exp: Math.floor(Date.now() / 1e3) + 365 * 86400 }));
+  const signature = await crypto.subtle.sign("HMAC", await key(secret), new TextEncoder().encode(payload));
+  return payload + "." + btoa(String.fromCharCode(...new Uint8Array(signature))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+}
+__name(preferenceToken, "preferenceToken");
+async function verifyPreferenceToken(secret, token) {
+  const [payload, signature, extra] = String(token).split(".");
+  if (!payload || !signature || extra || token.length > 2e3 || !await crypto.subtle.verify("HMAC", await key(secret), decode(signature), new TextEncoder().encode(payload))) throw Error("Link inv\xE1lido");
+  const data = JSON.parse(new TextDecoder().decode(decode(payload)));
+  if (!Number.isFinite(data.exp) || data.exp < Math.floor(Date.now() / 1e3) || !Number.isSafeInteger(data.clientId) || !data.owner || !data.email || !/^[a-z_]+(?::\d+)?$/.test(data.scope)) throw Error("Link expirado");
+  return data;
+}
+__name(verifyPreferenceToken, "verifyPreferenceToken");
+async function ensurePreferences(db) {
+  await db.prepare("CREATE TABLE IF NOT EXISTS crmAutomationSubscriptions (agentEmail TEXT NOT NULL,clientId INTEGER NOT NULL,occasion TEXT NOT NULL,isActive INTEGER NOT NULL DEFAULT 1,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,requestedBy TEXT NOT NULL DEFAULT 'agent',PRIMARY KEY(agentEmail,clientId,occasion))").run();
+  try {
+    await db.prepare("SELECT requestedBy FROM crmAutomationSubscriptions LIMIT 0").all();
+  } catch (e) {
+    if (!String(e).includes("no such column")) throw e;
+    try {
+      await db.prepare("ALTER TABLE crmAutomationSubscriptions ADD COLUMN requestedBy TEXT NOT NULL DEFAULT 'agent'").run();
+    } catch (other) {
+      if (!String(other).includes("duplicate column")) throw other;
+    }
+  }
+}
+__name(ensurePreferences, "ensurePreferences");
+async function automationFooter(env, automation, client, html) {
+  const token = await preferenceToken(env.JWT_SECRET, { owner: String(automation.agentEmail).toLowerCase(), clientId: Number(client.id || client.clientId), email: String(client.email).toLowerCase(), scope: automationScope(automation), label: String(automation.title || "esta programa\xE7\xE3o").slice(0, 180) });
+  const url = new URL("/email/preferences", env.VITE_FRONTEND_URL || "https://www.affinityfc.org");
+  url.searchParams.set("token", token);
+  return html + `<p style="font:12px Arial;color:#666;text-align:center;padding:16px">Para deixar de receber apenas esta programa\xE7\xE3o, <a href="${escape(url.href)}">clique aqui</a>. As outras mensagens permanecem ativas.</p>`;
+}
+__name(automationFooter, "automationFooter");
+async function preferenceRoute(request, env) {
+  const url = new URL(request.url);
+  if (url.pathname !== "/email/preferences") return null;
+  const page = /* @__PURE__ */ __name((text, status = 200) => new Response(`<!doctype html><html lang="pt-BR"><meta name="viewport" content="width=device-width"><title>Prefer\xEAncias de mensagens</title><body style="font:18px Arial;max-width:580px;margin:70px auto;padding:24px"><h1>Prefer\xEAncias de mensagens</h1>${text}</body></html>`, { status, headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store", "referrer-policy": "no-referrer", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" } }), "page");
+  if (!["GET", "POST"].includes(request.method)) return page("M\xE9todo n\xE3o permitido.", 405);
+  try {
+    const token = url.searchParams.get("token") || "", data = await verifyPreferenceToken(env.JWT_SECRET, token);
+    const client = await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=? AND lower(email)=?").bind(data.clientId, data.owner, data.email).first();
+    if (!client) return page("Este link n\xE3o corresponde mais ao cadastro. Entre em contato com seu agente.", 400);
+    if (request.method === "GET") return page(`<p>Deseja parar de receber <strong>${escape(data.label)}</strong>?</p><p>Isso n\xE3o cancela as outras programa\xE7\xF5es.</p><form method="post"><button style="padding:14px">Cancelar esta programa\xE7\xE3o</button></form>`);
+    await ensurePreferences(env.DB);
+    const previous = await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=? AND occasion=?").bind(data.owner, data.clientId, data.scope).first();
+    if (previous && Number(previous.isActive) === 0) return page("<p>Esta programa\xE7\xE3o j\xE1 est\xE1 cancelada para voc\xEA.</p>");
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO crmAutomationSubscriptions(agentEmail,clientId,occasion,isActive,updatedAt,requestedBy) VALUES(?,?,?,0,CURRENT_TIMESTAMP,'client') ON CONFLICT(agentEmail,clientId,occasion) DO UPDATE SET isActive=0,updatedAt=CURRENT_TIMESTAMP,requestedBy='client'").bind(data.owner, data.clientId, data.scope),
+      env.DB.prepare("INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,'note',?,?)").bind(data.clientId, "Cliente solicitou o cancelamento da programa\xE7\xE3o: " + data.label, data.owner)
+    ]);
+    return page("<p>Pronto. Voc\xEA deixou de receber esta programa\xE7\xE3o. Suas outras prefer\xEAncias foram mantidas.</p>");
+  } catch {
+    return page("N\xE3o foi poss\xEDvel usar este link. Solicite ajuda ao seu agente.", 400);
+  }
+}
+__name(preferenceRoute, "preferenceRoute");
+
+// worker/five-rings-credits.js
+var SCHEMA2 = "CREATE TABLE IF NOT EXISTS agentFiveRingsCredits(agentEmail TEXT PRIMARY KEY,totalCredits INTEGER NOT NULL,leadershipCurrent INTEGER NOT NULL,leadershipGoal INTEGER NOT NULL,leadershipRemaining INTEGER NOT NULL,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)";
+function parseFiveRingsCredits(html) {
+  const text = String(html).replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&(?:nbsp|amp);/g, " ").replace(/\s+/g, " ");
+  const totalAt = text.search(/\btotal\s+credits\b/i), leaderAt = text.search(/\bleadership\s*(?:retreat)?\b/i);
+  if (totalAt < 0 || leaderAt <= totalAt) throw Error("Os cart\xF5es de cr\xE9ditos n\xE3o foram encontrados no painel Five Rings.");
+  const numbers = /* @__PURE__ */ __name((value) => value.replace(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/g, " ").replace(/\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+20\d{2}\b/gi, " ").match(/\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b|\b\d+(?:\.\d+)?\b/g)?.map((n) => Math.round(Number(n.replaceAll(",", "")))) || [], "numbers");
+  const total = numbers(text.slice(totalAt, leaderAt));
+  const leaderText = text.slice(leaderAt).split(/scoreboards?|life policies|annuity policies|new recruits/i)[0];
+  const leader = numbers(leaderText);
+  if (!total.length || leader.length !== 3) throw Error("A Five Rings n\xE3o retornou todos os valores dos cart\xF5es.");
+  const [current, goal, remaining] = leader;
+  if (current < 0 || goal <= 0 || remaining < 0 || Math.abs(Math.max(0, goal - current) - remaining) > 1) throw Error("Os valores de Leadership retornados precisam ser conferidos.");
+  return { totalCredits: total.at(-1), leadershipCurrent: current, leadershipGoal: goal, leadershipRemaining: remaining };
+}
+__name(parseFiveRingsCredits, "parseFiveRingsCredits");
+async function cachedFiveRingsCredits(db, owner) {
+  try {
+    return await db.prepare("SELECT totalCredits,leadershipCurrent,leadershipGoal,leadershipRemaining,updatedAt FROM agentFiveRingsCredits WHERE agentEmail=?").bind(owner).first();
+  } catch (e) {
+    if (String(e).includes("no such table")) return null;
+    throw e;
+  }
+}
+__name(cachedFiveRingsCredits, "cachedFiveRingsCredits");
+async function refreshFiveRingsCredits(env, owner, session, fetchPortal) {
+  const response = await fetchPortal("https://portal.fiveringsfinancial.com/account/dashboard", { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
+  if (!response.ok) throw Error("N\xE3o foi poss\xEDvel consultar os cr\xE9ditos no Five Rings.");
+  const values = parseFiveRingsCredits(await response.text());
+  await env.DB.prepare(SCHEMA2).run();
+  await env.DB.prepare("INSERT INTO agentFiveRingsCredits(agentEmail,totalCredits,leadershipCurrent,leadershipGoal,leadershipRemaining) VALUES(?,?,?,?,?) ON CONFLICT(agentEmail) DO UPDATE SET totalCredits=excluded.totalCredits,leadershipCurrent=excluded.leadershipCurrent,leadershipGoal=excluded.leadershipGoal,leadershipRemaining=excluded.leadershipRemaining,updatedAt=CURRENT_TIMESTAMP").bind(owner, values.totalCredits, values.leadershipCurrent, values.leadershipGoal, values.leadershipRemaining).run();
+  return cachedFiveRingsCredits(env.DB, owner);
+}
+__name(refreshFiveRingsCredits, "refreshFiveRingsCredits");
+
+// worker/crm-stage.js
+function isActiveClientPolicy(policy) {
+  const status = String(policy?.status || "").trim().toLowerCase().replace(/[\s_-]+/g, "");
+  return ["active", "ativa", "ativo", "inforce", "issued"].includes(status);
+}
+__name(isActiveClientPolicy, "isActiveClientPolicy");
+function policyBelongsToCrmClient(policy, client) {
+  if (String(policy.agentEmail || "").trim().toLowerCase() !== String(client.assignedAdminEmail || "").trim().toLowerCase()) return false;
+  if (Number(policy.clientId) > 0) return Number(policy.clientId) === Number(client.id);
+  const email = /* @__PURE__ */ __name((v) => String(v || "").trim().toLowerCase(), "email"), phone = /* @__PURE__ */ __name((v) => String(v || "").replace(/\D/g, "").slice(-10), "phone");
+  return !!email(client.email) && email(policy.clientEmail) === email(client.email) || phone(client.phone || client.whatsapp).length === 10 && phone(policy.clientPhone) === phone(client.phone || client.whatsapp);
+}
+__name(policyBelongsToCrmClient, "policyBelongsToCrmClient");
+
+// worker/current-worker.js
+var __create = Object.create;
+var __defProp2 = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
-var __esm = (fn, res, err) => function __init() {
+var __name2 = /* @__PURE__ */ __name((target, value) => __defProp2(target, "name", { value, configurable: true }), "__name");
+var __esm = /* @__PURE__ */ __name((fn, res, err) => /* @__PURE__ */ __name(function __init() {
   if (err) throw err[0];
   try {
     return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
   } catch (e) {
     throw err = [e], e;
   }
-};
-var __commonJS = (cb, mod) => function __require() {
+}, "__init"), "__esm");
+var __commonJS = /* @__PURE__ */ __name((cb, mod) => /* @__PURE__ */ __name(function __require() {
   try {
     return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
   } catch (e) {
     throw mod = 0, e;
   }
-};
-var __export = (target, all) => {
+}, "__require"), "__commonJS");
+var __export = /* @__PURE__ */ __name((target, all) => {
   for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
-var __copyProps = (to, from, except, desc) => {
+    __defProp2(target, name, { get: all[name], enumerable: true });
+}, "__export");
+var __copyProps = /* @__PURE__ */ __name((to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    for (let key2 of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key2) && key2 !== except)
+        __defProp2(to, key2, { get: /* @__PURE__ */ __name(() => from[key2], "get"), enumerable: !(desc = __getOwnPropDesc(from, key2)) || desc.enumerable });
   }
   return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+}, "__copyProps");
+var __toESM = /* @__PURE__ */ __name((mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
   // If the importer is in node compatibility mode or this is not an ESM
   // file that has been converted to a CommonJS file using a Babel-
   // compatible transform (i.e. "__esModule" has not been set), then set
   // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
+  isNodeMode || !mod || !mod.__esModule ? __defProp2(target, "default", { value: mod, enumerable: true }) : target,
   mod
-));
-
-// shared/paymentReturnTemplate.ts
-var DEFAULT_PAYMENT_RETURN_SUBJECT, DEFAULT_PAYMENT_RETURN_MESSAGE;
+)), "__toESM");
+var DEFAULT_PAYMENT_RETURN_SUBJECT;
+var DEFAULT_PAYMENT_RETURN_MESSAGE;
 var init_paymentReturnTemplate = __esm({
   "shared/paymentReturnTemplate.ts"() {
     "use strict";
@@ -63,24 +443,16 @@ Affinity Financial Consulting
 \u{1F310} www.affinityfc.org`;
   }
 });
-
-// node-built-in-modules:events
-import libDefault from "events";
 var require_events = __commonJS({
   "node-built-in-modules:events"(exports, module) {
     module.exports = libDefault;
   }
 });
-
-// node-built-in-modules:url
-import libDefault2 from "url";
 var require_url = __commonJS({
   "node-built-in-modules:url"(exports, module) {
     module.exports = libDefault2;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/punycode/index.js
 var require_punycode = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/punycode/index.js"(exports, module) {
     "use strict";
@@ -108,6 +480,7 @@ var require_punycode = __commonJS({
       throw new RangeError(errors[type]);
     }
     __name(error, "error");
+    __name2(error, "error");
     function map(array, callback) {
       const result = [];
       let length = array.length;
@@ -117,6 +490,7 @@ var require_punycode = __commonJS({
       return result;
     }
     __name(map, "map");
+    __name2(map, "map");
     function mapDomain(domain, callback) {
       const parts = domain.split("@");
       let result = "";
@@ -130,6 +504,7 @@ var require_punycode = __commonJS({
       return result + encoded;
     }
     __name(mapDomain, "mapDomain");
+    __name2(mapDomain, "mapDomain");
     function ucs2decode(string) {
       const output = [];
       let counter = 0;
@@ -151,8 +526,9 @@ var require_punycode = __commonJS({
       return output;
     }
     __name(ucs2decode, "ucs2decode");
-    var ucs2encode = /* @__PURE__ */ __name((codePoints) => String.fromCodePoint(...codePoints), "ucs2encode");
-    var basicToDigit = /* @__PURE__ */ __name(function(codePoint) {
+    __name2(ucs2decode, "ucs2decode");
+    var ucs2encode = /* @__PURE__ */ __name2((codePoints) => String.fromCodePoint(...codePoints), "ucs2encode");
+    var basicToDigit = /* @__PURE__ */ __name2(function(codePoint) {
       if (codePoint >= 48 && codePoint < 58) {
         return 26 + (codePoint - 48);
       }
@@ -164,10 +540,10 @@ var require_punycode = __commonJS({
       }
       return base;
     }, "basicToDigit");
-    var digitToBasic = /* @__PURE__ */ __name(function(digit, flag) {
+    var digitToBasic = /* @__PURE__ */ __name2(function(digit, flag) {
       return digit + 22 + 75 * (digit < 26) - ((flag != 0) << 5);
     }, "digitToBasic");
-    var adapt = /* @__PURE__ */ __name(function(delta, numPoints, firstTime) {
+    var adapt = /* @__PURE__ */ __name2(function(delta, numPoints, firstTime) {
       let k = 0;
       delta = firstTime ? floor(delta / damp) : delta >> 1;
       delta += floor(delta / numPoints);
@@ -181,7 +557,7 @@ var require_punycode = __commonJS({
       }
       return floor(k + (baseMinusTMin + 1) * delta / (delta + skew));
     }, "adapt");
-    var decode = /* @__PURE__ */ __name(function(input) {
+    var decode2 = /* @__PURE__ */ __name2(function(input) {
       const output = [];
       const inputLength = input.length;
       let i = 0;
@@ -232,7 +608,7 @@ var require_punycode = __commonJS({
       }
       return String.fromCodePoint(...output);
     }, "decode");
-    var encode = /* @__PURE__ */ __name(function(input) {
+    var encode3 = /* @__PURE__ */ __name2(function(input) {
       const output = [];
       input = ucs2decode(input);
       const inputLength = input.length;
@@ -289,14 +665,14 @@ var require_punycode = __commonJS({
       }
       return output.join("");
     }, "encode");
-    var toUnicode = /* @__PURE__ */ __name(function(input) {
+    var toUnicode = /* @__PURE__ */ __name2(function(input) {
       return mapDomain(input, function(string) {
-        return regexPunycode.test(string) ? decode(string.slice(4).toLowerCase()) : string;
+        return regexPunycode.test(string) ? decode2(string.slice(4).toLowerCase()) : string;
       });
     }, "toUnicode");
-    var toASCII = /* @__PURE__ */ __name(function(input) {
+    var toASCII = /* @__PURE__ */ __name2(function(input) {
       return mapDomain(input, function(string) {
-        return regexNonASCII.test(string) ? "xn--" + encode(string) : string;
+        return regexNonASCII.test(string) ? "xn--" + encode3(string) : string;
       });
     }, "toASCII");
     var punycode = {
@@ -317,16 +693,14 @@ var require_punycode = __commonJS({
         decode: ucs2decode,
         encode: ucs2encode
       },
-      decode,
-      encode,
+      decode: decode2,
+      encode: encode3,
       toASCII,
       toUnicode
     };
     module.exports = punycode;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/shared/url.js
 var require_url2 = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/shared/url.js"(exports, module) {
     "use strict";
@@ -342,6 +716,7 @@ var require_url2 = __commonJS({
       }
     }
     __name(safeDecode, "safeDecode");
+    __name2(safeDecode, "safeDecode");
     function normalizeHostname(raw) {
       let hostname = raw || "";
       if (!hostname) {
@@ -353,6 +728,7 @@ var require_url2 = __commonJS({
       return punycode.toASCII(safeDecode(hostname));
     }
     __name(normalizeHostname, "normalizeHostname");
+    __name2(normalizeHostname, "normalizeHostname");
     module.exports.parse = (input, parseQueryString) => {
       input = input || "";
       if (!URLImpl) {
@@ -377,15 +753,15 @@ var require_url2 = __commonJS({
       let query;
       if (parseQueryString) {
         query = /* @__PURE__ */ Object.create(null);
-        u.searchParams.forEach((value, key) => {
-          if (Object.prototype.hasOwnProperty.call(query, key)) {
-            if (Array.isArray(query[key])) {
-              query[key].push(value);
+        u.searchParams.forEach((value, key2) => {
+          if (Object.prototype.hasOwnProperty.call(query, key2)) {
+            if (Array.isArray(query[key2])) {
+              query[key2].push(value);
             } else {
-              query[key] = [query[key], value];
+              query[key2] = [query[key2], value];
             }
           } else {
-            query[key] = value;
+            query[key2] = value;
           }
         });
       } else {
@@ -416,56 +792,36 @@ var require_url2 = __commonJS({
     };
   }
 });
-
-// node-built-in-modules:util
-import libDefault3 from "util";
 var require_util = __commonJS({
   "node-built-in-modules:util"(exports, module) {
     module.exports = libDefault3;
   }
 });
-
-// node-built-in-modules:fs
-import libDefault4 from "fs";
 var require_fs = __commonJS({
   "node-built-in-modules:fs"(exports, module) {
     module.exports = libDefault4;
   }
 });
-
-// node-built-in-modules:http
-import libDefault5 from "http";
 var require_http = __commonJS({
   "node-built-in-modules:http"(exports, module) {
     module.exports = libDefault5;
   }
 });
-
-// node-built-in-modules:https
-import libDefault6 from "https";
 var require_https = __commonJS({
   "node-built-in-modules:https"(exports, module) {
     module.exports = libDefault6;
   }
 });
-
-// node-built-in-modules:zlib
-import libDefault7 from "zlib";
 var require_zlib = __commonJS({
   "node-built-in-modules:zlib"(exports, module) {
     module.exports = libDefault7;
   }
 });
-
-// node-built-in-modules:stream
-import libDefault8 from "stream";
 var require_stream = __commonJS({
   "node-built-in-modules:stream"(exports, module) {
     module.exports = libDefault8;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/fetch/cookies.js
 var require_cookies = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/fetch/cookies.js"(exports, module) {
     "use strict";
@@ -474,6 +830,9 @@ var require_cookies = __commonJS({
     var Cookies = class {
       static {
         __name(this, "Cookies");
+      }
+      static {
+        __name2(this, "Cookies");
       }
       constructor(options) {
         this.options = options || {};
@@ -548,13 +907,13 @@ var require_cookies = __commonJS({
         const cookie = {};
         (cookieStr || "").toString().split(";").forEach((cookiePart) => {
           const valueParts = cookiePart.split("=");
-          const key = valueParts.shift().trim().toLowerCase();
+          const key2 = valueParts.shift().trim().toLowerCase();
           let value = valueParts.join("=").trim();
           let domain;
-          if (!key) {
+          if (!key2) {
             return;
           }
-          switch (key) {
+          switch (key2) {
             case "expires":
               value = new Date(value);
               if (value.toString() !== "Invalid Date") {
@@ -582,7 +941,7 @@ var require_cookies = __commonJS({
               break;
             default:
               if (!cookie.name) {
-                cookie.name = key;
+                cookie.name = key2;
                 cookie.value = value;
               }
           }
@@ -675,8 +1034,6 @@ var require_cookies = __commonJS({
     module.exports = Cookies;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/package.json
 var require_package = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/package.json"(exports, module) {
     module.exports = {
@@ -728,16 +1085,11 @@ var require_package = __commonJS({
     };
   }
 });
-
-// node-built-in-modules:net
-import libDefault9 from "net";
 var require_net = __commonJS({
   "node-built-in-modules:net"(exports, module) {
     module.exports = libDefault9;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/errors.js
 var require_errors = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/errors.js"(exports, module) {
     "use strict";
@@ -777,8 +1129,6 @@ var require_errors = __commonJS({
     }
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/fetch/index.js
 var require_fetch = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/fetch/index.js"(exports, module) {
     "use strict";
@@ -819,8 +1169,8 @@ var require_fetch = __commonJS({
         "accept-encoding": "gzip,deflate",
         "user-agent": "nodemailer/" + packageData.version
       };
-      Object.keys(options.headers || {}).forEach((key) => {
-        headers[key.toLowerCase().trim()] = options.headers[key];
+      Object.keys(options.headers || {}).forEach((key2) => {
+        headers[key2.toLowerCase().trim()] = options.headers[key2];
       });
       if (options.userAgent) {
         headers["user-agent"] = options.userAgent;
@@ -853,9 +1203,9 @@ var require_fetch = __commonJS({
           } else if (typeof options.body === "object") {
             try {
               body = Buffer.from(
-                Object.keys(options.body).map((key) => {
-                  const value = options.body[key].toString().trim();
-                  return encodeURIComponent(key) + "=" + encodeURIComponent(value);
+                Object.keys(options.body).map((key2) => {
+                  const value = options.body[key2].toString().trim();
+                  return encodeURIComponent(key2) + "=" + encodeURIComponent(value);
                 }).join("&")
               );
             } catch (E) {
@@ -963,9 +1313,9 @@ var require_fetch = __commonJS({
           const downgrade = parsed.protocol === "https:" && redirectParsed.protocol === "http:";
           if (options.headers && (crossHost || downgrade)) {
             const sensitive = ["authorization", "cookie", "proxy-authorization"];
-            Object.keys(options.headers).forEach((key) => {
-              if (sensitive.includes(key.toLowerCase())) {
-                delete options.headers[key];
+            Object.keys(options.headers).forEach((key2) => {
+              if (sensitive.includes(key2.toLowerCase())) {
+                delete options.headers[key2];
               }
             });
           }
@@ -1028,26 +1378,19 @@ var require_fetch = __commonJS({
       return fetchRes;
     }
     __name(nmfetch, "nmfetch");
+    __name2(nmfetch, "nmfetch");
   }
 });
-
-// node-built-in-modules:dns
-import libDefault10 from "dns";
 var require_dns = __commonJS({
   "node-built-in-modules:dns"(exports, module) {
     module.exports = libDefault10;
   }
 });
-
-// node-built-in-modules:os
-import libDefault11 from "os";
 var require_os = __commonJS({
   "node-built-in-modules:os"(exports, module) {
     module.exports = libDefault11;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/shared/index.js
 var require_shared = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/shared/index.js"(exports, module) {
     "use strict";
@@ -1073,14 +1416,14 @@ var require_shared = __commonJS({
     } catch (_err) {
     }
     module.exports.networkInterfaces = networkInterfaces;
-    var isFamilySupported = /* @__PURE__ */ __name((family, allowInternal) => {
+    var isFamilySupported = /* @__PURE__ */ __name2((family, allowInternal) => {
       const ifaces = module.exports.networkInterfaces;
       if (!ifaces) {
         return true;
       }
-      return Object.keys(ifaces).map((key) => ifaces[key]).reduce((acc, val) => acc.concat(val), []).filter((i) => !i.internal || allowInternal).some((i) => i.family === "IPv" + family || i.family === family);
+      return Object.keys(ifaces).map((key2) => ifaces[key2]).reduce((acc, val) => acc.concat(val), []).filter((i) => !i.internal || allowInternal).some((i) => i.family === "IPv" + family || i.family === family);
     }, "isFamilySupported");
-    var resolve = /* @__PURE__ */ __name((family, hostname, options, callback) => {
+    var resolve = /* @__PURE__ */ __name2((family, hostname, options, callback) => {
       options = options || {};
       if (!isFamilySupported(family, options.allowInternalNetworkInterfaces)) {
         return callback(null, []);
@@ -1104,7 +1447,7 @@ var require_shared = __commonJS({
       });
     }, "resolve");
     var dnsCache = module.exports.dnsCache = /* @__PURE__ */ new Map();
-    var formatDNSValue = /* @__PURE__ */ __name((value, extra) => {
+    var formatDNSValue = /* @__PURE__ */ __name2((value, extra) => {
       if (!value) {
         return Object.assign({}, extra || {});
       }
@@ -1151,7 +1494,7 @@ var require_shared = __commonJS({
           if (dnsCache.size > MAX_CACHE_SIZE) {
             const toDelete = Math.floor(MAX_CACHE_SIZE * 0.1);
             const keys = Array.from(dnsCache.keys()).slice(0, toDelete);
-            keys.forEach((key) => dnsCache.delete(key));
+            keys.forEach((key2) => dnsCache.delete(key2));
           }
         }
         if (!cached.expires || cached.expires >= now) {
@@ -1303,10 +1646,10 @@ var require_shared = __commonJS({
           pass: auth.join(":")
         };
       }
-      Object.keys(url.query || {}).forEach((key) => {
+      Object.keys(url.query || {}).forEach((key2) => {
         let obj = options;
-        let lKey = key;
-        let value = url.query[key];
+        let lKey = key2;
+        let value = url.query[key2];
         if (!isNaN(value)) {
           value = Number(value);
         }
@@ -1318,13 +1661,13 @@ var require_shared = __commonJS({
             value = false;
             break;
         }
-        if (key.indexOf("tls.") === 0) {
-          lKey = key.substr(4);
+        if (key2.indexOf("tls.") === 0) {
+          lKey = key2.substr(4);
           if (!options.tls) {
             options.tls = {};
           }
           obj = options.tls;
-        } else if (key.indexOf(".") >= 0) {
+        } else if (key2.indexOf(".") >= 0) {
           return;
         }
         if (!(lKey in obj)) {
@@ -1399,10 +1742,10 @@ var require_shared = __commonJS({
         const entry = metaEntries[i];
         const sepPos = entry.indexOf("=");
         if (sepPos > 0) {
-          const key = entry.substring(0, sepPos).trim();
+          const key2 = entry.substring(0, sepPos).trim();
           const value = entry.substring(sepPos + 1).trim();
-          if (key) {
-            params[key] = value;
+          if (key2) {
+            params[key2] = value;
           }
         }
       }
@@ -1427,7 +1770,7 @@ var require_shared = __commonJS({
         params
       };
     };
-    module.exports.resolveContent = (data, key, options, callback) => {
+    module.exports.resolveContent = (data, key2, options, callback) => {
       if (!callback && typeof options === "function") {
         callback = options;
         options = false;
@@ -1439,12 +1782,12 @@ var require_shared = __commonJS({
           callback = module.exports.callbackPromise(resolve2, reject);
         });
       }
-      resolveContentValue(data, key, options, callback);
+      resolveContentValue(data, key2, options, callback);
       return promise;
     };
-    function resolveContentValue(data, key, options, callback) {
-      let content = data && data[key] && data[key].content || data[key];
-      const encoding = (typeof data[key] === "object" && data[key].encoding || "utf8").toString().toLowerCase().replace(/[-_\s]/g, "");
+    function resolveContentValue(data, key2, options, callback) {
+      let content = data && data[key2] && data[key2].content || data[key2];
+      const encoding = (typeof data[key2] === "object" && data[key2].encoding || "utf8").toString().toLowerCase().replace(/[-_\s]/g, "");
       if (!content) {
         return callback(null, content);
       }
@@ -1454,10 +1797,10 @@ var require_shared = __commonJS({
             if (err) {
               return callback(err);
             }
-            if (data[key].content) {
-              data[key].content = value;
+            if (data[key2].content) {
+              data[key2].content = value;
             } else {
-              data[key] = value;
+              data[key2] = value;
             }
             callback(null, value);
           });
@@ -1484,21 +1827,22 @@ var require_shared = __commonJS({
           return resolveStream(fs.createReadStream(content.path), callback);
         }
       }
-      if (typeof data[key].content === "string" && !["utf8", "usascii", "ascii"].includes(encoding)) {
-        content = Buffer.from(data[key].content, encoding);
+      if (typeof data[key2].content === "string" && !["utf8", "usascii", "ascii"].includes(encoding)) {
+        content = Buffer.from(data[key2].content, encoding);
       }
       setImmediate(() => callback(null, content));
     }
     __name(resolveContentValue, "resolveContentValue");
+    __name2(resolveContentValue, "resolveContentValue");
     module.exports.assign = function() {
       const args = Array.from(arguments);
       const target = args.shift() || {};
       args.forEach((source) => {
-        Object.keys(source || {}).forEach((key) => {
-          if (["tls", "auth"].includes(key) && source[key] && typeof source[key] === "object") {
-            target[key] = Object.assign(target[key] || {}, source[key]);
+        Object.keys(source || {}).forEach((key2) => {
+          if (["tls", "auth"].includes(key2) && source[key2] && typeof source[key2] === "object") {
+            target[key2] = Object.assign(target[key2] || {}, source[key2]);
           } else {
-            target[key] = source[key];
+            target[key2] = source[key2];
           }
         });
       });
@@ -1553,6 +1897,7 @@ var require_shared = __commonJS({
       });
     }
     __name(resolveStream, "resolveStream");
+    __name2(resolveStream, "resolveStream");
     function createDefaultLogger(levels) {
       const levelMaxLen = levels.reduce((max, level) => Math.max(max, level.length), 0);
       const levelNames = /* @__PURE__ */ new Map();
@@ -1563,7 +1908,7 @@ var require_shared = __commonJS({
         }
         levelNames.set(level, levelName);
       });
-      const print = /* @__PURE__ */ __name((level, entry, message, ...args) => {
+      const print = /* @__PURE__ */ __name2((level, entry, message, ...args) => {
         let prefix = "";
         if (entry) {
           if (entry.tnx === "server") {
@@ -1590,18 +1935,14 @@ var require_shared = __commonJS({
       return logger;
     }
     __name(createDefaultLogger, "createDefaultLogger");
+    __name2(createDefaultLogger, "createDefaultLogger");
   }
 });
-
-// node-built-in-modules:path
-import libDefault12 from "path";
 var require_path = __commonJS({
   "node-built-in-modules:path"(exports, module) {
     module.exports = libDefault12;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-funcs/mime-types.js
 var require_mime_types = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-funcs/mime-types.js"(exports, module) {
     "use strict";
@@ -3704,27 +4045,23 @@ var require_mime_types = __commonJS({
     };
   }
 });
-
-// node-built-in-modules:crypto
-import libDefault13 from "crypto";
 var require_crypto = __commonJS({
   "node-built-in-modules:crypto"(exports, module) {
     module.exports = libDefault13;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/base64/index.js
 var require_base64 = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/base64/index.js"(exports, module) {
     "use strict";
     var { Transform } = require_stream();
-    function encode(buffer) {
+    function encode3(buffer) {
       if (typeof buffer === "string") {
         buffer = Buffer.from(buffer, "utf-8");
       }
       return buffer.toString("base64");
     }
-    __name(encode, "encode");
+    __name(encode3, "encode");
+    __name2(encode3, "encode");
     function wrap(str, lineLength) {
       str = (str || "").toString();
       lineLength = lineLength || 76;
@@ -3743,9 +4080,13 @@ var require_base64 = __commonJS({
       return result.join("\r\n").trim();
     }
     __name(wrap, "wrap");
+    __name2(wrap, "wrap");
     var Encoder = class extends Transform {
       static {
         __name(this, "Encoder");
+      }
+      static {
+        __name2(this, "Encoder");
       }
       constructor(options) {
         super();
@@ -3776,7 +4117,7 @@ var require_base64 = __commonJS({
         } else {
           this._remainingBytes = false;
         }
-        let b64 = this._curLine + encode(chunk);
+        let b64 = this._curLine + encode3(chunk);
         if (this.options.lineLength) {
           b64 = wrap(b64, this.options.lineLength);
           const lastLF = b64.lastIndexOf("\n");
@@ -3798,7 +4139,7 @@ var require_base64 = __commonJS({
       }
       _flush(done) {
         if (this._remainingBytes && this._remainingBytes.length) {
-          this._curLine += encode(this._remainingBytes);
+          this._curLine += encode3(this._remainingBytes);
         }
         if (this._curLine) {
           this._curLine = wrap(this._curLine, this.options.lineLength);
@@ -3810,14 +4151,12 @@ var require_base64 = __commonJS({
       }
     };
     module.exports = {
-      encode,
+      encode: encode3,
       wrap,
       Encoder
     };
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/qp/index.js
 var require_qp = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/qp/index.js"(exports, module) {
     "use strict";
@@ -3834,7 +4173,7 @@ var require_qp = __commonJS({
       [62, 126]
       // >?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}
     ];
-    function encode(buffer) {
+    function encode3(buffer) {
       if (typeof buffer === "string") {
         buffer = Buffer.from(buffer, "utf-8");
       }
@@ -3850,7 +4189,8 @@ var require_qp = __commonJS({
       }
       return result;
     }
-    __name(encode, "encode");
+    __name(encode3, "encode");
+    __name2(encode3, "encode");
     function wrap(str, lineLength) {
       str = (str || "").toString();
       lineLength = lineLength || 76;
@@ -3914,6 +4254,7 @@ var require_qp = __commonJS({
       return result;
     }
     __name(wrap, "wrap");
+    __name2(wrap, "wrap");
     function checkRanges(nr, ranges) {
       for (let i = ranges.length - 1; i >= 0; i--) {
         const range = ranges[i];
@@ -3930,9 +4271,13 @@ var require_qp = __commonJS({
       return false;
     }
     __name(checkRanges, "checkRanges");
+    __name2(checkRanges, "checkRanges");
     var Encoder = class extends Transform {
       static {
         __name(this, "Encoder");
+      }
+      static {
+        __name2(this, "Encoder");
       }
       constructor(options) {
         super();
@@ -3954,7 +4299,7 @@ var require_qp = __commonJS({
         }
         this.inputBytes += chunk.length;
         if (this.options.lineLength) {
-          qp = this._curLine + encode(chunk);
+          qp = this._curLine + encode3(chunk);
           qp = wrap(qp, this.options.lineLength);
           qp = qp.replace(/(^|\n)([^\n]*)$/, (match, lineBreak, lastLine) => {
             this._curLine = lastLine;
@@ -3965,7 +4310,7 @@ var require_qp = __commonJS({
             this.push(qp);
           }
         } else {
-          qp = encode(chunk);
+          qp = encode3(chunk);
           this.outputBytes += qp.length;
           this.push(qp, "ascii");
         }
@@ -3980,14 +4325,12 @@ var require_qp = __commonJS({
       }
     };
     module.exports = {
-      encode,
+      encode: encode3,
       wrap,
       Encoder
     };
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-funcs/index.js
 var require_mime_funcs = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-funcs/index.js"(exports, module) {
     "use strict";
@@ -4152,7 +4495,7 @@ var require_mime_funcs = __commonJS({
        * @param {String} [fromCharset='UTF-8'] Source sharacter set
        * @return {Array} A list of encoded keys and headers
        */
-      buildHeaderParam(key, data, maxLength) {
+      buildHeaderParam(key2, data, maxLength) {
         const list = [];
         let encodedStr = typeof data === "string" ? data : (data || "").toString();
         let chr, ord;
@@ -4164,7 +4507,7 @@ var require_mime_funcs = __commonJS({
           if (encodedStr.length <= maxLength) {
             return [
               {
-                key,
+                key: key2,
                 value: encodedStr
               }
             ];
@@ -4248,7 +4591,7 @@ var require_mime_funcs = __commonJS({
           // encoded lines: {name}*{part}*
           // unencoded lines: {name}*{part}
           // if any line needs to be encoded then the first line (part==0) is always encoded
-          key: key + "*" + i2 + (item.encoded ? "*" : ""),
+          key: key2 + "*" + i2 + (item.encoded ? "*" : ""),
           value: item.line
         }));
       },
@@ -4272,7 +4615,7 @@ var require_mime_funcs = __commonJS({
           value: false,
           params: {}
         };
-        let key = false;
+        let key2 = false;
         let value = "";
         let type = "value";
         let quote = false;
@@ -4282,7 +4625,7 @@ var require_mime_funcs = __commonJS({
           chr = str.charAt(i);
           if (type === "key") {
             if (chr === "=") {
-              key = value.trim().toLowerCase();
+              key2 = value.trim().toLowerCase();
               type = "value";
               value = "";
               continue;
@@ -4299,10 +4642,10 @@ var require_mime_funcs = __commonJS({
             } else if (!quote && chr === '"') {
               quote = chr;
             } else if (!quote && chr === ";") {
-              if (key === false) {
+              if (key2 === false) {
                 response.value = value.trim();
               } else {
-                response.params[key] = value.trim();
+                response.params[key2] = value.trim();
               }
               type = "key";
               value = "";
@@ -4313,18 +4656,18 @@ var require_mime_funcs = __commonJS({
           }
         }
         if (type === "value") {
-          if (key === false) {
+          if (key2 === false) {
             response.value = value.trim();
           } else {
-            response.params[key] = value.trim();
+            response.params[key2] = value.trim();
           }
         } else if (value.trim()) {
           response.params[value.trim().toLowerCase()] = "";
         }
-        Object.keys(response.params).forEach((key2) => {
+        Object.keys(response.params).forEach((key22) => {
           let actualKey, nr, match, value2;
-          if (match = key2.match(/(\*(\d+)|\*(\d+)\*|\*)$/)) {
-            actualKey = key2.substr(0, match.index);
+          if (match = key22.match(/(\*(\d+)|\*(\d+)\*|\*)$/)) {
+            actualKey = key22.substr(0, match.index);
             nr = Number(match[2] || match[3]) || 0;
             if (!response.params[actualKey] || typeof response.params[actualKey] !== "object") {
               response.params[actualKey] = {
@@ -4332,21 +4675,21 @@ var require_mime_funcs = __commonJS({
                 values: []
               };
             }
-            value2 = response.params[key2];
+            value2 = response.params[key22];
             if (nr === 0 && match[0].substr(-1) === "*" && (match = value2.match(/^([^']*)'[^']*'(.*)$/))) {
               response.params[actualKey].charset = match[1] || "iso-8859-1";
               value2 = match[2];
             }
             response.params[actualKey].values[nr] = value2;
-            delete response.params[key2];
+            delete response.params[key22];
           }
         });
-        Object.keys(response.params).forEach((key2) => {
+        Object.keys(response.params).forEach((key22) => {
           let value2;
-          if (response.params[key2] && Array.isArray(response.params[key2].values)) {
-            value2 = response.params[key2].values.map((val) => val || "").join("");
-            if (response.params[key2].charset) {
-              response.params[key2] = "=?" + response.params[key2].charset + "?Q?" + value2.replace(/[=?_\s]/g, (s) => {
+          if (response.params[key22] && Array.isArray(response.params[key22].values)) {
+            value2 = response.params[key22].values.map((val) => val || "").join("");
+            if (response.params[key22].charset) {
+              response.params[key22] = "=?" + response.params[key22].charset + "?Q?" + value2.replace(/[=?_\s]/g, (s) => {
                 const c = s.charCodeAt(0).toString(16);
                 if (s === " ") {
                   return "_";
@@ -4354,7 +4697,7 @@ var require_mime_funcs = __commonJS({
                 return "%" + (c.length < 2 ? "0" : "") + c;
               }).replace(/%/g, "=") + "?=";
             } else {
-              response.params[key2] = value2;
+              response.params[key22] = value2;
             }
           }
         });
@@ -4367,7 +4710,7 @@ var require_mime_funcs = __commonJS({
        * @param {String} mimeType Content type to be checked for
        * @return {String} File extension
        */
-      detectExtension: /* @__PURE__ */ __name((mimeType) => mimeTypes.detectExtension(mimeType), "detectExtension"),
+      detectExtension: /* @__PURE__ */ __name2((mimeType) => mimeTypes.detectExtension(mimeType), "detectExtension"),
       /**
        * Returns content type for a file extension. If no suitable content types
        * are found, 'application/octet-stream' is used as the default content type
@@ -4375,7 +4718,7 @@ var require_mime_funcs = __commonJS({
        * @param {String} extension Extension to be checked for
        * @return {String} File extension
        */
-      detectMimeType: /* @__PURE__ */ __name((extension) => mimeTypes.detectMimeType(extension), "detectMimeType"),
+      detectMimeType: /* @__PURE__ */ __name2((extension) => mimeTypes.detectMimeType(extension), "detectMimeType"),
       /**
        * Folds long lines, useful for folding header lines (afterSpace=false) and
        * flowed text (afterSpace=true)
@@ -4423,7 +4766,7 @@ var require_mime_funcs = __commonJS({
        * @param {Number} maxlen Maximum length of characters for one part (minimum 12)
        * @return {Array} Split string
        */
-      splitMimeEncodedString: /* @__PURE__ */ __name((str, maxlen) => {
+      splitMimeEncodedString: /* @__PURE__ */ __name2((str, maxlen) => {
         const lines = [];
         let curLine, match, chr, done;
         maxlen = Math.max(maxlen || 0, 12);
@@ -4450,7 +4793,7 @@ var require_mime_funcs = __commonJS({
         }
         return lines;
       }, "splitMimeEncodedString"),
-      encodeURICharComponent: /* @__PURE__ */ __name((chr) => {
+      encodeURICharComponent: /* @__PURE__ */ __name2((chr) => {
         let res = "";
         let ord = chr.charCodeAt(0).toString(16).toUpperCase();
         if (ord.length % 2) {
@@ -4477,8 +4820,6 @@ var require_mime_funcs = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/addressparser/index.js
 var require_addressparser = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/addressparser/index.js"(exports, module) {
     "use strict";
@@ -4612,9 +4953,13 @@ var require_addressparser = __commonJS({
       return addresses;
     }
     __name(_handleAddress, "_handleAddress");
+    __name2(_handleAddress, "_handleAddress");
     var Tokenizer = class {
       static {
         __name(this, "Tokenizer");
+      }
+      static {
+        __name2(this, "Tokenizer");
       }
       constructor(str) {
         this.str = (str || "").toString();
@@ -4757,7 +5102,7 @@ var require_addressparser = __commonJS({
       }
       if (options.flatten) {
         const flatAddresses = [];
-        const walkAddressList = /* @__PURE__ */ __name((list) => {
+        const walkAddressList = /* @__PURE__ */ __name2((list) => {
           list.forEach((entry) => {
             if (entry.group) {
               return walkAddressList(entry.group);
@@ -4771,11 +5116,10 @@ var require_addressparser = __commonJS({
       return parsedAddresses;
     }
     __name(addressparser, "addressparser");
+    __name2(addressparser, "addressparser");
     module.exports = addressparser;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/last-newline.js
 var require_last_newline = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/last-newline.js"(exports, module) {
     "use strict";
@@ -4783,6 +5127,9 @@ var require_last_newline = __commonJS({
     var LastNewline = class extends Transform {
       static {
         __name(this, "LastNewline");
+      }
+      static {
+        __name2(this, "LastNewline");
       }
       constructor() {
         super();
@@ -4810,8 +5157,6 @@ var require_last_newline = __commonJS({
     module.exports = LastNewline;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/le-windows.js
 var require_le_windows = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/le-windows.js"(exports, module) {
     "use strict";
@@ -4819,6 +5164,9 @@ var require_le_windows = __commonJS({
     var LeWindows = class extends Transform {
       static {
         __name(this, "LeWindows");
+      }
+      static {
+        __name2(this, "LeWindows");
       }
       constructor(options) {
         super(options);
@@ -4855,8 +5203,6 @@ var require_le_windows = __commonJS({
     module.exports = LeWindows;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/le-unix.js
 var require_le_unix = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/le-unix.js"(exports, module) {
     "use strict";
@@ -4864,6 +5210,9 @@ var require_le_unix = __commonJS({
     var LeUnix = class extends Transform {
       static {
         __name(this, "LeUnix");
+      }
+      static {
+        __name2(this, "LeUnix");
       }
       constructor(options) {
         super(options);
@@ -4893,8 +5242,6 @@ var require_le_unix = __commonJS({
     module.exports = LeUnix;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/index.js
 var require_mime_node = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mime-node/index.js"(exports, module) {
     "use strict";
@@ -4915,7 +5262,10 @@ var require_mime_node = __commonJS({
     var FORMATTED_HEADERS = ["From", "Sender", "To", "Cc", "Bcc", "Reply-To", "Date", "References"];
     var MimeNode = class _MimeNode {
       static {
-        __name(this, "MimeNode");
+        __name(this, "_MimeNode");
+      }
+      static {
+        __name2(this, "MimeNode");
       }
       constructor(contentType, options) {
         this.nodeCounter = 0;
@@ -5033,29 +5383,29 @@ var require_mime_node = __commonJS({
        * @param {String} value Header value
        * @return {Object} current node
        */
-      setHeader(key, value) {
+      setHeader(key2, value) {
         let added = false;
-        if (!value && key && typeof key === "object") {
-          if (key.key && "value" in key) {
-            this.setHeader(key.key, key.value);
-          } else if (Array.isArray(key)) {
-            key.forEach((i) => {
+        if (!value && key2 && typeof key2 === "object") {
+          if (key2.key && "value" in key2) {
+            this.setHeader(key2.key, key2.value);
+          } else if (Array.isArray(key2)) {
+            key2.forEach((i) => {
               this.setHeader(i.key, i.value);
             });
           } else {
-            Object.keys(key).forEach((i) => {
-              this.setHeader(i, key[i]);
+            Object.keys(key2).forEach((i) => {
+              this.setHeader(i, key2[i]);
             });
           }
           return this;
         }
-        key = this._normalizeHeaderKey(key);
+        key2 = this._normalizeHeaderKey(key2);
         const headerValue = {
-          key,
+          key: key2,
           value
         };
         for (let i = 0, len = this._headers.length; i < len; i++) {
-          if (this._headers[i].key === key) {
+          if (this._headers[i].key === key2) {
             if (!added) {
               this._headers[i] = headerValue;
               added = true;
@@ -5081,28 +5431,28 @@ var require_mime_node = __commonJS({
        * @param {String} value Header value
        * @return {Object} current node
        */
-      addHeader(key, value) {
-        if (!value && key && typeof key === "object") {
-          if (key.key && key.value) {
-            this.addHeader(key.key, key.value);
-          } else if (Array.isArray(key)) {
-            key.forEach((i) => {
+      addHeader(key2, value) {
+        if (!value && key2 && typeof key2 === "object") {
+          if (key2.key && key2.value) {
+            this.addHeader(key2.key, key2.value);
+          } else if (Array.isArray(key2)) {
+            key2.forEach((i) => {
               this.addHeader(i.key, i.value);
             });
           } else {
-            Object.keys(key).forEach((i) => {
-              this.addHeader(i, key[i]);
+            Object.keys(key2).forEach((i) => {
+              this.addHeader(i, key2[i]);
             });
           }
           return this;
         } else if (Array.isArray(value)) {
           value.forEach((val) => {
-            this.addHeader(key, val);
+            this.addHeader(key2, val);
           });
           return this;
         }
         this._headers.push({
-          key: this._normalizeHeaderKey(key),
+          key: this._normalizeHeaderKey(key2),
           value
         });
         return this;
@@ -5113,10 +5463,10 @@ var require_mime_node = __commonJS({
        * @param {String} key Key to search for
        * @retun {String} Value for the key
        */
-      getHeader(key) {
-        key = this._normalizeHeaderKey(key);
+      getHeader(key2) {
+        key2 = this._normalizeHeaderKey(key2);
         for (let i = 0, len = this._headers.length; i < len; i++) {
-          if (this._headers[i].key === key) {
+          if (this._headers[i].key === key2) {
             return this._headers[i].value;
           }
         }
@@ -5235,16 +5585,16 @@ var require_mime_node = __commonJS({
           }
         }
         this._headers.forEach((header) => {
-          let key = header.key;
+          let key2 = header.key;
           let value = header.value;
           let structured;
           let param;
           const options = {};
           const formattedHeaders = FORMATTED_HEADERS;
-          if (value && typeof value === "object" && !formattedHeaders.includes(key)) {
-            Object.keys(value).forEach((key2) => {
-              if (key2 !== "value") {
-                options[key2] = value[key2];
+          if (value && typeof value === "object" && !formattedHeaders.includes(key2)) {
+            Object.keys(value).forEach((key22) => {
+              if (key22 !== "value") {
+                options[key22] = value[key22];
               }
             });
             value = (value.value || "").toString();
@@ -5254,9 +5604,9 @@ var require_mime_node = __commonJS({
           }
           if (options.prepared) {
             if (options.foldLines) {
-              headers.push(mimeFuncs.foldLines(key + ": " + value));
+              headers.push(mimeFuncs.foldLines(key2 + ": " + value));
             } else {
-              headers.push(key + ": " + value);
+              headers.push(key2 + ": " + value);
             }
             return;
           }
@@ -5289,17 +5639,17 @@ var require_mime_node = __commonJS({
               }
               break;
           }
-          value = this._encodeHeaderValue(key, value);
+          value = this._encodeHeaderValue(key2, value);
           if (!(value || "").toString().trim()) {
             return;
           }
           if (typeof this.normalizeHeaderKey === "function") {
-            const normalized = this.normalizeHeaderKey(key, value);
+            const normalized = this.normalizeHeaderKey(key2, value);
             if (normalized && typeof normalized === "string" && normalized.length) {
-              key = normalized;
+              key2 = normalized;
             }
           }
-          headers.push(mimeFuncs.foldLines(key + ": " + value, 76));
+          headers.push(mimeFuncs.foldLines(key2 + ": " + value, 76));
         });
         return headers.join("\r\n");
       }
@@ -5371,16 +5721,16 @@ var require_mime_node = __commonJS({
         let contentStream;
         let localStream;
         let returned = false;
-        const callback = /* @__PURE__ */ __name((err) => {
+        const callback = /* @__PURE__ */ __name2((err) => {
           if (returned) {
             return;
           }
           returned = true;
           done(err);
         }, "callback");
-        const finalize = /* @__PURE__ */ __name(() => {
+        const finalize = /* @__PURE__ */ __name2(() => {
           let childId = 0;
-          const processChildNode = /* @__PURE__ */ __name(() => {
+          const processChildNode = /* @__PURE__ */ __name2(() => {
             if (childId >= this.childNodes.length) {
               outputStream.write("\r\n--" + this.boundary + "--\r\n");
               return callback();
@@ -5400,7 +5750,7 @@ var require_mime_node = __commonJS({
             return callback();
           }
         }, "finalize");
-        const sendContent = /* @__PURE__ */ __name(() => {
+        const sendContent = /* @__PURE__ */ __name2(() => {
           if (this.content) {
             if (Object.prototype.toString.call(this.content) === "[object Error]") {
               return callback(this.content);
@@ -5410,7 +5760,7 @@ var require_mime_node = __commonJS({
               this._contentErrorHandler = (err) => callback(err);
               this.content.once("error", this._contentErrorHandler);
             }
-            const createStream = /* @__PURE__ */ __name(() => {
+            const createStream = /* @__PURE__ */ __name2(() => {
               if (["quoted-printable", "base64"].includes(transferEncoding)) {
                 contentStream = new (transferEncoding === "base64" ? base64 : qp).Encoder(options);
                 contentStream.pipe(outputStream, {
@@ -5503,16 +5853,16 @@ var require_mime_node = __commonJS({
             this._envelope.from = list[0].address;
           }
         }
-        ["to", "cc", "bcc"].forEach((key) => {
-          if (envelope[key]) {
-            this._convertAddresses(this._parseAddresses(envelope[key]), this._envelope.to);
+        ["to", "cc", "bcc"].forEach((key2) => {
+          if (envelope[key2]) {
+            this._convertAddresses(this._parseAddresses(envelope[key2]), this._envelope.to);
           }
         });
         this._envelope.to = this._envelope.to.map((to) => to.address).filter((address) => address);
         const standardFields = ["to", "cc", "bcc", "from"];
-        Object.keys(envelope).forEach((key) => {
-          if (!standardFields.includes(key)) {
-            this._envelope[key] = envelope[key];
+        Object.keys(envelope).forEach((key2) => {
+          if (!standardFields.includes(key2)) {
+            this._envelope[key2] = envelope[key2];
           }
         });
         return this;
@@ -5525,12 +5875,12 @@ var require_mime_node = __commonJS({
       getAddresses() {
         const addresses = {};
         this._headers.forEach((header) => {
-          const key = header.key.toLowerCase();
-          if (["from", "sender", "reply-to", "to", "cc", "bcc"].includes(key)) {
-            if (!Array.isArray(addresses[key])) {
-              addresses[key] = [];
+          const key2 = header.key.toLowerCase();
+          if (["from", "sender", "reply-to", "to", "cc", "bcc"].includes(key2)) {
+            if (!Array.isArray(addresses[key2])) {
+              addresses[key2] = [];
             }
-            this._convertAddresses(this._parseAddresses(header.value), addresses[key]);
+            this._convertAddresses(this._parseAddresses(header.value), addresses[key2]);
           }
         });
         return addresses;
@@ -5674,9 +6024,9 @@ var require_mime_node = __commonJS({
        * @param {String} key Key to be normalized
        * @return {String} key in Camel-Case form
        */
-      _normalizeHeaderKey(key) {
-        key = (key || "").toString().replace(/\r?\n|\r/g, " ").trim().toLowerCase().replace(/^X-SMTPAPI$|^(MIME|DKIM|ARC|BIMI)\b|^[a-z]|-(SPF|FBL|ID|MD5)$|-[a-z]/gi, (c) => c.toUpperCase()).replace(/^Content-Features$/i, "Content-features");
-        return key;
+      _normalizeHeaderKey(key2) {
+        key2 = (key2 || "").toString().replace(/\r?\n|\r/g, " ").trim().toLowerCase().replace(/^X-SMTPAPI$|^(MIME|DKIM|ARC|BIMI)\b|^[a-z]|-(SPF|FBL|ID|MD5)$|-[a-z]/gi, (c) => c.toUpperCase()).replace(/^Content-Features$/i, "Content-features");
+        return key2;
       }
       /**
        * Checks if the content type is multipart and defines boundary if needed.
@@ -5707,9 +6057,9 @@ var require_mime_node = __commonJS({
        * @param {String} key Header key
        * @param {String} value Header value
        */
-      _encodeHeaderValue(key, value) {
-        key = this._normalizeHeaderKey(key);
-        switch (key) {
+      _encodeHeaderValue(key2, value) {
+        key2 = this._normalizeHeaderKey(key2);
+        switch (key2) {
           // Structured headers
           case "From":
           case "Sender":
@@ -5888,8 +6238,6 @@ var require_mime_node = __commonJS({
     module.exports = MimeNode;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mail-composer/index.js
 var require_mail_composer = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mail-composer/index.js"(exports, module) {
     "use strict";
@@ -5899,6 +6247,9 @@ var require_mail_composer = __commonJS({
     var MailComposer = class {
       static {
         __name(this, "MailComposer");
+      }
+      static {
+        __name2(this, "MailComposer");
       }
       constructor(mail) {
         this.mail = mail || {};
@@ -5939,9 +6290,9 @@ var require_mail_composer = __commonJS({
           this.message.addHeader(this.mail.headers);
         }
         ["from", "sender", "to", "cc", "bcc", "reply-to", "in-reply-to", "references", "subject", "message-id", "date"].forEach((header) => {
-          const key = header.replace(/-(\w)/g, (o, c) => c.toUpperCase());
-          if (this.mail[key]) {
-            this.message.setHeader(header, this.mail[key]);
+          const key2 = header.replace(/-(\w)/g, (o, c) => c.toUpperCase());
+          if (this.mail[key2]) {
+            this.message.setHeader(header, this.mail[key2]);
           }
         });
         if (this.mail.envelope) {
@@ -6378,8 +6729,6 @@ var require_mail_composer = __commonJS({
     module.exports = MailComposer;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/message-parser.js
 var require_message_parser = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/message-parser.js"(exports, module) {
     "use strict";
@@ -6387,6 +6736,9 @@ var require_message_parser = __commonJS({
     var MessageParser = class extends Transform {
       static {
         __name(this, "MessageParser");
+      }
+      static {
+        __name2(this, "MessageParser");
       }
       constructor(options) {
         super(options);
@@ -6510,8 +6862,6 @@ var require_message_parser = __commonJS({
     module.exports = MessageParser;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/relaxed-body.js
 var require_relaxed_body = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/relaxed-body.js"(exports, module) {
     "use strict";
@@ -6520,6 +6870,9 @@ var require_relaxed_body = __commonJS({
     var RelaxedBody = class extends Transform {
       static {
         __name(this, "RelaxedBody");
+      }
+      static {
+        __name2(this, "RelaxedBody");
       }
       constructor(options) {
         super();
@@ -6622,8 +6975,6 @@ var require_relaxed_body = __commonJS({
     module.exports = RelaxedBody;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/sign.js
 var require_sign = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/sign.js"(exports, module) {
     "use strict";
@@ -6662,6 +7013,7 @@ var require_sign = __commonJS({
       return mimeFuncs.foldLines("DKIM-Signature: " + dkim, 76) + ";\r\n b=";
     }
     __name(generateDKIMHeader, "generateDKIMHeader");
+    __name2(generateDKIMHeader, "generateDKIMHeader");
     function relaxedHeaders(headers, fieldNames, skipFields) {
       const includedFields = /* @__PURE__ */ new Set();
       const skip = /* @__PURE__ */ new Set();
@@ -6692,14 +7044,14 @@ var require_sign = __commonJS({
       };
     }
     __name(relaxedHeaders, "relaxedHeaders");
+    __name2(relaxedHeaders, "relaxedHeaders");
     function relaxedHeaderLine(line) {
       return line.substr(line.indexOf(":") + 1).replace(/\r?\n/g, "").replace(/\s+/g, " ").trim();
     }
     __name(relaxedHeaderLine, "relaxedHeaderLine");
+    __name2(relaxedHeaderLine, "relaxedHeaderLine");
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/index.js
 var require_dkim = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/dkim/index.js"(exports, module) {
     "use strict";
@@ -6715,6 +7067,9 @@ var require_dkim = __commonJS({
     var DKIMSigner = class {
       static {
         __name(this, "DKIMSigner");
+      }
+      static {
+        __name2(this, "DKIMSigner");
       }
       constructor(options, keys, input, output) {
         this.options = options || {};
@@ -6778,16 +7133,16 @@ var require_dkim = __commonJS({
       }
       sendSignedOutput() {
         let keyPos = 0;
-        const signNextKey = /* @__PURE__ */ __name(() => {
+        const signNextKey = /* @__PURE__ */ __name2(() => {
           if (keyPos >= this.keys.length) {
             this.output.write(this.parser.rawHeaders);
             return setImmediate(() => this.sendNextChunk());
           }
-          const key = this.keys[keyPos++];
+          const key2 = this.keys[keyPos++];
           const dkimField = sign(this.headers, this.hashAlgo, this.bodyHash, {
-            domainName: key.domainName,
-            keySelector: key.keySelector,
-            privateKey: key.privateKey,
+            domainName: key2.domainName,
+            keySelector: key2.keySelector,
+            privateKey: key2.privateKey,
             headerFieldNames: this.options.headerFieldNames,
             skipFields: this.options.skipFields
           });
@@ -6859,6 +7214,9 @@ var require_dkim = __commonJS({
       static {
         __name(this, "DKIM");
       }
+      static {
+        __name2(this, "DKIM");
+      }
       constructor(options) {
         this.options = options || {};
         this.keys = [].concat(
@@ -6899,16 +7257,11 @@ var require_dkim = __commonJS({
     module.exports = DKIM;
   }
 });
-
-// node-built-in-modules:tls
-import libDefault14 from "tls";
 var require_tls = __commonJS({
   "node-built-in-modules:tls"(exports, module) {
     module.exports = libDefault14;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-connection/http-proxy-client.js
 var require_http_proxy_client = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-connection/http-proxy-client.js"(exports, module) {
     "use strict";
@@ -6943,7 +7296,7 @@ var require_http_proxy_client = __commonJS({
       }
       let socket;
       let finished = false;
-      const tempSocketErr = /* @__PURE__ */ __name((err) => {
+      const tempSocketErr = /* @__PURE__ */ __name2((err) => {
         if (finished) {
           return;
         }
@@ -6954,7 +7307,7 @@ var require_http_proxy_client = __commonJS({
         }
         callback(err);
       }, "tempSocketErr");
-      const timeoutErr = /* @__PURE__ */ __name(() => {
+      const timeoutErr = /* @__PURE__ */ __name2(() => {
         const err = new Error("Proxy socket timed out");
         err.code = "ETIMEDOUT";
         tempSocketErr(err);
@@ -6973,11 +7326,11 @@ var require_http_proxy_client = __commonJS({
         socket.write(
           // HTTP method
           "CONNECT " + destinationHost + ":" + destinationPort + " HTTP/1.1\r\n" + // HTTP request headers
-          Object.keys(reqHeaders).map((key) => key + ": " + reqHeaders[key]).join("\r\n") + // End request
+          Object.keys(reqHeaders).map((key2) => key2 + ": " + reqHeaders[key2]).join("\r\n") + // End request
           "\r\n\r\n"
         );
         let headers = "";
-        const onSocketData = /* @__PURE__ */ __name((chunk) => {
+        const onSocketData = /* @__PURE__ */ __name2((chunk) => {
           let match;
           let remainder;
           if (finished) {
@@ -7021,11 +7374,10 @@ var require_http_proxy_client = __commonJS({
       socket.once("error", tempSocketErr);
     }
     __name(httpProxyClient, "httpProxyClient");
+    __name2(httpProxyClient, "httpProxyClient");
     module.exports = httpProxyClient;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mailer/mail-message.js
 var require_mail_message = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mailer/mail-message.js"(exports, module) {
     "use strict";
@@ -7036,6 +7388,9 @@ var require_mail_message = __commonJS({
       static {
         __name(this, "MailMessage");
       }
+      static {
+        __name2(this, "MailMessage");
+      }
       constructor(mailer, data) {
         this.mailer = mailer;
         this.data = {};
@@ -7045,20 +7400,20 @@ var require_mail_message = __commonJS({
         const defaults = mailer._defaults || {};
         Object.assign(this.data, data);
         this.data.headers = this.data.headers || {};
-        Object.keys(defaults).forEach((key) => {
-          if (!(key in this.data)) {
-            this.data[key] = defaults[key];
-          } else if (key === "headers") {
-            Object.keys(defaults.headers).forEach((key2) => {
-              if (!(key2 in this.data.headers)) {
-                this.data.headers[key2] = defaults.headers[key2];
+        Object.keys(defaults).forEach((key2) => {
+          if (!(key2 in this.data)) {
+            this.data[key2] = defaults[key2];
+          } else if (key2 === "headers") {
+            Object.keys(defaults.headers).forEach((key22) => {
+              if (!(key22 in this.data.headers)) {
+                this.data.headers[key22] = defaults.headers[key22];
               }
             });
           }
         });
-        ["disableFileAccess", "disableUrlAccess", "normalizeHeaderKey"].forEach((key) => {
-          if (key in options) {
-            this.data[key] = options[key];
+        ["disableFileAccess", "disableUrlAccess", "normalizeHeaderKey"].forEach((key2) => {
+          if (key2 in options) {
+            this.data[key2] = options[key2];
           }
         });
       }
@@ -7114,7 +7469,7 @@ var require_mail_message = __commonJS({
           }
         });
         let pos = 0;
-        const resolveNext = /* @__PURE__ */ __name(() => {
+        const resolveNext = /* @__PURE__ */ __name2(() => {
           if (pos >= keys.length) {
             return callback(null, this.data);
           }
@@ -7133,9 +7488,9 @@ var require_mail_message = __commonJS({
                 content: value
               };
               if (args[0][args[1]] && typeof args[0][args[1]] === "object" && !Buffer.isBuffer(args[0][args[1]])) {
-                Object.keys(args[0][args[1]]).forEach((key) => {
-                  if (!(key in node) && !["content", "path", "href", "raw"].includes(key)) {
-                    node[key] = args[0][args[1]][key];
+                Object.keys(args[0][args[1]]).forEach((key2) => {
+                  if (!(key2 in node) && !["content", "path", "href", "raw"].includes(key2)) {
+                    node[key2] = args[0][args[1]][key2];
                   }
                 });
               }
@@ -7155,12 +7510,12 @@ var require_mail_message = __commonJS({
           }
           data.envelope = envelope;
           data.messageId = messageId;
-          ["html", "text", "watchHtml", "amp"].forEach((key) => {
-            if (data[key] && data[key].content) {
-              if (typeof data[key].content === "string") {
-                data[key] = data[key].content;
-              } else if (Buffer.isBuffer(data[key].content)) {
-                data[key] = data[key].content.toString();
+          ["html", "text", "watchHtml", "amp"].forEach((key2) => {
+            if (data[key2] && data[key2].content) {
+              if (typeof data[key2].content === "string") {
+                data[key2] = data[key2].content;
+              } else if (Buffer.isBuffer(data[key2].content)) {
+                data[key2] = data[key2].content.toString();
               }
             }
           });
@@ -7185,14 +7540,14 @@ var require_mail_message = __commonJS({
             });
           }
           data.normalizedHeaders = {};
-          Object.keys(data.headers || {}).forEach((key) => {
-            let value = [].concat(data.headers[key] || []).shift();
+          Object.keys(data.headers || {}).forEach((key2) => {
+            let value = [].concat(data.headers[key2] || []).shift();
             value = value && value.value || value;
             if (value) {
-              if (["references", "in-reply-to", "message-id", "content-id"].includes(key)) {
-                value = this.message._encodeHeaderValue(key, value);
+              if (["references", "in-reply-to", "message-id", "content-id"].includes(key2)) {
+                value = this.message._encodeHeaderValue(key2, value);
               }
-              data.normalizedHeaders[key] = value;
+              data.normalizedHeaders[key2] = value;
             }
           });
           if (data.list && typeof data.list === "object") {
@@ -7245,9 +7600,9 @@ var require_mail_message = __commonJS({
         });
       }
       _getListHeaders(listData) {
-        return Object.keys(listData).map((key) => ({
-          key: "list-" + key.toLowerCase().trim(),
-          value: [].concat(listData[key] || []).map((value) => ({
+        return Object.keys(listData).map((key2) => ({
+          key: "list-" + key2.toLowerCase().trim(),
+          value: [].concat(listData[key2] || []).map((value) => ({
             prepared: true,
             foldLines: true,
             value: [].concat(value || []).map((value2) => {
@@ -7257,7 +7612,7 @@ var require_mail_message = __commonJS({
                 };
               }
               if (value2 && value2.url) {
-                if (key.toLowerCase().trim() === "id") {
+                if (key2.toLowerCase().trim() === "id") {
                   let comment2 = (value2.comment || "").toString().replace(/\r?\n|\r/g, " ");
                   if (mimeFuncs.isPlainText(comment2)) {
                     comment2 = '"' + comment2 + '"';
@@ -7291,8 +7646,6 @@ var require_mail_message = __commonJS({
     module.exports = MailMessage;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mailer/index.js
 var require_mailer = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/mailer/index.js"(exports, module) {
     "use strict";
@@ -7313,6 +7666,9 @@ var require_mailer = __commonJS({
     var Mail = class extends EventEmitter {
       static {
         __name(this, "Mail");
+      }
+      static {
+        __name2(this, "Mail");
       }
       constructor(transporter, options, defaults) {
         super();
@@ -7468,7 +7824,7 @@ var require_mailer = __commonJS({
                   {
                     tnx: "DKIM",
                     messageId: mail.message.messageId(),
-                    dkimDomains: dkim.keys.map((key) => key.keySelector + "." + key.domainName).join(", ")
+                    dkimDomains: dkim.keys.map((key2) => key2.keySelector + "." + key2.domainName).join(", ")
                   },
                   "Signing outgoing message with %s keys",
                   dkim.keys.length
@@ -7528,7 +7884,7 @@ var require_mailer = __commonJS({
         }
         let pos = 0;
         let block = "default";
-        const processPlugins = /* @__PURE__ */ __name(() => {
+        const processPlugins = /* @__PURE__ */ __name2(() => {
           let curplugins = block === "default" ? defaultPlugins : userPlugins;
           if (pos >= curplugins.length) {
             if (block === "default" && userPlugins.length) {
@@ -7583,7 +7939,7 @@ var require_mailer = __commonJS({
                 err2.code = errors.EPROXY;
                 return callback(err2);
               }
-              const connect2 = /* @__PURE__ */ __name((ipaddress) => {
+              const connect2 = /* @__PURE__ */ __name2((ipaddress) => {
                 const proxyV2 = !!this.meta.get("proxy_socks_module").SocksClient;
                 const socksClient = proxyV2 ? this.meta.get("proxy_socks_module").SocksClient : this.meta.get("proxy_socks_module");
                 const proxyType = Number(proxy.protocol.replace(/\D/g, "")) || 5;
@@ -7675,18 +8031,16 @@ var require_mailer = __commonJS({
           }
         );
       }
-      set(key, value) {
-        return this.meta.set(key, value);
+      set(key2, value) {
+        return this.meta.set(key2, value);
       }
-      get(key) {
-        return this.meta.get(key);
+      get(key2) {
+        return this.meta.get(key2);
       }
     };
     module.exports = Mail;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-connection/data-stream.js
 var require_data_stream = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-connection/data-stream.js"(exports, module) {
     "use strict";
@@ -7694,6 +8048,9 @@ var require_data_stream = __commonJS({
     var DataStream = class extends Transform {
       static {
         __name(this, "DataStream");
+      }
+      static {
+        __name2(this, "DataStream");
       }
       constructor(options) {
         super(options);
@@ -7775,8 +8132,6 @@ var require_data_stream = __commonJS({
     module.exports = DataStream;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-connection/index.js
 var require_smtp_connection = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-connection/index.js"(exports, module) {
     "use strict";
@@ -7793,7 +8148,7 @@ var require_smtp_connection = __commonJS({
     var SOCKET_TIMEOUT = 10 * 60 * 1e3;
     var GREETING_TIMEOUT = 30 * 1e3;
     var DNS_TIMEOUT = 30 * 1e3;
-    var TEARDOWN_NOOP = /* @__PURE__ */ __name(() => {
+    var TEARDOWN_NOOP = /* @__PURE__ */ __name2(() => {
     }, "TEARDOWN_NOOP");
     function decodeServerResponse(str) {
       if (!str) {
@@ -7803,9 +8158,13 @@ var require_smtp_connection = __commonJS({
       return utf8.includes("\uFFFD") ? str : utf8;
     }
     __name(decodeServerResponse, "decodeServerResponse");
+    __name2(decodeServerResponse, "decodeServerResponse");
     var SMTPConnection = class extends EventEmitter {
       static {
         __name(this, "SMTPConnection");
+      }
+      static {
+        __name2(this, "SMTPConnection");
       }
       constructor(options) {
         super(options);
@@ -7827,10 +8186,10 @@ var require_smtp_connection = __commonJS({
           sid: this.id
         });
         this.customAuth = /* @__PURE__ */ new Map();
-        for (const key of Object.keys(this.options.customAuth || {})) {
-          const mapKey = (key || "").toString().trim().toUpperCase();
+        for (const key2 of Object.keys(this.options.customAuth || {})) {
+          const mapKey = (key2 || "").toString().trim().toUpperCase();
           if (mapKey) {
-            this.customAuth.set(mapKey, this.options.customAuth[key]);
+            this.customAuth.set(mapKey, this.options.customAuth[key2]);
           }
         }
         this.version = packageInfo.version;
@@ -7967,9 +8326,9 @@ var require_smtp_connection = __commonJS({
             resolved.host,
             resolved.cached ? "hit" : "miss"
           );
-          for (const key of Object.keys(resolved)) {
-            if (key.charAt(0) !== "_" && resolved[key]) {
-              opts[key] = resolved[key];
+          for (const key2 of Object.keys(resolved)) {
+            if (key2.charAt(0) !== "_" && resolved[key2]) {
+              opts[key2] = resolved[key2];
             }
           }
           callback(resolved);
@@ -8127,7 +8486,7 @@ var require_smtp_connection = __commonJS({
           const handler = this.customAuth.get(this._authMethod);
           let lastResponse;
           let returned = false;
-          const resolve = /* @__PURE__ */ __name(() => {
+          const resolve = /* @__PURE__ */ __name2(() => {
             if (returned) {
               return;
             }
@@ -8145,7 +8504,7 @@ var require_smtp_connection = __commonJS({
             this.authenticated = true;
             callback(null, true);
           }, "resolve");
-          const reject = /* @__PURE__ */ __name((err) => {
+          const reject = /* @__PURE__ */ __name2((err) => {
             if (returned) {
               return;
             }
@@ -8158,7 +8517,7 @@ var require_smtp_connection = __commonJS({
             extensions: [].concat(this._supportedExtensions),
             authMethods: [].concat(this._supportedAuth),
             maxAllowedSize: this._maxAllowedSize || false,
-            sendCommand: /* @__PURE__ */ __name((cmd, done) => {
+            sendCommand: /* @__PURE__ */ __name2((cmd, done) => {
               let promise;
               if (!done) {
                 promise = new Promise((resolve2, reject2) => {
@@ -8255,7 +8614,7 @@ var require_smtp_connection = __commonJS({
           });
         }
         let returned = false;
-        const callback = /* @__PURE__ */ __name(function() {
+        const callback = /* @__PURE__ */ __name2(function() {
           if (returned) {
             return;
           }
@@ -8523,7 +8882,7 @@ var require_smtp_connection = __commonJS({
         if (this.servername && !opts.servername) {
           opts.servername = this.servername;
         }
-        const removePlainSocketListeners = /* @__PURE__ */ __name(() => {
+        const removePlainSocketListeners = /* @__PURE__ */ __name2(() => {
           socketPlain.removeListener("close", this._onSocketClose);
           socketPlain.removeListener("end", this._onSocketEnd);
           socketPlain.removeListener("error", this._onSocketError);
@@ -9280,8 +9639,6 @@ var require_smtp_connection = __commonJS({
     module.exports = SMTPConnection;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/xoauth2/index.js
 var require_xoauth2 = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/xoauth2/index.js"(exports, module) {
     "use strict";
@@ -9293,6 +9650,9 @@ var require_xoauth2 = __commonJS({
     var XOAuth2 = class extends Stream {
       static {
         __name(this, "XOAuth2");
+      }
+      static {
+        __name2(this, "XOAuth2");
       }
       constructor(options, logger) {
         super();
@@ -9378,7 +9738,7 @@ var require_xoauth2 = __commonJS({
           return this.renewalQueue.push({ renew, callback });
         }
         this.renewing = true;
-        const generateCallback = /* @__PURE__ */ __name((err, accessToken) => {
+        const generateCallback = /* @__PURE__ */ __name2((err, accessToken) => {
           this.renewalQueue.forEach((item) => item.callback(err, accessToken));
           this.renewalQueue = [];
           this.renewing = false;
@@ -9643,8 +10003,6 @@ var require_xoauth2 = __commonJS({
     module.exports = XOAuth2;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-pool/pool-resource.js
 var require_pool_resource = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-pool/pool-resource.js"(exports, module) {
     "use strict";
@@ -9656,6 +10014,9 @@ var require_pool_resource = __commonJS({
     var PoolResource = class extends EventEmitter {
       static {
         __name(this, "PoolResource");
+      }
+      static {
+        __name2(this, "PoolResource");
       }
       constructor(pool) {
         super();
@@ -9867,8 +10228,6 @@ var require_pool_resource = __commonJS({
     module.exports = PoolResource;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/well-known/services.json
 var require_services = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/well-known/services.json"(exports, module) {
     module.exports = {
@@ -10407,17 +10766,15 @@ var require_services = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/well-known/index.js
 var require_well_known = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/well-known/index.js"(exports, module) {
     "use strict";
     var services = require_services();
     var normalized = {};
-    Object.keys(services).forEach((key) => {
-      const service = services[key];
+    Object.keys(services).forEach((key2) => {
+      const service = services[key2];
       const normalizedService = normalizeService(service);
-      normalized[normalizeKey(key)] = normalizedService;
+      normalized[normalizeKey(key2)] = normalizedService;
       [].concat(service.aliases || []).forEach((alias) => {
         normalized[normalizeKey(alias)] = normalizedService;
       });
@@ -10425,28 +10782,28 @@ var require_well_known = __commonJS({
         normalized[normalizeKey(domain)] = normalizedService;
       });
     });
-    function normalizeKey(key) {
-      return key.replace(/[^a-zA-Z0-9.-]/g, "").toLowerCase();
+    function normalizeKey(key2) {
+      return key2.replace(/[^a-zA-Z0-9.-]/g, "").toLowerCase();
     }
     __name(normalizeKey, "normalizeKey");
+    __name2(normalizeKey, "normalizeKey");
     function normalizeService(service) {
       const response = {};
-      Object.keys(service).forEach((key) => {
-        if (!["domains", "aliases"].includes(key)) {
-          response[key] = service[key];
+      Object.keys(service).forEach((key2) => {
+        if (!["domains", "aliases"].includes(key2)) {
+          response[key2] = service[key2];
         }
       });
       return response;
     }
     __name(normalizeService, "normalizeService");
-    module.exports = function(key) {
-      key = normalizeKey(key.split("@").pop());
-      return normalized[key] || false;
+    __name2(normalizeService, "normalizeService");
+    module.exports = function(key2) {
+      key2 = normalizeKey(key2.split("@").pop());
+      return normalized[key2] || false;
     };
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-pool/index.js
 var require_smtp_pool = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-pool/index.js"(exports, module) {
     "use strict";
@@ -10460,6 +10817,9 @@ var require_smtp_pool = __commonJS({
     var SMTPPool = class extends EventEmitter {
       static {
         __name(this, "SMTPPool");
+      }
+      static {
+        __name2(this, "SMTPPool");
       }
       constructor(options) {
         super();
@@ -10583,7 +10943,7 @@ var require_smtp_pool = __commonJS({
         if (!this._queue.length) {
           return;
         }
-        const invokeCallbacks = /* @__PURE__ */ __name(() => {
+        const invokeCallbacks = /* @__PURE__ */ __name2(() => {
           if (!this._queue.length) {
             this.logger.debug(
               {
@@ -10946,7 +11306,7 @@ var require_smtp_pool = __commonJS({
             returned = true;
             return callback(new Error("Connection closed"));
           });
-          const finalize = /* @__PURE__ */ __name(() => {
+          const finalize = /* @__PURE__ */ __name2(() => {
             if (returned) {
               return;
             }
@@ -10987,8 +11347,6 @@ var require_smtp_pool = __commonJS({
     module.exports = SMTPPool;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-transport/index.js
 var require_smtp_transport = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/smtp-transport/index.js"(exports, module) {
     "use strict";
@@ -11002,6 +11360,9 @@ var require_smtp_transport = __commonJS({
     var SMTPTransport = class extends EventEmitter {
       static {
         __name(this, "SMTPTransport");
+      }
+      static {
+        __name2(this, "SMTPTransport");
       }
       constructor(options) {
         super();
@@ -11126,7 +11487,7 @@ var require_smtp_transport = __commonJS({
           }
           const connection = new SMTPConnection(options);
           let perCallAuth;
-          const cleanupPerCallAuth = /* @__PURE__ */ __name(() => {
+          const cleanupPerCallAuth = /* @__PURE__ */ __name2(() => {
             if (perCallAuth && perCallAuth !== this.auth && perCallAuth.oauth2) {
               perCallAuth.oauth2.removeAllListeners();
             }
@@ -11162,7 +11523,7 @@ var require_smtp_transport = __commonJS({
             } catch (_E) {
             }
           });
-          const sendMessage = /* @__PURE__ */ __name(() => {
+          const sendMessage = /* @__PURE__ */ __name2(() => {
             const envelope = mail.message.getEnvelope();
             const messageId = mail.message.messageId();
             const recipients = [].concat(envelope.to || []);
@@ -11282,7 +11643,7 @@ var require_smtp_transport = __commonJS({
           const connection = new SMTPConnection(options);
           let returned = false;
           let perCallAuth;
-          const cleanupPerCallAuth = /* @__PURE__ */ __name(() => {
+          const cleanupPerCallAuth = /* @__PURE__ */ __name2(() => {
             if (perCallAuth && perCallAuth !== this.auth && perCallAuth.oauth2) {
               perCallAuth.oauth2.removeAllListeners();
             }
@@ -11305,7 +11666,7 @@ var require_smtp_transport = __commonJS({
             cleanupPerCallAuth();
             return callback(new Error("Connection closed"));
           });
-          const finalize = /* @__PURE__ */ __name(() => {
+          const finalize = /* @__PURE__ */ __name2(() => {
             if (returned) {
               return;
             }
@@ -11359,16 +11720,11 @@ var require_smtp_transport = __commonJS({
     module.exports = SMTPTransport;
   }
 });
-
-// node-built-in-modules:child_process
-import libDefault15 from "child_process";
 var require_child_process = __commonJS({
   "node-built-in-modules:child_process"(exports, module) {
     module.exports = libDefault15;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/sendmail-transport/index.js
 var require_sendmail_transport = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/sendmail-transport/index.js"(exports, module) {
     "use strict";
@@ -11381,6 +11737,9 @@ var require_sendmail_transport = __commonJS({
     var SendmailTransport = class {
       static {
         __name(this, "SendmailTransport");
+      }
+      static {
+        __name2(this, "SendmailTransport");
       }
       constructor(options) {
         options = options || {};
@@ -11423,7 +11782,7 @@ var require_sendmail_transport = __commonJS({
           return done(err);
         }
         const args = this.args ? ["-i"].concat(this.args).concat(envelope.to) : ["-i"].concat(envelope.from ? ["-f", envelope.from] : []).concat(envelope.to);
-        const callback = /* @__PURE__ */ __name((err) => {
+        const callback = /* @__PURE__ */ __name2((err) => {
           if (returned) {
             return;
           }
@@ -11546,8 +11905,6 @@ var require_sendmail_transport = __commonJS({
     module.exports = SendmailTransport;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/stream-transport/index.js
 var require_stream_transport = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/stream-transport/index.js"(exports, module) {
     "use strict";
@@ -11558,6 +11915,9 @@ var require_stream_transport = __commonJS({
     var StreamTransport = class {
       static {
         __name(this, "StreamTransport");
+      }
+      static {
+        __name2(this, "StreamTransport");
       }
       constructor(options) {
         options = options || {};
@@ -11670,8 +12030,6 @@ var require_stream_transport = __commonJS({
     module.exports = StreamTransport;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/json-transport/index.js
 var require_json_transport = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/json-transport/index.js"(exports, module) {
     "use strict";
@@ -11680,6 +12038,9 @@ var require_json_transport = __commonJS({
     var JSONTransport = class {
       static {
         __name(this, "JSONTransport");
+      }
+      static {
+        __name2(this, "JSONTransport");
       }
       constructor(options) {
         options = options || {};
@@ -11742,8 +12103,6 @@ var require_json_transport = __commonJS({
     module.exports = JSONTransport;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/ses-transport/index.js
 var require_ses_transport = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/ses-transport/index.js"(exports, module) {
     "use strict";
@@ -11760,9 +12119,13 @@ var require_ses_transport = __commonJS({
       return err;
     }
     __name(tagSesError, "tagSesError");
+    __name2(tagSesError, "tagSesError");
     var SESTransport = class extends EventEmitter {
       static {
         __name(this, "SESTransport");
+      }
+      static {
+        __name2(this, "SESTransport");
       }
       constructor(options) {
         super();
@@ -11811,7 +12174,7 @@ var require_ses_transport = __commonJS({
           messageId,
           recipients.join(", ")
         );
-        const getRawMessage = /* @__PURE__ */ __name((next) => {
+        const getRawMessage = /* @__PURE__ */ __name2((next) => {
           if (!mail.data._dkim) {
             mail.data._dkim = {};
           }
@@ -11931,7 +12294,7 @@ var require_ses_transport = __commonJS({
             callback = shared.callbackPromise(resolve, reject);
           });
         }
-        const cb = /* @__PURE__ */ __name((err) => {
+        const cb = /* @__PURE__ */ __name2((err) => {
           if (err && !["InvalidParameterValue", "MessageRejected"].includes(err.code || err.Code || err.name)) {
             return callback(tagSesError(err));
           }
@@ -11965,8 +12328,6 @@ var require_ses_transport = __commonJS({
     module.exports = SESTransport;
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/nodemailer.js
 var require_nodemailer = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.3/node_modules/nodemailer/lib/nodemailer.js"(exports, module) {
     "use strict";
@@ -12093,8 +12454,8 @@ var require_nodemailer = __commonJS({
         const open = response.indexOf("[", response.lastIndexOf("]", response.length - 2) + 1);
         if (open >= 0 && open < response.length - 2) {
           const props = response.substring(open + 1, response.length - 1);
-          props.replace(/\b([A-Z0-9]+)=([^\s]+)/g, (m, key, value) => {
-            infoProps.set(key, value);
+          props.replace(/\b([A-Z0-9]+)=([^\s]+)/g, (m, key2, value) => {
+            infoProps.set(key2, value);
           });
         }
       }
@@ -12105,44 +12466,46 @@ var require_nodemailer = __commonJS({
     };
   }
 });
-
-// worker/cloudflare-email.ts
 function bytesToBase64(bytes) {
   let binary = "";
   for (let index = 0; index < bytes.length; index += 1)
     binary += String.fromCharCode(bytes[index]);
   return btoa(binary);
 }
+__name(bytesToBase64, "bytesToBase64");
 function base64ToBytes(value) {
   const binary = atob(value);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
+__name(base64ToBytes, "base64ToBytes");
 function applicationDocumentPayload(input) {
   const name = String(input.name || "documento.pdf").trim().slice(0, 180);
   const category = String(input.category || "Documento").trim().slice(0, 80);
   const data = String(input.data || "");
   const match = data.match(/^data:(application\/pdf);base64,([A-Za-z0-9+/=]+)$/);
-  if (!match) throw new Error("Selecione um arquivo PDF válido");
+  if (!match) throw new Error("Selecione um arquivo PDF v\xE1lido");
   const bytes = base64ToBytes(match[2]);
-  if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new Error("O PDF deve ter no máximo 15 MB");
+  if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new Error("O PDF deve ter no m\xE1ximo 15 MB");
   const safeName = name.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "documento.pdf";
   return { bytes, name, safeName, category, type: "application/pdf" };
 }
+__name(applicationDocumentPayload, "applicationDocumentPayload");
 async function storeApplicationDocument(env, applicationId, agentEmail, input) {
   const file = applicationDocumentPayload(input);
-  const key = `${Number(applicationId)}-${crypto.randomUUID()}`;
+  const key2 = `${Number(applicationId)}-${crypto.randomUUID()}`;
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDocuments (storageKey TEXT PRIMARY KEY,applicationId INTEGER NOT NULL,agentEmail TEXT NOT NULL,name TEXT NOT NULL,type TEXT NOT NULL,category TEXT,size INTEGER NOT NULL,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS applicationDocumentChunks (storageKey TEXT NOT NULL,chunkIndex INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(storageKey,chunkIndex))").run();
-  await env.DB.prepare("INSERT INTO applicationDocuments (storageKey,applicationId,agentEmail,name,type,category,size) VALUES (?,?,?,?,?,?,?)").bind(key, Number(applicationId), String(agentEmail || "").toLowerCase(), file.name, file.type, file.category, file.bytes.length).run();
+  await env.DB.prepare("INSERT INTO applicationDocuments (storageKey,applicationId,agentEmail,name,type,category,size) VALUES (?,?,?,?,?,?,?)").bind(key2, Number(applicationId), String(agentEmail || "").toLowerCase(), file.name, file.type, file.category, file.bytes.length).run();
   const encoded = String(input.data).split(",", 2)[1];
   const chunks = [];
-  for (let offset = 0, index = 0; offset < encoded.length; offset += 480000, index++) {
-    const encryptedChunk = await encryptSmtpPassword(encoded.slice(offset, offset + 480000), env.JWT_SECRET);
-    chunks.push(env.DB.prepare("INSERT INTO applicationDocumentChunks (storageKey,chunkIndex,data) VALUES (?,?,?)").bind(key, index, encryptedChunk));
+  for (let offset = 0, index = 0; offset < encoded.length; offset += 48e4, index++) {
+    const encryptedChunk = await encryptSmtpPassword(encoded.slice(offset, offset + 48e4), env.JWT_SECRET);
+    chunks.push(env.DB.prepare("INSERT INTO applicationDocumentChunks (storageKey,chunkIndex,data) VALUES (?,?,?)").bind(key2, index, encryptedChunk));
   }
   for (let offset = 0; offset < chunks.length; offset += 20) await env.DB.batch(chunks.slice(offset, offset + 20));
-  return { name: file.name, type: file.type, category: file.category, storageKey: `d1:${key}`, size: file.bytes.length };
+  return { name: file.name, type: file.type, category: file.category, storageKey: `d1:${key2}`, size: file.bytes.length };
 }
+__name(storeApplicationDocument, "storeApplicationDocument");
 async function encryptionKey(secret) {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -12153,6 +12516,7 @@ async function encryptionKey(secret) {
     "decrypt"
   ]);
 }
+__name(encryptionKey, "encryptionKey");
 async function encryptSmtpPassword(password, secret) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encrypted = await crypto.subtle.encrypt(
@@ -12162,6 +12526,7 @@ async function encryptSmtpPassword(password, secret) {
   );
   return `v1.${bytesToBase64(iv)}.${bytesToBase64(new Uint8Array(encrypted))}`;
 }
+__name(encryptSmtpPassword, "encryptSmtpPassword");
 async function decryptSmtpPassword(value, secret) {
   if (!value.startsWith("v1."))
     throw new Error("A senha de e-mail precisa ser informada novamente");
@@ -12173,6 +12538,7 @@ async function decryptSmtpPassword(value, secret) {
   );
   return new TextDecoder().decode(clear);
 }
+__name(decryptSmtpPassword, "decryptSmtpPassword");
 async function sendEmail(env, options) {
   const config = await env.DB.prepare(
     "SELECT * FROM smtpConfig ORDER BY id DESC LIMIT 1"
@@ -12195,6 +12561,7 @@ async function sendEmail(env, options) {
     ...options
   });
 }
+__name(sendEmail, "sendEmail");
 async function sendAgentEmail(env, agentEmail, options) {
   const config = await env.DB.prepare(
     "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
@@ -12217,84 +12584,76 @@ async function sendAgentEmail(env, agentEmail, options) {
     ...options
   });
 }
+__name(sendAgentEmail, "sendAgentEmail");
 function emailHtml(title, content) {
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222"><h2 style="color:#b28a2e">${title}</h2>${content}<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#666;font-size:12px">Affinity Financial Consulting Inc.<br>247 Washington St, Stoughton, MA<br>(857) 421-8325</p></div>`;
 }
+__name(emailHtml, "emailHtml");
 async function appendAgentEmailSignature(env, owner, body) {
   await ensureAgentMessageSignatureColumn(env);
   const profile = await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail,email,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner.toLowerCase()).first();
-  if (!profile) throw new Error("Perfil do remetente não encontrado");
-  const signature = String(profile.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE)
-    .replaceAll("{agente_nome}", String(profile.name || ""))
-    .replaceAll("{agente}", String(profile.name || ""))
-    .replaceAll("{agente_telefone}", String(profile.phone || profile.whatsapp || ""))
-    .replaceAll("{telefone do agente}", String(profile.phone || profile.whatsapp || ""))
-    .replaceAll("{agente_whatsapp}", String(profile.whatsapp || profile.phone || ""))
-    .replaceAll("{agente_email}", String(profile.contactEmail || profile.email || ""))
-    .replaceAll("{email do agente}", String(profile.contactEmail || profile.email || "")).trim();
+  if (!profile) throw new Error("Perfil do remetente n\xE3o encontrado");
+  const signature = String(profile.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE).replaceAll("{agente_nome}", String(profile.name || "")).replaceAll("{agente}", String(profile.name || "")).replaceAll("{agente_telefone}", String(profile.phone || profile.whatsapp || "")).replaceAll("{telefone do agente}", String(profile.phone || profile.whatsapp || "")).replaceAll("{agente_whatsapp}", String(profile.whatsapp || profile.phone || "")).replaceAll("{agente_email}", String(profile.contactEmail || profile.email || "")).replaceAll("{email do agente}", String(profile.contactEmail || profile.email || "")).trim();
   const text = String(body || "").trim();
-  return !signature || text.endsWith(signature) ? text : `${text}\n\n${signature}`;
+  return !signature || text.endsWith(signature) ? text : `${text}
+
+${signature}`;
 }
+__name(appendAgentEmailSignature, "appendAgentEmailSignature");
 async function signedClientEmailHtml(env, owner, body) {
   const signature = await appendAgentEmailSignature(env, owner, "");
   let message = String(body || "").trim();
   if (signature && message.endsWith(signature)) message = message.slice(0, -signature.length).trimEnd();
   return clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n", "<br>")}</p>`, signature);
 }
+__name(signedClientEmailHtml, "signedClientEmailHtml");
 function clientEmailHtml(content, signature = "") {
   return `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;color:#222">${content}${signature ? `<hr style="border:0;border-top:1px solid #d4af37;margin:24px 0"><p style="color:#444;font-size:14px;line-height:1.6">${escapeAutomationHtml(signature).replaceAll("\n", "<br>")}</p>` : ""}</div>`;
 }
+__name(clientEmailHtml, "clientEmailHtml");
 var import_nodemailer;
 var init_cloudflare_email = __esm({
   "worker/cloudflare-email.ts"() {
     "use strict";
     import_nodemailer = __toESM(require_nodemailer(), 1);
-    __name(bytesToBase64, "bytesToBase64");
-    __name(base64ToBytes, "base64ToBytes");
-    __name(encryptionKey, "encryptionKey");
-    __name(encryptSmtpPassword, "encryptSmtpPassword");
-    __name(decryptSmtpPassword, "decryptSmtpPassword");
-    __name(sendEmail, "sendEmail");
-    __name(sendAgentEmail, "sendAgentEmail");
-    __name(emailHtml, "emailHtml");
-    __name(clientEmailHtml, "clientEmailHtml");
+    __name2(bytesToBase64, "bytesToBase64");
+    __name2(base64ToBytes, "base64ToBytes");
+    __name2(encryptionKey, "encryptionKey");
+    __name2(encryptSmtpPassword, "encryptSmtpPassword");
+    __name2(decryptSmtpPassword, "decryptSmtpPassword");
+    __name2(sendEmail, "sendEmail");
+    __name2(sendAgentEmail, "sendAgentEmail");
+    __name2(emailHtml, "emailHtml");
+    __name2(clientEmailHtml, "clientEmailHtml");
   }
 });
-
-// node-built-in-modules:node:buffer
-import libDefault16 from "node:buffer";
 var require_node_buffer = __commonJS({
   "node-built-in-modules:node:buffer"(exports, module) {
     module.exports = libDefault16;
   }
 });
-
-// node-built-in-modules:buffer
-import libDefault17 from "buffer";
 var require_buffer = __commonJS({
   "node-built-in-modules:buffer"(exports, module) {
     module.exports = libDefault17;
   }
 });
-
-// node_modules/.pnpm/safer-buffer@2.1.2/node_modules/safer-buffer/safer.js
 var require_safer = __commonJS({
   "node_modules/.pnpm/safer-buffer@2.1.2/node_modules/safer-buffer/safer.js"(exports, module) {
     "use strict";
     var buffer = require_buffer();
     var Buffer3 = buffer.Buffer;
     var safer = {};
-    var key;
-    for (key in buffer) {
-      if (!buffer.hasOwnProperty(key)) continue;
-      if (key === "SlowBuffer" || key === "Buffer") continue;
-      safer[key] = buffer[key];
+    var key2;
+    for (key2 in buffer) {
+      if (!buffer.hasOwnProperty(key2)) continue;
+      if (key2 === "SlowBuffer" || key2 === "Buffer") continue;
+      safer[key2] = buffer[key2];
     }
     var Safer = safer.Buffer = {};
-    for (key in Buffer3) {
-      if (!Buffer3.hasOwnProperty(key)) continue;
-      if (key === "allocUnsafe" || key === "allocUnsafeSlow") continue;
-      Safer[key] = Buffer3[key];
+    for (key2 in Buffer3) {
+      if (!Buffer3.hasOwnProperty(key2)) continue;
+      if (key2 === "allocUnsafe" || key2 === "allocUnsafeSlow") continue;
+      Safer[key2] = Buffer3[key2];
     }
     safer.Buffer.prototype = Buffer3.prototype;
     if (!Safer.from || Safer.from === Uint8Array.from) {
@@ -12344,8 +12703,6 @@ var require_safer = __commonJS({
     module.exports = safer;
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/bom-handling.js
 var require_bom_handling = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/bom-handling.js"(exports) {
     "use strict";
@@ -12356,6 +12713,7 @@ var require_bom_handling = __commonJS({
       this.addBOM = true;
     }
     __name(PrependBOMWrapper, "PrependBOMWrapper");
+    __name2(PrependBOMWrapper, "PrependBOMWrapper");
     PrependBOMWrapper.prototype.write = function(str) {
       if (this.addBOM) {
         str = BOMChar + str;
@@ -12373,6 +12731,7 @@ var require_bom_handling = __commonJS({
       this.options = options || {};
     }
     __name(StripBOMWrapper, "StripBOMWrapper");
+    __name2(StripBOMWrapper, "StripBOMWrapper");
     StripBOMWrapper.prototype.write = function(buf) {
       var res = this.decoder.write(buf);
       if (this.pass || !res) {
@@ -12392,33 +12751,27 @@ var require_bom_handling = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/helpers/merge-exports.js
 var require_merge_exports = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/helpers/merge-exports.js"(exports, module) {
     "use strict";
     var hasOwn = typeof Object.hasOwn === "undefined" ? Function.call.bind(Object.prototype.hasOwnProperty) : Object.hasOwn;
     function mergeModules(target, module2) {
-      for (var key in module2) {
-        if (hasOwn(module2, key)) {
-          target[key] = module2[key];
+      for (var key2 in module2) {
+        if (hasOwn(module2, key2)) {
+          target[key2] = module2[key2];
         }
       }
     }
     __name(mergeModules, "mergeModules");
+    __name2(mergeModules, "mergeModules");
     module.exports = mergeModules;
   }
 });
-
-// node-built-in-modules:string_decoder
-import libDefault18 from "string_decoder";
 var require_string_decoder = __commonJS({
   "node-built-in-modules:string_decoder"(exports, module) {
     module.exports = libDefault18;
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/internal.js
 var require_internal = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/internal.js"(exports, module) {
     "use strict";
@@ -12453,6 +12806,7 @@ var require_internal = __commonJS({
       }
     }
     __name(InternalCodec, "InternalCodec");
+    __name2(InternalCodec, "InternalCodec");
     InternalCodec.prototype.encoder = InternalEncoder;
     InternalCodec.prototype.decoder = InternalDecoder;
     var StringDecoder = require_string_decoder().StringDecoder;
@@ -12460,6 +12814,7 @@ var require_internal = __commonJS({
       this.decoder = new StringDecoder(codec.enc);
     }
     __name(InternalDecoder, "InternalDecoder");
+    __name2(InternalDecoder, "InternalDecoder");
     InternalDecoder.prototype.write = function(buf) {
       if (!Buffer3.isBuffer(buf)) {
         buf = Buffer3.from(buf);
@@ -12473,6 +12828,7 @@ var require_internal = __commonJS({
       this.enc = codec.enc;
     }
     __name(InternalEncoder, "InternalEncoder");
+    __name2(InternalEncoder, "InternalEncoder");
     InternalEncoder.prototype.write = function(str) {
       return Buffer3.from(str, this.enc);
     };
@@ -12482,6 +12838,7 @@ var require_internal = __commonJS({
       this.prevStr = "";
     }
     __name(InternalEncoderBase64, "InternalEncoderBase64");
+    __name2(InternalEncoderBase64, "InternalEncoderBase64");
     InternalEncoderBase64.prototype.write = function(str) {
       str = this.prevStr + str;
       var completeQuads = str.length - str.length % 4;
@@ -12495,6 +12852,7 @@ var require_internal = __commonJS({
     function InternalEncoderCesu8(options, codec) {
     }
     __name(InternalEncoderCesu8, "InternalEncoderCesu8");
+    __name2(InternalEncoderCesu8, "InternalEncoderCesu8");
     InternalEncoderCesu8.prototype.write = function(str) {
       var buf = Buffer3.alloc(str.length * 3);
       var bufIdx = 0;
@@ -12522,6 +12880,7 @@ var require_internal = __commonJS({
       this.defaultCharUnicode = codec.defaultCharUnicode;
     }
     __name(InternalDecoderCesu8, "InternalDecoderCesu8");
+    __name2(InternalDecoderCesu8, "InternalDecoderCesu8");
     InternalDecoderCesu8.prototype.write = function(buf) {
       var acc = this.acc;
       var contBytes = this.contBytes;
@@ -12582,6 +12941,7 @@ var require_internal = __commonJS({
       this.highSurrogate = "";
     }
     __name(InternalEncoderUtf8, "InternalEncoderUtf8");
+    __name2(InternalEncoderUtf8, "InternalEncoderUtf8");
     InternalEncoderUtf8.prototype.write = function(str) {
       if (this.highSurrogate) {
         str = this.highSurrogate + str;
@@ -12605,8 +12965,6 @@ var require_internal = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/utf32.js
 var require_utf32 = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/utf32.js"(exports) {
     "use strict";
@@ -12618,6 +12976,7 @@ var require_utf32 = __commonJS({
       this.isLE = codecOptions.isLE;
     }
     __name(Utf32Codec, "Utf32Codec");
+    __name2(Utf32Codec, "Utf32Codec");
     exports.utf32le = { type: "_utf32", isLE: true };
     exports.utf32be = { type: "_utf32", isLE: false };
     exports.ucs4le = "utf32le";
@@ -12629,6 +12988,7 @@ var require_utf32 = __commonJS({
       this.highSurrogate = 0;
     }
     __name(Utf32Encoder, "Utf32Encoder");
+    __name2(Utf32Encoder, "Utf32Encoder");
     Utf32Encoder.prototype.write = function(str) {
       var src = Buffer3.from(str, "ucs2");
       var dst = Buffer3.alloc(src.length * 2 + 4);
@@ -12682,6 +13042,7 @@ var require_utf32 = __commonJS({
       this.overflow = [];
     }
     __name(Utf32Decoder, "Utf32Decoder");
+    __name2(Utf32Decoder, "Utf32Decoder");
     Utf32Decoder.prototype.write = function(src) {
       if (src.length === 0) {
         return "";
@@ -12736,6 +13097,7 @@ var require_utf32 = __commonJS({
       return offset;
     }
     __name(_writeCodepoint, "_writeCodepoint");
+    __name2(_writeCodepoint, "_writeCodepoint");
     Utf32Decoder.prototype.end = function() {
       if (this.overflow.length === 0) {
         return;
@@ -12749,6 +13111,7 @@ var require_utf32 = __commonJS({
       this.iconv = iconv;
     }
     __name(Utf32AutoCodec, "Utf32AutoCodec");
+    __name2(Utf32AutoCodec, "Utf32AutoCodec");
     Utf32AutoCodec.prototype.encoder = Utf32AutoEncoder;
     Utf32AutoCodec.prototype.decoder = Utf32AutoDecoder;
     function Utf32AutoEncoder(options, codec) {
@@ -12759,6 +13122,7 @@ var require_utf32 = __commonJS({
       this.encoder = codec.iconv.getEncoder(options.defaultEncoding || "utf-32le", options);
     }
     __name(Utf32AutoEncoder, "Utf32AutoEncoder");
+    __name2(Utf32AutoEncoder, "Utf32AutoEncoder");
     Utf32AutoEncoder.prototype.write = function(str) {
       return this.encoder.write(str);
     };
@@ -12773,6 +13137,7 @@ var require_utf32 = __commonJS({
       this.iconv = codec.iconv;
     }
     __name(Utf32AutoDecoder, "Utf32AutoDecoder");
+    __name2(Utf32AutoDecoder, "Utf32AutoDecoder");
     Utf32AutoDecoder.prototype.write = function(buf) {
       if (!this.decoder) {
         this.initialBufs.push(buf);
@@ -12846,10 +13211,9 @@ var require_utf32 = __commonJS({
       return defaultEncoding || "utf-32le";
     }
     __name(detectEncoding, "detectEncoding");
+    __name2(detectEncoding, "detectEncoding");
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/utf16.js
 var require_utf16 = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/utf16.js"(exports) {
     "use strict";
@@ -12858,12 +13222,14 @@ var require_utf16 = __commonJS({
     function Utf16BECodec() {
     }
     __name(Utf16BECodec, "Utf16BECodec");
+    __name2(Utf16BECodec, "Utf16BECodec");
     Utf16BECodec.prototype.encoder = Utf16BEEncoder;
     Utf16BECodec.prototype.decoder = Utf16BEDecoder;
     Utf16BECodec.prototype.bomAware = true;
     function Utf16BEEncoder() {
     }
     __name(Utf16BEEncoder, "Utf16BEEncoder");
+    __name2(Utf16BEEncoder, "Utf16BEEncoder");
     Utf16BEEncoder.prototype.write = function(str) {
       var buf = Buffer3.from(str, "ucs2");
       for (var i = 0; i < buf.length; i += 2) {
@@ -12879,6 +13245,7 @@ var require_utf16 = __commonJS({
       this.overflowByte = -1;
     }
     __name(Utf16BEDecoder, "Utf16BEDecoder");
+    __name2(Utf16BEDecoder, "Utf16BEDecoder");
     Utf16BEDecoder.prototype.write = function(buf) {
       if (buf.length == 0) {
         return "";
@@ -12907,6 +13274,7 @@ var require_utf16 = __commonJS({
       this.iconv = iconv;
     }
     __name(Utf16Codec, "Utf16Codec");
+    __name2(Utf16Codec, "Utf16Codec");
     Utf16Codec.prototype.encoder = Utf16Encoder;
     Utf16Codec.prototype.decoder = Utf16Decoder;
     function Utf16Encoder(options, codec) {
@@ -12917,6 +13285,7 @@ var require_utf16 = __commonJS({
       this.encoder = codec.iconv.getEncoder("utf-16le", options);
     }
     __name(Utf16Encoder, "Utf16Encoder");
+    __name2(Utf16Encoder, "Utf16Encoder");
     Utf16Encoder.prototype.write = function(str) {
       return this.encoder.write(str);
     };
@@ -12931,6 +13300,7 @@ var require_utf16 = __commonJS({
       this.iconv = codec.iconv;
     }
     __name(Utf16Decoder, "Utf16Decoder");
+    __name2(Utf16Decoder, "Utf16Decoder");
     Utf16Decoder.prototype.write = function(buf) {
       if (!this.decoder) {
         this.initialBufs.push(buf);
@@ -12996,10 +13366,9 @@ var require_utf16 = __commonJS({
       return defaultEncoding || "utf-16le";
     }
     __name(detectEncoding, "detectEncoding");
+    __name2(detectEncoding, "detectEncoding");
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/utf7.js
 var require_utf7 = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/utf7.js"(exports) {
     "use strict";
@@ -13010,6 +13379,7 @@ var require_utf7 = __commonJS({
       this.iconv = iconv;
     }
     __name(Utf7Codec, "Utf7Codec");
+    __name2(Utf7Codec, "Utf7Codec");
     Utf7Codec.prototype.encoder = Utf7Encoder;
     Utf7Codec.prototype.decoder = Utf7Decoder;
     Utf7Codec.prototype.bomAware = true;
@@ -13018,6 +13388,7 @@ var require_utf7 = __commonJS({
       this.iconv = codec.iconv;
     }
     __name(Utf7Encoder, "Utf7Encoder");
+    __name2(Utf7Encoder, "Utf7Encoder");
     Utf7Encoder.prototype.write = function(str) {
       return Buffer3.from(str.replace(nonDirectChars, function(chunk) {
         return "+" + (chunk === "+" ? "" : this.iconv.encode(chunk, "utf16-be").toString("base64").replace(/=+$/, "")) + "-";
@@ -13031,6 +13402,7 @@ var require_utf7 = __commonJS({
       this.base64Accum = "";
     }
     __name(Utf7Decoder, "Utf7Decoder");
+    __name2(Utf7Decoder, "Utf7Decoder");
     var base64Regex = /[A-Za-z0-9\/+]/;
     var base64Chars = [];
     for (i = 0; i < 256; i++) {
@@ -13096,6 +13468,7 @@ var require_utf7 = __commonJS({
       this.iconv = iconv;
     }
     __name(Utf7IMAPCodec, "Utf7IMAPCodec");
+    __name2(Utf7IMAPCodec, "Utf7IMAPCodec");
     Utf7IMAPCodec.prototype.encoder = Utf7IMAPEncoder;
     Utf7IMAPCodec.prototype.decoder = Utf7IMAPDecoder;
     Utf7IMAPCodec.prototype.bomAware = true;
@@ -13106,6 +13479,7 @@ var require_utf7 = __commonJS({
       this.base64AccumIdx = 0;
     }
     __name(Utf7IMAPEncoder, "Utf7IMAPEncoder");
+    __name2(Utf7IMAPEncoder, "Utf7IMAPEncoder");
     Utf7IMAPEncoder.prototype.write = function(str) {
       var inBase64 = this.inBase64;
       var base64Accum = this.base64Accum;
@@ -13167,6 +13541,7 @@ var require_utf7 = __commonJS({
       this.base64Accum = "";
     }
     __name(Utf7IMAPDecoder, "Utf7IMAPDecoder");
+    __name2(Utf7IMAPDecoder, "Utf7IMAPDecoder");
     var base64IMAPChars = base64Chars.slice();
     base64IMAPChars[",".charCodeAt(0)] = true;
     Utf7IMAPDecoder.prototype.write = function(buf) {
@@ -13222,8 +13597,6 @@ var require_utf7 = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/sbcs-codec.js
 var require_sbcs_codec = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/sbcs-codec.js"(exports) {
     "use strict";
@@ -13251,12 +13624,14 @@ var require_sbcs_codec = __commonJS({
       this.encodeBuf = encodeBuf;
     }
     __name(SBCSCodec, "SBCSCodec");
+    __name2(SBCSCodec, "SBCSCodec");
     SBCSCodec.prototype.encoder = SBCSEncoder;
     SBCSCodec.prototype.decoder = SBCSDecoder;
     function SBCSEncoder(options, codec) {
       this.encodeBuf = codec.encodeBuf;
     }
     __name(SBCSEncoder, "SBCSEncoder");
+    __name2(SBCSEncoder, "SBCSEncoder");
     SBCSEncoder.prototype.write = function(str) {
       var buf = Buffer3.alloc(str.length);
       for (var i = 0; i < str.length; i++) {
@@ -13270,6 +13645,7 @@ var require_sbcs_codec = __commonJS({
       this.decodeBuf = codec.decodeBuf;
     }
     __name(SBCSDecoder, "SBCSDecoder");
+    __name2(SBCSDecoder, "SBCSDecoder");
     SBCSDecoder.prototype.write = function(buf) {
       var decodeBuf = this.decodeBuf;
       var newBuf = Buffer3.alloc(buf.length * 2);
@@ -13287,8 +13663,6 @@ var require_sbcs_codec = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/sbcs-data.js
 var require_sbcs_data = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/sbcs-data.js"(exports, module) {
     "use strict";
@@ -13442,8 +13816,6 @@ var require_sbcs_data = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/sbcs-data-generated.js
 var require_sbcs_data_generated = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/sbcs-data-generated.js"(exports, module) {
     "use strict";
@@ -13897,8 +14269,6 @@ var require_sbcs_data_generated = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/dbcs-codec.js
 var require_dbcs_codec = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/dbcs-codec.js"(exports) {
     "use strict";
@@ -13992,6 +14362,7 @@ var require_dbcs_codec = __commonJS({
       if (this.defCharSB === UNASSIGNED) this.defCharSB = "?".charCodeAt(0);
     }
     __name(DBCSCodec, "DBCSCodec");
+    __name2(DBCSCodec, "DBCSCodec");
     DBCSCodec.prototype.encoder = DBCSEncoder;
     DBCSCodec.prototype.decoder = DBCSDecoder;
     DBCSCodec.prototype._getDecodeTrieNode = function(addr) {
@@ -14139,6 +14510,7 @@ var require_dbcs_codec = __commonJS({
       this.gb18030 = codec.gb18030;
     }
     __name(DBCSEncoder, "DBCSEncoder");
+    __name2(DBCSEncoder, "DBCSEncoder");
     DBCSEncoder.prototype.write = function(str) {
       var newBuf = Buffer3.alloc(str.length * (this.gb18030 ? 4 : 3));
       var leadSurrogate = this.leadSurrogate;
@@ -14275,6 +14647,7 @@ var require_dbcs_codec = __commonJS({
       this.gb18030 = codec.gb18030;
     }
     __name(DBCSDecoder, "DBCSDecoder");
+    __name2(DBCSDecoder, "DBCSDecoder");
     DBCSDecoder.prototype.write = function(buf) {
       var newBuf = Buffer3.alloc(buf.length * 2);
       var nodeIdx = this.nodeIdx;
@@ -14359,10 +14732,9 @@ var require_dbcs_codec = __commonJS({
       return l;
     }
     __name(findIdx, "findIdx");
+    __name2(findIdx, "findIdx");
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/shiftjis.json
 var require_shiftjis = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/shiftjis.json"(exports, module) {
     module.exports = [
@@ -14492,8 +14864,6 @@ var require_shiftjis = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/eucjp.json
 var require_eucjp = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/eucjp.json"(exports, module) {
     module.exports = [
@@ -14680,8 +15050,6 @@ var require_eucjp = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/cp936.json
 var require_cp936 = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/cp936.json"(exports, module) {
     module.exports = [
@@ -14950,8 +15318,6 @@ var require_cp936 = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/gbk-added.json
 var require_gbk_added = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/gbk-added.json"(exports, module) {
     module.exports = [
@@ -15012,15 +15378,11 @@ var require_gbk_added = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/gb18030-ranges.json
 var require_gb18030_ranges = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/gb18030-ranges.json"(exports, module) {
     module.exports = { uChars: [128, 165, 169, 178, 184, 216, 226, 235, 238, 244, 248, 251, 253, 258, 276, 284, 300, 325, 329, 334, 364, 463, 465, 467, 469, 471, 473, 475, 477, 506, 594, 610, 712, 716, 730, 930, 938, 962, 970, 1026, 1104, 1106, 8209, 8215, 8218, 8222, 8231, 8241, 8244, 8246, 8252, 8365, 8452, 8454, 8458, 8471, 8482, 8556, 8570, 8596, 8602, 8713, 8720, 8722, 8726, 8731, 8737, 8740, 8742, 8748, 8751, 8760, 8766, 8777, 8781, 8787, 8802, 8808, 8816, 8854, 8858, 8870, 8896, 8979, 9322, 9372, 9548, 9588, 9616, 9622, 9634, 9652, 9662, 9672, 9676, 9680, 9702, 9735, 9738, 9793, 9795, 11906, 11909, 11913, 11917, 11928, 11944, 11947, 11951, 11956, 11960, 11964, 11979, 12284, 12292, 12312, 12319, 12330, 12351, 12436, 12447, 12535, 12543, 12586, 12842, 12850, 12964, 13200, 13215, 13218, 13253, 13263, 13267, 13270, 13384, 13428, 13727, 13839, 13851, 14617, 14703, 14801, 14816, 14964, 15183, 15471, 15585, 16471, 16736, 17208, 17325, 17330, 17374, 17623, 17997, 18018, 18212, 18218, 18301, 18318, 18760, 18811, 18814, 18820, 18823, 18844, 18848, 18872, 19576, 19620, 19738, 19887, 40870, 59244, 59336, 59367, 59413, 59417, 59423, 59431, 59437, 59443, 59452, 59460, 59478, 59493, 63789, 63866, 63894, 63976, 63986, 64016, 64018, 64021, 64025, 64034, 64037, 64042, 65074, 65093, 65107, 65112, 65127, 65132, 65375, 65510, 65536], gbChars: [0, 36, 38, 45, 50, 81, 89, 95, 96, 100, 103, 104, 105, 109, 126, 133, 148, 172, 175, 179, 208, 306, 307, 308, 309, 310, 311, 312, 313, 341, 428, 443, 544, 545, 558, 741, 742, 749, 750, 805, 819, 820, 7922, 7924, 7925, 7927, 7934, 7943, 7944, 7945, 7950, 8062, 8148, 8149, 8152, 8164, 8174, 8236, 8240, 8262, 8264, 8374, 8380, 8381, 8384, 8388, 8390, 8392, 8393, 8394, 8396, 8401, 8406, 8416, 8419, 8424, 8437, 8439, 8445, 8482, 8485, 8496, 8521, 8603, 8936, 8946, 9046, 9050, 9063, 9066, 9076, 9092, 9100, 9108, 9111, 9113, 9131, 9162, 9164, 9218, 9219, 11329, 11331, 11334, 11336, 11346, 11361, 11363, 11366, 11370, 11372, 11375, 11389, 11682, 11686, 11687, 11692, 11694, 11714, 11716, 11723, 11725, 11730, 11736, 11982, 11989, 12102, 12336, 12348, 12350, 12384, 12393, 12395, 12397, 12510, 12553, 12851, 12962, 12973, 13738, 13823, 13919, 13933, 14080, 14298, 14585, 14698, 15583, 15847, 16318, 16434, 16438, 16481, 16729, 17102, 17122, 17315, 17320, 17402, 17418, 17859, 17909, 17911, 17915, 17916, 17936, 17939, 17961, 18664, 18703, 18814, 18962, 19043, 33469, 33470, 33471, 33484, 33485, 33490, 33497, 33501, 33505, 33513, 33520, 33536, 33550, 37845, 37921, 37948, 38029, 38038, 38064, 38065, 38066, 38069, 38075, 38076, 38078, 39108, 39109, 39113, 39114, 39115, 39116, 39265, 39394, 189e3] };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/cp949.json
 var require_cp949 = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/cp949.json"(exports, module) {
     module.exports = [
@@ -15298,8 +15660,6 @@ var require_cp949 = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/cp950.json
 var require_cp950 = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/cp950.json"(exports, module) {
     module.exports = [
@@ -15481,8 +15841,6 @@ var require_cp950 = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/big5-added.json
 var require_big5_added = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/tables/big5-added.json"(exports, module) {
     module.exports = [
@@ -15609,8 +15967,6 @@ var require_big5_added = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/dbcs-data.js
 var require_dbcs_data = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/dbcs-data.js"(exports, module) {
     "use strict";
@@ -15647,7 +16003,7 @@ var require_dbcs_data = __commonJS({
       // Overall, it seems that it's a mess :( http://www8.plala.or.jp/tkubota1/unicode-symbols-map2.html
       shiftjis: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_shiftjis();
         }, "table"),
         encodeAdd: { "\xA5": 92, "\u203E": 126 },
@@ -15665,7 +16021,7 @@ var require_dbcs_data = __commonJS({
       cp932: "shiftjis",
       eucjp: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_eucjp();
         }, "table"),
         encodeAdd: { "\xA5": 92, "\u203E": 126 }
@@ -15689,14 +16045,14 @@ var require_dbcs_data = __commonJS({
       936: "cp936",
       cp936: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_cp936();
         }, "table")
       },
       // GBK (~22000 chars) is an extension of CP936 that added user-mapped chars and some other.
       gbk: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_cp936().concat(require_gbk_added());
         }, "table")
       },
@@ -15709,10 +16065,10 @@ var require_dbcs_data = __commonJS({
       // http://www.khngai.com/chinese/charmap/tblgbk.php?page=0
       gb18030: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_cp936().concat(require_gbk_added());
         }, "table"),
-        gb18030: /* @__PURE__ */ __name(function() {
+        gb18030: /* @__PURE__ */ __name2(function() {
           return require_gb18030_ranges();
         }, "gb18030"),
         encodeSkipVals: [128],
@@ -15726,7 +16082,7 @@ var require_dbcs_data = __commonJS({
       949: "cp949",
       cp949: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_cp949();
         }, "table")
       },
@@ -15765,7 +16121,7 @@ var require_dbcs_data = __commonJS({
       950: "cp950",
       cp950: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_cp950();
         }, "table")
       },
@@ -15773,7 +16129,7 @@ var require_dbcs_data = __commonJS({
       big5: "big5hkscs",
       big5hkscs: {
         type: "_dbcs",
-        table: /* @__PURE__ */ __name(function() {
+        table: /* @__PURE__ */ __name2(function() {
           return require_cp950().concat(require_big5_added());
         }, "table"),
         encodeSkipVals: [
@@ -15856,8 +16212,6 @@ var require_dbcs_data = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/index.js
 var require_encodings = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/encodings/index.js"(exports, module) {
     "use strict";
@@ -15881,8 +16235,6 @@ var require_encodings = __commonJS({
     var i;
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/streams.js
 var require_streams = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/streams.js"(exports, module) {
     "use strict";
@@ -15896,6 +16248,7 @@ var require_streams = __commonJS({
         Transform.call(this, options);
       }
       __name(IconvLiteEncoderStream, "IconvLiteEncoderStream");
+      __name2(IconvLiteEncoderStream, "IconvLiteEncoderStream");
       IconvLiteEncoderStream.prototype = Object.create(Transform.prototype, {
         constructor: { value: IconvLiteEncoderStream }
       });
@@ -15938,6 +16291,7 @@ var require_streams = __commonJS({
         Transform.call(this, options);
       }
       __name(IconvLiteDecoderStream, "IconvLiteDecoderStream");
+      __name2(IconvLiteDecoderStream, "IconvLiteDecoderStream");
       IconvLiteDecoderStream.prototype = Object.create(Transform.prototype, {
         constructor: { value: IconvLiteDecoderStream }
       });
@@ -15980,8 +16334,6 @@ var require_streams = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/index.js
 var require_lib = __commonJS({
   "node_modules/.pnpm/iconv-lite@0.7.3/node_modules/iconv-lite/lib/index.js"(exports, module) {
     "use strict";
@@ -15991,14 +16343,14 @@ var require_lib = __commonJS({
     module.exports.encodings = null;
     module.exports.defaultCharUnicode = "\uFFFD";
     module.exports.defaultCharSingleByte = "?";
-    module.exports.encode = /* @__PURE__ */ __name(function encode(str, encoding, options) {
+    module.exports.encode = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function encode3(str, encoding, options) {
       str = "" + (str || "");
       var encoder = module.exports.getEncoder(encoding, options);
       var res = encoder.write(str);
       var trail = encoder.end();
       return trail && trail.length > 0 ? Buffer3.concat([res, trail]) : res;
-    }, "encode");
-    module.exports.decode = /* @__PURE__ */ __name(function decode(buf, encoding, options) {
+    }, "encode"), "encode");
+    module.exports.decode = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function decode2(buf, encoding, options) {
       if (typeof buf === "string") {
         if (!module.exports.skipDecodeWarning) {
           console.error("Iconv-lite warning: decode()-ing strings is deprecated. Refer to https://github.com/ashtuchkin/iconv-lite/wiki/Use-Buffers-when-decoding");
@@ -16010,19 +16362,19 @@ var require_lib = __commonJS({
       var res = decoder.write(buf);
       var trail = decoder.end();
       return trail ? res + trail : res;
-    }, "decode");
-    module.exports.encodingExists = /* @__PURE__ */ __name(function encodingExists(enc) {
+    }, "decode"), "decode");
+    module.exports.encodingExists = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function encodingExists(enc) {
       try {
         module.exports.getCodec(enc);
         return true;
       } catch (e) {
         return false;
       }
-    }, "encodingExists");
+    }, "encodingExists"), "encodingExists");
     module.exports.toEncoding = module.exports.encode;
     module.exports.fromEncoding = module.exports.decode;
     module.exports._codecDataCache = { __proto__: null };
-    module.exports.getCodec = /* @__PURE__ */ __name(function getCodec(encoding) {
+    module.exports.getCodec = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function getCodec(encoding) {
       if (!module.exports.encodings) {
         var raw = require_encodings();
         module.exports.encodings = { __proto__: null };
@@ -16041,8 +16393,8 @@ var require_lib = __commonJS({
             enc = codecDef;
             break;
           case "object":
-            for (var key in codecDef) {
-              codecOptions[key] = codecDef[key];
+            for (var key2 in codecDef) {
+              codecOptions[key2] = codecDef[key2];
             }
             if (!codecOptions.encodingName) {
               codecOptions.encodingName = enc;
@@ -16060,41 +16412,41 @@ var require_lib = __commonJS({
             throw new Error("Encoding not recognized: '" + encoding + "' (searched as: '" + enc + "')");
         }
       }
-    }, "getCodec");
+    }, "getCodec"), "getCodec");
     module.exports._canonicalizeEncoding = function(encoding) {
       return ("" + encoding).toLowerCase().replace(/:\d{4}$|[^0-9a-z]/g, "");
     };
-    module.exports.getEncoder = /* @__PURE__ */ __name(function getEncoder(encoding, options) {
+    module.exports.getEncoder = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function getEncoder(encoding, options) {
       var codec = module.exports.getCodec(encoding);
       var encoder = new codec.encoder(options, codec);
       if (codec.bomAware && options && options.addBOM) {
         encoder = new bomHandling.PrependBOM(encoder, options);
       }
       return encoder;
-    }, "getEncoder");
-    module.exports.getDecoder = /* @__PURE__ */ __name(function getDecoder(encoding, options) {
+    }, "getEncoder"), "getEncoder");
+    module.exports.getDecoder = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function getDecoder(encoding, options) {
       var codec = module.exports.getCodec(encoding);
       var decoder = new codec.decoder(options, codec);
       if (codec.bomAware && !(options && options.stripBOM === false)) {
         decoder = new bomHandling.StripBOM(decoder, options);
       }
       return decoder;
-    }, "getDecoder");
-    module.exports.enableStreamingAPI = /* @__PURE__ */ __name(function enableStreamingAPI(streamModule2) {
+    }, "getDecoder"), "getDecoder");
+    module.exports.enableStreamingAPI = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function enableStreamingAPI(streamModule2) {
       if (module.exports.supportsStreams) {
         return;
       }
       var streams = require_streams()(streamModule2);
       module.exports.IconvLiteEncoderStream = streams.IconvLiteEncoderStream;
       module.exports.IconvLiteDecoderStream = streams.IconvLiteDecoderStream;
-      module.exports.encodeStream = /* @__PURE__ */ __name(function encodeStream(encoding, options) {
+      module.exports.encodeStream = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function encodeStream(encoding, options) {
         return new module.exports.IconvLiteEncoderStream(module.exports.getEncoder(encoding, options), options);
-      }, "encodeStream");
-      module.exports.decodeStream = /* @__PURE__ */ __name(function decodeStream(encoding, options) {
+      }, "encodeStream"), "encodeStream");
+      module.exports.decodeStream = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function decodeStream(encoding, options) {
         return new module.exports.IconvLiteDecoderStream(module.exports.getDecoder(encoding, options), options);
-      }, "decodeStream");
+      }, "decodeStream"), "decodeStream");
       module.exports.supportsStreams = true;
-    }, "enableStreamingAPI");
+    }, "enableStreamingAPI"), "enableStreamingAPI");
     var streamModule;
     try {
       streamModule = require_stream();
@@ -16112,8 +16464,6 @@ var require_lib = __commonJS({
     }
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/util.js
 var require_util2 = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/util.js"(exports) {
     var config = require_config();
@@ -16128,30 +16478,34 @@ var require_util2 = __commonJS({
       return type === "function" || type === "object" && !!x;
     }
     __name(isObject, "isObject");
+    __name2(isObject, "isObject");
     exports.isObject = isObject;
     function isArray(x) {
       return nativeIsArray ? nativeIsArray(x) : toString.call(x) === "[object Array]";
     }
     __name(isArray, "isArray");
+    __name2(isArray, "isArray");
     exports.isArray = isArray;
     function isString(x) {
       return typeof x === "string" || toString.call(x) === "[object String]";
     }
     __name(isString, "isString");
+    __name2(isString, "isString");
     exports.isString = isString;
     function objectKeys(object) {
       if (nativeObjectKeys) {
         return nativeObjectKeys(object);
       }
       var keys = [];
-      for (var key in object) {
-        if (hasOwnProperty.call(object, key)) {
-          keys[keys.length] = key;
+      for (var key2 in object) {
+        if (hasOwnProperty.call(object, key2)) {
+          keys[keys.length] = key2;
         }
       }
       return keys;
     }
     __name(objectKeys, "objectKeys");
+    __name2(objectKeys, "objectKeys");
     exports.objectKeys = objectKeys;
     function createBuffer(bits, size) {
       if (config.HAS_TYPED) {
@@ -16165,6 +16519,7 @@ var require_util2 = __commonJS({
       return new Array(size);
     }
     __name(createBuffer, "createBuffer");
+    __name2(createBuffer, "createBuffer");
     exports.createBuffer = createBuffer;
     function stringToBuffer(string) {
       var length = string.length;
@@ -16175,6 +16530,7 @@ var require_util2 = __commonJS({
       return buffer;
     }
     __name(stringToBuffer, "stringToBuffer");
+    __name2(stringToBuffer, "stringToBuffer");
     exports.stringToBuffer = stringToBuffer;
     function codeToString_fast(code) {
       if (config.CAN_CHARCODE_APPLY && config.CAN_CHARCODE_APPLY_TYPED) {
@@ -16197,6 +16553,7 @@ var require_util2 = __commonJS({
       return codeToString_chunked(code);
     }
     __name(codeToString_fast, "codeToString_fast");
+    __name2(codeToString_fast, "codeToString_fast");
     exports.codeToString_fast = codeToString_fast;
     function codeToString_chunked(code) {
       var string = "";
@@ -16230,6 +16587,7 @@ var require_util2 = __commonJS({
       return string;
     }
     __name(codeToString_chunked, "codeToString_chunked");
+    __name2(codeToString_chunked, "codeToString_chunked");
     exports.codeToString_chunked = codeToString_chunked;
     function codeToString_slow(code) {
       var string = "";
@@ -16240,6 +16598,7 @@ var require_util2 = __commonJS({
       return string;
     }
     __name(codeToString_slow, "codeToString_slow");
+    __name2(codeToString_slow, "codeToString_slow");
     exports.codeToString_slow = codeToString_slow;
     function stringToCode(string) {
       var code = [];
@@ -16250,6 +16609,7 @@ var require_util2 = __commonJS({
       return code;
     }
     __name(stringToCode, "stringToCode");
+    __name2(stringToCode, "stringToCode");
     exports.stringToCode = stringToCode;
     function codeToBuffer(code) {
       if (config.HAS_TYPED) {
@@ -16266,6 +16626,7 @@ var require_util2 = __commonJS({
       return buffer;
     }
     __name(codeToBuffer, "codeToBuffer");
+    __name2(codeToBuffer, "codeToBuffer");
     exports.codeToBuffer = codeToBuffer;
     function bufferToCode(buffer) {
       if (isArray(buffer)) {
@@ -16274,6 +16635,7 @@ var require_util2 = __commonJS({
       return slice.call(buffer);
     }
     __name(bufferToCode, "bufferToCode");
+    __name2(bufferToCode, "bufferToCode");
     exports.bufferToCode = bufferToCode;
     function canonicalizeEncodingName(target) {
       var name = "";
@@ -16302,6 +16664,7 @@ var require_util2 = __commonJS({
       return name;
     }
     __name(canonicalizeEncodingName, "canonicalizeEncodingName");
+    __name2(canonicalizeEncodingName, "canonicalizeEncodingName");
     exports.canonicalizeEncodingName = canonicalizeEncodingName;
     var base64EncodeChars = [
       65,
@@ -16532,6 +16895,7 @@ var require_util2 = __commonJS({
       return codeToString_fast(out);
     }
     __name(base64encode, "base64encode");
+    __name2(base64encode, "base64encode");
     exports.base64encode = base64encode;
     function base64decode(str) {
       var c1, c2, c3, c4;
@@ -16579,11 +16943,10 @@ var require_util2 = __commonJS({
       return out;
     }
     __name(base64decode, "base64decode");
+    __name2(base64decode, "base64decode");
     exports.base64decode = base64decode;
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/utf8-to-jis-table.js
 var require_utf8_to_jis_table = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/utf8-to-jis-table.js"(exports, module) {
     module.exports = {
@@ -23983,8 +24346,6 @@ var require_utf8_to_jis_table = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/utf8-to-jisx0212-table.js
 var require_utf8_to_jisx0212_table = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/utf8-to-jisx0212-table.js"(exports, module) {
     module.exports = {
@@ -30060,24 +30421,18 @@ var require_utf8_to_jisx0212_table = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/jis-to-utf8-table.js
 var require_jis_to_utf8_table = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/jis-to-utf8-table.js"(exports, module) {
     var JIS_TO_UTF8_TABLE = null;
     module.exports = JIS_TO_UTF8_TABLE;
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/jisx0212-to-utf8-table.js
 var require_jisx0212_to_utf8_table = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/jisx0212-to-utf8-table.js"(exports, module) {
     var JISX0212_TO_UTF8_TABLE = null;
     module.exports = JISX0212_TO_UTF8_TABLE;
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/encoding-table.js
 var require_encoding_table = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/encoding-table.js"(exports) {
     exports.UTF8_TO_JIS_TABLE = require_utf8_to_jis_table();
@@ -30086,8 +30441,6 @@ var require_encoding_table = __commonJS({
     exports.JISX0212_TO_UTF8_TABLE = require_jisx0212_to_utf8_table();
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/config.js
 var require_config = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/config.js"(exports) {
     var util = require_util2();
@@ -30187,30 +30540,29 @@ var require_config = __commonJS({
         var keys = util.objectKeys(EncodingTable.UTF8_TO_JIS_TABLE);
         var i = 0;
         var len = keys.length;
-        var key, value;
+        var key2, value;
         for (; i < len; i++) {
-          key = keys[i];
-          value = EncodingTable.UTF8_TO_JIS_TABLE[key];
+          key2 = keys[i];
+          value = EncodingTable.UTF8_TO_JIS_TABLE[key2];
           if (value > 95) {
-            EncodingTable.JIS_TO_UTF8_TABLE[value] = key | 0;
+            EncodingTable.JIS_TO_UTF8_TABLE[value] = key2 | 0;
           }
         }
         EncodingTable.JISX0212_TO_UTF8_TABLE = {};
         keys = util.objectKeys(EncodingTable.UTF8_TO_JISX0212_TABLE);
         len = keys.length;
         for (i = 0; i < len; i++) {
-          key = keys[i];
-          value = EncodingTable.UTF8_TO_JISX0212_TABLE[key];
-          EncodingTable.JISX0212_TO_UTF8_TABLE[value] = key | 0;
+          key2 = keys[i];
+          value = EncodingTable.UTF8_TO_JISX0212_TABLE[key2];
+          EncodingTable.JISX0212_TO_UTF8_TABLE[value] = key2 | 0;
         }
       }
     }
     __name(init_JIS_TO_UTF8_TABLE, "init_JIS_TO_UTF8_TABLE");
+    __name2(init_JIS_TO_UTF8_TABLE, "init_JIS_TO_UTF8_TABLE");
     exports.init_JIS_TO_UTF8_TABLE = init_JIS_TO_UTF8_TABLE;
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/encoding-detect.js
 var require_encoding_detect = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/encoding-detect.js"(exports) {
     function isBINARY(data) {
@@ -30229,6 +30581,7 @@ var require_encoding_detect = __commonJS({
       return false;
     }
     __name(isBINARY, "isBINARY");
+    __name2(isBINARY, "isBINARY");
     exports.isBINARY = isBINARY;
     function isASCII(data) {
       var i = 0;
@@ -30243,6 +30596,7 @@ var require_encoding_detect = __commonJS({
       return true;
     }
     __name(isASCII, "isASCII");
+    __name2(isASCII, "isASCII");
     exports.isASCII = isASCII;
     function isJIS(data) {
       var i = 0;
@@ -30280,6 +30634,7 @@ var require_encoding_detect = __commonJS({
       return false;
     }
     __name(isJIS, "isJIS");
+    __name2(isJIS, "isJIS");
     exports.isJIS = isJIS;
     function isEUCJP(data) {
       var i = 0;
@@ -30328,6 +30683,7 @@ var require_encoding_detect = __commonJS({
       return true;
     }
     __name(isEUCJP, "isEUCJP");
+    __name2(isEUCJP, "isEUCJP");
     exports.isEUCJP = isEUCJP;
     function isSJIS(data) {
       var i = 0;
@@ -30354,6 +30710,7 @@ var require_encoding_detect = __commonJS({
       return true;
     }
     __name(isSJIS, "isSJIS");
+    __name2(isSJIS, "isSJIS");
     exports.isSJIS = isSJIS;
     function isUTF8(data) {
       var i = 0;
@@ -30409,6 +30766,7 @@ var require_encoding_detect = __commonJS({
       return true;
     }
     __name(isUTF8, "isUTF8");
+    __name2(isUTF8, "isUTF8");
     exports.isUTF8 = isUTF8;
     function isUTF16(data) {
       var i = 0;
@@ -30453,6 +30811,7 @@ var require_encoding_detect = __commonJS({
       return false;
     }
     __name(isUTF16, "isUTF16");
+    __name2(isUTF16, "isUTF16");
     exports.isUTF16 = isUTF16;
     function isUTF16BE(data) {
       var i = 0;
@@ -30488,6 +30847,7 @@ var require_encoding_detect = __commonJS({
       return false;
     }
     __name(isUTF16BE, "isUTF16BE");
+    __name2(isUTF16BE, "isUTF16BE");
     exports.isUTF16BE = isUTF16BE;
     function isUTF16LE(data) {
       var i = 0;
@@ -30523,6 +30883,7 @@ var require_encoding_detect = __commonJS({
       return false;
     }
     __name(isUTF16LE, "isUTF16LE");
+    __name2(isUTF16LE, "isUTF16LE");
     exports.isUTF16LE = isUTF16LE;
     function isUTF32(data) {
       var i = 0;
@@ -30572,6 +30933,7 @@ var require_encoding_detect = __commonJS({
       return false;
     }
     __name(isUTF32, "isUTF32");
+    __name2(isUTF32, "isUTF32");
     exports.isUTF32 = isUTF32;
     function isUNICODE(data) {
       var i = 0;
@@ -30586,11 +30948,10 @@ var require_encoding_detect = __commonJS({
       return true;
     }
     __name(isUNICODE, "isUNICODE");
+    __name2(isUNICODE, "isUNICODE");
     exports.isUNICODE = isUNICODE;
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/encoding-convert.js
 var require_encoding_convert = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/encoding-convert.js"(exports) {
     var config = require_config();
@@ -30657,6 +31018,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(JISToSJIS, "JISToSJIS");
+    __name2(JISToSJIS, "JISToSJIS");
     exports.JISToSJIS = JISToSJIS;
     function JISToEUCJP(data) {
       var results = [];
@@ -30697,6 +31059,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(JISToEUCJP, "JISToEUCJP");
+    __name2(JISToEUCJP, "JISToEUCJP");
     exports.JISToEUCJP = JISToEUCJP;
     function SJISToJIS(data) {
       var results = [];
@@ -30773,6 +31136,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(SJISToJIS, "SJISToJIS");
+    __name2(SJISToJIS, "SJISToJIS");
     exports.SJISToJIS = SJISToJIS;
     function SJISToEUCJP(data) {
       var results = [];
@@ -30815,6 +31179,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(SJISToEUCJP, "SJISToEUCJP");
+    __name2(SJISToEUCJP, "SJISToEUCJP");
     exports.SJISToEUCJP = SJISToEUCJP;
     function EUCJPToJIS(data) {
       var results = [];
@@ -30884,6 +31249,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(EUCJPToJIS, "EUCJPToJIS");
+    __name2(EUCJPToJIS, "EUCJPToJIS");
     exports.EUCJPToJIS = EUCJPToJIS;
     function EUCJPToSJIS(data) {
       var results = [];
@@ -30929,6 +31295,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(EUCJPToSJIS, "EUCJPToSJIS");
+    __name2(EUCJPToSJIS, "EUCJPToSJIS");
     exports.EUCJPToSJIS = EUCJPToSJIS;
     function SJISToUTF8(data) {
       config.init_JIS_TO_UTF8_TABLE();
@@ -30989,6 +31356,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(SJISToUTF8, "SJISToUTF8");
+    __name2(SJISToUTF8, "SJISToUTF8");
     exports.SJISToUTF8 = SJISToUTF8;
     function EUCJPToUTF8(data) {
       config.init_JIS_TO_UTF8_TABLE();
@@ -31044,6 +31412,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(EUCJPToUTF8, "EUCJPToUTF8");
+    __name2(EUCJPToUTF8, "EUCJPToUTF8");
     exports.EUCJPToUTF8 = EUCJPToUTF8;
     function JISToUTF8(data) {
       config.init_JIS_TO_UTF8_TABLE();
@@ -31113,6 +31482,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(JISToUTF8, "JISToUTF8");
+    __name2(JISToUTF8, "JISToUTF8");
     exports.JISToUTF8 = JISToUTF8;
     function UTF8ToSJIS(data, options) {
       var results = [];
@@ -31181,6 +31551,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF8ToSJIS, "UTF8ToSJIS");
+    __name2(UTF8ToSJIS, "UTF8ToSJIS");
     exports.UTF8ToSJIS = UTF8ToSJIS;
     function UTF8ToEUCJP(data, options) {
       var results = [];
@@ -31234,6 +31605,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF8ToEUCJP, "UTF8ToEUCJP");
+    __name2(UTF8ToEUCJP, "UTF8ToEUCJP");
     exports.UTF8ToEUCJP = UTF8ToEUCJP;
     function UTF8ToJIS(data, options) {
       var results = [];
@@ -31337,6 +31709,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF8ToJIS, "UTF8ToJIS");
+    __name2(UTF8ToJIS, "UTF8ToJIS");
     exports.UTF8ToJIS = UTF8ToJIS;
     function UNICODEToUTF8(data) {
       var results = [];
@@ -31371,6 +31744,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UNICODEToUTF8, "UNICODEToUTF8");
+    __name2(UNICODEToUTF8, "UNICODEToUTF8");
     exports.UNICODEToUTF8 = UNICODEToUTF8;
     function UTF8ToUNICODE(data, options) {
       var results = [];
@@ -31407,6 +31781,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF8ToUNICODE, "UTF8ToUNICODE");
+    __name2(UTF8ToUNICODE, "UTF8ToUNICODE");
     exports.UTF8ToUNICODE = UTF8ToUNICODE;
     function UNICODEToUTF16(data, options) {
       var results;
@@ -31435,6 +31810,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UNICODEToUTF16, "UNICODEToUTF16");
+    __name2(UNICODEToUTF16, "UNICODEToUTF16");
     exports.UNICODEToUTF16 = UNICODEToUTF16;
     function UNICODEToUTF16BE(data) {
       var results = [];
@@ -31454,6 +31830,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UNICODEToUTF16BE, "UNICODEToUTF16BE");
+    __name2(UNICODEToUTF16BE, "UNICODEToUTF16BE");
     exports.UNICODEToUTF16BE = UNICODEToUTF16BE;
     function UNICODEToUTF16LE(data) {
       var results = [];
@@ -31473,6 +31850,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UNICODEToUTF16LE, "UNICODEToUTF16LE");
+    __name2(UNICODEToUTF16LE, "UNICODEToUTF16LE");
     exports.UNICODEToUTF16LE = UNICODEToUTF16LE;
     function UTF16BEToUNICODE(data) {
       var results = [];
@@ -31494,6 +31872,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16BEToUNICODE, "UTF16BEToUNICODE");
+    __name2(UTF16BEToUNICODE, "UTF16BEToUNICODE");
     exports.UTF16BEToUNICODE = UTF16BEToUNICODE;
     function UTF16LEToUNICODE(data) {
       var results = [];
@@ -31515,6 +31894,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16LEToUNICODE, "UTF16LEToUNICODE");
+    __name2(UTF16LEToUNICODE, "UTF16LEToUNICODE");
     exports.UTF16LEToUNICODE = UTF16LEToUNICODE;
     function UTF16ToUNICODE(data) {
       var results = [];
@@ -31555,6 +31935,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16ToUNICODE, "UTF16ToUNICODE");
+    __name2(UTF16ToUNICODE, "UTF16ToUNICODE");
     exports.UTF16ToUNICODE = UTF16ToUNICODE;
     function UTF16ToUTF16BE(data) {
       var results = [];
@@ -31589,6 +31970,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16ToUTF16BE, "UTF16ToUTF16BE");
+    __name2(UTF16ToUTF16BE, "UTF16ToUTF16BE");
     exports.UTF16ToUTF16BE = UTF16ToUTF16BE;
     function UTF16BEToUTF16(data, options) {
       var isLE = false;
@@ -31630,6 +32012,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16BEToUTF16, "UTF16BEToUTF16");
+    __name2(UTF16BEToUTF16, "UTF16BEToUTF16");
     exports.UTF16BEToUTF16 = UTF16BEToUTF16;
     function UTF16ToUTF16LE(data) {
       var results = [];
@@ -31664,6 +32047,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16ToUTF16LE, "UTF16ToUTF16LE");
+    __name2(UTF16ToUTF16LE, "UTF16ToUTF16LE");
     exports.UTF16ToUTF16LE = UTF16ToUTF16LE;
     function UTF16LEToUTF16(data, options) {
       var isLE = false;
@@ -31705,6 +32089,7 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16LEToUTF16, "UTF16LEToUTF16");
+    __name2(UTF16LEToUTF16, "UTF16LEToUTF16");
     exports.UTF16LEToUTF16 = UTF16LEToUTF16;
     function UTF16BEToUTF16LE(data) {
       var results = [];
@@ -31723,161 +32108,193 @@ var require_encoding_convert = __commonJS({
       return results;
     }
     __name(UTF16BEToUTF16LE, "UTF16BEToUTF16LE");
+    __name2(UTF16BEToUTF16LE, "UTF16BEToUTF16LE");
     exports.UTF16BEToUTF16LE = UTF16BEToUTF16LE;
     function UTF16LEToUTF16BE(data) {
       return UTF16BEToUTF16LE(data);
     }
     __name(UTF16LEToUTF16BE, "UTF16LEToUTF16BE");
+    __name2(UTF16LEToUTF16BE, "UTF16LEToUTF16BE");
     exports.UTF16LEToUTF16BE = UTF16LEToUTF16BE;
     function UNICODEToJIS(data, options) {
       return UTF8ToJIS(UNICODEToUTF8(data), options);
     }
     __name(UNICODEToJIS, "UNICODEToJIS");
+    __name2(UNICODEToJIS, "UNICODEToJIS");
     exports.UNICODEToJIS = UNICODEToJIS;
     function JISToUNICODE(data) {
       return UTF8ToUNICODE(JISToUTF8(data));
     }
     __name(JISToUNICODE, "JISToUNICODE");
+    __name2(JISToUNICODE, "JISToUNICODE");
     exports.JISToUNICODE = JISToUNICODE;
     function UNICODEToEUCJP(data, options) {
       return UTF8ToEUCJP(UNICODEToUTF8(data), options);
     }
     __name(UNICODEToEUCJP, "UNICODEToEUCJP");
+    __name2(UNICODEToEUCJP, "UNICODEToEUCJP");
     exports.UNICODEToEUCJP = UNICODEToEUCJP;
     function EUCJPToUNICODE(data) {
       return UTF8ToUNICODE(EUCJPToUTF8(data));
     }
     __name(EUCJPToUNICODE, "EUCJPToUNICODE");
+    __name2(EUCJPToUNICODE, "EUCJPToUNICODE");
     exports.EUCJPToUNICODE = EUCJPToUNICODE;
     function UNICODEToSJIS(data, options) {
       return UTF8ToSJIS(UNICODEToUTF8(data), options);
     }
     __name(UNICODEToSJIS, "UNICODEToSJIS");
+    __name2(UNICODEToSJIS, "UNICODEToSJIS");
     exports.UNICODEToSJIS = UNICODEToSJIS;
     function SJISToUNICODE(data) {
       return UTF8ToUNICODE(SJISToUTF8(data));
     }
     __name(SJISToUNICODE, "SJISToUNICODE");
+    __name2(SJISToUNICODE, "SJISToUNICODE");
     exports.SJISToUNICODE = SJISToUNICODE;
     function UTF8ToUTF16(data, options) {
       return UNICODEToUTF16(UTF8ToUNICODE(data), options);
     }
     __name(UTF8ToUTF16, "UTF8ToUTF16");
+    __name2(UTF8ToUTF16, "UTF8ToUTF16");
     exports.UTF8ToUTF16 = UTF8ToUTF16;
     function UTF16ToUTF8(data) {
       return UNICODEToUTF8(UTF16ToUNICODE(data));
     }
     __name(UTF16ToUTF8, "UTF16ToUTF8");
+    __name2(UTF16ToUTF8, "UTF16ToUTF8");
     exports.UTF16ToUTF8 = UTF16ToUTF8;
     function UTF8ToUTF16BE(data) {
       return UNICODEToUTF16BE(UTF8ToUNICODE(data));
     }
     __name(UTF8ToUTF16BE, "UTF8ToUTF16BE");
+    __name2(UTF8ToUTF16BE, "UTF8ToUTF16BE");
     exports.UTF8ToUTF16BE = UTF8ToUTF16BE;
     function UTF16BEToUTF8(data) {
       return UNICODEToUTF8(UTF16BEToUNICODE(data));
     }
     __name(UTF16BEToUTF8, "UTF16BEToUTF8");
+    __name2(UTF16BEToUTF8, "UTF16BEToUTF8");
     exports.UTF16BEToUTF8 = UTF16BEToUTF8;
     function UTF8ToUTF16LE(data) {
       return UNICODEToUTF16LE(UTF8ToUNICODE(data));
     }
     __name(UTF8ToUTF16LE, "UTF8ToUTF16LE");
+    __name2(UTF8ToUTF16LE, "UTF8ToUTF16LE");
     exports.UTF8ToUTF16LE = UTF8ToUTF16LE;
     function UTF16LEToUTF8(data) {
       return UNICODEToUTF8(UTF16LEToUNICODE(data));
     }
     __name(UTF16LEToUTF8, "UTF16LEToUTF8");
+    __name2(UTF16LEToUTF8, "UTF16LEToUTF8");
     exports.UTF16LEToUTF8 = UTF16LEToUTF8;
     function JISToUTF16(data, options) {
       return UTF8ToUTF16(JISToUTF8(data), options);
     }
     __name(JISToUTF16, "JISToUTF16");
+    __name2(JISToUTF16, "JISToUTF16");
     exports.JISToUTF16 = JISToUTF16;
     function UTF16ToJIS(data, options) {
       return UTF8ToJIS(UTF16ToUTF8(data), options);
     }
     __name(UTF16ToJIS, "UTF16ToJIS");
+    __name2(UTF16ToJIS, "UTF16ToJIS");
     exports.UTF16ToJIS = UTF16ToJIS;
     function JISToUTF16BE(data) {
       return UTF8ToUTF16BE(JISToUTF8(data));
     }
     __name(JISToUTF16BE, "JISToUTF16BE");
+    __name2(JISToUTF16BE, "JISToUTF16BE");
     exports.JISToUTF16BE = JISToUTF16BE;
     function UTF16BEToJIS(data, options) {
       return UTF8ToJIS(UTF16BEToUTF8(data), options);
     }
     __name(UTF16BEToJIS, "UTF16BEToJIS");
+    __name2(UTF16BEToJIS, "UTF16BEToJIS");
     exports.UTF16BEToJIS = UTF16BEToJIS;
     function JISToUTF16LE(data) {
       return UTF8ToUTF16LE(JISToUTF8(data));
     }
     __name(JISToUTF16LE, "JISToUTF16LE");
+    __name2(JISToUTF16LE, "JISToUTF16LE");
     exports.JISToUTF16LE = JISToUTF16LE;
     function UTF16LEToJIS(data, options) {
       return UTF8ToJIS(UTF16LEToUTF8(data), options);
     }
     __name(UTF16LEToJIS, "UTF16LEToJIS");
+    __name2(UTF16LEToJIS, "UTF16LEToJIS");
     exports.UTF16LEToJIS = UTF16LEToJIS;
     function EUCJPToUTF16(data, options) {
       return UTF8ToUTF16(EUCJPToUTF8(data), options);
     }
     __name(EUCJPToUTF16, "EUCJPToUTF16");
+    __name2(EUCJPToUTF16, "EUCJPToUTF16");
     exports.EUCJPToUTF16 = EUCJPToUTF16;
     function UTF16ToEUCJP(data, options) {
       return UTF8ToEUCJP(UTF16ToUTF8(data), options);
     }
     __name(UTF16ToEUCJP, "UTF16ToEUCJP");
+    __name2(UTF16ToEUCJP, "UTF16ToEUCJP");
     exports.UTF16ToEUCJP = UTF16ToEUCJP;
     function EUCJPToUTF16BE(data) {
       return UTF8ToUTF16BE(EUCJPToUTF8(data));
     }
     __name(EUCJPToUTF16BE, "EUCJPToUTF16BE");
+    __name2(EUCJPToUTF16BE, "EUCJPToUTF16BE");
     exports.EUCJPToUTF16BE = EUCJPToUTF16BE;
     function UTF16BEToEUCJP(data, options) {
       return UTF8ToEUCJP(UTF16BEToUTF8(data), options);
     }
     __name(UTF16BEToEUCJP, "UTF16BEToEUCJP");
+    __name2(UTF16BEToEUCJP, "UTF16BEToEUCJP");
     exports.UTF16BEToEUCJP = UTF16BEToEUCJP;
     function EUCJPToUTF16LE(data) {
       return UTF8ToUTF16LE(EUCJPToUTF8(data));
     }
     __name(EUCJPToUTF16LE, "EUCJPToUTF16LE");
+    __name2(EUCJPToUTF16LE, "EUCJPToUTF16LE");
     exports.EUCJPToUTF16LE = EUCJPToUTF16LE;
     function UTF16LEToEUCJP(data, options) {
       return UTF8ToEUCJP(UTF16LEToUTF8(data), options);
     }
     __name(UTF16LEToEUCJP, "UTF16LEToEUCJP");
+    __name2(UTF16LEToEUCJP, "UTF16LEToEUCJP");
     exports.UTF16LEToEUCJP = UTF16LEToEUCJP;
     function SJISToUTF16(data, options) {
       return UTF8ToUTF16(SJISToUTF8(data), options);
     }
     __name(SJISToUTF16, "SJISToUTF16");
+    __name2(SJISToUTF16, "SJISToUTF16");
     exports.SJISToUTF16 = SJISToUTF16;
     function UTF16ToSJIS(data, options) {
       return UTF8ToSJIS(UTF16ToUTF8(data), options);
     }
     __name(UTF16ToSJIS, "UTF16ToSJIS");
+    __name2(UTF16ToSJIS, "UTF16ToSJIS");
     exports.UTF16ToSJIS = UTF16ToSJIS;
     function SJISToUTF16BE(data) {
       return UTF8ToUTF16BE(SJISToUTF8(data));
     }
     __name(SJISToUTF16BE, "SJISToUTF16BE");
+    __name2(SJISToUTF16BE, "SJISToUTF16BE");
     exports.SJISToUTF16BE = SJISToUTF16BE;
     function UTF16BEToSJIS(data, options) {
       return UTF8ToSJIS(UTF16BEToUTF8(data), options);
     }
     __name(UTF16BEToSJIS, "UTF16BEToSJIS");
+    __name2(UTF16BEToSJIS, "UTF16BEToSJIS");
     exports.UTF16BEToSJIS = UTF16BEToSJIS;
     function SJISToUTF16LE(data) {
       return UTF8ToUTF16LE(SJISToUTF8(data));
     }
     __name(SJISToUTF16LE, "SJISToUTF16LE");
+    __name2(SJISToUTF16LE, "SJISToUTF16LE");
     exports.SJISToUTF16LE = SJISToUTF16LE;
     function UTF16LEToSJIS(data, options) {
       return UTF8ToSJIS(UTF16LEToUTF8(data), options);
     }
     __name(UTF16LEToSJIS, "UTF16LEToSJIS");
+    __name2(UTF16LEToSJIS, "UTF16LEToSJIS");
     exports.UTF16LEToSJIS = UTF16LEToSJIS;
     function handleFallback(results, bytes, fallbackOption) {
       switch (fallbackOption) {
@@ -31905,10 +32322,9 @@ var require_encoding_convert = __commonJS({
       }
     }
     __name(handleFallback, "handleFallback");
+    __name2(handleFallback, "handleFallback");
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/kana-case-table.js
 var require_kana_case_table = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/kana-case-table.js"(exports) {
     exports.HANKANA_TABLE = {
@@ -32049,8 +32465,6 @@ var require_kana_case_table = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/package.json
 var require_package2 = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/package.json"(exports, module) {
     module.exports = {
@@ -32124,8 +32538,6 @@ var require_package2 = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/index.js
 var require_src = __commonJS({
   "node_modules/.pnpm/encoding-japanese@2.2.0/node_modules/encoding-japanese/src/index.js"(exports, module) {
     var config = require_config();
@@ -32152,7 +32564,7 @@ var require_src = __commonJS({
        *   character encoding
        * @return {string|boolean} The detected character encoding, or false
        */
-      detect: /* @__PURE__ */ __name(function(data, encodings) {
+      detect: /* @__PURE__ */ __name2(function(data, encodings) {
         if (data == null || data.length === 0) {
           return false;
         }
@@ -32206,7 +32618,7 @@ var require_src = __commonJS({
        *   character encoding
        * @return {Array|TypedArray|string} The converted data
        */
-      convert: /* @__PURE__ */ __name(function(data, to, from) {
+      convert: /* @__PURE__ */ __name2(function(data, to, from) {
         var result, type, options;
         if (!util.isObject(to)) {
           options = {};
@@ -32252,7 +32664,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray} data The data being encoded
        * @return {string} The percent encoded string
        */
-      urlEncode: /* @__PURE__ */ __name(function(data) {
+      urlEncode: /* @__PURE__ */ __name2(function(data) {
         if (util.isString(data)) {
           data = util.stringToBuffer(data);
         }
@@ -32288,7 +32700,7 @@ var require_src = __commonJS({
        * @param {string} string The data being decoded
        * @return {Array.<number>} The decoded array
        */
-      urlDecode: /* @__PURE__ */ __name(function(string) {
+      urlDecode: /* @__PURE__ */ __name2(function(string) {
         var results = [];
         var i = 0;
         var len = string && string.length;
@@ -32312,7 +32724,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray} data The data being encoded
        * @return {string} The Base64 encoded string
        */
-      base64Encode: /* @__PURE__ */ __name(function(data) {
+      base64Encode: /* @__PURE__ */ __name2(function(data) {
         if (util.isString(data)) {
           data = util.stringToBuffer(data);
         }
@@ -32324,7 +32736,7 @@ var require_src = __commonJS({
        * @param {string} string The data being decoded
        * @return {Array.<number>} The decoded array
        */
-      base64Decode: /* @__PURE__ */ __name(function(string) {
+      base64Decode: /* @__PURE__ */ __name2(function(string) {
         return util.base64decode(string);
       }, "base64Decode"),
       /**
@@ -32354,7 +32766,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toHankakuCase: /* @__PURE__ */ __name(function(data) {
+      toHankakuCase: /* @__PURE__ */ __name2(function(data) {
         var asString = false;
         if (util.isString(data)) {
           asString = true;
@@ -32386,7 +32798,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toZenkakuCase: /* @__PURE__ */ __name(function(data) {
+      toZenkakuCase: /* @__PURE__ */ __name2(function(data) {
         var asString = false;
         if (util.isString(data)) {
           asString = true;
@@ -32417,7 +32829,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toHiraganaCase: /* @__PURE__ */ __name(function(data) {
+      toHiraganaCase: /* @__PURE__ */ __name2(function(data) {
         var asString = false;
         if (util.isString(data)) {
           asString = true;
@@ -32454,7 +32866,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toKatakanaCase: /* @__PURE__ */ __name(function(data) {
+      toKatakanaCase: /* @__PURE__ */ __name2(function(data) {
         var asString = false;
         if (util.isString(data)) {
           asString = true;
@@ -32492,7 +32904,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toHankanaCase: /* @__PURE__ */ __name(function(data) {
+      toHankanaCase: /* @__PURE__ */ __name2(function(data) {
         var asString = false;
         if (util.isString(data)) {
           asString = true;
@@ -32539,7 +32951,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toZenkanaCase: /* @__PURE__ */ __name(function(data) {
+      toZenkanaCase: /* @__PURE__ */ __name2(function(data) {
         var asString = false;
         if (util.isString(data)) {
           asString = true;
@@ -32586,7 +32998,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toHankakuSpace: /* @__PURE__ */ __name(function(data) {
+      toHankakuSpace: /* @__PURE__ */ __name2(function(data) {
         if (util.isString(data)) {
           return data.replace(/\u3000/g, " ");
         }
@@ -32611,7 +33023,7 @@ var require_src = __commonJS({
        * @param {Array.<number>|TypedArray|string} data The input unicode data
        * @return {Array.<number>|string} The conveted data
        */
-      toZenkakuSpace: /* @__PURE__ */ __name(function(data) {
+      toZenkakuSpace: /* @__PURE__ */ __name2(function(data) {
         if (util.isString(data)) {
           return data.replace(/\u0020/g, "\u3000");
         }
@@ -32632,8 +33044,6 @@ var require_src = __commonJS({
     module.exports = Encoding;
   }
 });
-
-// node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/charsets.js
 var require_charsets = __commonJS({
   "node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/charsets.js"(exports, module) {
     "use strict";
@@ -32847,8 +33257,6 @@ var require_charsets = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/charset.js
 var require_charset = __commonJS({
   "node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/charset.js"(exports, module) {
     "use strict";
@@ -32944,34 +33352,31 @@ var require_charset = __commonJS({
     };
   }
 });
-
-// node-built-in-modules:node:stream
-import libDefault19 from "node:stream";
 var require_node_stream = __commonJS({
   "node-built-in-modules:node:stream"(exports, module) {
     module.exports = libDefault19;
   }
 });
-
-// node_modules/.pnpm/libbase64@1.3.0/node_modules/libbase64/lib/libbase64.js
 var require_libbase64 = __commonJS({
   "node_modules/.pnpm/libbase64@1.3.0/node_modules/libbase64/lib/libbase64.js"(exports, module) {
     "use strict";
     var { Buffer: Buffer3 } = require_node_buffer();
     var stream = require_node_stream();
     var Transform = stream.Transform;
-    function encode(buffer) {
+    function encode3(buffer) {
       if (typeof buffer === "string") {
         buffer = Buffer3.from(buffer, "utf-8");
       }
       return buffer.toString("base64");
     }
-    __name(encode, "encode");
-    function decode(str) {
+    __name(encode3, "encode");
+    __name2(encode3, "encode");
+    function decode2(str) {
       str = str || "";
       return Buffer3.from(str, "base64");
     }
-    __name(decode, "decode");
+    __name(decode2, "decode");
+    __name2(decode2, "decode");
     function wrap(str, lineLength) {
       str = (str || "").toString();
       lineLength = lineLength || 76;
@@ -32989,9 +33394,13 @@ var require_libbase64 = __commonJS({
       return result.join("\r\n").trim();
     }
     __name(wrap, "wrap");
+    __name2(wrap, "wrap");
     var Encoder = class extends Transform {
       static {
         __name(this, "Encoder");
+      }
+      static {
+        __name2(this, "Encoder");
       }
       constructor(options) {
         super();
@@ -33051,7 +33460,7 @@ var require_libbase64 = __commonJS({
         } else {
           this._remainingBytes = false;
         }
-        let b64 = this._curLine + encode(chunk);
+        let b64 = this._curLine + encode3(chunk);
         if (this.options.lineLength) {
           b64 = this._getWrapped(b64);
           let lastLF = b64.lastIndexOf("\n");
@@ -33072,7 +33481,7 @@ var require_libbase64 = __commonJS({
       }
       _flush(done) {
         if (this._remainingBytes && this._remainingBytes.length) {
-          this._curLine += encode(this._remainingBytes);
+          this._curLine += encode3(this._remainingBytes);
         }
         if (this._curLine) {
           this._curLine = this._getWrapped(this._curLine, true);
@@ -33085,6 +33494,9 @@ var require_libbase64 = __commonJS({
     var Decoder = class extends Transform {
       static {
         __name(this, "Decoder");
+      }
+      static {
+        __name2(this, "Decoder");
       }
       constructor(options) {
         super();
@@ -33111,7 +33523,7 @@ var require_libbase64 = __commonJS({
           b64 = b64.substr(0, b64.length - this._curLine.length);
         }
         if (b64) {
-          let buf = decode(b64);
+          let buf = decode2(b64);
           this.outputBytes += buf.length;
           this.push(buf);
         }
@@ -33119,7 +33531,7 @@ var require_libbase64 = __commonJS({
       }
       _flush(done) {
         if (this._curLine) {
-          let buf = decode(this._curLine);
+          let buf = decode2(this._curLine);
           this.outputBytes += buf.length;
           this.push(buf);
           this._curLine = "";
@@ -33128,23 +33540,21 @@ var require_libbase64 = __commonJS({
       }
     };
     module.exports = {
-      encode,
-      decode,
+      encode: encode3,
+      decode: decode2,
       wrap,
       Encoder,
       Decoder
     };
   }
 });
-
-// node_modules/.pnpm/libqp@2.1.1/node_modules/libqp/lib/libqp.js
 var require_libqp = __commonJS({
   "node_modules/.pnpm/libqp@2.1.1/node_modules/libqp/lib/libqp.js"(exports, module) {
     "use strict";
     var { Buffer: Buffer3 } = require_node_buffer();
     var stream = require_node_stream();
     var Transform = stream.Transform;
-    function encode(buffer) {
+    function encode3(buffer) {
       if (typeof buffer === "string") {
         buffer = Buffer3.from(buffer, "utf-8");
       }
@@ -33173,8 +33583,9 @@ var require_libqp = __commonJS({
       }
       return result;
     }
-    __name(encode, "encode");
-    function decode(str) {
+    __name(encode3, "encode");
+    __name2(encode3, "encode");
+    function decode2(str) {
       str = (str || "").toString().replace(/[\t ]+$/gm, "").replace(/\=(?:\r?\n|$)/g, "");
       let encodedBytesCount = (str.match(/\=[\da-fA-F]{2}/g) || []).length, bufferLength = str.length - encodedBytesCount * 2, chr, hex, buffer = Buffer3.alloc(bufferLength), bufferPos = 0;
       for (let i = 0, len = str.length; i < len; i++) {
@@ -33188,7 +33599,8 @@ var require_libqp = __commonJS({
       }
       return buffer;
     }
-    __name(decode, "decode");
+    __name(decode2, "decode");
+    __name2(decode2, "decode");
     function wrap(str, lineLength) {
       str = (str || "").toString();
       lineLength = lineLength || 76;
@@ -33246,6 +33658,7 @@ var require_libqp = __commonJS({
       return result;
     }
     __name(wrap, "wrap");
+    __name2(wrap, "wrap");
     function checkRanges(nr, ranges) {
       for (let i = ranges.length - 1; i >= 0; i--) {
         if (!ranges[i].length) {
@@ -33261,9 +33674,13 @@ var require_libqp = __commonJS({
       return false;
     }
     __name(checkRanges, "checkRanges");
+    __name2(checkRanges, "checkRanges");
     var Encoder = class extends Transform {
       static {
         __name(this, "Encoder");
+      }
+      static {
+        __name2(this, "Encoder");
       }
       constructor(options) {
         super();
@@ -33286,7 +33703,7 @@ var require_libqp = __commonJS({
         }
         this.inputBytes += chunk.length;
         if (this.options.lineLength) {
-          qp = this._curLine + encode(chunk);
+          qp = this._curLine + encode3(chunk);
           qp = wrap(qp, this.options.lineLength);
           qp = qp.replace(/(^|\n)([^\n]*)$/, (match, lineBreak, lastLine) => {
             this._curLine = lastLine;
@@ -33297,7 +33714,7 @@ var require_libqp = __commonJS({
             this.push(qp);
           }
         } else {
-          qp = encode(chunk);
+          qp = encode3(chunk);
           this.outputBytes += qp.length;
           this.push(qp, "ascii");
         }
@@ -33314,6 +33731,9 @@ var require_libqp = __commonJS({
     var Decoder = class extends Transform {
       static {
         __name(this, "Decoder");
+      }
+      static {
+        __name2(this, "Decoder");
       }
       constructor(options) {
         options = options || {};
@@ -33337,7 +33757,7 @@ var require_libqp = __commonJS({
       }
       _flush(done) {
         if (this.inputBytes) {
-          let buf = decode(Buffer3.concat(this.qpChunks, this.inputBytes).toString());
+          let buf = decode2(Buffer3.concat(this.qpChunks, this.inputBytes).toString());
           this.outputBytes += buf.length;
           this.push(buf);
         }
@@ -33345,16 +33765,14 @@ var require_libqp = __commonJS({
       }
     };
     module.exports = {
-      encode,
-      decode,
+      encode: encode3,
+      decode: decode2,
       wrap,
       Encoder,
       Decoder
     };
   }
 });
-
-// node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/mimetypes.js
 var require_mimetypes = __commonJS({
   "node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/mimetypes.js"(exports, module) {
     "use strict";
@@ -35404,8 +35822,6 @@ var require_mimetypes = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/libmime.js
 var require_libmime = __commonJS({
   "node_modules/.pnpm/libmime@5.4.2/node_modules/libmime/lib/libmime.js"(exports, module) {
     "use strict";
@@ -35416,23 +35832,26 @@ var require_libmime = __commonJS({
     var mimetypes = require_mimetypes();
     var STAGE_KEY = 4097;
     var STAGE_VALUE = 4098;
-    var setOwnProperty = /* @__PURE__ */ __name((obj, key, value) => {
-      if (key === "__proto__") {
-        Object.defineProperty(obj, key, {
+    var setOwnProperty = /* @__PURE__ */ __name2((obj, key2, value) => {
+      if (key2 === "__proto__") {
+        Object.defineProperty(obj, key2, {
           value,
           writable: true,
           enumerable: true,
           configurable: true
         });
       } else {
-        obj[key] = value;
+        obj[key2] = value;
       }
     }, "setOwnProperty");
-    var hasOwn = /* @__PURE__ */ __name((obj, key) => Object.prototype.hasOwnProperty.call(obj, key), "hasOwn");
-    var isWSP = /* @__PURE__ */ __name((chr) => chr === " " || chr === "	" || chr === "\r" || chr === "\n" || chr === "\f" || chr === "\v", "isWSP");
+    var hasOwn = /* @__PURE__ */ __name2((obj, key2) => Object.prototype.hasOwnProperty.call(obj, key2), "hasOwn");
+    var isWSP = /* @__PURE__ */ __name2((chr) => chr === " " || chr === "	" || chr === "\r" || chr === "\n" || chr === "\f" || chr === "\v", "isWSP");
     var Libmime = class {
       static {
         __name(this, "Libmime");
+      }
+      static {
+        __name2(this, "Libmime");
       }
       constructor(config) {
         this.config = config || {};
@@ -35702,9 +36121,9 @@ var require_libmime = __commonJS({
        * @return {Object} An object of {key, value}
        */
       decodeHeader(headerLine) {
-        let line = (headerLine || "").toString().replace(/(?:\r?\n|\r)[ \t]*/g, " ").trim(), match = line.match(/^\s*([^:]+):(.*)$/), key = (match && match[1] || "").trim().toLowerCase(), value = (match && match[2] || "").trim();
+        let line = (headerLine || "").toString().replace(/(?:\r?\n|\r)[ \t]*/g, " ").trim(), match = line.match(/^\s*([^:]+):(.*)$/), key2 = (match && match[1] || "").trim().toLowerCase(), value = (match && match[2] || "").trim();
         return {
-          key,
+          key: key2,
           value
         };
       }
@@ -35786,14 +36205,14 @@ var require_libmime = __commonJS({
           value: false,
           params: {}
         };
-        let key = false;
+        let key2 = false;
         let value = "";
         let valueEnd = 0;
         let stage = STAGE_VALUE;
         let quote = false;
         let escaped = false;
         let chr;
-        let commit = /* @__PURE__ */ __name(() => {
+        let commit = /* @__PURE__ */ __name2(() => {
           let collected = value.substring(0, valueEnd);
           value = "";
           valueEnd = 0;
@@ -35801,10 +36220,10 @@ var require_libmime = __commonJS({
             if (collected) {
               setOwnProperty(response.params, collected.toLowerCase(), "");
             }
-          } else if (key === false) {
+          } else if (key2 === false) {
             response.value = collected;
           } else {
-            setOwnProperty(response.params, key, collected);
+            setOwnProperty(response.params, key2, collected);
           }
         }, "commit");
         for (let i = 0, len = str.length; i < len; i++) {
@@ -35812,7 +36231,7 @@ var require_libmime = __commonJS({
           switch (stage) {
             case STAGE_KEY:
               if (chr === "=") {
-                key = value.substring(0, valueEnd).toLowerCase();
+                key2 = value.substring(0, valueEnd).toLowerCase();
                 value = "";
                 valueEnd = 0;
                 stage = STAGE_VALUE;
@@ -35853,15 +36272,15 @@ var require_libmime = __commonJS({
         }
         commit();
         let continuations = /* @__PURE__ */ new Map();
-        for (let key2 of Object.keys(response.params)) {
-          let match = key2.match(/\*((\d+)\*?)?$/);
+        for (let key22 of Object.keys(response.params)) {
+          let match = key22.match(/\*((\d+)\*?)?$/);
           if (!match) {
             continue;
           }
-          let actualKey = key2.substr(0, match.index).toLowerCase();
+          let actualKey = key22.substr(0, match.index).toLowerCase();
           let nr = Number(match[2]) || 0;
-          let value2 = response.params[key2];
-          delete response.params[key2];
+          let value2 = response.params[key22];
+          delete response.params[key22];
           let continuation = continuations.get(actualKey);
           if (!continuation) {
             continuation = {
@@ -35876,10 +36295,10 @@ var require_libmime = __commonJS({
           }
           continuation.values.push({ nr, value: value2 });
         }
-        for (let [key2, continuation] of continuations) {
+        for (let [key22, continuation] of continuations) {
           let value2 = continuation.values.sort((a, b) => a.nr - b.nr).map((val) => val.value).join("");
           if (!continuation.charset) {
-            setOwnProperty(response.params, key2, this.decodeWords(value2));
+            setOwnProperty(response.params, key22, this.decodeWords(value2));
             continue;
           }
           let qpValue = value2.replace(/[=_\s]/g, (s) => {
@@ -35889,7 +36308,7 @@ var require_libmime = __commonJS({
             let c = s.charCodeAt(0).toString(16);
             return "%" + (c.length < 2 ? "0" : "") + c;
           }).replace(/%/g, "=");
-          setOwnProperty(response.params, key2, this.decodeWord(continuation.charset, "Q", qpValue));
+          setOwnProperty(response.params, key22, this.decodeWord(continuation.charset, "Q", qpValue));
         }
         return response;
       }
@@ -35909,7 +36328,7 @@ var require_libmime = __commonJS({
        * @param {String} [fromCharset='UTF-8'] Source character set
        * @return {Array} A list of encoded keys and headers
        */
-      buildHeaderParam(key, data, maxLength, fromCharset) {
+      buildHeaderParam(key2, data, maxLength, fromCharset) {
         let list = [];
         if (typeof data !== "string" && !Buffer3.isBuffer(data)) {
           data = data === null || data === void 0 ? "" : data.toString();
@@ -35926,7 +36345,7 @@ var require_libmime = __commonJS({
           if (encodedStr.length <= maxLength) {
             return [
               {
-                key,
+                key: key2,
                 value: encodedStr
               }
             ];
@@ -36010,7 +36429,7 @@ var require_libmime = __commonJS({
           // encoded lines: {name}*{part}*
           // unencoded lines: {name}*{part}
           // if any line needs to be encoded then the first line (part==0) is always encoded
-          key: key + "*" + i2 + (item.encoded ? "*" : ""),
+          key: key2 + "*" + i2 + (item.encoded ? "*" : ""),
           value: item.line
         }));
       }
@@ -36154,8 +36573,6 @@ var require_libmime = __commonJS({
     module.exports.Libmime = Libmime;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/headers.js
 var require_headers = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/headers.js"(exports, module) {
     "use strict";
@@ -36166,7 +36583,10 @@ var require_headers = __commonJS({
     );
     var Headers2 = class {
       static {
-        __name(this, "Headers");
+        __name(this, "Headers2");
+      }
+      static {
+        __name2(this, "Headers");
       }
       /**
        * @param {string | Buffer | HeaderLine[] | false} [headers] Raw header source or already parsed lines.
@@ -36193,45 +36613,45 @@ var require_headers = __commonJS({
        * @param {string} key
        * @returns {boolean}
        */
-      hasHeader(key) {
+      hasHeader(key2) {
         if (!this.parsed) {
           this._parseHeaders();
         }
         let lines = this._getLines();
-        key = this._normalizeHeader(key);
-        return typeof lines.find((line) => line.key === key) === "object";
+        key2 = this._normalizeHeader(key2);
+        return typeof lines.find((line) => line.key === key2) === "object";
       }
       /**
        * @param {string} key
        * @returns {string[]}
        */
-      get(key) {
+      get(key2) {
         if (!this.parsed) {
           this._parseHeaders();
         }
         let headerLines = this._getLines();
-        key = this._normalizeHeader(key);
-        let lines = headerLines.filter((line) => line.key === key).map((line) => this._decodeHeaderValue(line.line));
+        key2 = this._normalizeHeader(key2);
+        let lines = headerLines.filter((line) => line.key === key2).map((line) => this._decodeHeaderValue(line.line));
         return lines;
       }
       /**
        * @param {string} key
        * @returns {DecodedHeader[]}
        */
-      getDecoded(key) {
-        return this.get(key).map((line) => this.libmime.decodeHeader(line)).filter((line) => line && line.value);
+      getDecoded(key2) {
+        return this.get(key2).map((line) => this.libmime.decodeHeader(line)).filter((line) => line && line.value);
       }
       /**
        * @param {string} key
        * @returns {string}
        */
-      getFirst(key) {
+      getFirst(key2) {
         if (!this.parsed) {
           this._parseHeaders();
         }
         let lines = this._getLines();
-        key = this._normalizeHeader(key);
-        let header = lines.find((line) => line.key === key);
+        key2 = this._normalizeHeader(key2);
+        let header = lines.find((line) => line.key === key2);
         if (!header) {
           return "";
         }
@@ -36252,7 +36672,7 @@ var require_headers = __commonJS({
        * @param {number} [index]
        * @returns {void}
        */
-      add(key, value, index) {
+      add(key2, value, index) {
         if (typeof value === "undefined") {
           return;
         }
@@ -36263,7 +36683,7 @@ var require_headers = __commonJS({
           value = Buffer.from(value);
         }
         value = value.toString("binary");
-        this.addFormatted(key, this.libmime.foldLines(key + ": " + value.replace(/[\r\n]/g, ""), 76, false), index);
+        this.addFormatted(key2, this.libmime.foldLines(key2 + ": " + value.replace(/[\r\n]/g, ""), 76, false), index);
       }
       /**
        * @param {string} key
@@ -36271,7 +36691,7 @@ var require_headers = __commonJS({
        * @param {number} [index]
        * @returns {void}
        */
-      addFormatted(key, line, index) {
+      addFormatted(key2, line, index) {
         if (!this.parsed) {
           this._parseHeaders();
         }
@@ -36289,7 +36709,7 @@ var require_headers = __commonJS({
           return;
         }
         let header = {
-          key: this._normalizeHeader(key),
+          key: this._normalizeHeader(key2),
           line
         };
         if (index < 1) {
@@ -36304,14 +36724,14 @@ var require_headers = __commonJS({
        * @param {string} key
        * @returns {void}
        */
-      remove(key) {
+      remove(key2) {
         if (!this.parsed) {
           this._parseHeaders();
         }
         let lines = this._getLines();
-        key = this._normalizeHeader(key);
+        key2 = this._normalizeHeader(key2);
         for (let i = lines.length - 1; i >= 0; i--) {
-          if (lines[i].key === key) {
+          if (lines[i].key === key2) {
             this.changed = true;
             lines.splice(i, 1);
           }
@@ -36323,18 +36743,18 @@ var require_headers = __commonJS({
        * @param {number} [relativeIndex]
        * @returns {void}
        */
-      update(key, value, relativeIndex) {
+      update(key2, value, relativeIndex) {
         if (!this.parsed) {
           this._parseHeaders();
         }
         let lines = this._getLines();
-        let keyName = key;
+        let keyName = key2;
         let index = 0;
-        key = this._normalizeHeader(key);
+        key2 = this._normalizeHeader(key2);
         let relativeIndexCount = 0;
         let relativeMatchFound = false;
         for (let i = lines.length - 1; i >= 0; i--) {
-          if (lines[i].key === key) {
+          if (lines[i].key === key2) {
             if (relativeIndex && relativeIndex !== relativeIndexCount) {
               relativeIndexCount++;
               continue;
@@ -36393,8 +36813,8 @@ var require_headers = __commonJS({
        * @param {string} key
        * @returns {string}
        */
-      _normalizeHeader(key) {
-        return (key || "").toLowerCase().trim();
+      _normalizeHeader(key2) {
+        return (key2 || "").toLowerCase().trim();
       }
       /**
        * Rewrites the line breaks of a header line so that the line can only ever parse
@@ -36482,9 +36902,9 @@ var require_headers = __commonJS({
               lines.splice(i, 1);
               continue;
             }
-            let key = this._normalizeHeader(line.substr(0, line.indexOf(":")));
+            let key2 = this._normalizeHeader(line.substr(0, line.indexOf(":")));
             lines[i] = {
-              key,
+              key: key2,
               line
             };
           }
@@ -36516,8 +36936,6 @@ var require_headers = __commonJS({
     module.exports = Headers2;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/mime-node.js
 var require_mime_node2 = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/mime-node.js"(exports, module) {
     "use strict";
@@ -36534,6 +36952,9 @@ var require_mime_node2 = __commonJS({
     var MimeNode = class {
       static {
         __name(this, "MimeNode");
+      }
+      static {
+        __name2(this, "MimeNode");
       }
       /**
        * @param {MimeNodeType | false} parentNode Parent node, or false for the root node.
@@ -36818,8 +37239,6 @@ var require_mime_node2 = __commonJS({
     module.exports = MimeNode;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/message-splitter.js
 var require_message_splitter = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/message-splitter.js"(exports, module) {
     "use strict";
@@ -36842,6 +37261,7 @@ var require_message_splitter = __commonJS({
       return err;
     }
     __name(maxLenError, "maxLenError");
+    __name2(maxLenError, "maxLenError");
     function trimBodyLineEnd(group, chunk, start, end) {
       if (group.type !== "body" || !group.node || !group.node.parentNode) {
         return end;
@@ -36855,9 +37275,13 @@ var require_message_splitter = __commonJS({
       return end;
     }
     __name(trimBodyLineEnd, "trimBodyLineEnd");
+    __name2(trimBodyLineEnd, "trimBodyLineEnd");
     var MessageSplitter = class extends Transform {
       static {
         __name(this, "MessageSplitter");
+      }
+      static {
+        __name2(this, "MessageSplitter");
       }
       /**
        * @param {SplitterOptions} [config]
@@ -36926,7 +37350,7 @@ var require_message_splitter = __commonJS({
         };
         let groupstart = this.lineLength ? -this.lineLength : 0;
         let groupend = 0;
-        let checkTrailingLinebreak = /* @__PURE__ */ __name((data) => {
+        let checkTrailingLinebreak = /* @__PURE__ */ __name2((data) => {
           if (data.type === "body" && data.node.parentNode && data.value && data.value.length) {
             if (data.value[data.value.length - 1] === 10) {
               groupstart--;
@@ -36951,7 +37375,7 @@ var require_message_splitter = __commonJS({
             }
           }
         }, "checkTrailingLinebreak");
-        let iterateData = /* @__PURE__ */ __name(() => {
+        let iterateData = /* @__PURE__ */ __name2(() => {
           for (let len = chunk.length; i < len; i++) {
             if (chunk[i] === 10) {
               let start = Math.max(pos, 0);
@@ -37300,8 +37724,6 @@ var require_message_splitter = __commonJS({
     module.exports = MessageSplitter;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/message-joiner.js
 var require_message_joiner = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/message-joiner.js"(exports, module) {
     "use strict";
@@ -37309,6 +37731,9 @@ var require_message_joiner = __commonJS({
     var MessageJoiner = class extends Transform {
       static {
         __name(this, "MessageJoiner");
+      }
+      static {
+        __name2(this, "MessageJoiner");
       }
       /**
        * Creates a joiner that accepts splitter objects and emits Buffer chunks.
@@ -37347,8 +37772,6 @@ var require_message_joiner = __commonJS({
     module.exports = MessageJoiner;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/flowed-decoder.js
 var require_flowed_decoder = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/flowed-decoder.js"(exports, module) {
     "use strict";
@@ -37361,6 +37784,9 @@ var require_flowed_decoder = __commonJS({
     var FlowedDecoder = class extends Transform {
       static {
         __name(this, "FlowedDecoder");
+      }
+      static {
+        __name2(this, "FlowedDecoder");
       }
       /**
        * @param {FlowedDecoderOptions} [config] Flowed text and charset decoding settings.
@@ -37408,8 +37834,6 @@ var require_flowed_decoder = __commonJS({
     module.exports = FlowedDecoder;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/node-rewriter.js
 var require_node_rewriter = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/node-rewriter.js"(exports, module) {
     "use strict";
@@ -37418,6 +37842,9 @@ var require_node_rewriter = __commonJS({
     var NodeRewriter = class extends Transform {
       static {
         __name(this, "NodeRewriter");
+      }
+      static {
+        __name2(this, "NodeRewriter");
       }
       /**
        * @param {FilterFunc} filterFunc Function that receives a MIME node and returns true to rewrite it.
@@ -37511,7 +37938,7 @@ var require_node_rewriter = __commonJS({
         );
         let firstChunk = true;
         decoder.$reading = false;
-        let readFromEncoder = /* @__PURE__ */ __name(() => {
+        let readFromEncoder = /* @__PURE__ */ __name2(() => {
           decoder.$reading = true;
           let data = encoder.read();
           if (data === null) {
@@ -37599,8 +38026,6 @@ var require_node_rewriter = __commonJS({
     module.exports = NodeRewriter;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/node-streamer.js
 var require_node_streamer = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/node-streamer.js"(exports, module) {
     "use strict";
@@ -37609,6 +38034,9 @@ var require_node_streamer = __commonJS({
     var NodeStreamer = class extends Transform {
       static {
         __name(this, "NodeStreamer");
+      }
+      static {
+        __name2(this, "NodeStreamer");
       }
       /**
        * @param {FilterFunc} filterFunc Function that receives a MIME node and returns true to stream it.
@@ -37665,7 +38093,7 @@ var require_node_streamer = __commonJS({
             return callback();
           }
         } else if (this.decoder && data.type !== "body") {
-          let doContinue = /* @__PURE__ */ __name(() => {
+          let doContinue = /* @__PURE__ */ __name2(() => {
             this.continue = false;
             this.decoder = false;
             this.canContinue = false;
@@ -37725,7 +38153,7 @@ var require_node_streamer = __commonJS({
            *
            * @returns {void}
            */
-          done: /* @__PURE__ */ __name(() => {
+          done: /* @__PURE__ */ __name2(() => {
             if (typeof this.continue === "function") {
               this.continue();
             } else {
@@ -37738,8 +38166,6 @@ var require_node_streamer = __commonJS({
     module.exports = NodeStreamer;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/chunked-passthrough.js
 var require_chunked_passthrough = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/lib/chunked-passthrough.js"(exports, module) {
     "use strict";
@@ -37747,6 +38173,9 @@ var require_chunked_passthrough = __commonJS({
     var ChunkedPassthrough = class extends Transform {
       static {
         __name(this, "ChunkedPassthrough");
+      }
+      static {
+        __name2(this, "ChunkedPassthrough");
       }
       /**
        * @param {import('..').ChunkedPassthroughOptions} [options]
@@ -37789,8 +38218,6 @@ var require_chunked_passthrough = __commonJS({
     module.exports = ChunkedPassthrough;
   }
 });
-
-// node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/index.js
 var require_mailsplit = __commonJS({
   "node_modules/.pnpm/@zone-eu+mailsplit@5.4.15/node_modules/@zone-eu/mailsplit/index.js"(exports, module) {
     "use strict";
@@ -37812,8 +38239,6 @@ var require_mailsplit = __commonJS({
     };
   }
 });
-
-// node_modules/.pnpm/nodemailer@9.0.5/node_modules/nodemailer/lib/addressparser/index.js
 var require_addressparser2 = __commonJS({
   "node_modules/.pnpm/nodemailer@9.0.5/node_modules/nodemailer/lib/addressparser/index.js"(exports, module) {
     "use strict";
@@ -37829,6 +38254,7 @@ var require_addressparser2 = __commonJS({
       return '"' + user.replace(/["\\]/g, "\\$&") + '"@' + address.substr(lastAt + 1);
     }
     __name(_quoteLocalPart, "_quoteLocalPart");
+    __name2(_quoteLocalPart, "_quoteLocalPart");
     function _handleAddress(tokens, depth) {
       let isGroup = false;
       let state = "text";
@@ -37963,9 +38389,13 @@ var require_addressparser2 = __commonJS({
       return addresses;
     }
     __name(_handleAddress, "_handleAddress");
+    __name2(_handleAddress, "_handleAddress");
     var Tokenizer = class {
       static {
         __name(this, "Tokenizer");
+      }
+      static {
+        __name2(this, "Tokenizer");
       }
       constructor(str) {
         this.str = (str || "").toString();
@@ -38108,7 +38538,7 @@ var require_addressparser2 = __commonJS({
       }
       if (options.flatten) {
         const flatAddresses = [];
-        const walkAddressList = /* @__PURE__ */ __name((list) => {
+        const walkAddressList = /* @__PURE__ */ __name2((list) => {
           list.forEach((entry) => {
             if (entry.group) {
               return walkAddressList(entry.group);
@@ -38122,11 +38552,10 @@ var require_addressparser2 = __commonJS({
       return parsedAddresses;
     }
     __name(addressparser, "addressparser");
+    __name2(addressparser, "addressparser");
     module.exports = addressparser;
   }
 });
-
-// node_modules/.pnpm/punycode.js@2.3.1/node_modules/punycode.js/punycode.js
 var require_punycode2 = __commonJS({
   "node_modules/.pnpm/punycode.js@2.3.1/node_modules/punycode.js/punycode.js"(exports, module) {
     "use strict";
@@ -38154,6 +38583,7 @@ var require_punycode2 = __commonJS({
       throw new RangeError(errors[type]);
     }
     __name(error, "error");
+    __name2(error, "error");
     function map(array, callback) {
       const result = [];
       let length = array.length;
@@ -38163,6 +38593,7 @@ var require_punycode2 = __commonJS({
       return result;
     }
     __name(map, "map");
+    __name2(map, "map");
     function mapDomain(domain, callback) {
       const parts = domain.split("@");
       let result = "";
@@ -38176,6 +38607,7 @@ var require_punycode2 = __commonJS({
       return result + encoded;
     }
     __name(mapDomain, "mapDomain");
+    __name2(mapDomain, "mapDomain");
     function ucs2decode(string) {
       const output = [];
       let counter = 0;
@@ -38197,8 +38629,9 @@ var require_punycode2 = __commonJS({
       return output;
     }
     __name(ucs2decode, "ucs2decode");
-    var ucs2encode = /* @__PURE__ */ __name((codePoints) => String.fromCodePoint(...codePoints), "ucs2encode");
-    var basicToDigit = /* @__PURE__ */ __name(function(codePoint) {
+    __name2(ucs2decode, "ucs2decode");
+    var ucs2encode = /* @__PURE__ */ __name2((codePoints) => String.fromCodePoint(...codePoints), "ucs2encode");
+    var basicToDigit = /* @__PURE__ */ __name2(function(codePoint) {
       if (codePoint >= 48 && codePoint < 58) {
         return 26 + (codePoint - 48);
       }
@@ -38210,10 +38643,10 @@ var require_punycode2 = __commonJS({
       }
       return base;
     }, "basicToDigit");
-    var digitToBasic = /* @__PURE__ */ __name(function(digit, flag) {
+    var digitToBasic = /* @__PURE__ */ __name2(function(digit, flag) {
       return digit + 22 + 75 * (digit < 26) - ((flag != 0) << 5);
     }, "digitToBasic");
-    var adapt = /* @__PURE__ */ __name(function(delta, numPoints, firstTime) {
+    var adapt = /* @__PURE__ */ __name2(function(delta, numPoints, firstTime) {
       let k = 0;
       delta = firstTime ? floor(delta / damp) : delta >> 1;
       delta += floor(delta / numPoints);
@@ -38222,7 +38655,7 @@ var require_punycode2 = __commonJS({
       }
       return floor(k + (baseMinusTMin + 1) * delta / (delta + skew));
     }, "adapt");
-    var decode = /* @__PURE__ */ __name(function(input) {
+    var decode2 = /* @__PURE__ */ __name2(function(input) {
       const output = [];
       const inputLength = input.length;
       let i = 0;
@@ -38273,7 +38706,7 @@ var require_punycode2 = __commonJS({
       }
       return String.fromCodePoint(...output);
     }, "decode");
-    var encode = /* @__PURE__ */ __name(function(input) {
+    var encode3 = /* @__PURE__ */ __name2(function(input) {
       const output = [];
       input = ucs2decode(input);
       const inputLength = input.length;
@@ -38332,14 +38765,14 @@ var require_punycode2 = __commonJS({
       }
       return output.join("");
     }, "encode");
-    var toUnicode = /* @__PURE__ */ __name(function(input) {
+    var toUnicode = /* @__PURE__ */ __name2(function(input) {
       return mapDomain(input, function(string) {
-        return regexPunycode.test(string) ? decode(string.slice(4).toLowerCase()) : string;
+        return regexPunycode.test(string) ? decode2(string.slice(4).toLowerCase()) : string;
       });
     }, "toUnicode");
-    var toASCII = /* @__PURE__ */ __name(function(input) {
+    var toASCII = /* @__PURE__ */ __name2(function(input) {
       return mapDomain(input, function(string) {
-        return regexNonASCII.test(string) ? "xn--" + encode(string) : string;
+        return regexNonASCII.test(string) ? "xn--" + encode3(string) : string;
       });
     }, "toASCII");
     var punycode = {
@@ -38360,16 +38793,14 @@ var require_punycode2 = __commonJS({
         "decode": ucs2decode,
         "encode": ucs2encode
       },
-      "decode": decode,
-      "encode": encode,
+      "decode": decode2,
+      "encode": encode3,
       "toASCII": toASCII,
       "toUnicode": toUnicode
     };
     module.exports = punycode;
   }
 });
-
-// node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/lib/stream-hash.js
 var require_stream_hash = __commonJS({
   "node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/lib/stream-hash.js"(exports, module) {
     "use strict";
@@ -38378,6 +38809,9 @@ var require_stream_hash = __commonJS({
     var StreamHash = class extends Transform {
       static {
         __name(this, "StreamHash");
+      }
+      static {
+        __name2(this, "StreamHash");
       }
       constructor(attachment, algo) {
         super();
@@ -38400,8 +38834,6 @@ var require_stream_hash = __commonJS({
     module.exports = StreamHash;
   }
 });
-
-// node_modules/.pnpm/domelementtype@2.3.0/node_modules/domelementtype/lib/index.js
 var require_lib2 = __commonJS({
   "node_modules/.pnpm/domelementtype@2.3.0/node_modules/domelementtype/lib/index.js"(exports) {
     "use strict";
@@ -38423,6 +38855,7 @@ var require_lib2 = __commonJS({
       return elem.type === ElementType.Tag || elem.type === ElementType.Script || elem.type === ElementType.Style;
     }
     __name(isTag, "isTag");
+    __name2(isTag, "isTag");
     exports.isTag = isTag;
     exports.Root = ElementType.Root;
     exports.Text = ElementType.Text;
@@ -38435,13 +38868,11 @@ var require_lib2 = __commonJS({
     exports.Doctype = ElementType.Doctype;
   }
 });
-
-// node_modules/.pnpm/domhandler@5.0.3/node_modules/domhandler/lib/node.js
 var require_node = __commonJS({
   "node_modules/.pnpm/domhandler@5.0.3/node_modules/domhandler/lib/node.js"(exports) {
     "use strict";
     var __extends = exports && exports.__extends || /* @__PURE__ */ (function() {
-      var extendStatics = /* @__PURE__ */ __name(function(d, b) {
+      var extendStatics = /* @__PURE__ */ __name2(function(d, b) {
         extendStatics = Object.setPrototypeOf || { __proto__: [] } instanceof Array && function(d2, b2) {
           d2.__proto__ = b2;
         } || function(d2, b2) {
@@ -38457,6 +38888,7 @@ var require_node = __commonJS({
           this.constructor = d;
         }
         __name(__, "__");
+        __name2(__, "__");
         d.prototype = b === null ? Object.create(b) : (__.prototype = b.prototype, new __());
       };
     })();
@@ -38484,17 +38916,18 @@ var require_node = __commonJS({
           this.startIndex = null;
           this.endIndex = null;
         }
-        __name(Node2, "Node");
+        __name(Node2, "Node2");
+        __name2(Node2, "Node");
         Object.defineProperty(Node2.prototype, "parentNode", {
           // Read-write aliases for properties
           /**
            * Same as {@link parent}.
            * [DOM spec](https://dom.spec.whatwg.org)-compatible alias.
            */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.parent;
           }, "get"),
-          set: /* @__PURE__ */ __name(function(parent) {
+          set: /* @__PURE__ */ __name2(function(parent) {
             this.parent = parent;
           }, "set"),
           enumerable: false,
@@ -38505,10 +38938,10 @@ var require_node = __commonJS({
            * Same as {@link prev}.
            * [DOM spec](https://dom.spec.whatwg.org)-compatible alias.
            */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.prev;
           }, "get"),
-          set: /* @__PURE__ */ __name(function(prev) {
+          set: /* @__PURE__ */ __name2(function(prev) {
             this.prev = prev;
           }, "set"),
           enumerable: false,
@@ -38519,10 +38952,10 @@ var require_node = __commonJS({
            * Same as {@link next}.
            * [DOM spec](https://dom.spec.whatwg.org)-compatible alias.
            */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.next;
           }, "get"),
-          set: /* @__PURE__ */ __name(function(next) {
+          set: /* @__PURE__ */ __name2(function(next) {
             this.next = next;
           }, "set"),
           enumerable: false,
@@ -38547,16 +38980,17 @@ var require_node = __commonJS({
           _this.data = data;
           return _this;
         }
-        __name(DataNode2, "DataNode");
+        __name(DataNode2, "DataNode2");
+        __name2(DataNode2, "DataNode");
         Object.defineProperty(DataNode2.prototype, "nodeValue", {
           /**
            * Same as {@link data}.
            * [DOM spec](https://dom.spec.whatwg.org)-compatible alias.
            */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.data;
           }, "get"),
-          set: /* @__PURE__ */ __name(function(data) {
+          set: /* @__PURE__ */ __name2(function(data) {
             this.data = data;
           }, "set"),
           enumerable: false,
@@ -38575,9 +39009,10 @@ var require_node = __commonJS({
           _this.type = domelementtype_1.ElementType.Text;
           return _this;
         }
-        __name(Text2, "Text");
+        __name(Text2, "Text2");
+        __name2(Text2, "Text");
         Object.defineProperty(Text2.prototype, "nodeType", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return 3;
           }, "get"),
           enumerable: false,
@@ -38596,9 +39031,10 @@ var require_node = __commonJS({
           _this.type = domelementtype_1.ElementType.Comment;
           return _this;
         }
-        __name(Comment2, "Comment");
+        __name(Comment2, "Comment2");
+        __name2(Comment2, "Comment");
         Object.defineProperty(Comment2.prototype, "nodeType", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return 8;
           }, "get"),
           enumerable: false,
@@ -38618,9 +39054,10 @@ var require_node = __commonJS({
           _this.type = domelementtype_1.ElementType.Directive;
           return _this;
         }
-        __name(ProcessingInstruction2, "ProcessingInstruction");
+        __name(ProcessingInstruction2, "ProcessingInstruction2");
+        __name2(ProcessingInstruction2, "ProcessingInstruction");
         Object.defineProperty(ProcessingInstruction2.prototype, "nodeType", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return 1;
           }, "get"),
           enumerable: false,
@@ -38639,11 +39076,12 @@ var require_node = __commonJS({
           _this.children = children;
           return _this;
         }
-        __name(NodeWithChildren2, "NodeWithChildren");
+        __name(NodeWithChildren2, "NodeWithChildren2");
+        __name2(NodeWithChildren2, "NodeWithChildren");
         Object.defineProperty(NodeWithChildren2.prototype, "firstChild", {
           // Aliases
           /** First child of the node. */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             var _a;
             return (_a = this.children[0]) !== null && _a !== void 0 ? _a : null;
           }, "get"),
@@ -38652,7 +39090,7 @@ var require_node = __commonJS({
         });
         Object.defineProperty(NodeWithChildren2.prototype, "lastChild", {
           /** Last child of the node. */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.children.length > 0 ? this.children[this.children.length - 1] : null;
           }, "get"),
           enumerable: false,
@@ -38663,10 +39101,10 @@ var require_node = __commonJS({
            * Same as {@link children}.
            * [DOM spec](https://dom.spec.whatwg.org)-compatible alias.
            */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.children;
           }, "get"),
-          set: /* @__PURE__ */ __name(function(children) {
+          set: /* @__PURE__ */ __name2(function(children) {
             this.children = children;
           }, "set"),
           enumerable: false,
@@ -38685,9 +39123,10 @@ var require_node = __commonJS({
           _this.type = domelementtype_1.ElementType.CDATA;
           return _this;
         }
-        __name(CDATA2, "CDATA");
+        __name(CDATA2, "CDATA2");
+        __name2(CDATA2, "CDATA");
         Object.defineProperty(CDATA2.prototype, "nodeType", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return 4;
           }, "get"),
           enumerable: false,
@@ -38706,9 +39145,10 @@ var require_node = __commonJS({
           _this.type = domelementtype_1.ElementType.Root;
           return _this;
         }
-        __name(Document2, "Document");
+        __name(Document2, "Document2");
+        __name2(Document2, "Document");
         Object.defineProperty(Document2.prototype, "nodeType", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return 9;
           }, "get"),
           enumerable: false,
@@ -38735,9 +39175,10 @@ var require_node = __commonJS({
           _this.type = type;
           return _this;
         }
-        __name(Element2, "Element");
+        __name(Element2, "Element2");
+        __name2(Element2, "Element");
         Object.defineProperty(Element2.prototype, "nodeType", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return 1;
           }, "get"),
           enumerable: false,
@@ -38749,17 +39190,17 @@ var require_node = __commonJS({
            * Same as {@link name}.
            * [DOM spec](https://dom.spec.whatwg.org)-compatible alias.
            */
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             return this.name;
           }, "get"),
-          set: /* @__PURE__ */ __name(function(name) {
+          set: /* @__PURE__ */ __name2(function(name) {
             this.name = name;
           }, "set"),
           enumerable: false,
           configurable: true
         });
         Object.defineProperty(Element2.prototype, "attributes", {
-          get: /* @__PURE__ */ __name(function() {
+          get: /* @__PURE__ */ __name2(function() {
             var _this = this;
             return Object.keys(this.attribs).map(function(name) {
               var _a, _b;
@@ -38782,36 +39223,43 @@ var require_node = __commonJS({
       return (0, domelementtype_1.isTag)(node);
     }
     __name(isTag, "isTag");
+    __name2(isTag, "isTag");
     exports.isTag = isTag;
     function isCDATA(node) {
       return node.type === domelementtype_1.ElementType.CDATA;
     }
     __name(isCDATA, "isCDATA");
+    __name2(isCDATA, "isCDATA");
     exports.isCDATA = isCDATA;
     function isText(node) {
       return node.type === domelementtype_1.ElementType.Text;
     }
     __name(isText, "isText");
+    __name2(isText, "isText");
     exports.isText = isText;
     function isComment(node) {
       return node.type === domelementtype_1.ElementType.Comment;
     }
     __name(isComment, "isComment");
+    __name2(isComment, "isComment");
     exports.isComment = isComment;
     function isDirective(node) {
       return node.type === domelementtype_1.ElementType.Directive;
     }
     __name(isDirective, "isDirective");
+    __name2(isDirective, "isDirective");
     exports.isDirective = isDirective;
     function isDocument(node) {
       return node.type === domelementtype_1.ElementType.Root;
     }
     __name(isDocument, "isDocument");
+    __name2(isDocument, "isDocument");
     exports.isDocument = isDocument;
     function hasChildren(node) {
       return Object.prototype.hasOwnProperty.call(node, "children");
     }
     __name(hasChildren, "hasChildren");
+    __name2(hasChildren, "hasChildren");
     exports.hasChildren = hasChildren;
     function cloneNode(node, recursive) {
       if (recursive === void 0) {
@@ -38874,6 +39322,7 @@ var require_node = __commonJS({
       return result;
     }
     __name(cloneNode, "cloneNode");
+    __name2(cloneNode, "cloneNode");
     exports.cloneNode = cloneNode;
     function cloneChildren(childs) {
       var children = childs.map(function(child) {
@@ -38886,10 +39335,9 @@ var require_node = __commonJS({
       return children;
     }
     __name(cloneChildren, "cloneChildren");
+    __name2(cloneChildren, "cloneChildren");
   }
 });
-
-// node_modules/.pnpm/domhandler@5.0.3/node_modules/domhandler/lib/index.js
 var require_lib3 = __commonJS({
   "node_modules/.pnpm/domhandler@5.0.3/node_modules/domhandler/lib/index.js"(exports) {
     "use strict";
@@ -38897,7 +39345,7 @@ var require_lib3 = __commonJS({
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: /* @__PURE__ */ __name(function() {
+        desc = { enumerable: true, get: /* @__PURE__ */ __name2(function() {
           return m[k];
         }, "get") };
       }
@@ -38941,7 +39389,8 @@ var require_lib3 = __commonJS({
           this.options = options !== null && options !== void 0 ? options : defaultOpts;
           this.elementCB = elementCB !== null && elementCB !== void 0 ? elementCB : null;
         }
-        __name(DomHandler2, "DomHandler");
+        __name(DomHandler2, "DomHandler2");
+        __name2(DomHandler2, "DomHandler");
         DomHandler2.prototype.onparserinit = function(parser) {
           this.parser = parser;
         };
@@ -39048,8 +39497,6 @@ var require_lib3 = __commonJS({
     exports.default = DomHandler;
   }
 });
-
-// node_modules/.pnpm/leac@0.7.0/node_modules/leac/lib/leac.cjs
 var require_leac = __commonJS({
   "node_modules/.pnpm/leac@0.7.0/node_modules/leac/lib/leac.cjs"(exports) {
     "use strict";
@@ -39069,6 +39516,7 @@ var require_leac = __commonJS({
       };
     }
     __name(createPositionQuery, "createPositionQuery");
+    __name2(createPositionQuery, "createPositionQuery");
     function toUnifiedRule(r, i) {
       return {
         name: r.name,
@@ -39080,23 +39528,28 @@ var require_leac = __commonJS({
       };
     }
     __name(toUnifiedRule, "toUnifiedRule");
+    __name2(toUnifiedRule, "toUnifiedRule");
     function isStringRule(r) {
       return Object.prototype.hasOwnProperty.call(r, "str");
     }
     __name(isStringRule, "isStringRule");
+    __name2(isStringRule, "isStringRule");
     function isRegexRule(r) {
       return Object.prototype.hasOwnProperty.call(r, "regex");
     }
     __name(isRegexRule, "isRegexRule");
+    __name2(isRegexRule, "isRegexRule");
     function isReplacementRule(r) {
       return Object.prototype.hasOwnProperty.call(r, "replace");
     }
     __name(isReplacementRule, "isReplacementRule");
+    __name2(isReplacementRule, "isReplacementRule");
     function toReplacer(re, replace) {
       const replaceSearch = toNonSticky(re);
       return (match) => match.replace(replaceSearch, replace);
     }
     __name(toReplacer, "toReplacer");
+    __name2(toReplacer, "toReplacer");
     function toRegExp(r, i) {
       if (r.name.length === 0) {
         throw new Error(`Rule #${i} has empty name, which is not allowed.`);
@@ -39113,10 +39566,12 @@ var require_leac = __commonJS({
       return new RegExp(escapeRegExp(r.name), "y");
     }
     __name(toRegExp, "toRegExp");
+    __name2(toRegExp, "toRegExp");
     function escapeRegExp(str) {
       return str.replace(/[-[\]{}()*+!<=:?./\\^$|#\s,]/g, "\\$&");
     }
     __name(escapeRegExp, "escapeRegExp");
+    __name2(escapeRegExp, "escapeRegExp");
     function toSticky(re) {
       if (re.global) {
         throw new Error(`Regular expression /${re.source}/${re.flags} contains the global flag, which is not allowed.`);
@@ -39124,10 +39579,12 @@ var require_leac = __commonJS({
       return re.sticky ? re : new RegExp(re.source, re.flags + "y");
     }
     __name(toSticky, "toSticky");
+    __name2(toSticky, "toSticky");
     function toNonSticky(re) {
       return re.sticky ? new RegExp(re.source, re.flags.replace("y", "")) : re;
     }
     __name(toNonSticky, "toNonSticky");
+    __name2(toNonSticky, "toNonSticky");
     function createLexer(rules, state = "", options = {}) {
       const options1 = typeof state !== "string" ? state : options;
       const state1 = typeof state === "string" ? state : "";
@@ -39183,11 +39640,10 @@ var require_leac = __commonJS({
       };
     }
     __name(createLexer, "createLexer");
+    __name2(createLexer, "createLexer");
     exports.createLexer = createLexer;
   }
 });
-
-// node_modules/.pnpm/peberminta@0.10.0/node_modules/peberminta/lib/util/util.cjs
 var require_util3 = __commonJS({
   "node_modules/.pnpm/peberminta@0.10.0/node_modules/peberminta/lib/util/util.cjs"(exports) {
     "use strict";
@@ -39195,16 +39651,16 @@ var require_util3 = __commonJS({
       return Math.max(left, Math.min(x, right));
     }
     __name(clamp, "clamp");
+    __name2(clamp, "clamp");
     function escapeWhitespace(str) {
       return str.replace(/(\t)|(\r)|(\n)/g, (m, t, r) => t ? "\\t" : r ? "\\r" : "\\n");
     }
     __name(escapeWhitespace, "escapeWhitespace");
+    __name2(escapeWhitespace, "escapeWhitespace");
     exports.clamp = clamp;
     exports.escapeWhitespace = escapeWhitespace;
   }
 });
-
-// node_modules/.pnpm/peberminta@0.10.0/node_modules/peberminta/lib/core.cjs
 var require_core = __commonJS({
   "node_modules/.pnpm/peberminta@0.10.0/node_modules/peberminta/lib/core.cjs"(exports) {
     "use strict";
@@ -39217,18 +39673,22 @@ var require_core = __commonJS({
       } : r;
     }
     __name(mapInner, "mapInner");
+    __name2(mapInner, "mapInner");
     function mapOuter(r, f) {
       return r.matched ? f(r) : r;
     }
     __name(mapOuter, "mapOuter");
+    __name2(mapOuter, "mapOuter");
     function ab(pa, pb, join) {
       return (data, i) => mapOuter(pa(data, i), (ma) => mapInner(pb(data, ma.position), (vb, j) => join(ma.value, vb, data, i, j)));
     }
     __name(ab, "ab");
+    __name2(ab, "ab");
     function abc(pa, pb, pc, join) {
       return (data, i) => mapOuter(pa(data, i), (ma) => mapOuter(pb(data, ma.position), (mb) => mapInner(pc(data, mb.position), (vc, j) => join(ma.value, mb.value, vc, data, i, j))));
     }
     __name(abc, "abc");
+    __name2(abc, "abc");
     function action(f) {
       return (data, i) => {
         f(data, i);
@@ -39240,6 +39700,7 @@ var require_core = __commonJS({
       };
     }
     __name(action, "action");
+    __name2(action, "action");
     function ahead(p) {
       return (data, i) => mapOuter(p(data, i), (m1) => ({
         matched: true,
@@ -39248,6 +39709,7 @@ var require_core = __commonJS({
       }));
     }
     __name(ahead, "ahead");
+    __name2(ahead, "ahead");
     function all(...ps) {
       return (data, i) => {
         const result = [];
@@ -39269,6 +39731,7 @@ var require_core = __commonJS({
       };
     }
     __name(all, "all");
+    __name2(all, "all");
     function any(data, i) {
       return i < data.tokens.length ? {
         matched: true,
@@ -39277,10 +39740,12 @@ var require_core = __commonJS({
       } : { matched: false };
     }
     __name(any, "any");
+    __name2(any, "any");
     function chain(p, f) {
       return (data, i) => mapOuter(p(data, i), (m1) => f(m1.value, data, i, m1.position)(data, m1.position));
     }
     __name(chain, "chain");
+    __name2(chain, "chain");
     function chainReduce(acc, f) {
       return (data, i) => {
         let loop = true;
@@ -39303,14 +39768,17 @@ var require_core = __commonJS({
       };
     }
     __name(chainReduce, "chainReduce");
+    __name2(chainReduce, "chainReduce");
     function condition(cond, pTrue, pFalse) {
       return (data, i) => cond(data, i) ? pTrue(data, i) : pFalse(data, i);
     }
     __name(condition, "condition");
+    __name2(condition, "condition");
     function decide(p) {
       return (data, i) => mapOuter(p(data, i), (m1) => m1.value(data, m1.position));
     }
     __name(decide, "decide");
+    __name2(decide, "decide");
     function eitherOr(pa, pb) {
       return (data, i) => {
         const r1 = pa(data, i);
@@ -39318,6 +39786,7 @@ var require_core = __commonJS({
       };
     }
     __name(eitherOr, "eitherOr");
+    __name2(eitherOr, "eitherOr");
     function emit(value) {
       return (data, i) => ({
         matched: true,
@@ -39326,6 +39795,7 @@ var require_core = __commonJS({
       });
     }
     __name(emit, "emit");
+    __name2(emit, "emit");
     function end(data, i) {
       return i < data.tokens.length ? { matched: false } : {
         matched: true,
@@ -39334,16 +39804,19 @@ var require_core = __commonJS({
       };
     }
     __name(end, "end");
+    __name2(end, "end");
     function error(message) {
       return (data, i) => {
         throw new Error(message instanceof Function ? message(data, i) : message);
       };
     }
     __name(error, "error");
+    __name2(error, "error");
     function fail(data, i) {
       return { matched: false };
     }
     __name(fail, "fail");
+    __name2(fail, "fail");
     function first(...ps) {
       return (data, i) => {
         for (const p of ps) {
@@ -39356,18 +39829,22 @@ var require_core = __commonJS({
       };
     }
     __name(first, "first");
+    __name2(first, "first");
     function map(p, mapper) {
       return (data, i) => mapInner(p(data, i), (v, j) => mapper(v, data, i, j));
     }
     __name(map, "map");
+    __name2(map, "map");
     function flatten1(p) {
       return map(p, (vs) => vs.flatMap((v) => v));
     }
     __name(flatten1, "flatten1");
+    __name2(flatten1, "flatten1");
     function flatten(...ps) {
       return flatten1(all(...ps));
     }
     __name(flatten, "flatten");
+    __name2(flatten, "flatten");
     function last(...ps) {
       return (data, i) => {
         for (let j = ps.length - 1; j >= 0; j--) {
@@ -39380,22 +39857,27 @@ var require_core = __commonJS({
       };
     }
     __name(last, "last");
+    __name2(last, "last");
     function left(pa, pb) {
       return ab(pa, pb, (va) => va);
     }
     __name(left, "left");
+    __name2(left, "left");
     function reduceLeft(acc, p, reducer) {
       return chainReduce(acc, (acc2) => map(p, (v, data, i, j) => reducer(acc2, v, data, i, j)));
     }
     __name(reduceLeft, "reduceLeft");
+    __name2(reduceLeft, "reduceLeft");
     function leftAssoc1(pLeft, pOper) {
       return chain(pLeft, (v0) => reduceLeft(v0, pOper, (acc, f) => f(acc)));
     }
     __name(leftAssoc1, "leftAssoc1");
+    __name2(leftAssoc1, "leftAssoc1");
     function leftAssoc2(pLeft, pOper, pRight) {
       return chain(pLeft, (v0) => reduceLeft(v0, ab(pOper, pRight, (f, y) => [f, y]), (acc, [f, y]) => f(acc, y)));
     }
     __name(leftAssoc2, "leftAssoc2");
+    __name2(leftAssoc2, "leftAssoc2");
     function longest(...ps) {
       return (data, i) => {
         let match2 = void 0;
@@ -39409,6 +39891,7 @@ var require_core = __commonJS({
       };
     }
     __name(longest, "longest");
+    __name2(longest, "longest");
     function make(f) {
       return (data, i) => ({
         matched: true,
@@ -39417,6 +39900,7 @@ var require_core = __commonJS({
       });
     }
     __name(make, "make");
+    __name2(make, "make");
     function takeWhile(p, test) {
       return (data, i) => {
         const values = [];
@@ -39438,22 +39922,27 @@ var require_core = __commonJS({
       };
     }
     __name(takeWhile, "takeWhile");
+    __name2(takeWhile, "takeWhile");
     function many(p) {
       return takeWhile(p, () => true);
     }
     __name(many, "many");
+    __name2(many, "many");
     function many1(p) {
       return ab(p, many(p), (head, tail) => [head, ...tail]);
     }
     __name(many1, "many1");
+    __name2(many1, "many1");
     function mapR(p, mapper) {
       return (data, i) => mapOuter(p(data, i), (m) => mapper(m, data, i));
     }
     __name(mapR, "mapR");
+    __name2(mapR, "mapR");
     function middle(pa, pb, pc) {
       return abc(pa, pb, pc, (ra, rb) => rb);
     }
     __name(middle, "middle");
+    __name2(middle, "middle");
     function not(p) {
       return (data, i) => {
         const r = p(data, i);
@@ -39465,6 +39954,7 @@ var require_core = __commonJS({
       };
     }
     __name(not, "not");
+    __name2(not, "not");
     function option(p, def) {
       return (data, i) => {
         const r = p(data, i);
@@ -39476,6 +39966,7 @@ var require_core = __commonJS({
       };
     }
     __name(option, "option");
+    __name2(option, "option");
     function peek(p, f) {
       return (data, i) => {
         const r = p(data, i);
@@ -39484,28 +39975,34 @@ var require_core = __commonJS({
       };
     }
     __name(peek, "peek");
+    __name2(peek, "peek");
     function recursive(f) {
       return function(data, i) {
         return f()(data, i);
       };
     }
     __name(recursive, "recursive");
+    __name2(recursive, "recursive");
     function reduceRight(p, acc, reducer) {
       return map(many(p), (vs, data, i, j) => vs.reduceRight((acc2, v) => reducer(v, acc2, data, i, j), acc));
     }
     __name(reduceRight, "reduceRight");
+    __name2(reduceRight, "reduceRight");
     function right(pa, pb) {
       return ab(pa, pb, (va, vb) => vb);
     }
     __name(right, "right");
+    __name2(right, "right");
     function rightAssoc1(pOper, pRight) {
       return ab(reduceRight(pOper, (y) => y, (f, acc) => (y) => f(acc(y))), pRight, (f, v) => f(v));
     }
     __name(rightAssoc1, "rightAssoc1");
+    __name2(rightAssoc1, "rightAssoc1");
     function rightAssoc2(pLeft, pOper, pRight) {
       return ab(reduceRight(ab(pLeft, pOper, (x, f) => [x, f]), (y) => y, ([x, f], acc) => (y) => f(x, acc(y))), pRight, (f, v) => f(v));
     }
     __name(rightAssoc2, "rightAssoc2");
+    __name2(rightAssoc2, "rightAssoc2");
     function satisfy(test) {
       return (data, i) => i < data.tokens.length && test(data.tokens[i], data, i) ? {
         matched: true,
@@ -39514,18 +40011,22 @@ var require_core = __commonJS({
       } : { matched: false };
     }
     __name(satisfy, "satisfy");
+    __name2(satisfy, "satisfy");
     function sepBy1(pValue, pSep) {
       return ab(pValue, many(right(pSep, pValue)), (head, tail) => [head, ...tail]);
     }
     __name(sepBy1, "sepBy1");
+    __name2(sepBy1, "sepBy1");
     function sepBy(pValue, pSep) {
       return eitherOr(sepBy1(pValue, pSep), emit([]));
     }
     __name(sepBy, "sepBy");
+    __name2(sepBy, "sepBy");
     function skip(...ps) {
       return map(all(...ps), () => null);
     }
     __name(skip, "skip");
+    __name2(skip, "skip");
     function start(data, i) {
       return i !== 0 ? { matched: false } : {
         matched: true,
@@ -39534,6 +40035,7 @@ var require_core = __commonJS({
       };
     }
     __name(start, "start");
+    __name2(start, "start");
     function takeMinMax(p, min, max) {
       return (data, i) => {
         const values = [];
@@ -39558,6 +40060,7 @@ var require_core = __commonJS({
       };
     }
     __name(takeMinMax, "takeMinMax");
+    __name2(takeMinMax, "takeMinMax");
     function takeN(p, n) {
       return (data, i) => {
         const values = [];
@@ -39579,18 +40082,22 @@ var require_core = __commonJS({
       };
     }
     __name(takeN, "takeN");
+    __name2(takeN, "takeN");
     function takeUntil(p, test) {
       return takeWhile(p, (value, n, data, i, j) => !test(value, n, data, i, j));
     }
     __name(takeUntil, "takeUntil");
+    __name2(takeUntil, "takeUntil");
     function takeUntilP(pValue, pTest) {
       return takeWhile(pValue, (value, n, data, i) => !pTest(data, i).matched);
     }
     __name(takeUntilP, "takeUntilP");
+    __name2(takeUntilP, "takeUntilP");
     function takeWhileP(pValue, pTest) {
       return takeWhile(pValue, (value, n, data, i) => pTest(data, i).matched);
     }
     __name(takeWhileP, "takeWhileP");
+    __name2(takeWhileP, "takeWhileP");
     function token(onToken, onEnd) {
       return (data, i) => {
         let position = i;
@@ -39611,14 +40118,17 @@ var require_core = __commonJS({
       };
     }
     __name(token, "token");
+    __name2(token, "token");
     function filter(p, test) {
       return (data, i) => mapOuter(p(data, i), (m) => test(m.value, data, i, m.position) ? m : { matched: false });
     }
     __name(filter, "filter");
+    __name2(filter, "filter");
     function remainingTokensNumber(data, i) {
       return data.tokens.length - i;
     }
     __name(remainingTokensNumber, "remainingTokensNumber");
+    __name2(remainingTokensNumber, "remainingTokensNumber");
     function parserPosition(data, i, formatToken, contextTokens = 3) {
       const len = data.tokens.length;
       const lowIndex = util_ts.clamp(0, i - contextTokens, len - contextTokens);
@@ -39645,6 +40155,7 @@ var require_core = __commonJS({
       return lines.join("\n");
     }
     __name(parserPosition, "parserPosition");
+    __name2(parserPosition, "parserPosition");
     function parse(parser, tokens, options, formatToken = JSON.stringify) {
       const data = { tokens, options };
       const result = parser(data, 0);
@@ -39658,16 +40169,19 @@ ${parserPosition(data, result.position, formatToken)}`);
       return result.value;
     }
     __name(parse, "parse");
+    __name2(parse, "parse");
     function tryParse(parser, tokens, options) {
       const result = parser({ tokens, options }, 0);
       return result.matched ? result.value : void 0;
     }
     __name(tryParse, "tryParse");
+    __name2(tryParse, "tryParse");
     function match(matcher, tokens, options) {
       const result = matcher({ tokens, options }, 0);
       return result.value;
     }
     __name(match, "match");
+    __name2(match, "match");
     exports.ab = ab;
     exports.abc = abc;
     exports.action = action;
@@ -39739,8 +40253,6 @@ ${parserPosition(data, result.position, formatToken)}`);
     exports.tryParse = tryParse;
   }
 });
-
-// node_modules/.pnpm/parseley@0.13.1/node_modules/parseley/lib/parseley.cjs
 var require_parseley = __commonJS({
   "node_modules/.pnpm/parseley@0.13.1/node_modules/parseley/lib/parseley.cjs"(exports) {
     "use strict";
@@ -39754,7 +40266,7 @@ var require_parseley = __commonJS({
             var d = Object.getOwnPropertyDescriptor(e, k);
             Object.defineProperty(n, k, d.get ? d : {
               enumerable: true,
-              get: /* @__PURE__ */ __name(function() {
+              get: /* @__PURE__ */ __name2(function() {
                 return e[k];
               }, "get")
             });
@@ -39765,18 +40277,19 @@ var require_parseley = __commonJS({
       return Object.freeze(n);
     }
     __name(_interopNamespaceDefault, "_interopNamespaceDefault");
+    __name2(_interopNamespaceDefault, "_interopNamespaceDefault");
     var p__namespace = /* @__PURE__ */ _interopNamespaceDefault(p);
     var ws = "(?:[ \\t\\r\\n\\f]*)";
     var nl = "(?:\\n|\\r\\n|\\r|\\f)";
     var nonascii = "[^\\x00-\\x7F]";
     var unicode = "(?:\\\\[0-9a-f]{1,6}(?:\\r\\n|[ \\n\\r\\t\\f])?)";
-    var escape = "(?:\\\\[^\\n\\r\\f0-9a-f])";
-    var nmstart = `(?:[_a-z]|${nonascii}|${unicode}|${escape})`;
-    var nmchar = `(?:[_a-z0-9-]|${nonascii}|${unicode}|${escape})`;
+    var escape2 = "(?:\\\\[^\\n\\r\\f0-9a-f])";
+    var nmstart = `(?:[_a-z]|${nonascii}|${unicode}|${escape2})`;
+    var nmchar = `(?:[_a-z0-9-]|${nonascii}|${unicode}|${escape2})`;
     var name = `(?:${nmchar}+)`;
     var ident = `(?:[-]?${nmstart}${nmchar}*)`;
-    var string1 = `'([^\\n\\r\\f\\\\']|\\\\${nl}|${nonascii}|${unicode}|${escape})*'`;
-    var string2 = `"([^\\n\\r\\f\\\\"]|\\\\${nl}|${nonascii}|${unicode}|${escape})*"`;
+    var string1 = `'([^\\n\\r\\f\\\\']|\\\\${nl}|${nonascii}|${unicode}|${escape2})*'`;
+    var string2 = `"([^\\n\\r\\f\\\\"]|\\\\${nl}|${nonascii}|${unicode}|${escape2})*"`;
     var lexSelector = leac.createLexer([
       { name: "ws", regex: new RegExp(ws) },
       { name: "hash", regex: new RegExp(`#${name}`, "i") },
@@ -39801,25 +40314,29 @@ var require_parseley = __commonJS({
     ]);
     var lexEscapedString = leac.createLexer([
       { name: "unicode", regex: new RegExp(unicode, "i") },
-      { name: "escape", regex: new RegExp(escape, "i") },
+      { name: "escape", regex: new RegExp(escape2, "i") },
       { name: "any", regex: new RegExp("[\\s\\S]", "i") }
     ]);
     function sumSpec([a0, a1, a2], [b0, b1, b2]) {
       return [a0 + b0, a1 + b1, a2 + b2];
     }
     __name(sumSpec, "sumSpec");
+    __name2(sumSpec, "sumSpec");
     function sumAllSpec(ss) {
       return ss.reduce(sumSpec, [0, 0, 0]);
     }
     __name(sumAllSpec, "sumAllSpec");
+    __name2(sumAllSpec, "sumAllSpec");
     function maxSpec([a0, a1, a2], [b0, b1, b2]) {
       return a0 > b0 || a0 === b0 && (a1 > b1 || a1 === b1 && a2 >= b2) ? [a0, a1, a2] : [b0, b1, b2];
     }
     __name(maxSpec, "maxSpec");
+    __name2(maxSpec, "maxSpec");
     function maxAllSpec(ss) {
       return ss.reduce(maxSpec, [0, 0, 0]);
     }
     __name(maxAllSpec, "maxAllSpec");
+    __name2(maxAllSpec, "maxAllSpec");
     var unicodeEscapedSequence_ = p__namespace.token((t) => t.name === "unicode" ? String.fromCodePoint(parseInt(t.text.slice(1), 16)) : void 0);
     var escapedSequence_ = p__namespace.token((t) => t.name === "escape" ? t.text.slice(1) : void 0);
     var anyChar_ = p__namespace.token((t) => t.name === "any" ? t.text : void 0);
@@ -39830,16 +40347,19 @@ var require_parseley = __commonJS({
       return result.value;
     }
     __name(unescape, "unescape");
+    __name2(unescape, "unescape");
     function literal(name2) {
       return p__namespace.token((t) => t.name === name2 ? true : void 0);
     }
     __name(literal, "literal");
+    __name2(literal, "literal");
     var whitespace_ = p__namespace.token((t) => t.name === "ws" ? null : void 0);
     var optionalWhitespace_ = p__namespace.option(whitespace_, null);
     function optionallySpaced(parser) {
       return p__namespace.middle(optionalWhitespace_, parser, optionalWhitespace_);
     }
     __name(optionallySpaced, "optionallySpaced");
+    __name2(optionallySpaced, "optionallySpaced");
     var identifier_ = p__namespace.token((t) => t.name === "ident" ? unescape(t.text) : void 0);
     var hashId_ = p__namespace.token((t) => t.name === "hash" ? unescape(t.text.slice(1)) : void 0);
     var string_ = p__namespace.token((t) => t.name.startsWith("str") ? unescape(t.text.slice(1, -1)) : void 0);
@@ -39899,10 +40419,12 @@ var require_parseley = __commonJS({
       return p__namespace.filter(identifier_, (id) => id.toLowerCase() === name2.toLowerCase());
     }
     __name(pcLiteral, "pcLiteral");
+    __name2(pcLiteral, "pcLiteral");
     function fpcBase(name2, contentParser, contentDesc) {
       return p__namespace.abc(p__namespace.middle(literal(":"), pcLiteral(name2), p__namespace.eitherOr(literal("("), p__namespace.error(`Expected opening parenthesis in :${name2}()`))), p__namespace.eitherOr(optionallySpaced(contentParser), p__namespace.error(`Expected ${contentDesc} in :${name2}()`)), p__namespace.eitherOr(literal(")"), p__namespace.error(`Expected closing parenthesis in :${name2}()`)), (name3, content) => ({ name: name3, content }));
     }
     __name(fpcBase, "fpcBase");
+    __name2(fpcBase, "fpcBase");
     var isSelector_ = p__namespace.map(fpcBase("is", p__namespace.recursive(() => listSelector_), "selector list"), (v) => ({
       type: "fpc:is",
       name: v.name,
@@ -39961,19 +40483,23 @@ var require_parseley = __commonJS({
       return result.value;
     }
     __name(parse_, "parse_");
+    __name2(parse_, "parse_");
     function prettyPrintPosition(str, offset, len = 1) {
       return `${str.replace(/(\t)|(\r)|(\n)/g, (_m, t, r) => t ? "\u2409" : r ? "\u240D" : "\u240A")}
 ${"".padEnd(offset)}${"^".repeat(len)}`;
     }
     __name(prettyPrintPosition, "prettyPrintPosition");
+    __name2(prettyPrintPosition, "prettyPrintPosition");
     function parse(str) {
       return parse_(listSelector_, str);
     }
     __name(parse, "parse");
+    __name2(parse, "parse");
     function parse1(str) {
       return parse_(complexSelector_, str);
     }
     __name(parse1, "parse1");
+    __name2(parse1, "parse1");
     function serialize(selector) {
       if (!selector.type) {
         throw new Error("This is not an AST node.");
@@ -40008,14 +40534,17 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
       }
     }
     __name(serialize, "serialize");
+    __name2(serialize, "serialize");
     function _serNs(ns) {
       return ns || ns === "" ? _serIdent(ns) + "|" : "";
     }
     __name(_serNs, "_serNs");
+    __name2(_serNs, "_serNs");
     function _codePoint(char) {
       return `\\${char.codePointAt(0).toString(16)} `;
     }
     __name(_codePoint, "_codePoint");
+    __name2(_codePoint, "_codePoint");
     function _serIdent(str) {
       return str.replace(
         /(^[0-9])|(^-[0-9])|(^-$)|([-0-9a-zA-Z_]|[^\x00-\x7F])|(\x00)|([\x01-\x1f]|\x7f)|([\s\S])/g,
@@ -40023,6 +40552,7 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
       );
     }
     __name(_serIdent, "_serIdent");
+    __name2(_serIdent, "_serIdent");
     function _serStr(str) {
       return str.replace(
         /(")|(\\)|(\x00)|([\x01-\x1f]|\x7f)/g,
@@ -40030,6 +40560,7 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
       );
     }
     __name(_serStr, "_serStr");
+    __name2(_serStr, "_serStr");
     function normalize(selector, options = { mode: "html" }) {
       const mode = options.mode ?? "html";
       const isHtmlMode = mode === "html";
@@ -40110,10 +40641,12 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
         }
       }
       __name(visit, "visit");
+      __name2(visit, "visit");
       visit(selector);
       return selector;
     }
     __name(normalize, "normalize");
+    __name2(normalize, "normalize");
     function _getSelectorPriority(selector) {
       switch (selector.type) {
         case "universal":
@@ -40139,6 +40672,7 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
       }
     }
     __name(_getSelectorPriority, "_getSelectorPriority");
+    __name2(_getSelectorPriority, "_getSelectorPriority");
     function _compareSelectorPriority(a, b) {
       if (a[0] !== b[0]) {
         return a[0] < b[0] ? -1 : 1;
@@ -40157,10 +40691,12 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
       return aStr < bStr ? -1 : 1;
     }
     __name(_compareSelectorPriority, "_compareSelectorPriority");
+    __name2(_compareSelectorPriority, "_compareSelectorPriority");
     function compareSelectors(a, b) {
       return compareSpecificity(a.specificity, b.specificity);
     }
     __name(compareSelectors, "compareSelectors");
+    __name2(compareSelectors, "compareSelectors");
     function compareSpecificity(a, b) {
       if (a[0] !== b[0]) {
         return a[0] < b[0] ? -1 : 1;
@@ -40171,6 +40707,7 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
       return a[2] < b[2] ? -1 : a[2] > b[2] ? 1 : 0;
     }
     __name(compareSpecificity, "compareSpecificity");
+    __name2(compareSpecificity, "compareSpecificity");
     exports.compareSelectors = compareSelectors;
     exports.compareSpecificity = compareSpecificity;
     exports.normalize = normalize;
@@ -40179,8 +40716,6 @@ ${"".padEnd(offset)}${"^".repeat(len)}`;
     exports.serialize = serialize;
   }
 });
-
-// node_modules/.pnpm/selderee@0.12.0/node_modules/selderee/lib/selderee.cjs
 var require_selderee = __commonJS({
   "node_modules/.pnpm/selderee@0.12.0/node_modules/selderee/lib/selderee.cjs"(exports) {
     "use strict";
@@ -40193,7 +40728,7 @@ var require_selderee = __commonJS({
             var d = Object.getOwnPropertyDescriptor(e, k);
             Object.defineProperty(n, k, d.get ? d : {
               enumerable: true,
-              get: /* @__PURE__ */ __name(function() {
+              get: /* @__PURE__ */ __name2(function() {
                 return e[k];
               }, "get")
             });
@@ -40204,6 +40739,7 @@ var require_selderee = __commonJS({
       return Object.freeze(n);
     }
     __name(_interopNamespaceDefault, "_interopNamespaceDefault");
+    __name2(_interopNamespaceDefault, "_interopNamespaceDefault");
     var parseley__namespace = /* @__PURE__ */ _interopNamespaceDefault(parseley);
     var Ast$1 = /* @__PURE__ */ Object.freeze({
       __proto__: null
@@ -40215,6 +40751,7 @@ var require_selderee = __commonJS({
       return "\u25BD\n" + treeifyArray(nodes, thinLines);
     }
     __name(treeify, "treeify");
+    __name2(treeify, "treeify");
     var thinLines = [["\u251C\u2500", "\u2502 "], ["\u2514\u2500", "  "]];
     var heavyLines = [["\u2520\u2500", "\u2503 "], ["\u2516\u2500", "  "]];
     var doubleLines = [["\u255F\u2500", "\u2551 "], ["\u2559\u2500", "  "]];
@@ -40222,6 +40759,7 @@ var require_selderee = __commonJS({
       return prefixItems(tpl, nodes.map((n) => treeifyNode(n)));
     }
     __name(treeifyArray, "treeifyArray");
+    __name2(treeifyArray, "treeifyArray");
     function treeifyNode(node) {
       switch (node.type) {
         case "terminal": {
@@ -40255,15 +40793,18 @@ ${treeifyArray(node.cont)}`;
       }
     }
     __name(treeifyNode, "treeifyNode");
+    __name2(treeifyNode, "treeifyNode");
     function prefixItems(tpl, items) {
       return items.map((item, i, { length }) => prefixItem(tpl, item, i === length - 1)).join("\n");
     }
     __name(prefixItems, "prefixItems");
+    __name2(prefixItems, "prefixItems");
     function prefixItem(tpl, item, tail = true) {
       const tpl1 = tpl[tail ? 1 : 0];
       return tpl1[0] + item.split("\n").join("\n" + tpl1[1]);
     }
     __name(prefixItem, "prefixItem");
+    __name2(prefixItem, "prefixItem");
     var TreeifyBuilder = /* @__PURE__ */ Object.freeze({
       __proto__: null,
       treeify
@@ -40271,6 +40812,9 @@ ${treeifyArray(node.cont)}`;
     var DecisionTree = class {
       static {
         __name(this, "DecisionTree");
+      }
+      static {
+        __name2(this, "DecisionTree");
       }
       branches;
       constructor(input, options = {}) {
@@ -40303,6 +40847,7 @@ ${treeifyArray(node.cont)}`;
       return results;
     }
     __name(toAstTerminalPairs, "toAstTerminalPairs");
+    __name2(toAstTerminalPairs, "toAstTerminalPairs");
     function reduceSelectorVariants(ast) {
       const newList = [];
       ast.list.forEach((sel) => {
@@ -40343,6 +40888,7 @@ ${treeifyArray(node.cont)}`;
       ast.list = newList;
     }
     __name(reduceSelectorVariants, "reduceSelectorVariants");
+    __name2(reduceSelectorVariants, "reduceSelectorVariants");
     function weave(items) {
       const branches = [];
       while (items.length) {
@@ -40359,6 +40905,7 @@ ${treeifyArray(node.cont)}`;
       return branches;
     }
     __name(weave, "weave");
+    __name2(weave, "weave");
     function terminate(items) {
       const results = [];
       for (const item of items) {
@@ -40377,6 +40924,7 @@ ${treeifyArray(node.cont)}`;
       return results;
     }
     __name(terminate, "terminate");
+    __name2(terminate, "terminate");
     function breakByKind(items, selectedKind) {
       const matches = [];
       const nonMatches = [];
@@ -40393,6 +40941,7 @@ ${treeifyArray(node.cont)}`;
       return { matches, nonMatches, empty };
     }
     __name(breakByKind, "breakByKind");
+    __name2(breakByKind, "breakByKind");
     function getSelectorKind(sel) {
       switch (sel.type) {
         case "attrPresence":
@@ -40408,6 +40957,7 @@ ${treeifyArray(node.cont)}`;
       }
     }
     __name(getSelectorKind, "getSelectorKind");
+    __name2(getSelectorKind, "getSelectorKind");
     function branchOfKind(kind, items) {
       if (kind === "tag") {
         return tagNameBranch(items);
@@ -40430,6 +40980,7 @@ ${treeifyArray(node.cont)}`;
       throw new Error(`Unsupported selector kind: ${kind}`);
     }
     __name(branchOfKind, "branchOfKind");
+    __name2(branchOfKind, "branchOfKind");
     function tagNameBranch(items) {
       const groups = spliceAndGroup(items, (x) => x.type === "tag", (x) => x.name);
       const variants = Object.entries(groups).map(([name, group]) => ({
@@ -40443,6 +40994,7 @@ ${treeifyArray(node.cont)}`;
       };
     }
     __name(tagNameBranch, "tagNameBranch");
+    __name2(tagNameBranch, "tagNameBranch");
     function attrPresenceBranch(name, items) {
       for (const item of items) {
         spliceSimpleSelector(item, (x) => x.type === "attrPresence" && x.name === name);
@@ -40454,6 +41006,7 @@ ${treeifyArray(node.cont)}`;
       };
     }
     __name(attrPresenceBranch, "attrPresenceBranch");
+    __name2(attrPresenceBranch, "attrPresenceBranch");
     function attrValueBranch(name, items) {
       const groups = spliceAndGroup(items, (x) => x.type === "attrValue" && x.name === name, (x) => `${x.matcher} ${x.modifier || ""} ${x.value}`);
       const matchers = [];
@@ -40475,6 +41028,7 @@ ${treeifyArray(node.cont)}`;
       };
     }
     __name(attrValueBranch, "attrValueBranch");
+    __name2(attrValueBranch, "attrValueBranch");
     function getAttrValuePredicate(sel) {
       if (sel.modifier === "i") {
         const expected = sel.value.toLowerCase();
@@ -40514,6 +41068,7 @@ ${treeifyArray(node.cont)}`;
       }
     }
     __name(getAttrValuePredicate, "getAttrValuePredicate");
+    __name2(getAttrValuePredicate, "getAttrValuePredicate");
     function pseudoClassBranch(name, items) {
       if (name !== "empty" && name !== "only-child" && name !== "first-child" && name !== "last-child" && name !== "any-link") {
         throw new Error(`Unsupported pseudo-class: :${name}`);
@@ -40528,6 +41083,7 @@ ${treeifyArray(node.cont)}`;
       };
     }
     __name(pseudoClassBranch, "pseudoClassBranch");
+    __name2(pseudoClassBranch, "pseudoClassBranch");
     function combinatorBranch(combinator, items) {
       const groups = spliceAndGroup(items, (x) => x.type === "combinator" && x.combinator === combinator, (x) => parseley__namespace.serialize(x.left));
       const leftItems = [];
@@ -40546,12 +41102,13 @@ ${treeifyArray(node.cont)}`;
       };
     }
     __name(combinatorBranch, "combinatorBranch");
+    __name2(combinatorBranch, "combinatorBranch");
     function spliceAndGroup(items, predicate, keyCallback) {
       const groups = {};
       while (items.length) {
         const bestKey = findTopKey(items, predicate, keyCallback);
-        const bestKeyPredicate = /* @__PURE__ */ __name((sel) => predicate(sel) && keyCallback(sel) === bestKey, "bestKeyPredicate");
-        const hasBestKeyPredicate = /* @__PURE__ */ __name((item) => item.ast.list.some(bestKeyPredicate), "hasBestKeyPredicate");
+        const bestKeyPredicate = /* @__PURE__ */ __name2((sel) => predicate(sel) && keyCallback(sel) === bestKey, "bestKeyPredicate");
+        const hasBestKeyPredicate = /* @__PURE__ */ __name2((item) => item.ast.list.some(bestKeyPredicate), "hasBestKeyPredicate");
         const { matches, rest } = partition(items, hasBestKeyPredicate);
         let oneSimpleSelector = null;
         for (const item of matches) {
@@ -40569,6 +41126,7 @@ ${treeifyArray(node.cont)}`;
       return groups;
     }
     __name(spliceAndGroup, "spliceAndGroup");
+    __name2(spliceAndGroup, "spliceAndGroup");
     function spliceSimpleSelector(item, predicate) {
       const simpleSelectors = item.ast.list;
       const matches = new Array(simpleSelectors.length);
@@ -40587,6 +41145,7 @@ ${treeifyArray(node.cont)}`;
       return result;
     }
     __name(spliceSimpleSelector, "spliceSimpleSelector");
+    __name2(spliceSimpleSelector, "spliceSimpleSelector");
     function findTopKey(items, predicate, keyCallback) {
       const candidates = {};
       for (const item of items) {
@@ -40594,11 +41153,11 @@ ${treeifyArray(node.cont)}`;
         for (const node of item.ast.list.filter(predicate)) {
           candidates1[keyCallback(node)] = true;
         }
-        for (const key of Object.keys(candidates1)) {
-          if (candidates[key]) {
-            candidates[key]++;
+        for (const key2 of Object.keys(candidates1)) {
+          if (candidates[key2]) {
+            candidates[key2]++;
           } else {
-            candidates[key] = 1;
+            candidates[key2] = 1;
           }
         }
       }
@@ -40613,6 +41172,7 @@ ${treeifyArray(node.cont)}`;
       return topKind;
     }
     __name(findTopKey, "findTopKey");
+    __name2(findTopKey, "findTopKey");
     function partition(src, predicate) {
       const matches = [];
       const rest = [];
@@ -40626,9 +41186,13 @@ ${treeifyArray(node.cont)}`;
       return { matches, rest };
     }
     __name(partition, "partition");
+    __name2(partition, "partition");
     var Picker = class {
       static {
         __name(this, "Picker");
+      }
+      static {
+        __name2(this, "Picker");
       }
       f;
       constructor(f) {
@@ -40662,11 +41226,13 @@ ${treeifyArray(node.cont)}`;
       return diff > 0 || diff === 0 && next.index < acc.index;
     }
     __name(comparatorPreferFirst, "comparatorPreferFirst");
+    __name2(comparatorPreferFirst, "comparatorPreferFirst");
     function comparatorPreferLast(acc, next) {
       const diff = parseley.compareSpecificity(next.specificity, acc.specificity);
       return diff > 0 || diff === 0 && next.index > acc.index;
     }
     __name(comparatorPreferLast, "comparatorPreferLast");
+    __name2(comparatorPreferLast, "comparatorPreferLast");
     exports.Ast = Ast$1;
     exports.DecisionTree = DecisionTree;
     exports.Picker = Picker;
@@ -40674,8 +41240,6 @@ ${treeifyArray(node.cont)}`;
     exports.Types = Types$1;
   }
 });
-
-// node_modules/.pnpm/@selderee+plugin-htmlparser2@0.12.0_selderee@0.12.0/node_modules/@selderee/plugin-htmlparser2/lib/hp2-builder.cjs
 var require_hp2_builder = __commonJS({
   "node_modules/.pnpm/@selderee+plugin-htmlparser2@0.12.0_selderee@0.12.0/node_modules/@selderee/plugin-htmlparser2/lib/hp2-builder.cjs"(exports) {
     "use strict";
@@ -40686,11 +41250,13 @@ var require_hp2_builder = __commonJS({
       return new selderee.Picker(handleArray(nodes));
     }
     __name(hp2Builder, "hp2Builder");
+    __name2(hp2Builder, "hp2Builder");
     function handleArray(nodes) {
       const matchers = nodes.map(handleNode);
       return (el, ...tail) => matchers.flatMap((m) => m(el, ...tail));
     }
     __name(handleArray, "handleArray");
+    __name2(handleArray, "handleArray");
     function handleNode(node) {
       switch (node.type) {
         case "terminal": {
@@ -40712,6 +41278,7 @@ var require_hp2_builder = __commonJS({
       }
     }
     __name(handleNode, "handleNode");
+    __name2(handleNode, "handleNode");
     function handleTagName(node) {
       const variants = {};
       for (const variant of node.variants) {
@@ -40723,12 +41290,14 @@ var require_hp2_builder = __commonJS({
       };
     }
     __name(handleTagName, "handleTagName");
+    __name2(handleTagName, "handleTagName");
     function handleAttrPresenceName(node) {
       const attrName = node.name;
       const continuation = handleArray(node.cont);
       return (el, ...tail) => Object.prototype.hasOwnProperty.call(el.attribs, attrName) ? continuation(el, ...tail) : [];
     }
     __name(handleAttrPresenceName, "handleAttrPresenceName");
+    __name2(handleAttrPresenceName, "handleAttrPresenceName");
     function handleAttrValueName(node) {
       const callbacks = [];
       for (const matcher of node.matchers) {
@@ -40743,6 +41312,7 @@ var require_hp2_builder = __commonJS({
       };
     }
     __name(handleAttrValueName, "handleAttrValueName");
+    __name2(handleAttrValueName, "handleAttrValueName");
     function handlePseudoClassNode(node) {
       const continuation = handleArray(node.cont);
       const predicate = pseudoClassPredicates[node.name];
@@ -40752,6 +41322,7 @@ var require_hp2_builder = __commonJS({
       return (el, ...tail) => predicate(el) ? continuation(el, ...tail) : [];
     }
     __name(handlePseudoClassNode, "handlePseudoClassNode");
+    __name2(handlePseudoClassNode, "handlePseudoClassNode");
     var pseudoClassPredicates = {
       "empty": isEmptyElement,
       "only-child": isOnlyChildElement,
@@ -40771,22 +41342,27 @@ var require_hp2_builder = __commonJS({
       return true;
     }
     __name(isEmptyElement, "isEmptyElement");
+    __name2(isEmptyElement, "isEmptyElement");
     function isOnlyChildElement(el) {
       return getPrecedingElement(el) === null && getFollowingElement(el) === null;
     }
     __name(isOnlyChildElement, "isOnlyChildElement");
+    __name2(isOnlyChildElement, "isOnlyChildElement");
     function isFirstChildElement(el) {
       return getPrecedingElement(el) === null;
     }
     __name(isFirstChildElement, "isFirstChildElement");
+    __name2(isFirstChildElement, "isFirstChildElement");
     function isLastChildElement(el) {
       return getFollowingElement(el) === null;
     }
     __name(isLastChildElement, "isLastChildElement");
+    __name2(isLastChildElement, "isLastChildElement");
     function isAnyLinkElement(el) {
       return (el.name === "a" || el.name === "area") && Object.prototype.hasOwnProperty.call(el.attribs, "href");
     }
     __name(isAnyLinkElement, "isAnyLinkElement");
+    __name2(isAnyLinkElement, "isAnyLinkElement");
     function handlePushElementNode(node) {
       const continuation = handleArray(node.cont);
       const leftElementGetter = node.combinator === "+" ? getPrecedingElement : getParentElement;
@@ -40799,21 +41375,22 @@ var require_hp2_builder = __commonJS({
       };
     }
     __name(handlePushElementNode, "handlePushElementNode");
-    var getPrecedingElement = /* @__PURE__ */ __name((el) => {
+    __name2(handlePushElementNode, "handlePushElementNode");
+    var getPrecedingElement = /* @__PURE__ */ __name2((el) => {
       const prev = el.prev;
       if (prev === null) {
         return null;
       }
       return domhandler.isTag(prev) ? prev : getPrecedingElement(prev);
     }, "getPrecedingElement");
-    var getFollowingElement = /* @__PURE__ */ __name((el) => {
+    var getFollowingElement = /* @__PURE__ */ __name2((el) => {
       const next = el.next;
       if (next === null) {
         return null;
       }
       return domhandler.isTag(next) ? next : getFollowingElement(next);
     }, "getFollowingElement");
-    var getParentElement = /* @__PURE__ */ __name((el) => {
+    var getParentElement = /* @__PURE__ */ __name2((el) => {
       const parent = el.parent;
       return parent && domhandler.isTag(parent) ? parent : null;
     }, "getParentElement");
@@ -40822,11 +41399,10 @@ var require_hp2_builder = __commonJS({
       return (_el, next, ...tail) => continuation(next, ...tail);
     }
     __name(handlePopElementNode, "handlePopElementNode");
+    __name2(handlePopElementNode, "handlePopElementNode");
     exports.hp2Builder = hp2Builder;
   }
 });
-
-// node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/decode-codepoint.js
 var require_decode_codepoint = __commonJS({
   "node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/decode-codepoint.js"(exports) {
     "use strict";
@@ -40885,14 +41461,14 @@ var require_decode_codepoint = __commonJS({
       return (_a2 = decodeMap.get(codePoint)) !== null && _a2 !== void 0 ? _a2 : codePoint;
     }
     __name(replaceCodePoint, "replaceCodePoint");
+    __name2(replaceCodePoint, "replaceCodePoint");
     function decodeCodePoint(codePoint) {
       return (0, exports.fromCodePoint)(replaceCodePoint(codePoint));
     }
     __name(decodeCodePoint, "decodeCodePoint");
+    __name2(decodeCodePoint, "decodeCodePoint");
   }
 });
-
-// node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/internal/decode-shared.js
 var require_decode_shared = __commonJS({
   "node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/internal/decode-shared.js"(exports) {
     "use strict";
@@ -40926,11 +41502,10 @@ var require_decode_shared = __commonJS({
       }
       return out;
     }
-    __name(decodeBase642, "decodeBase64");
+    __name(decodeBase642, "decodeBase642");
+    __name2(decodeBase642, "decodeBase64");
   }
 });
-
-// node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/generated/decode-data-html.js
 var require_decode_data_html = __commonJS({
   "node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/generated/decode-data-html.js"(exports) {
     "use strict";
@@ -40940,8 +41515,6 @@ var require_decode_data_html = __commonJS({
     exports.htmlDecodeTree = (0, decode_shared_js_1.decodeBase64)("QR08ALkAAgH6AYsDNQR2BO0EPgXZBQEGLAbdBxMISQrvCmQLfQurDKQNLw4fD4YPpA+6D/IPAAAAAAAAAAAAAAAAKhBMEY8TmxUWF2EYLBkxGuAa3RsJHDscWR8YIC8jSCSIJcMl6ie3Ku8rEC0CLjoupS7kLgAIRU1hYmNmZ2xtbm9wcnN0dVQAWgBeAGUAaQBzAHcAfgCBAIQAhwCSAJoAoACsALMAbABpAGcAO4DGAMZAUAA7gCYAJkBjAHUAdABlADuAwQDBQHIiZXZlAAJhAAFpeW0AcgByAGMAO4DCAMJAEGRyAADgNdgE3XIAYQB2AGUAO4DAAMBA8CFoYZFj4SFjcgBhZAAAoFMqAAFncIsAjgBvAG4ABGFmAADgNdg43fAlbHlGdW5jdGlvbgCgYSBpAG4AZwA7gMUAxUAAAWNzpACoAHIAAOA12Jzc6SFnbgCgVCJpAGwAZABlADuAwwDDQG0AbAA7gMQAxEAABGFjZWZvcnN1xQDYANoA7QDxAPYA+QD8AAABY3LJAM8AayNzbGFzaAAAoBYidgHTANUAAKDnKmUAZAAAoAYjeQARZIABY3J0AOAA5QDrAGEidXNlAACgNSLuI291bGxpcwCgLCFhAJJjcgAA4DXYBd1wAGYAAOA12Dnd5SF2ZdhiYwDyAOoAbSJwZXEAAKBOIgAHSE9hY2RlZmhpbG9yc3UXARoBHwE6AVIBVQFiAWQBZgGCAakB6QHtAfIBYwB5ACdkUABZADuAqQCpQIABY3B5ACUBKAE1AfUhdGUGYWmg0iJ0KGFsRGlmZmVyZW50aWFsRAAAoEUhbCJleXMAAKAtIQACYWVpb0EBRAFKAU0B8iFvbgxhZABpAGwAO4DHAMdAcgBjAAhhbiJpbnQAAKAwIm8AdAAKYQABZG5ZAV0BaSJsbGEAuGB0I2VyRG90ALdg8gA5AWkAp2NyImNsZQAAAkRNUFRwAXQBeQF9AW8AdAAAoJkiaSJudXMAAKCWIuwhdXMAoJUiaSJtZXMAAKCXIm8AAAFjc4cBlAFrKndpc2VDb250b3VySW50ZWdyYWwAAKAyImUjQ3VybHkAAAFEUZwBpAFvJXVibGVRdW90ZQAAoB0gdSJvdGUAAKAZIAACbG5wdbABtgHNAdgBbwBuAGWgNyIAoHQqgAFnaXQAvAHBAcUB8iJ1ZW50AKBhIm4AdAAAoC8i7yV1ckludGVncmFsAKAuIgABZnLRAdMBAKACIe8iZHVjdACgECJuLnRlckNsb2Nrd2lzZUNvbnRvdXJJbnRlZ3JhbAAAoDMi7yFzcwCgLypjAHIAAOA12J7ccABDoNMiYQBwAACgTSKABURKU1phY2VmaW9zAAsCEgIVAhgCGwIsAjQCOQI9AnMCfwNvoEUh9CJyYWhkAKARKWMAeQACZGMAeQAFZGMAeQAPZIABZ3JzACECJQIoAuchZXIAoCEgcgAAoKEhaAB2AACg5CoAAWF5MAIzAvIhb24OYRRkbAB0oAciYQCUY3IAAOA12AfdAAFhZkECawIAAWNtRQJnAvIjaXRpY2FsAAJBREdUUAJUAl8CYwJjInV0ZQC0YG8AdAFZAloC2WJiJGxlQWN1dGUA3WJyImF2ZQBgYGkibGRlANxi7yFuZACgxCJmJWVyZW50aWFsRAAAoEYhcAR9AgAAAAAAAIECjgIAABoDZgAA4DXYO91EoagAhQKJAm8AdAAAoNwgcSJ1YWwAAKBQIuIhbGUAA0NETFJVVpkCqAK1Au8C/wIRA28AbgB0AG8AdQByAEkAbgB0AGUAZwByAGEA7ADEAW8AdAKvAgAAAACwAqhgbiNBcnJvdwAAoNMhAAFlb7kC0AJmAHQAgAFBUlQAwQLGAs0CciJyb3cAAKDQIekkZ2h0QXJyb3cAoNQhZQDlACsCbgBnAAABTFLWAugC5SFmdAABQVLcAuECciJyb3cAAKD4J+kkZ2h0QXJyb3cAoPon6SRnaHRBcnJvdwCg+SdpImdodAAAAUFU9gL7AnIicm93AACg0iFlAGUAAKCoInAAQQIGAwAAAAALA3Iicm93AACg0SFvJHduQXJyb3cAAKDVIWUlcnRpY2FsQmFyAACgJSJuAAADQUJMUlRhJAM2AzoDWgNxA3oDciJyb3cAAKGTIUJVLAMwA2EAcgAAoBMpcCNBcnJvdwAAoPUhciJldmUAEWPlIWZ00gJDAwAASwMAAFIDaSVnaHRWZWN0b3IAAKBQKWUkZVZlY3RvcgAAoF4p5SJjdG9yQqC9IWEAcgAAoFYpaSJnaHQA1AFiAwAAaQNlJGVWZWN0b3IAAKBfKeUiY3RvckKgwSFhAHIAAKBXKWUAZQBBoKQiciJyb3cAAKCnIXIAcgBvAPcAtAIAAWN0gwOHA3IAAOA12J/c8iFvaxBhAAhOVGFjZGZnbG1vcHFzdHV4owOlA6kDsAO/A8IDxgPNA9ID8gP9AwEEFAQeBCAEJQRHAEphSAA7gNAA0EBjAHUAdABlADuAyQDJQIABYWl5ALYDuQO+A/Ihb24aYXIAYwA7gMoAykAtZG8AdAAWYXIAAOA12AjdcgBhAHYAZQA7gMgAyEDlIm1lbnQAoAgiAAFhcNYD2QNjAHIAEmF0AHkAUwLhAwAAAADpA20lYWxsU3F1YXJlAACg+yVlJ3J5U21hbGxTcXVhcmUAAKCrJQABZ3D2A/kDbwBuABhhZgAA4DXYPN3zImlsb26VY3UAAAFhaQYEDgRsAFSgdSppImxkZQAAoEIi7CNpYnJpdW0AoMwhAAFjaRgEGwRyAACgMCFtAACgcyphAJdjbQBsADuAywDLQAABaXApBC0E8yF0cwCgAyLvJG5lbnRpYWxFAKBHIYACY2Zpb3MAPQQ/BEMEXQRyBHkAJGRyAADgNdgJ3WwibGVkAFMCTAQAAAAAVARtJWFsbFNxdWFyZQAAoPwlZSdyeVNtYWxsU3F1YXJlAACgqiVwA2UEAABpBAAAAABtBGYAAOA12D3dwSFsbACgACLyI2llcnRyZgCgMSFjAPIAcQQABkpUYWJjZGZnb3JzdIgEiwSOBJMElwSkBKcEqwStBLIE5QTqBGMAeQADZDuAPgA+QO0hbWFkoJMD3GNyImV2ZQAeYYABZWl5AJ0EoASjBOQhaWwiYXIAYwAcYRNkbwB0ACBhcgAA4DXYCt0AoNkicABmAADgNdg+3eUiYXRlcgADRUZHTFNUvwTIBM8E1QTZBOAEcSJ1YWwATKBlIuUhc3MAoNsidSRsbEVxdWFsAACgZyJyI2VhdGVyAACgoirlIXNzAKB3IuwkYW50RXF1YWwAoH4qaSJsZGUAAKBzImMAcgAA4DXYotwAoGsiAARBYWNmaW9zdfkE/QQFBQgFCwUTBSIFKwVSIkRjeQAqZAABY3QBBQQFZQBrAMdiXmDpIXJjJGFyAACgDCFsJWJlcnRTcGFjZQAAoAsh8AEYBQAAGwVmAACgDSHpJXpvbnRhbExpbmUAoAAlAAFjdCYFKAXyABIF8iFvayZhbQBwAEQBMQU5BW8AdwBuAEgAdQBtAPAAAAFxInVhbAAAoE8iAAdFSk9hY2RmZ21ub3N0dVMFVgVZBVwFYwVtBXAFcwV6BZAFtgXFBckFzQVjAHkAFWTsIWlnMmFjAHkAAWRjAHUAdABlADuAzQDNQAABaXlnBWwFcgBjADuAzgDOQBhkbwB0ADBhcgAAoBEhcgBhAHYAZQA7gMwAzEAAoREhYXB/BYsFAAFjZ4MFhQVyACphaSNuYXJ5SQAAoEghbABpAGUA8wD6AvQBlQUAAKUFZaAsIgABZ3KaBZ4F8iFhbACgKyLzI2VjdGlvbgCgwiJpI3NpYmxlAAABQ1SsBbEFbyJtbWEAAKBjIGkibWVzAACgYiCAAWdwdAC8Bb8FwwVvAG4ALmFmAADgNdhA3WEAmWNjAHIAAKAQIWkibGRlAChh6wHSBQAA1QVjAHkABmRsADuAzwDPQIACY2Zvc3UA4QXpBe0F8gX9BQABaXnlBegFcgBjADRhGWRyAADgNdgN3XAAZgAA4DXYQd3jAfcFAAD7BXIAAOA12KXc8iFjeQhk6yFjeQRkgANISmFjZm9zAAwGDwYSBhUGHQYhBiYGYwB5ACVkYwB5AAxk8CFwYZpjAAFleRkGHAbkIWlsNmEaZHIAAOA12A7dcABmAADgNdhC3WMAcgAA4DXYptyABUpUYWNlZmxtb3N0AD0GQAZDBl4GawZkB2gHcAd0B80H2gdjAHkACWQ7gDwAPECAAmNtbnByAEwGTwZSBlUGWwb1IXRlOWHiIWRhm2NnAACg6ifsI2FjZXRyZgCgEiFyAACgniGAAWFleQBkBmcGagbyIW9uPWHkIWlsO2EbZAABZnNvBjQHdAAABUFDREZSVFVWYXKABp4GpAbGBssG3AYDByEHwQIqBwABbnKEBowGZyVsZUJyYWNrZXQAAKDoJ/Ihb3cAoZAhQlKTBpcGYQByAACg5CHpJGdodEFycm93AKDGIWUjaWxpbmcAAKAII28A9QGqBgAAsgZiJWxlQnJhY2tldAAAoOYnbgDUAbcGAAC+BmUkZVZlY3RvcgAAoGEp5SJjdG9yQqDDIWEAcgAAoFkpbCJvb3IAAKAKI2kiZ2h0AAABQVbSBtcGciJyb3cAAKCUIeUiY3RvcgCgTikAAWVy4AbwBmUAAKGjIkFW5gbrBnIicm93AACgpCHlImN0b3IAoFopaSNhbmdsZQBCorIi+wYAAAAA/wZhAHIAAKDPKXEidWFsAACgtCJwAIABRFRWAAoHEQcYB+8kd25WZWN0b3IAoFEpZSRlVmVjdG9yAACgYCnlImN0b3JCoL8hYQByAACgWCnlImN0b3JCoLwhYQByAACgUilpAGcAaAB0AGEAcgByAG8A9wDMAnMAAANFRkdMU1Q/B0cHTgdUB1gHXwfxJXVhbEdyZWF0ZXIAoNoidSRsbEVxdWFsAACgZiJyI2VhdGVyAACgdiLlIXNzAKChKuwkYW50RXF1YWwAoH0qaSJsZGUAAKByInIAAOA12A/dZaDYIuYjdGFycm93AKDaIWkiZG90AD9hgAFucHcAege1B7kHZwAAAkxSbHKCB5QHmwerB+UhZnQAAUFSiAeNB3Iicm93AACg9SfpJGdodEFycm93AKD3J+kkZ2h0QXJyb3cAoPYn5SFmdAABYXLcAqEHaQBnAGgAdABhAHIAcgBvAPcA5wJpAGcAaAB0AGEAcgByAG8A9wDuAmYAAOA12EPdZQByAAABTFK/B8YHZSRmdEFycm93AACgmSHpJGdodEFycm93AKCYIYABY2h0ANMH1QfXB/IAWgYAoLAh8iFva0FhAKBqIgAEYWNlZmlvc3XpB+wH7gf/BwMICQgOCBEIcAAAoAUpeQAcZAABZGzyB/kHaSR1bVNwYWNlAACgXyBsI2ludHJmAACgMyFyAADgNdgQ3e4jdXNQbHVzAKATInAAZgAA4DXYRN1jAPIA/gecY4AESmFjZWZvc3R1ACEIJAgoCDUIgQiFCDsKQApHCmMAeQAKZGMidXRlAENhgAFhZXkALggxCDQI8iFvbkdh5CFpbEVhHWSAAWdzdwA7CGEIfQjhInRpdmWAAU1UVgBECEwIWQhlJWRpdW1TcGFjZQAAoAsgaABpAAABY25SCFMIawBTAHAAYQBjAOUASwhlAHIAeQBUAGgAaQDuAFQI9CFlZAABR0xnCHUIcgBlAGEAdABlAHIARwByAGUAYQB0AGUA8gDrBGUAcwBzAEwAZQBzAPMA2wdMImluZQAKYHIAAOA12BHdAAJCbnB0jAiRCJkInAhyImVhawAAoGAgwiZyZWFraW5nU3BhY2WgYGYAAKAVIUOq7CqzCMIIzQgAAOcIGwkAAAAAAAAtCQAAbwkAAIcJAACdCcAJGQoAADQKAAFvdbYIvAjuI2dydWVudACgYiJwIkNhcAAAoG0ibyh1YmxlVmVydGljYWxCYXIAAKAmIoABbHF4ANII1wjhCOUibWVudACgCSL1IWFsVKBgImkibGRlAADgQiI4A2kic3RzAACgBCJyI2VhdGVyAACjbyJFRkdMU1T1CPoIAgkJCQ0JFQlxInVhbAAAoHEidSRsbEVxdWFsAADgZyI4A3IjZWF0ZXIAAOBrIjgD5SFzcwCgeSLsJGFudEVxdWFsAOB+KjgDaSJsZGUAAKB1IvUhbXBEASAJJwnvI3duSHVtcADgTiI4A3EidWFsAADgTyI4A2UAAAFmczEJRgn0JFRyaWFuZ2xlQqLqIj0JAAAAAEIJYQByAADgzyk4A3EidWFsAACg7CJzAICibiJFR0xTVABRCVYJXAlhCWkJcSJ1YWwAAKBwInIjZWF0ZXIAAKB4IuUhc3MA4GoiOAPsJGFudEVxdWFsAOB9KjgDaSJsZGUAAKB0IuUic3RlZAABR0x1CX8J8iZlYXRlckdyZWF0ZXIA4KIqOAPlI3NzTGVzcwDgoSo4A/IjZWNlZGVzAKGAIkVTjwmVCXEidWFsAADgryo4A+wkYW50RXF1YWwAoOAiAAFlaaAJqQl2JmVyc2VFbGVtZW50AACgDCLnJWh0VHJpYW5nbGVCousitgkAAAAAuwlhAHIAAODQKTgDcSJ1YWwAAKDtIgABcXXDCeAJdSNhcmVTdQAAAWJwywnVCfMhZXRF4I8iOANxInVhbAAAoOIi5SJyc2V0ReCQIjgDcSJ1YWwAAKDjIoABYmNwAOYJ8AkNCvMhZXRF4IIi0iBxInVhbAAAoIgi4yJlZWRzgKGBIkVTVAD6CQAKBwpxInVhbAAA4LAqOAPsJGFudEVxdWFsAKDhImkibGRlAADgfyI4A+UicnNldEXggyLSIHEidWFsAACgiSJpImxkZQCAoUEiRUZUACIKJwouCnEidWFsAACgRCJ1JGxsRXF1YWwAAKBHImkibGRlAACgSSJlJXJ0aWNhbEJhcgAAoCQiYwByAADgNdip3GkAbABkAGUAO4DRANFAnWMAB0VhY2RmZ21vcHJzdHV2XgphCmgKcgp2CnoKgQqRCpYKqwqtCrsKyArNCuwhaWdSYWMAdQB0AGUAO4DTANNAAAFpeWwKcQpyAGMAO4DUANRAHmRiImxhYwBQYXIAAOA12BLdcgBhAHYAZQA7gNIA0kCAAWFlaQCHCooKjQpjAHIATGFnAGEAqWNjInJvbgCfY3AAZgAA4DXYRt3lI25DdXJseQABRFGeCqYKbyV1YmxlUXVvdGUAAKAcIHUib3RlAACgGCAAoFQqAAFjbLEKtQpyAADgNdiq3GEAcwBoADuA2ADYQGkAbAHACsUKZABlADuA1QDVQGUAcwAAoDcqbQBsADuA1gDWQGUAcgAAAUJQ0wrmCgABYXLXCtoKcgAAoD4gYQBjAAABZWvgCuIKAKDeI2UAdAAAoLQjYSVyZW50aGVzaXMAAKDcI4AEYWNmaGlsb3JzAP0KAwsFCwkLCwsMCxELIwtaC3IjdGlhbEQAAKACInkAH2RyAADgNdgT3WkApmOgY/Ujc01pbnVzsWAAAWlwFQsgC24AYwBhAHIAZQBwAGwAYQBuAOUACgVmAACgGSGAobsqZWlvACoLRQtJC+MiZWRlc4CheiJFU1QANAs5C0ALcSJ1YWwAAKCvKuwkYW50RXF1YWwAoHwiaSJsZGUAAKB+Im0AZQAAoDMgAAFkcE0LUQv1IWN0AKAPIm8jcnRpb24AYaA3ImwAAKAdIgABY2leC2ILcgAA4DXYq9yoYwACVWZvc2oLbwtzC3cLTwBUADuAIgAiQHIAAOA12BTdcABmAACgGiFjAHIAAOA12KzcAAZCRWFjZWZoaW9yc3WPC5MLlwupC7YL2AvbC90LhQyTDJoMowzhIXJyAKAQKUcAO4CuAK5AgAFjbnIAnQugC6ML9SF0ZVRhZwAAoOsncgB0oKAhbAAAoBYpgAFhZXkArwuyC7UL8iFvblhh5CFpbFZhIGR2oBwhZSJyc2UAAAFFVb8LzwsAAWxxwwvIC+UibWVudACgCyL1JGlsaWJyaXVtAKDLIXAmRXF1aWxpYnJpdW0AAKBvKXIAAKAcIW8AoWPnIWh0AARBQ0RGVFVWYewLCgwQDDIMNwxeDHwM9gIAAW5y8Av4C2clbGVCcmFja2V0AACg6SfyIW93AKGSIUJM/wsDDGEAcgAAoOUhZSRmdEFycm93AACgxCFlI2lsaW5nAACgCSNvAPUBFgwAAB4MYiVsZUJyYWNrZXQAAKDnJ24A1AEjDAAAKgxlJGVWZWN0b3IAAKBdKeUiY3RvckKgwiFhAHIAAKBVKWwib29yAACgCyMAAWVyOwxLDGUAAKGiIkFWQQxGDHIicm93AACgpiHlImN0b3IAoFspaSNhbmdsZQBCorMiVgwAAAAAWgxhAHIAAKDQKXEidWFsAACgtSJwAIABRFRWAGUMbAxzDO8kd25WZWN0b3IAoE8pZSRlVmVjdG9yAACgXCnlImN0b3JCoL4hYQByAACgVCnlImN0b3JCoMAhYQByAACgUykAAXB1iQyMDGYAAKAdIe4kZEltcGxpZXMAoHAp6SRnaHRhcnJvdwCg2yEAAWNongyhDHIAAKAbIQCgsSHsJGVEZWxheWVkAKD0KYAGSE9hY2ZoaW1vcXN0dQC/DMgMzAzQDOIM5gwKDQ0NFA0ZDU8NVA1YDQABQ2PDDMYMyCFjeSlkeQAoZEYiVGN5ACxkYyJ1dGUAWmEAorwqYWVpedgM2wzeDOEM8iFvbmBh5CFpbF5hcgBjAFxhIWRyAADgNdgW3e8hcnQAAkRMUlXvDPYM/QwEDW8kd25BcnJvdwAAoJMhZSRmdEFycm93AACgkCHpJGdodEFycm93AKCSIXAjQXJyb3cAAKCRIechbWGjY+EkbGxDaXJjbGUAoBgicABmAADgNdhK3XICHw0AAAAAIg10AACgGiLhIXJlgKGhJUlTVQAqDTINSg3uJXRlcnNlY3Rpb24AoJMidQAAAWJwNw1ADfMhZXRFoI8icSJ1YWwAAKCRIuUicnNldEWgkCJxInVhbAAAoJIibiJpb24AAKCUImMAcgAA4DXYrtxhAHIAAKDGIgACYmNtcF8Nag2ODZANc6DQImUAdABFoNAicSJ1YWwAAKCGIgABY2huDYkNZSJlZHMAgKF7IkVTVAB4DX0NhA1xInVhbAAAoLAq7CRhbnRFcXVhbACgfSJpImxkZQAAoH8iVABoAGEA9ADHCwCgESIAodEiZXOVDZ8NciJzZXQARaCDInEidWFsAACghyJlAHQAAKDRIoAFSFJTYWNmaGlvcnMAtQ27Db8NyA3ODdsN3w3+DRgOHQ4jDk8AUgBOADuA3gDeQMEhREUAoCIhAAFIY8MNxg1jAHkAC2R5ACZkAAFidcwNzQ0JYKRjgAFhZXkA1A3XDdoN8iFvbmRh5CFpbGJhImRyAADgNdgX3QABZWnjDe4N8gHoDQAA7Q3lImZvcmUAoDQiYQCYYwABY27yDfkNayNTcGFjZQAA4F8gCiDTInBhY2UAoAkg7CFkZYChPCJFRlQABw4MDhMOcSJ1YWwAAKBDInUkbGxFcXVhbAAAoEUiaSJsZGUAAKBIInAAZgAA4DXYS93pI3BsZURvdACg2yAAAWN0Jw4rDnIAAOA12K/c8iFva2Zh4QpFDlYOYA5qDgAAbg5yDgAAAAAAAAAAAAB5DnwOqA6zDgAADg8RDxYPGg8AAWNySA5ODnUAdABlADuA2gDaQHIAb6CfIeMhaXIAoEkpcgDjAVsOAABdDnkADmR2AGUAbGEAAWl5Yw5oDnIAYwA7gNsA20AjZGIibGFjAHBhcgAA4DXYGN1yAGEAdgBlADuA2QDZQOEhY3JqYQABZGl/Dp8OZQByAAABQlCFDpcOAAFhcokOiw5yAF9gYQBjAAABZWuRDpMOAKDfI2UAdAAAoLUjYSVyZW50aGVzaXMAAKDdI28AbgBQoMMi7CF1cwCgjiIAAWdwqw6uDm8AbgByYWYAAOA12EzdAARBREVUYWRwc78O0g7ZDuEOBQPqDvMOBw9yInJvdwDCoZEhyA4AAMwOYQByAACgEilvJHduQXJyb3cAAKDFIW8kd25BcnJvdwAAoJUhcSV1aWxpYnJpdW0AAKBuKWUAZQBBoKUiciJyb3cAAKClIW8AdwBuAGEAcgByAG8A9wAQA2UAcgAAAUxS+Q4AD2UkZnRBcnJvdwAAoJYh6SRnaHRBcnJvdwCglyFpAGyg0gNvAG4ApWPpIW5nbmFjAHIAAOA12LDcaSJsZGUAaGFtAGwAO4DcANxAgAREYmNkZWZvc3YALQ8xDzUPNw89D3IPdg97D4AP4SFzaACgqyJhAHIAAKDrKnkAEmThIXNobKCpIgCg5ioAAWVyQQ9DDwCgwSKAAWJ0eQBJD00Paw9hAHIAAKAWIGmgFiDjIWFsAAJCTFNUWA9cD18PZg9hAHIAAKAjIukhbmV8YGUkcGFyYXRvcgAAoFgnaSJsZGUAAKBAItQkaGluU3BhY2UAoAogcgAA4DXYGd1wAGYAAOA12E3dYwByAADgNdix3GQiYXNoAACgqiKAAmNlZm9zAI4PkQ+VD5kPng/pIXJjdGHkIWdlAKDAInIAAOA12BrdcABmAADgNdhO3WMAcgAA4DXYstwAAmZpb3OqD64Prw+0D3IAAOA12BvdnmNwAGYAAOA12E/dYwByAADgNdiz3IAEQUlVYWNmb3N1AMgPyw/OD9EP2A/gD+QP6Q/uD2MAeQAvZGMAeQAHZGMAeQAuZGMAdQB0AGUAO4DdAN1AAAFpedwP3w9yAGMAdmErZHIAAOA12BzdcABmAADgNdhQ3WMAcgAA4DXYtNxtAGwAeGEABEhhY2RlZm9z/g8BEAUQDRAQEB0QIBAkEGMAeQAWZGMidXRlAHlhAAFheQkQDBDyIW9ufWEXZG8AdAB7YfIBFRAAABwQbwBXAGkAZAB0AOgAVAhhAJZjcgAAoCghcABmAACgJCFjAHIAAOA12LXc4QtCEEkQTRAAAGcQbRByEAAAAAAAAAAAeRCKEJcQ8hD9EAAAGxEhETIROREAAD4RYwB1AHQAZQA7gOEA4UByImV2ZQADYYCiPiJFZGl1eQBWEFkQWxBgEGUQAOA+IjMDAKA/InIAYwA7gOIA4kB0AGUAO4C0ALRAMGRsAGkAZwA7gOYA5kByoGEgAOA12B7dcgBhAHYAZQA7gOAA4EAAAWVwfBCGEAABZnCAEIQQ8yF5bQCgNSHoAIMQaABhALFjAAFhcI0QWwAAAWNskRCTEHIAAWFnAACgPypkApwQAAAAALEQAKInImFkc3ajEKcQqRCuEG4AZAAAoFUqAKBcKmwib3BlAACgWCoAoFoqAKMgImVsbXJzersQvRDAEN0Q5RDtEACgpCllAACgICJzAGQAYaAhImEEzhDQENIQ1BDWENgQ2hDcEACgqCkAoKkpAKCqKQCgqykAoKwpAKCtKQCgrikAoK8pdAB2oB8iYgBkoL4iAKCdKQABcHTpEOwQaAAAoCIixWDhIXJyAKB8IwABZ3D1EPgQbwBuAAVhZgAA4DXYUt0Ao0giRWFlaW9wBxEJEQ0RDxESERQRAKBwKuMhaXIAoG8qAKBKImQAAKBLInMAJ2DyIW94ZaBIIvEADhFpAG4AZwA7gOUA5UCAAWN0eQAmESoRKxFyAADgNdi23CpgbQBwAGWgSCLxAPgBaQBsAGQAZQA7gOMA40BtAGwAO4DkAORAAAFjaUERRxFvAG4AaQBuAPQA6AFuAHQAAKARKgAITmFiY2RlZmlrbG5vcHJzdWQRaBGXEZ8RpxGrEdIR1hErEjASexKKEn0RThNbE3oTbwB0AACg7SoAAWNybBGJEWsAAAJjZXBzdBF4EX0RghHvIW5nAKBMInAjc2lsb24A9mNyImltZQAAoDUgaQBtAGWgPSJxAACgzSJ2AY0RkRFlAGUAAKC9ImUAZABnoAUjZQAAoAUjcgBrAHSgtSPiIXJrAKC2IwABb3mjEaYRbgDnAHcRMWTxIXVvAKAeIIACY21wcnQAtBG5Eb4RwRHFEeEhdXPloDUi5ABwInR5dgAAoLApcwDpAH0RbgBvAPUA6gCAAWFodwDLEcwRzhGyYwCgNiHlIWVuAKBsInIAAOA12B/dZwCAA2Nvc3R1dncA4xHyEQUSEhIhEiYSKRKAAWFpdQDpEesR7xHwAKMFcgBjAACg7yVwAACgwyKAAWRwdAD4EfwRABJvAHQAAKAAKuwhdXMAoAEqaSJtZXMAAKACKnECCxIAAAAADxLjIXVwAKAGKmEAcgAAoAUm8iNpYW5nbGUAAWR1GhIeEu8hd24AoL0lcAAAoLMlcCJsdXMAAKAEKmUA5QBCD+UAkg9hInJvdwAAoA0pgAFha28ANhJoEncSAAFjbjoSZRJrAIABbHN0AEESRxJNEm8jemVuZ2UAAKDrKXEAdQBhAHIA5QBcBPIjaWFuZ2xlgKG0JWRscgBYElwSYBLvIXduAKC+JeUhZnQAoMIlaSJnaHQAAKC4JWsAAKAjJLEBbRIAAHUSsgFxEgAAcxIAoJIlAKCRJTQAAKCTJWMAawAAoIglAAFlb38ShxJx4D0A5SD1IWl2AOBhIuUgdAAAoBAjAAJwdHd4kRKVEpsSnxJmAADgNdhT3XSgpSJvAG0AAKClIvQhaWUAoMgiAAZESFVWYmRobXB0dXayEsES0RLgEvcS+xIKExoTHxMjEygTNxMAAkxSbHK5ErsSvRK/EgCgVyUAoFQlAKBWJQCgUyUAolAlRFVkdckSyxLNEs8SAKBmJQCgaSUAoGQlAKBnJQACTFJsctgS2hLcEt4SAKBdJQCgWiUAoFwlAKBZJQCjUSVITFJobHLrEu0S7xLxEvMS9RIAoGwlAKBjJQCgYCUAoGslAKBiJQCgXyVvAHgAAKDJKQACTFJscgITBBMGEwgTAKBVJQCgUiUAoBAlAKAMJQCiACVEVWR1EhMUExYTGBMAoGUlAKBoJQCgLCUAoDQlaSJudXMAAKCfIuwhdXMAoJ4iaSJtZXMAAKCgIgACTFJsci8TMRMzEzUTAKBbJQCgWCUAoBglAKAUJQCjAiVITFJobHJCE0QTRhNIE0oTTBMAoGolAKBhJQCgXiUAoDwlAKAkJQCgHCUAAWV2UhNVE3YA5QD5AGIAYQByADuApgCmQAACY2Vpb2ITZhNqE24TcgAA4DXYt9xtAGkAAKBPIG0A5aA9IogRbAAAoVwAYmh0E3YTAKDFKfMhdWIAoMgnbAF+E4QTbABloCIgdAAAoCIgcAAAoU4iRWWJE4sTAKCuKvGgTyI8BeEMqRMAAN8TABQDFB8UAAAjFDQUAAAAAIUUAAAAAI0UAAAAANcU4xT3FPsUAACIFQAAlhWAAWNwcgCuE7ET1RP1IXRlB2GAoikiYWJjZHMAuxO/E8QTzhPSE24AZAAAoEQqciJjdXAAAKBJKgABYXXIE8sTcAAAoEsqcAAAoEcqbwB0AACgQCoA4CkiAP4AAWVv2RPcE3QAAKBBIO4ABAUAAmFlaXXlE+8T9RP4E/AB6hMAAO0TcwAAoE0qbwBuAA1hZABpAGwAO4DnAOdAcgBjAAlhcABzAHOgTCptAACgUCpvAHQAC2GAAWRtbgAIFA0UEhRpAGwAO4C4ALhAcCJ0eXYAAKCyKXQAAIGiADtlGBQZFKJAcgBkAG8A9ABiAXIAAOA12CDdgAFjZWkAKBQqFDIUeQBHZGMAawBtoBMn4SFyawCgEyfHY3IAAKPLJUVjZWZtcz8UQRRHFHcUfBSAFACgwykAocYCZWxGFEkUcQAAoFciZQBhAlAUAAAAAGAUciJyb3cAAAFsclYUWhTlIWZ0AKC6IWkiZ2h0AACguyGAAlJTYWNkAGgUaRRrFG8UcxSuYACgyCRzAHQAAKCbIukhcmMAoJoi4SFzaACgnSJuImludAAAoBAqaQBkAACg7yrjIWlyAKDCKfUhYnN1oGMmaQB0AACgYybsApMUmhS2FAAAwxRvAG4AZaA6APGgVCKrAG0CnxQAAAAAoxRhAHSgLABAYAChASJmbKcUqRTuABMNZQAAAW14rhSyFOUhbnQAoAEiZQDzANIB5wG6FAAAwBRkoEUibwB0AACgbSpuAPQAzAGAAWZyeQDIFMsUzhQA4DXYVN1vAOQA1wEAgakAO3MeAdMUcgAAoBchAAFhb9oU3hRyAHIAAKC1IXMAcwAAoBcnAAFjdeYU6hRyAADgNdi43AABYnDuFPIUZaDPKgCg0SploNAqAKDSKuQhb3QAoO8igANkZWxwcnZ3AAYVEBUbFSEVRBVlFYQV4SFycgABbHIMFQ4VAKA4KQCgNSlwAhYVAAAAABkVcgAAoN4iYwAAoN8i4SFycnCgtiEAoD0pgKIqImJjZG9zACsVMBU6FT4VQRVyImNhcAAAoEgqAAFhdTQVNxVwAACgRipwAACgSipvAHQAAKCNInIAAKBFKgDgKiIA/gACYWxydksVURVuFXMVcgByAG2gtyEAoDwpeQCAAWV2dwBYFWUVaRVxAHACXxUAAAAAYxVyAGUA4wAXFXUA4wAZFWUAZQAAoM4iZSJkZ2UAAKDPImUAbgA7gKQApEBlI2Fycm93AAABbHJ7FX8V5SFmdACgtiFpImdodAAAoLchZQDkAG0VAAFjaYsVkRVvAG4AaQBuAPQAkwFuAHQAAKAxImwiY3R5AACgLSOACUFIYWJjZGVmaGlqbG9yc3R1d3oAuBW7Fb8V1RXgFegV+RUKFhUWHxZUFlcWZRbFFtsW7xb7FgUXChdyAPIAtAJhAHIAAKBlKQACZ2xyc8YVyhXOFdAV5yFlcgCgICDlIXRoAKA4IfIA9QxoAHagECAAoKMiawHZFd4VYSJyb3cAAKAPKWEA4wBfAgABYXnkFecV8iFvbg9hNGQAoUYhYW/tFfQVAAFnciEC8RVyAACgyiF0InNlcQAAoHcqgAFnbG0A/xUCFgUWO4CwALBAdABhALRjcCJ0eXYAAKCxKQABaXIOFhIW8yFodACgfykA4DXYId1hAHIAAAFschsWHRYAoMMhAKDCIYACYWVnc3YAKBauAjYWOhY+Fm0AAKHEIm9zLhY0Fm4AZABzoMQi9SFpdACgZiZhIm1tYQDdY2kAbgAAoPIiAKH3AGlvQxZRFmQAZQAAgfcAO29KFksW90BuI3RpbWVzAACgxyJuAPgAUBZjAHkAUmRjAG8CXhYAAAAAYhZyAG4AAKAeI28AcAAAoA0jgAJscHR1dwBuFnEWdRaSFp4W7CFhciRgZgAA4DXYVd0AotkCZW1wc30WhBaJFo0WcQBkoFAibwB0AACgUSJpIm51cwAAoDgi7CF1cwCgFCLxInVhcmUAoKEiYgBsAGUAYgBhAHIAdwBlAGQAZwDlANcAbgCAAWFkaAClFqoWtBZyAHIAbwD3APUMbwB3AG4AYQByAHIAbwB3APMA8xVhI3Jwb29uAAABbHK8FsAWZQBmAPQAHBZpAGcAaAD0AB4WYgHJFs8WawBhAHIAbwD3AJILbwLUFgAAAADYFnIAbgAAoB8jbwBwAACgDCOAAWNvdADhFukW7BYAAXJ55RboFgDgNdi53FVkbAAAoPYp8iFvaxFhAAFkcvMW9xZvAHQAAKDxImkA5qC/JVsSAAFhaP8WAhdyAPIANQNhAPIA1wvhIm5nbGUAoKYpAAFjaQ4XEBd5AF9k5yJyYXJyAKD/JwAJRGFjZGVmZ2xtbm9wcXJzdHV4MRc4F0YXWxcyBF4XaRd5F40XrBe0F78X2RcVGCEYLRg1GEAYAAFEbzUXgRZvAPQA+BUAAWNzPBdCF3UAdABlADuA6QDpQPQhZXIAoG4qAAJhaW95TRdQF1YXWhfyIW9uG2FyAGOgViI7gOoA6kDsIW9uAKBVIk1kbwB0ABdhAAFEcmIXZhdvAHQAAKBSIgDgNdgi3XKhmipuF3QXYQB2AGUAO4DoAOhAZKCWKm8AdAAAoJgqgKGZKmlscwCAF4UXhxfuInRlcnMAoOcjAKATIWSglSpvAHQAAKCXKoABYXBzAJMXlheiF2MAcgATYXQAeQBzogUinxcAAAAAoRdlAHQAAKAFInAAMaADIDMBqRerFwCgBCAAoAUgAAFnc7AXsRdLYXAAAKACIAABZ3C4F7sXbwBuABlhZgAA4DXYVt2AAWFscwDFF8sXzxdyAHOg1SJsAACg4yl1AHMAAKBxKmkAAKG1A2x21RfYF28AbgC1Y/VjAAJjc3V24BfoF/0XEBgAAWlv5BdWF3IAYwAAoFYiaQLuFwAAAADwF+0ADQThIW50AAFnbPUX+Rd0AHIAAKCWKuUhc3MAoJUqgAFhZWkAAxgGGAoYbABzAD1gcwB0AACgXyJ2AESgYSJEAACgeCrwImFyc2wAoOUpAAFEYRkYHRhvAHQAAKBTInIAcgAAoHEpgAFjZGkAJxgqGO0XcgAAoC8hbwD0AIwCAAFhaDEYMhi3YzuA8ADwQAABbXI5GD0YbAA7gOsA60BvAACgrCCAAWNpcABGGEgYSxhsACFgcwD0ACwEAAFlb08YVxhjAHQAYQB0AGkAbwDuABoEbgBlAG4AdABpAGEAbADlADME4Ql1GAAAgRgAAIMYiBgAAAAAoRilGAAAqhgAALsYvhjRGAAA1xgnGWwAbABpAG4AZwBkAG8AdABzAGUA8QBlF3kARGRtImFsZQAAoEAmgAFpbHIAjRiRGJ0Y7CFpZwCgA/tpApcYAAAAAJoYZwAAoAD7aQBnAACgBPsA4DXYI93sIWlnAKAB++whaWcA4GYAagCAAWFsdACvGLIYthh0AACgbSZpAGcAAKAC+24AcwAAoLElbwBmAJJh8AHCGAAAxhhmAADgNdhX3QABYWvJGMwYbADsAGsEdqDUIgCg2SphI3J0aW50AACgDSoAAWFv2hgiGQABY3PeGB8ZsQPnGP0YBRkSGRUZAAAdGbID7xjyGPQY9xj5GAAA+xg7gL0AvUAAoFMhO4C8ALxAAKBVIQCgWSEAoFshswEBGQAAAxkAoFQhAKBWIbQCCxkOGQAAAAAQGTuAvgC+QACgVyEAoFwhNQAAoFghtgEZGQAAGxkAoFohAKBdITgAAKBeIWwAAKBEIHcAbgAAoCIjYwByAADgNdi73IAIRWFiY2RlZmdpamxub3JzdHYARhlKGVoZXhlmGWkZkhmWGZkZnRmgGa0ZxhnLGc8Z4BkjGmygZyIAoIwqgAFjbXAAUBlTGVgZ9SF0ZfVhbQBhAOSgswM6FgCghipyImV2ZQAfYQABaXliGWUZcgBjAB1hM2RvAHQAIWGAoWUibHFzAMYEcBl6GfGhZSLOBAAAdhlsAGEAbgD0AN8EgKF+KmNkbACBGYQZjBljAACgqSpvAHQAb6CAKmyggioAoIQqZeDbIgD+cwAAoJQqcgAA4DXYJN3noGsirATtIWVsAKA3IWMAeQBTZIChdyJFYWoApxmpGasZAKCSKgCgpSoAoKQqAAJFYWVztBm2Gb0ZwhkAoGkicABwoIoq8iFveACgiipxoIgq8aCIKrUZaQBtAACg5yJwAGYAAOA12FjdYQB2AOUAYwIAAWNp0xnWGXIAAKAKIW0AAKFzImVs3BneGQCgjioAoJAqAIM+ADtjZGxxco0E6xn0GfgZ/BkBGgABY2nvGfEZAKCnKnIAAKB6Km8AdAAAoNci0CFhcgCglSl1ImVzdAAAoHwqgAJhZGVscwAKGvQZFhrVBCAa8AEPGgAAFBpwAHIAbwD4AFkZcgAAoHgpcQAAAWxxxAQbGmwAZQBzAPMASRlpAO0A5AQAAWVuJxouGnIjdG5lcXEAAOBpIgD+xQAsGgAFQWFiY2Vma29zeUAaQxpmGmoabRqDGocalhrCGtMacgDyAMwCAAJpbG1yShpOGlAaVBpyAHMA8ABxD2YAvWBpAGwA9AASBQABZHJYGlsaYwB5AEpkAKGUIWN3YBpkGmkAcgAAoEgpAKCtIWEAcgAAoA8h6SFyYyVhgAFhbHIAcxp7Gn8a8iF0c3WgZSZpAHQAAKBlJuwhaXAAoCYg4yFvbgCguSJyAADgNdgl3XMAAAFld4wakRphInJvdwAAoCUpYSJyb3cAAKAmKYACYW1vcHIAnxqjGqcauhq+GnIAcgAAoP8h9CFodACgOyJrAAABbHKsGrMaZSRmdGFycm93AACgqSHpJGdodGFycm93AKCqIWYAAOA12Fnd4iFhcgCgFSCAAWNsdADIGswa0BpyAADgNdi93GEAcwDoAGka8iFvaydhAAFicNca2xr1IWxsAKBDIOghZW4AoBAg4Qr2GgAA/RoAAAgbExsaGwAAIRs7GwAAAAA+G2IbmRuVG6sbAACyG80b0htjAHUAdABlADuA7QDtQAChYyBpeQEbBhtyAGMAO4DuAO5AOGQAAWN4CxsNG3kANWRjAGwAO4ChAKFAAAFmcssCFhsA4DXYJt1yAGEAdgBlADuA7ADsQIChSCFpbm8AJxsyGzYbAAFpbisbLxtuAHQAAKAMKnQAAKAtIuYhaW4AoNwpdABhAACgKSHsIWlnM2GAAWFvcABDG1sbXhuAAWNndABJG0sbWRtyACthgAFlbHAAcQVRG1UbaQBuAOUAyAVhAHIA9AByBWgAMWFmAACgtyJlAGQAtWEAoggiY2ZvdGkbbRt1G3kb4SFyZQCgBSFpAG4AdKAeImkAZQAAoN0pZABvAPQAWxsAoisiY2VscIEbhRuPG5QbYQBsAACguiIAAWdyiRuNG2UAcgDzACMQ4wCCG2EicmhrAACgFyryIW9kAKA8KgACY2dwdJ8boRukG6gbeQBRZG8AbgAvYWYAAOA12FrdYQC5Y3UAZQBzAHQAO4C/AL9AAAFjabUbuRtyAADgNdi+3G4AAKIIIkVkc3bCG8QbyBvQAwCg+SJvAHQAAKD1Inag9CIAoPMiaaBiIOwhZGUpYesB1hsAANkbYwB5AFZkbAA7gO8A70AAA2NmbW9zdeYb7hvyG/Ub+hsFHAABaXnqG+0bcgBjADVhOWRyAADgNdgn3eEhdGg3YnAAZgAA4DXYW93jAf8bAAADHHIAAOA12L/c8iFjeVhk6yFjeVRkAARhY2ZnaGpvcxUcGhwiHCYcKhwtHDAcNRzwIXBhdqC6A/BjAAFleR4cIRzkIWlsN2E6ZHIAAOA12CjdciJlZW4AOGFjAHkARWRjAHkAXGRwAGYAAOA12FzdYwByAADgNdjA3IALQUJFSGFiY2RlZmdoamxtbm9wcnN0dXYAXhxtHHEcdRx5HN8cBx0dHTwd3B3tHfEdAR4EHh0eLB5FHrwewx7hHgkfPR9LH4ABYXJ0AGQcZxxpHHIA8gBvB/IAxQLhIWlsAKAbKeEhcnIAoA4pZ6BmIgCgiyphAHIAAKBiKWMJjRwAAJAcAACVHAAAAAAAAAAAAACZHJwcAACmHKgcrRwAANIc9SF0ZTph7SJwdHl2AKC0KXIAYQDuAFoG4iFkYbtjZwAAoegnZGyhHKMcAKCRKeUAiwYAoIUqdQBvADuAqwCrQHIAgKOQIWJmaGxwc3QAuhy/HMIcxBzHHMoczhxmoOQhcwAAoB8pcwAAoB0p6wCyGnAAAKCrIWwAAKA5KWkAbQAAoHMpbAAAoKIhAKGrKmFl1hzaHGkAbAAAoBkpc6CtKgDgrSoA/oABYWJyAOUc6RztHHIAcgAAoAwpcgBrAACgcicAAWFr8Rz4HGMAAAFla/Yc9xx7YFtgAAFlc/wc/hwAoIspbAAAAWR1Ax0FHQCgjykAoI0pAAJhZXV5Dh0RHRodHB3yIW9uPmEAAWRpFR0YHWkAbAA8YewAowbiAPccO2QAAmNxcnMkHScdLB05HWEAAKA2KXUAbwDyoBwgqhEAAWR1MB00HeghYXIAoGcpcyJoYXIAAKBLKWgAAKCyIQCiZCJmZ3FzRB1FB5Qdnh10AIACYWhscnQATh1WHWUdbB2NHXIicm93AHSgkCFhAOkAzxxhI3Jwb29uAAABZHVeHWId7yF3bgCgvSFwAACgvCHlJGZ0YXJyb3dzAKDHIWkiZ2h0AIABYWhzAHUdex2DHXIicm93APOglCGdBmEAcgBwAG8AbwBuAPMAzgtxAHUAaQBnAGEAcgByAG8A9wBlGugkcmVldGltZXMAoMsi8aFkIk0HAACaHWwAYQBuAPQAXgcAon0qY2Rnc6YdqR2xHbcdYwAAoKgqbwB0AG+gfypyoIEqAKCDKmXg2iIA/nMAAKCTKoACYWRlZ3MAwB3GHcod1h3ZHXAAcAByAG8A+ACmHG8AdAAAoNYicQAAAWdxzx3SHXQA8gBGB2cAdADyAHQcdADyAFMHaQDtAGMHgAFpbHIA4h3mHeod8yFodACgfClvAG8A8gDKBgDgNdgp3UWgdiIAoJEqYQH1Hf4dcgAAAWR1YB35HWygvCEAoGopbABrAACghCVjAHkAWWQAomoiYWNodAweDx4VHhkecgDyAGsdbwByAG4AZQDyAGAW4SFyZACgaylyAGkAAKD6JQABaW8hHiQe5CFvdEBh9SFzdGGgsCPjIWhlAKCwIwACRWFlczMeNR48HkEeAKBoInAAcKCJKvIhb3gAoIkqcaCHKvGghyo0HmkAbQAAoOYiAARhYm5vcHR3elIeXB5fHoUelh6mHqsetB4AAW5yVh5ZHmcAAKDsJ3IAAKD9IXIA6wCwBmcAgAFsbXIAZh52Hnse5SFmdAABYXKIB2weaQBnAGgAdABhAHIAcgBvAPcAkwfhInBzdG8AoPwnaQBnAGgAdABhAHIAcgBvAPcAmgdwI2Fycm93AAABbHKNHpEeZQBmAPQAxhxpImdodAAAoKwhgAFhZmwAnB6fHqIecgAAoIUpAOA12F3ddQBzAACgLSppIm1lcwAAoDQqYQGvHrMecwB0AACgFyLhAIoOZaHKJbkeRhLuIWdlAKDKJWEAcgBsoCgAdAAAoJMpgAJhY2htdADMHs8e1R7bHt0ecgDyAJ0GbwByAG4AZQDyANYWYQByAGSgyyEAoG0pAKAOIHIAaQAAoL8iAANhY2hpcXTrHu8e1QfzHv0eBh/xIXVvAKA5IHIAAOA12MHcbQDloXIi+h4AAPweAKCNKgCgjyoAAWJ19xwBH28AcqAYIACgGiDyIW9rQmEAhDwAO2NkaGlscXJCBhcfxh0gHyQfKB8sHzEfAAFjaRsfHR8AoKYqcgAAoHkqcgBlAOUAkx3tIWVzAKDJIuEhcnIAoHYpdSJlc3QAAKB7KgABUGk1HzkfYQByAACglillocMlAgdfEnIAAAFkdUIfRx9zImhhcgAAoEop6CFhcgCgZikAAWVuTx9WH3IjdG5lcXEAAOBoIgD+xQBUHwAHRGFjZGVmaGlsbm9wc3VuH3Ifoh+rH68ftx+7H74f5h/uH/MfBwj/HwsgxCFvdACgOiIAAmNscHJ5H30fiR+eH3IAO4CvAK9AAAFldIEfgx8AoEImZaAgJ3MAZQAAoCAnc6CmIXQAbwCAoaYhZGx1AJQfmB+cH28AdwDuAHkDZQBmAPQA6gbwAOkO6yFlcgCgriUAAW95ph+qH+0hbWEAoCkqPGThIXNoAKAUIOElc3VyZWRhbmdsZQCgISJyAADgNdgq3W8AAKAnIYABY2RuAMQfyR/bH3IAbwA7gLUAtUBhoiMi0B8AANMf1x9zAPQAKxFpAHIAAKDwKm8AdAA7gLcAt0B1AHMA4qESIh4TAADjH3WgOCIAoCoqYwHqH+0fcAAAoNsq8gB+GnAAbAB1APMACAgAAWRw9x/7H+UhbHMAoKciZgAA4DXYXt0AAWN0AyAHIHIAAOA12MLc8CFvcwCgPiJsobwDECAVIPQiaW1hcACguCJhAPAAEyAADEdMUlZhYmNkZWZnaGlqbG1vcHJzdHV2dzwgRyBmIG0geSCqILgg2iDeIBEhFSEyIUMhTSFQIZwhnyHSIQAiIyKLIrEivyIUIwABZ3RAIEMgAODZIjgD9uBrItIgBwmAAWVsdABNIF8gYiBmAHQAAAFhclMgWCByInJvdwAAoM0h6SRnaHRhcnJvdwCgziEA4NgiOAP24Goi0iBfCekkZ2h0YXJyb3cAoM8hAAFEZHEgdSDhIXNoAKCvIuEhc2gAoK4igAJiY25wdACCIIYgiSCNIKIgbABhAACgByL1IXRlRGFnAADgICLSIACiSSJFaW9wlSCYIJwgniAA4HAqOANkAADgSyI4A3MASWFyAG8A+AAyCnUAcgBhoG4mbADzoG4mmwjzAa8gAACzIHAAO4CgAKBAbQBwAOXgTiI4AyoJgAJhZW91eQDBIMogzSDWINkg8AHGIAAAyCAAoEMqbwBuAEhh5CFpbEZhbgBnAGSgRyJvAHQAAOBtKjgDcAAAoEIqPWThIXNoAKATIACjYCJBYWRxc3jpIO0g+SD+IAIhDCFyAHIAAKDXIXIAAAFocvIg9SBrAACgJClvoJch9wAGD28AdAAA4FAiOAN1AGkA9gC7CAABZWkGIQohYQByAACgKCntAN8I6SFzdPOgBCLlCHIAAOA12CvdAAJFZXN0/wgcISshLiHxoXEiIiEAABMJ8aFxIgAJAAAnIWwAYQBuAPQAEwlpAO0AGQlyoG8iAKBvIoABQWFwADghOyE/IXIA8gBeIHIAcgAAoK4hYQByAACg8ipzogsiSiEAAAAAxwtkoPwiAKD6ImMAeQBaZIADQUVhZGVzdABcIV8hYiFmIWkhkyGWIXIA8gBXIADgZiI4A3IAcgAAoJohcgAAoCUggKFwImZxcwBwIYQhjiF0AAABYXJ1IXohcgByAG8A9wBlIWkAZwBoAHQAYQByAHIAbwD3AD4h8aFwImAhAACKIWwAYQBuAPQAZwlz4H0qOAMAoG4iaQDtAG0JcqBuImkA5aDqIkUJaQDkADoKAAFwdKMhpyFmAADgNdhf3YCBrAA7aW4AriGvIcchrEBuAIChCSJFZHYAtyG6Ib8hAOD5IjgDbwB0AADg9SI4A+EB1gjEIcYhAKD3IgCg9iJpAHagDCLhAagJzyHRIQCg/iIAoP0igAFhb3IA2CHsIfEhcgCAoSYiYXN0AOAh5SHpIWwAbABlAOwAywhsAADg/SrlIADgAiI4A2wiaW50AACgFCrjoYAi9yEAAPohdQDlAJsJY+CvKjgDZaCAIvEAkwkAAkFhaXQHIgoiFyIeInIA8gBsIHIAcgAAoZshY3cRIhQiAOAzKTgDAOCdITgDZyRodGFycm93AACgmyFyAGkA5aDrIr4JgANjaGltcHF1AC8iPCJHIpwhTSJQIloigKGBImNlcgA2Iv0JOSJ1AOUABgoA4DXYw9zvIXJ0bQKdIQAAAABEImEAcgDhAOEhbQBloEEi8aBEIiYKYQDyAMsIcwB1AAABYnBWIlgi5QDUCeUA3wmAAWJjcABgInMieCKAoYQiRWVzAGci7glqIgDgxSo4A2UAdABl4IIi0iBxAPGgiCJoImMAZaCBIvEA/gmAoYUiRWVzAH8iFgqCIgDgxio4A2UAdABl4IMi0iBxAPGgiSKAIgACZ2lscpIilCKaIpwi7AAMCWwAZABlADuA8QDxQOcAWwlpI2FuZ2xlAAABbHKkIqoi5SFmdGWg6iLxAEUJaSJnaHQAZaDrIvEAvgltoL0DAKEjAGVzuCK8InIAbwAAoBYhcAAAoAcggARESGFkZ2lscnMAziLSItYi2iLeIugi7SICIw8j4SFzaACgrSLhIXJyAKAEKXAAAOBNItIg4SFzaACgrCIAAWV04iLlIgDgZSLSIADgPgDSIG4iZmluAACg3imAAUFldADzIvci+iJyAHIAAKACKQDgZCLSIHLgPADSIGkAZQAA4LQi0iAAAUF0BiMKI3IAcgAAoAMp8iFpZQDgtSLSIGkAbQAA4Dwi0iCAAUFhbgAaIx4jKiNyAHIAAKDWIXIAAAFociMjJiNrAACgIylvoJYh9wD/DuUhYXIAoCcpUxJqFAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVCMAAF4jaSN/I4IjjSOeI8AUAAAAAKYjwCMAANoj3yMAAO8jHiQvJD8kRCQAAWNzVyNsFHUAdABlADuA8wDzQAABaXlhI2cjcgBjoJoiO4D0APRAPmSAAmFiaW9zAHEjdCN3I3EBeiNzAOgAdhTsIWFjUWF2AACgOCrvIWxkAKC8KewhaWdTYQABY3KFI4kjaQByAACgvykA4DXYLN1vA5QjAAAAAJYjAACcI24A22JhAHYAZQA7gPIA8kAAoMEpAAFibaEjjAphAHIAAKC1KQACYWNpdKwjryO6I70jcgDyAFkUAAFpcrMjtiNyAACgvinvIXNzAKC7KW4A5QDZCgCgwCmAAWFlaQDFI8gjyyNjAHIATWFnAGEAyWOAAWNkbgDRI9Qj1iPyIW9uv2MAoLYpdQDzAHgBcABmAADgNdhg3YABYWVsAOQj5yPrI3IAAKC3KXIAcAAAoLkpdQDzAHwBAKMoImFkaW9zdvkj/CMPJBMkFiQbJHIA8gBeFIChXSplZm0AAyQJJAwkcgBvoDQhZgAAoDQhO4CqAKpAO4C6ALpA5yFvZgCgtiJyAACgVipsIm9wZQAAoFcqAKBbKoABY2xvACMkJSQrJPIACCRhAHMAaAA7gPgA+EBsAACgmCJpAGwBMyQ4JGQAZQA7gPUA9UBlAHMAYaCXInMAAKA2Km0AbAA7gPYA9kDiIWFyAKA9I+EKXiQAAHokAAB8JJQkAACYJKkkAAAAALUkEQsAAPAkAAAAAAQleiUAAIMlcgCAoSUiYXN0AGUkbyQBCwCBtgA7bGokayS2QGwAZQDsABgDaQJ1JAAAAAB4JG0AAKDzKgCg/Sp5AD9kcgCAAmNpbXB0AIUkiCSLJJkSjyRuAHQAJWBvAGQALmBpAGwAAKAwIOUhbmsAoDEgcgAA4DXYLd2AAWltbwCdJKAkpCR2oMYD1WNtAGEA9AD+B24AZQAAoA4m9KHAA64kAAC0JGMjaGZvcmsAAKDUItZjAAFhdbgkxCRuAAABY2u9JMIkawBooA8hAKAOIfYAaRpzAACkKwBhYmNkZW1zdNMkIRPXJNsk4STjJOck6yTjIWlyAKAjKmkAcgAAoCIqAAFvdYsW3yQAoCUqAKByKm4AO4CxALFAaQBtAACgJip3AG8AAKAnKoABaXB1APUk+iT+JO4idGludACgFSpmAADgNdhh3W4AZAA7gKMAo0CApHoiRWFjZWlub3N1ABMlFSUYJRslTCVRJVklSSV1JQCgsypwAACgtyp1AOUAPwtjoK8qgKJ6ImFjZW5zACclLSU0JTYlSSVwAHAAcgBvAPgAFyV1AHIAbAB5AGUA8QA/C/EAOAuAAWFlcwA8JUElRSXwInByb3gAoLkqcQBxAACgtSppAG0AAKDoImkA7QBEC20AZQDzoDIgIguAAUVhcwBDJVclRSXwAEAlgAFkZnAATwtfJXElgAFhbHMAZSVpJW0l7CFhcgCgLiPpIW5lAKASI/UhcmYAoBMjdKAdIu8AWQvyIWVsAKCwIgABY2l9JYElcgAA4DXYxdzIY24iY3NwAACgCCAAA2Zpb3BzdZElKxuVJZolnyWkJXIAAOA12C7dcABmAADgNdhi3XIiaW1lAACgVyBjAHIAAOA12MbcgAFhZW8AqiW6JcAldAAAAWVpryW2JXIAbgBpAG8AbgDzABkFbgB0AACgFipzAHQAZaA/APEACRj0AG0LgApBQkhhYmNkZWZoaWxtbm9wcnN0dXgA4yXyJfYl+iVpJpAmpia9JtUm5ib4JlonaCdxJ3UnnietJ7EnyCfiJ+cngAFhcnQA6SXsJe4lcgDyAJkM8gD6AuEhaWwAoBwpYQByAPIA3BVhAHIAAKBkKYADY2RlbnFydAAGJhAmEyYYJiYmKyZaJgABZXUKJg0mAOA9IjEDdABlAFVhaQDjACAN7SJwdHl2AKCzKWcAgKHpJ2RlbAAgJiImJCYAoJIpAKClKeUA9wt1AG8AO4C7ALtAcgAApZIhYWJjZmhscHN0dz0mQCZFJkcmSiZMJk4mUSZVJlgmcAAAoHUpZqDlIXMAAKAgKQCgMylzAACgHinrALka8ACVHmwAAKBFKWkAbQAAoHQpbAAAoKMhAKCdIQABYWleJmImaQBsAACgGilvAG6gNiJhAGwA8wB2C4ABYWJyAG8mciZ2JnIA8gAvEnIAawAAoHMnAAFha3omgSZjAAABZWt/JoAmfWBdYAABZXOFJocmAKCMKWwAAAFkdYwmjiYAoI4pAKCQKQACYWV1eZcmmiajJqUm8iFvbllhAAFkaZ4moSZpAGwAV2HsAA8M4gCAJkBkAAJjbHFzrSawJrUmuiZhAACgNylkImhhcgAAoGkpdQBvAPKgHSCjAWgAAKCzIYABYWNnAMMm0iaUC2wAgKEcIWlwcwDLJs4migxuAOUAoAxhAHIA9ADaC3QAAKCtJYABaWxyANsm3ybjJvMhaHQAoH0pbwBvAPIANgwA4DXYL90AAWFv6ib1JnIAAAFkde8m8SYAoMEhbKDAIQCgbCl2oMED8WOAAWducwD+Jk4nUCdoAHQAAANhaGxyc3QKJxInISc1Jz0nRydyInJvdwB0oJIhYQDpAFYmYSNycG9vbgAAAWR1GiceJ28AdwDuAPAmcAAAoMAh5SFmdAABYWgnJy0ncgByAG8AdwDzAAkMYQByAHAAbwBvAG4A8wATBGklZ2h0YXJyb3dzAACgySFxAHUAaQBnAGEAcgByAG8A9wBZJugkcmVldGltZXMAoMwiZwDaYmkAbgBnAGQAbwB0AHMAZQDxABwYgAFhaG0AYCdjJ2YncgDyAAkMYQDyABMEAKAPIG8idXN0AGGgsSPjIWhlAKCxI+0haWQAoO4qAAJhYnB0fCeGJ4knmScAAW5ygCeDJ2cAAKDtJ3IAAKD+IXIA6wAcDIABYWZsAI8nkieVJ3IAAKCGKQDgNdhj3XUAcwAAoC4qaSJtZXMAAKA1KgABYXCiJ6gncgBnoCkAdAAAoJQp7yJsaW50AKASKmEAcgDyADwnAAJhY2hxuCe8J6EMwCfxIXVvAKA6IHIAAOA12MfcAAFidYAmxCdvAPKgGSCoAYABaGlyAM4n0ifWJ3IAZQDlAE0n7SFlcwCgyiJpAIChuSVlZmwAXAxjEt4n9CFyaQCgzinsInVoYXIAoGgpAKAeIWENBSgJKA0oSyhVKIYoAACLKLAoAAAAAOMo5ygAABApJCkxKW0pcSmHKaYpAACYKgAAAACxKmMidXRlAFthcQB1AO8ABR+ApHsiRWFjZWlucHN5ABwoHignKCooLygyKEEoRihJKACgtCrwASMoAAAlKACguCpvAG4AYWF1AOUAgw1koLAqaQBsAF9hcgBjAF1hgAFFYXMAOCg6KD0oAKC2KnAAAKC6KmkAbQAAoOki7yJsaW50AKATKmkA7QCIDUFkbwB0AGKixSKRFgAAAABTKACgZiqAA0FhY21zdHgAYChkKG8ocyh1KHkogihyAHIAAKDYIXIAAAFocmkoayjrAJAab6CYIfcAzAd0ADuApwCnQGkAO2D3IWFyAKApKW0AAAFpbn4ozQBuAHUA8wDOAHQAAKA2J3IA7+A12DDdIxkAAmFjb3mRKJUonSisKHIAcAAAoG8mAAFoeZkonChjAHkASWRIZHIAdABtAqUoAAAAAKgoaQDkAFsPYQByAGEA7ABsJDuArQCtQAABZ22zKLsobQBhAAChwwNmdroouijCY4CjPCJkZWdsbnByAMgozCjPKNMo1yjaKN4obwB0AACgairxoEMiCw5FoJ4qAKCgKkWgnSoAoJ8qZQAAoEYi7CF1cwCgJCrhIXJyAKByKWEAcgDyAPwMAAJhZWl07Sj8KAEpCCkAAWxz8Sj4KGwAcwBlAHQAbQDpAH8oaABwAACgMyrwImFyc2wAoOQpAAFkbFoPBSllAACgIyNloKoqc6CsKgDgrCoA/oABZmxwABUpGCkfKfQhY3lMZGKgLwBhoMQpcgAAoD8jZgAA4DXYZN1hAAABZHIoKRcDZQBzAHWgYCZpAHQAAKBgJoABY3N1ADYpRilhKQABYXU6KUApcABzoJMiAOCTIgD+cABzoJQiAOCUIgD+dQAAAWJwSylWKQChjyJlcz4NUCllAHQAZaCPIvEAPw0AoZAiZXNIDVspZQB0AGWgkCLxAEkNAKGhJWFmZilbBHIAZQFrKVwEAKChJWEAcgDyAAMNAAJjZW10dyl7KX8pgilyAADgNdjI3HQAbQDuAM4AaQDsAAYpYQByAOYAVw0AAWFyiimOKXIA5qAGJhESAAFhbpIpoylpImdodAAAAWVwmSmgKXAAcwBpAGwAbwDuANkXaADpAKAkcwCvYIACYmNtbnAArin8KY4NJSooKgCkgiJFZGVtbnByc7wpvinCKcgpzCnUKdgp3CkAoMUqbwB0AACgvSpkoIYibwB0AACgwyr1IWx0AKDBKgABRWXQKdIpAKDLKgCgiiLsIXVzAKC/KuEhcnIAoHkpgAFlaXUA4inxKfQpdAAAoYIiZW7oKewpcQDxoIYivSllAHEA8aCKItEpbQAAoMcqAAFicPgp+ikAoNUqAKDTKmMAgKJ7ImFjZW5zAAcqDSoUKhYqRihwAHAAcgBvAPgAIyh1AHIAbAB5AGUA8QCDDfEAfA2AAWFlcwAcKiIqPShwAHAAcgBvAPgAPChxAPEAOShnAACgaiYApoMiMTIzRWRlaGxtbnBzPCo/KkIqRSpHKlIqWCpjKmcqaypzKncqO4C5ALlAO4CyALJAO4CzALNAAKDGKgABb3NLKk4qdAAAoL4qdQBiAACg2CpkoIcibwB0AACgxCpzAAABb3VdKmAqbAAAoMknYgAAoNcq4SFycgCgeyn1IWx0AKDCKgABRWVvKnEqAKDMKgCgiyLsIXVzAKDAKoABZWl1AH0qjCqPKnQAAKGDImVugyqHKnEA8aCHIkYqZQBxAPGgiyJwKm0AAKDIKgABYnCTKpUqAKDUKgCg1iqAAUFhbgCdKqEqrCpyAHIAAKDZIXIAAAFocqYqqCrrAJUab6CZIfcAxQf3IWFyAKAqKWwAaQBnADuA3wDfQOELzyrZKtwq6SrsKvEqAAD1KjQrAAAAAAAAAAAAAEwrbCsAAHErvSsAAAAAAADRK3IC1CoAAAAA2CrnIWV0AKAWI8RjcgDrAOUKgAFhZXkA4SrkKucq8iFvbmVh5CFpbGNhQmRvAPQAIg5sInJlYwAAoBUjcgAA4DXYMd0AAmVpa2/7KhIrKCsuK/IBACsAAAkrZQAAATRm6g0EK28AcgDlAOsNYQBzorgDECsAAAAAEit5AG0A0WMAAWNuFislK2sAAAFhcxsrIStwAHAAcgBvAPgAFw5pAG0AAKA8InMA8AD9DQABYXMsKyEr8AAXDnIAbgA7gP4A/kDsATgrOyswG2QA5QBnAmUAcwCAgdcAO2JkAEMrRCtJK9dAYaCgInIAAKAxKgCgMCqAAWVwcwBRK1MraSvhAAkh4qKkIlsrXysAAAAAYytvAHQAAKA2I2kAcgAAoPEqb+A12GXdcgBrAACg2irhAHgociJpbWUAAKA0IIABYWlwAHYreSu3K2QA5QC+DYADYWRlbXBzdACFK6MrmiunK6wrsCuzK24iZ2xlAACitSVkbHFykCuUK5ornCvvIXduAKC/JeUhZnRloMMl8QACBwCgXCJpImdodABloLkl8QBdDG8AdAAAoOwlaSJudXMAAKA6KuwhdXMAoDkqYgAAoM0p6SFtZQCgOyrlInppdW0AoOIjgAFjaHQAwivKK80rAAFyecYrySsA4DXYydxGZGMAeQBbZPIhb2tnYQABaW/UK9creAD0ANERaCJlYWQAAAFsct4r5ytlAGYAdABhAHIAcgBvAPcAXQbpJGdodGFycm93AKCgIQAJQUhhYmNkZmdobG1vcHJzdHV3CiwNLBEsHSwnLDEsQCxLLFIsYix6LIQsjyzLLOgs7Sz/LAotcgDyAAkDYQByAACgYykAAWNyFSwbLHUAdABlADuA+gD6QPIACQ1yAOMBIywAACUseQBeZHYAZQBtYQABaXkrLDAscgBjADuA+wD7QENkgAFhYmgANyw6LD0scgDyANEO7CFhY3FhYQDyAOAOAAFpckQsSCzzIWh0AKB+KQDgNdgy3XIAYQB2AGUAO4D5APlAYQFWLF8scgAAAWxyWixcLACgvyEAoL4hbABrAACggCUAAWN0Zix2LG8CbCwAAAAAcyxyAG4AZaAcI3IAAKAcI28AcAAAoA8jcgBpAACg+CUAAWFsfiyBLGMAcgBrYTuAqACoQAABZ3CILIssbwBuAHNhZgAA4DXYZt0AA2FkaGxzdZksniynLLgsuyzFLHIAcgBvAPcACQ1vAHcAbgBhAHIAcgBvAPcA2A5hI3Jwb29uAAABbHKvLLMsZQBmAPQAWyxpAGcAaAD0AF0sdQDzAKYOaQAAocUDaGzBLMIs0mNvAG4AxWPwI2Fycm93cwCgyCGAAWNpdADRLOEs5CxvAtcsAAAAAN4scgBuAGWgHSNyAACgHSNvAHAAAKAOI24AZwBvYXIAaQAAoPklYwByAADgNdjK3IABZGlyAPMs9yz6LG8AdAAAoPAi7CFkZWlhaQBmoLUlAKC0JQABYW0DLQYtcgDyAMosbAA7gPwA/EDhIm5nbGUAoKcpgAdBQkRhY2RlZmxub3Byc3oAJy0qLTAtNC2bLZ0toS2/LcMtxy3TLdgt3C3gLfwtcgDyABADYQByAHag6CoAoOkqYQBzAOgA/gIAAW5yOC08LechcnQAoJwpgANla25wcnN0AJkpSC1NLVQtXi1iLYItYQBwAHAA4QAaHG8AdABoAGkAbgDnAKEXgAFoaXIAoSmzJFotbwBwAPQAdCVooJUh7wD4JgABaXVmLWotZwBtAOEAuygAAWJwbi14LXMjZXRuZXEAceCKIgD+AODLKgD+cyNldG5lcQBx4IsiAP4A4MwqAP4AAWhyhi2KLWUAdADhABIraSNhbmdsZQAAAWxyki2WLeUhZnQAoLIiaSJnaHQAAKCzInkAMmThIXNoAKCiIoABZWxyAKcttC24LWKiKCKuLQAAAACyLWEAcgAAoLsicQAAoFoi7CFpcACg7iIAAWJ0vC1eD2EA8gBfD3IAAOA12DPddAByAOkAlS1zAHUAAAFicM0t0C0A4IIi0iAA4IMi0iBwAGYAAOA12GfdcgBvAPAAWQt0AHIA6QCaLQABY3XkLegtcgAA4DXYy9wAAWJw7C30LW4AAAFFZXUt8S0A4IoiAP5uAAABRWV/LfktAOCLIgD+6SJnemFnAKCaKYADY2Vmb3BycwANLhAuJS4pLiMuLi40LukhcmN1YQABZGkULiEuAAFiZxguHC5hAHIAAKBfKmUAcaAnIgCgWSLlIXJwAKAYIXIAAOA12DTdcABmAADgNdho3WWgQCJhAHQA6ABqD2MAcgAA4DXYzNzjCuQRUC4AAFQuAABYLmIuAAAAAGMubS5wLnQuAAAAAIguki4AAJouJxIqEnQAcgDpAB0ScgAA4DXYNd0AAUFhWy5eLnIA8gDnAnIA8gCTB75jAAFBYWYuaS5yAPIA4AJyAPIAjAdhAPAAeh5pAHMAAKD7IoABZHB0APgReS6DLgABZmx9LoAuAOA12GnddQDzAP8RaQBtAOUABBIAAUFhiy6OLnIA8gDuAnIA8gCaBwABY3GVLgoScgAA4DXYzdwAAXB0nS6hLmwAdQDzACUScgDpACASAARhY2VmaW9zdbEuvC7ELsguzC7PLtQu2S5jAAABdXm2LrsudABlADuA/QD9QE9kAAFpecAuwy5yAGMAd2FLZG4AO4ClAKVAcgAA4DXYNt1jAHkAV2RwAGYAAOA12GrdYwByAADgNdjO3AABY23dLt8ueQBOZGwAO4D/AP9AAAVhY2RlZmhpb3N38y73Lv8uAi8MLxAvEy8YLx0vIi9jInV0ZQB6YQABYXn7Lv4u8iFvbn5hN2RvAHQAfGEAAWV0Bi8KL3QAcgDmAB8QYQC2Y3IAAOA12DfdYwB5ADZk5yJyYXJyAKDdIXAAZgAA4DXYa91jAHIAAOA12M/cAAFqbiYvKC8AoA0gagAAoAwg");
   }
 });
-
-// node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/generated/decode-data-xml.js
 var require_decode_data_xml = __commonJS({
   "node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/generated/decode-data-xml.js"(exports) {
     "use strict";
@@ -40951,8 +41524,6 @@ var require_decode_data_xml = __commonJS({
     exports.xmlDecodeTree = (0, decode_shared_js_1.decodeBase64)("AAJhZ2xxBwARABMAFQBtAg0AAAAAAA8AcAAmYG8AcwAnYHQAPmB0ADxg9SFvdCJg");
   }
 });
-
-// node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/internal/bin-trie-flags.js
 var require_bin_trie_flags = __commonJS({
   "node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/internal/bin-trie-flags.js"(exports) {
     "use strict";
@@ -40967,8 +41538,6 @@ var require_bin_trie_flags = __commonJS({
     })(BinTrieFlags || (exports.BinTrieFlags = BinTrieFlags = {}));
   }
 });
-
-// node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/decode.js
 var require_decode = __commonJS({
   "node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/decode.js"(exports) {
     "use strict";
@@ -41003,18 +41572,22 @@ var require_decode = __commonJS({
       return code >= CharCodes.ZERO && code <= CharCodes.NINE;
     }
     __name(isNumber, "isNumber");
+    __name2(isNumber, "isNumber");
     function isHexadecimalCharacter(code) {
       return code >= CharCodes.UPPER_A && code <= CharCodes.UPPER_F || code >= CharCodes.LOWER_A && code <= CharCodes.LOWER_F;
     }
     __name(isHexadecimalCharacter, "isHexadecimalCharacter");
+    __name2(isHexadecimalCharacter, "isHexadecimalCharacter");
     function isAsciiAlphaNumeric(code) {
       return code >= CharCodes.UPPER_A && code <= CharCodes.UPPER_Z || code >= CharCodes.LOWER_A && code <= CharCodes.LOWER_Z || isNumber(code);
     }
     __name(isAsciiAlphaNumeric, "isAsciiAlphaNumeric");
+    __name2(isAsciiAlphaNumeric, "isAsciiAlphaNumeric");
     function isEntityInAttributeInvalidEnd(code) {
       return code === CharCodes.EQUALS || isAsciiAlphaNumeric(code);
     }
     __name(isEntityInAttributeInvalidEnd, "isEntityInAttributeInvalidEnd");
+    __name2(isEntityInAttributeInvalidEnd, "isEntityInAttributeInvalidEnd");
     var EntityDecoderState;
     (function(EntityDecoderState2) {
       EntityDecoderState2[EntityDecoderState2["EntityStart"] = 0] = "EntityStart";
@@ -41032,6 +41605,9 @@ var require_decode = __commonJS({
     var EntityDecoder = class {
       static {
         __name(this, "EntityDecoder");
+      }
+      static {
+        __name2(this, "EntityDecoder");
       }
       constructor(decodeTree, emitCodePoint, errors) {
         this.decodeTree = decodeTree;
@@ -41329,7 +41905,7 @@ var require_decode = __commonJS({
     function getDecoder(decodeTree) {
       let returnValue = "";
       const decoder = new EntityDecoder(decodeTree, (data) => returnValue += (0, decode_codepoint_js_1.fromCodePoint)(data));
-      return /* @__PURE__ */ __name(function decodeWithTrie(input, decodeMode) {
+      return /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function decodeWithTrie(input, decodeMode) {
         let lastIndex = 0;
         let offset = 0;
         while ((offset = input.indexOf("&", offset)) >= 0) {
@@ -41350,9 +41926,10 @@ var require_decode = __commonJS({
         const result = returnValue + input.slice(lastIndex);
         returnValue = "";
         return result;
-      }, "decodeWithTrie");
+      }, "decodeWithTrie"), "decodeWithTrie");
     }
     __name(getDecoder, "getDecoder");
+    __name2(getDecoder, "getDecoder");
     function determineBranch(decodeTree, current, nodeIndex, char) {
       const branchCount = (current & bin_trie_flags_js_1.BinTrieFlags.BRANCH_LENGTH) >> 7;
       const jumpOffset = current & bin_trie_flags_js_1.BinTrieFlags.JUMP_TABLE;
@@ -41382,46 +41959,49 @@ var require_decode = __commonJS({
       return -1;
     }
     __name(determineBranch, "determineBranch");
+    __name2(determineBranch, "determineBranch");
     var htmlDecoder = /* @__PURE__ */ getDecoder(decode_data_html_js_1.htmlDecodeTree);
     var xmlDecoder = /* @__PURE__ */ getDecoder(decode_data_xml_js_1.xmlDecodeTree);
     function decodeHTML(htmlString, mode = DecodingMode.Legacy) {
       return htmlDecoder(htmlString, mode);
     }
     __name(decodeHTML, "decodeHTML");
+    __name2(decodeHTML, "decodeHTML");
     function decodeHTMLAttribute(htmlAttribute) {
       return htmlDecoder(htmlAttribute, DecodingMode.Attribute);
     }
     __name(decodeHTMLAttribute, "decodeHTMLAttribute");
+    __name2(decodeHTMLAttribute, "decodeHTMLAttribute");
     function decodeHTMLStrict(htmlString) {
       return htmlDecoder(htmlString, DecodingMode.Strict);
     }
     __name(decodeHTMLStrict, "decodeHTMLStrict");
+    __name2(decodeHTMLStrict, "decodeHTMLStrict");
     function decodeXML(xmlString) {
       return xmlDecoder(xmlString, DecodingMode.Strict);
     }
     __name(decodeXML, "decodeXML");
+    __name2(decodeXML, "decodeXML");
     var decode_codepoint_js_2 = require_decode_codepoint();
-    Object.defineProperty(exports, "decodeCodePoint", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeCodePoint", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_codepoint_js_2.decodeCodePoint;
     }, "get") });
-    Object.defineProperty(exports, "fromCodePoint", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "fromCodePoint", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_codepoint_js_2.fromCodePoint;
     }, "get") });
-    Object.defineProperty(exports, "replaceCodePoint", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "replaceCodePoint", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_codepoint_js_2.replaceCodePoint;
     }, "get") });
     var decode_data_html_js_2 = require_decode_data_html();
-    Object.defineProperty(exports, "htmlDecodeTree", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "htmlDecodeTree", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_data_html_js_2.htmlDecodeTree;
     }, "get") });
     var decode_data_xml_js_2 = require_decode_data_xml();
-    Object.defineProperty(exports, "xmlDecodeTree", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "xmlDecodeTree", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_data_xml_js_2.xmlDecodeTree;
     }, "get") });
   }
 });
-
-// node_modules/.pnpm/htmlparser2@10.1.0/node_modules/htmlparser2/dist/commonjs/Tokenizer.js
 var require_Tokenizer = __commonJS({
   "node_modules/.pnpm/htmlparser2@10.1.0/node_modules/htmlparser2/dist/commonjs/Tokenizer.js"(exports) {
     "use strict";
@@ -41491,14 +42071,17 @@ var require_Tokenizer = __commonJS({
       return c === CharCodes.Space || c === CharCodes.NewLine || c === CharCodes.Tab || c === CharCodes.FormFeed || c === CharCodes.CarriageReturn;
     }
     __name(isWhitespace, "isWhitespace");
+    __name2(isWhitespace, "isWhitespace");
     function isEndOfTagSection(c) {
       return c === CharCodes.Slash || c === CharCodes.Gt || isWhitespace(c);
     }
     __name(isEndOfTagSection, "isEndOfTagSection");
+    __name2(isEndOfTagSection, "isEndOfTagSection");
     function isASCIIAlpha(c) {
       return c >= CharCodes.LowerA && c <= CharCodes.LowerZ || c >= CharCodes.UpperA && c <= CharCodes.UpperZ;
     }
     __name(isASCIIAlpha, "isASCIIAlpha");
+    __name2(isASCIIAlpha, "isASCIIAlpha");
     var QuoteType;
     (function(QuoteType2) {
       QuoteType2[QuoteType2["NoValue"] = 0] = "NoValue";
@@ -41538,6 +42121,9 @@ var require_Tokenizer = __commonJS({
     var Tokenizer = class {
       static {
         __name(this, "Tokenizer");
+      }
+      static {
+        __name2(this, "Tokenizer");
       }
       constructor({ xmlMode = false, decodeEntities = true }, cbs) {
         this.cbs = cbs;
@@ -42140,8 +42726,6 @@ var require_Tokenizer = __commonJS({
     exports.default = Tokenizer;
   }
 });
-
-// node_modules/.pnpm/htmlparser2@10.1.0/node_modules/htmlparser2/dist/commonjs/Parser.js
 var require_Parser = __commonJS({
   "node_modules/.pnpm/htmlparser2@10.1.0/node_modules/htmlparser2/dist/commonjs/Parser.js"(exports) {
     "use strict";
@@ -42149,7 +42733,7 @@ var require_Parser = __commonJS({
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: /* @__PURE__ */ __name(function() {
+        desc = { enumerable: true, get: /* @__PURE__ */ __name2(function() {
           return m[k];
         }, "get") };
       }
@@ -42164,7 +42748,7 @@ var require_Parser = __commonJS({
       o["default"] = v;
     });
     var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
-      var ownKeys = /* @__PURE__ */ __name(function(o) {
+      var ownKeys = /* @__PURE__ */ __name2(function(o) {
         ownKeys = Object.getOwnPropertyNames || function(o2) {
           var ar = [];
           for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
@@ -42285,6 +42869,9 @@ var require_Parser = __commonJS({
     var Parser = class {
       static {
         __name(this, "Parser");
+      }
+      static {
+        __name2(this, "Parser");
       }
       constructor(cbs, options = {}) {
         var _a, _b, _c, _d, _e, _f;
@@ -42638,8 +43225,6 @@ var require_Parser = __commonJS({
     exports.Parser = Parser;
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/generated/decode-data-html.js
 var require_decode_data_html2 = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/generated/decode-data-html.js"(exports) {
     "use strict";
@@ -42652,8 +43237,6 @@ var require_decode_data_html2 = __commonJS({
     );
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/generated/decode-data-xml.js
 var require_decode_data_xml2 = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/generated/decode-data-xml.js"(exports) {
     "use strict";
@@ -42666,8 +43249,6 @@ var require_decode_data_xml2 = __commonJS({
     );
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/decode_codepoint.js
 var require_decode_codepoint2 = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/decode_codepoint.js"(exports) {
     "use strict";
@@ -42724,16 +43305,16 @@ var require_decode_codepoint2 = __commonJS({
       return (_a2 = decodeMap.get(codePoint)) !== null && _a2 !== void 0 ? _a2 : codePoint;
     }
     __name(replaceCodePoint, "replaceCodePoint");
+    __name2(replaceCodePoint, "replaceCodePoint");
     exports.replaceCodePoint = replaceCodePoint;
     function decodeCodePoint(codePoint) {
       return (0, exports.fromCodePoint)(replaceCodePoint(codePoint));
     }
     __name(decodeCodePoint, "decodeCodePoint");
+    __name2(decodeCodePoint, "decodeCodePoint");
     exports.default = decodeCodePoint;
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/decode.js
 var require_decode2 = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/decode.js"(exports) {
     "use strict";
@@ -42741,7 +43322,7 @@ var require_decode2 = __commonJS({
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: /* @__PURE__ */ __name(function() {
+        desc = { enumerable: true, get: /* @__PURE__ */ __name2(function() {
           return m[k];
         }, "get") };
       }
@@ -42776,10 +43357,10 @@ var require_decode2 = __commonJS({
     var decode_codepoint_js_1 = __importStar(require_decode_codepoint2());
     exports.decodeCodePoint = decode_codepoint_js_1.default;
     var decode_codepoint_js_2 = require_decode_codepoint2();
-    Object.defineProperty(exports, "replaceCodePoint", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "replaceCodePoint", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_codepoint_js_2.replaceCodePoint;
     }, "get") });
-    Object.defineProperty(exports, "fromCodePoint", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "fromCodePoint", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_codepoint_js_2.fromCodePoint;
     }, "get") });
     var CharCodes;
@@ -42808,18 +43389,22 @@ var require_decode2 = __commonJS({
       return code >= CharCodes.ZERO && code <= CharCodes.NINE;
     }
     __name(isNumber, "isNumber");
+    __name2(isNumber, "isNumber");
     function isHexadecimalCharacter(code) {
       return code >= CharCodes.UPPER_A && code <= CharCodes.UPPER_F || code >= CharCodes.LOWER_A && code <= CharCodes.LOWER_F;
     }
     __name(isHexadecimalCharacter, "isHexadecimalCharacter");
+    __name2(isHexadecimalCharacter, "isHexadecimalCharacter");
     function isAsciiAlphaNumeric(code) {
       return code >= CharCodes.UPPER_A && code <= CharCodes.UPPER_Z || code >= CharCodes.LOWER_A && code <= CharCodes.LOWER_Z || isNumber(code);
     }
     __name(isAsciiAlphaNumeric, "isAsciiAlphaNumeric");
+    __name2(isAsciiAlphaNumeric, "isAsciiAlphaNumeric");
     function isEntityInAttributeInvalidEnd(code) {
       return code === CharCodes.EQUALS || isAsciiAlphaNumeric(code);
     }
     __name(isEntityInAttributeInvalidEnd, "isEntityInAttributeInvalidEnd");
+    __name2(isEntityInAttributeInvalidEnd, "isEntityInAttributeInvalidEnd");
     var EntityDecoderState;
     (function(EntityDecoderState2) {
       EntityDecoderState2[EntityDecoderState2["EntityStart"] = 0] = "EntityStart";
@@ -42848,7 +43433,8 @@ var require_decode2 = __commonJS({
           this.excess = 1;
           this.decodeMode = DecodingMode.Strict;
         }
-        __name(EntityDecoder2, "EntityDecoder");
+        __name(EntityDecoder2, "EntityDecoder2");
+        __name2(EntityDecoder2, "EntityDecoder");
         EntityDecoder2.prototype.startEntity = function(decodeMode) {
           this.decodeMode = decodeMode;
           this.state = EntityDecoderState.EntityStart;
@@ -43024,7 +43610,7 @@ var require_decode2 = __commonJS({
       var decoder = new EntityDecoder(decodeTree, function(str) {
         return ret += (0, decode_codepoint_js_1.fromCodePoint)(str);
       });
-      return /* @__PURE__ */ __name(function decodeWithTrie(str, decodeMode) {
+      return /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function decodeWithTrie(str, decodeMode) {
         var lastIndex = 0;
         var offset = 0;
         while ((offset = str.indexOf("&", offset)) >= 0) {
@@ -43045,9 +43631,10 @@ var require_decode2 = __commonJS({
         var result = ret + str.slice(lastIndex);
         ret = "";
         return result;
-      }, "decodeWithTrie");
+      }, "decodeWithTrie"), "decodeWithTrie");
     }
     __name(getDecoder, "getDecoder");
+    __name2(getDecoder, "getDecoder");
     function determineBranch(decodeTree, current, nodeIdx, char) {
       var branchCount = (current & BinTrieFlags.BRANCH_LENGTH) >> 7;
       var jumpOffset = current & BinTrieFlags.JUMP_TABLE;
@@ -43074,6 +43661,7 @@ var require_decode2 = __commonJS({
       return -1;
     }
     __name(determineBranch, "determineBranch");
+    __name2(determineBranch, "determineBranch");
     exports.determineBranch = determineBranch;
     var htmlDecoder = getDecoder(decode_data_html_js_1.default);
     var xmlDecoder = getDecoder(decode_data_xml_js_1.default);
@@ -43084,26 +43672,28 @@ var require_decode2 = __commonJS({
       return htmlDecoder(str, mode);
     }
     __name(decodeHTML, "decodeHTML");
+    __name2(decodeHTML, "decodeHTML");
     exports.decodeHTML = decodeHTML;
     function decodeHTMLAttribute(str) {
       return htmlDecoder(str, DecodingMode.Attribute);
     }
     __name(decodeHTMLAttribute, "decodeHTMLAttribute");
+    __name2(decodeHTMLAttribute, "decodeHTMLAttribute");
     exports.decodeHTMLAttribute = decodeHTMLAttribute;
     function decodeHTMLStrict(str) {
       return htmlDecoder(str, DecodingMode.Strict);
     }
     __name(decodeHTMLStrict, "decodeHTMLStrict");
+    __name2(decodeHTMLStrict, "decodeHTMLStrict");
     exports.decodeHTMLStrict = decodeHTMLStrict;
     function decodeXML(str) {
       return xmlDecoder(str, DecodingMode.Strict);
     }
     __name(decodeXML, "decodeXML");
+    __name2(decodeXML, "decodeXML");
     exports.decodeXML = decodeXML;
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/generated/encode-html.js
 var require_encode_html = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/generated/encode-html.js"(exports) {
     "use strict";
@@ -43115,11 +43705,10 @@ var require_encode_html = __commonJS({
       return arr;
     }
     __name(restoreDiff, "restoreDiff");
+    __name2(restoreDiff, "restoreDiff");
     exports.default = new Map(/* @__PURE__ */ restoreDiff([[9, "&Tab;"], [0, "&NewLine;"], [22, "&excl;"], [0, "&quot;"], [0, "&num;"], [0, "&dollar;"], [0, "&percnt;"], [0, "&amp;"], [0, "&apos;"], [0, "&lpar;"], [0, "&rpar;"], [0, "&ast;"], [0, "&plus;"], [0, "&comma;"], [1, "&period;"], [0, "&sol;"], [10, "&colon;"], [0, "&semi;"], [0, { v: "&lt;", n: 8402, o: "&nvlt;" }], [0, { v: "&equals;", n: 8421, o: "&bne;" }], [0, { v: "&gt;", n: 8402, o: "&nvgt;" }], [0, "&quest;"], [0, "&commat;"], [26, "&lbrack;"], [0, "&bsol;"], [0, "&rbrack;"], [0, "&Hat;"], [0, "&lowbar;"], [0, "&DiacriticalGrave;"], [5, { n: 106, o: "&fjlig;" }], [20, "&lbrace;"], [0, "&verbar;"], [0, "&rbrace;"], [34, "&nbsp;"], [0, "&iexcl;"], [0, "&cent;"], [0, "&pound;"], [0, "&curren;"], [0, "&yen;"], [0, "&brvbar;"], [0, "&sect;"], [0, "&die;"], [0, "&copy;"], [0, "&ordf;"], [0, "&laquo;"], [0, "&not;"], [0, "&shy;"], [0, "&circledR;"], [0, "&macr;"], [0, "&deg;"], [0, "&PlusMinus;"], [0, "&sup2;"], [0, "&sup3;"], [0, "&acute;"], [0, "&micro;"], [0, "&para;"], [0, "&centerdot;"], [0, "&cedil;"], [0, "&sup1;"], [0, "&ordm;"], [0, "&raquo;"], [0, "&frac14;"], [0, "&frac12;"], [0, "&frac34;"], [0, "&iquest;"], [0, "&Agrave;"], [0, "&Aacute;"], [0, "&Acirc;"], [0, "&Atilde;"], [0, "&Auml;"], [0, "&angst;"], [0, "&AElig;"], [0, "&Ccedil;"], [0, "&Egrave;"], [0, "&Eacute;"], [0, "&Ecirc;"], [0, "&Euml;"], [0, "&Igrave;"], [0, "&Iacute;"], [0, "&Icirc;"], [0, "&Iuml;"], [0, "&ETH;"], [0, "&Ntilde;"], [0, "&Ograve;"], [0, "&Oacute;"], [0, "&Ocirc;"], [0, "&Otilde;"], [0, "&Ouml;"], [0, "&times;"], [0, "&Oslash;"], [0, "&Ugrave;"], [0, "&Uacute;"], [0, "&Ucirc;"], [0, "&Uuml;"], [0, "&Yacute;"], [0, "&THORN;"], [0, "&szlig;"], [0, "&agrave;"], [0, "&aacute;"], [0, "&acirc;"], [0, "&atilde;"], [0, "&auml;"], [0, "&aring;"], [0, "&aelig;"], [0, "&ccedil;"], [0, "&egrave;"], [0, "&eacute;"], [0, "&ecirc;"], [0, "&euml;"], [0, "&igrave;"], [0, "&iacute;"], [0, "&icirc;"], [0, "&iuml;"], [0, "&eth;"], [0, "&ntilde;"], [0, "&ograve;"], [0, "&oacute;"], [0, "&ocirc;"], [0, "&otilde;"], [0, "&ouml;"], [0, "&div;"], [0, "&oslash;"], [0, "&ugrave;"], [0, "&uacute;"], [0, "&ucirc;"], [0, "&uuml;"], [0, "&yacute;"], [0, "&thorn;"], [0, "&yuml;"], [0, "&Amacr;"], [0, "&amacr;"], [0, "&Abreve;"], [0, "&abreve;"], [0, "&Aogon;"], [0, "&aogon;"], [0, "&Cacute;"], [0, "&cacute;"], [0, "&Ccirc;"], [0, "&ccirc;"], [0, "&Cdot;"], [0, "&cdot;"], [0, "&Ccaron;"], [0, "&ccaron;"], [0, "&Dcaron;"], [0, "&dcaron;"], [0, "&Dstrok;"], [0, "&dstrok;"], [0, "&Emacr;"], [0, "&emacr;"], [2, "&Edot;"], [0, "&edot;"], [0, "&Eogon;"], [0, "&eogon;"], [0, "&Ecaron;"], [0, "&ecaron;"], [0, "&Gcirc;"], [0, "&gcirc;"], [0, "&Gbreve;"], [0, "&gbreve;"], [0, "&Gdot;"], [0, "&gdot;"], [0, "&Gcedil;"], [1, "&Hcirc;"], [0, "&hcirc;"], [0, "&Hstrok;"], [0, "&hstrok;"], [0, "&Itilde;"], [0, "&itilde;"], [0, "&Imacr;"], [0, "&imacr;"], [2, "&Iogon;"], [0, "&iogon;"], [0, "&Idot;"], [0, "&imath;"], [0, "&IJlig;"], [0, "&ijlig;"], [0, "&Jcirc;"], [0, "&jcirc;"], [0, "&Kcedil;"], [0, "&kcedil;"], [0, "&kgreen;"], [0, "&Lacute;"], [0, "&lacute;"], [0, "&Lcedil;"], [0, "&lcedil;"], [0, "&Lcaron;"], [0, "&lcaron;"], [0, "&Lmidot;"], [0, "&lmidot;"], [0, "&Lstrok;"], [0, "&lstrok;"], [0, "&Nacute;"], [0, "&nacute;"], [0, "&Ncedil;"], [0, "&ncedil;"], [0, "&Ncaron;"], [0, "&ncaron;"], [0, "&napos;"], [0, "&ENG;"], [0, "&eng;"], [0, "&Omacr;"], [0, "&omacr;"], [2, "&Odblac;"], [0, "&odblac;"], [0, "&OElig;"], [0, "&oelig;"], [0, "&Racute;"], [0, "&racute;"], [0, "&Rcedil;"], [0, "&rcedil;"], [0, "&Rcaron;"], [0, "&rcaron;"], [0, "&Sacute;"], [0, "&sacute;"], [0, "&Scirc;"], [0, "&scirc;"], [0, "&Scedil;"], [0, "&scedil;"], [0, "&Scaron;"], [0, "&scaron;"], [0, "&Tcedil;"], [0, "&tcedil;"], [0, "&Tcaron;"], [0, "&tcaron;"], [0, "&Tstrok;"], [0, "&tstrok;"], [0, "&Utilde;"], [0, "&utilde;"], [0, "&Umacr;"], [0, "&umacr;"], [0, "&Ubreve;"], [0, "&ubreve;"], [0, "&Uring;"], [0, "&uring;"], [0, "&Udblac;"], [0, "&udblac;"], [0, "&Uogon;"], [0, "&uogon;"], [0, "&Wcirc;"], [0, "&wcirc;"], [0, "&Ycirc;"], [0, "&ycirc;"], [0, "&Yuml;"], [0, "&Zacute;"], [0, "&zacute;"], [0, "&Zdot;"], [0, "&zdot;"], [0, "&Zcaron;"], [0, "&zcaron;"], [19, "&fnof;"], [34, "&imped;"], [63, "&gacute;"], [65, "&jmath;"], [142, "&circ;"], [0, "&caron;"], [16, "&breve;"], [0, "&DiacriticalDot;"], [0, "&ring;"], [0, "&ogon;"], [0, "&DiacriticalTilde;"], [0, "&dblac;"], [51, "&DownBreve;"], [127, "&Alpha;"], [0, "&Beta;"], [0, "&Gamma;"], [0, "&Delta;"], [0, "&Epsilon;"], [0, "&Zeta;"], [0, "&Eta;"], [0, "&Theta;"], [0, "&Iota;"], [0, "&Kappa;"], [0, "&Lambda;"], [0, "&Mu;"], [0, "&Nu;"], [0, "&Xi;"], [0, "&Omicron;"], [0, "&Pi;"], [0, "&Rho;"], [1, "&Sigma;"], [0, "&Tau;"], [0, "&Upsilon;"], [0, "&Phi;"], [0, "&Chi;"], [0, "&Psi;"], [0, "&ohm;"], [7, "&alpha;"], [0, "&beta;"], [0, "&gamma;"], [0, "&delta;"], [0, "&epsi;"], [0, "&zeta;"], [0, "&eta;"], [0, "&theta;"], [0, "&iota;"], [0, "&kappa;"], [0, "&lambda;"], [0, "&mu;"], [0, "&nu;"], [0, "&xi;"], [0, "&omicron;"], [0, "&pi;"], [0, "&rho;"], [0, "&sigmaf;"], [0, "&sigma;"], [0, "&tau;"], [0, "&upsi;"], [0, "&phi;"], [0, "&chi;"], [0, "&psi;"], [0, "&omega;"], [7, "&thetasym;"], [0, "&Upsi;"], [2, "&phiv;"], [0, "&piv;"], [5, "&Gammad;"], [0, "&digamma;"], [18, "&kappav;"], [0, "&rhov;"], [3, "&epsiv;"], [0, "&backepsilon;"], [10, "&IOcy;"], [0, "&DJcy;"], [0, "&GJcy;"], [0, "&Jukcy;"], [0, "&DScy;"], [0, "&Iukcy;"], [0, "&YIcy;"], [0, "&Jsercy;"], [0, "&LJcy;"], [0, "&NJcy;"], [0, "&TSHcy;"], [0, "&KJcy;"], [1, "&Ubrcy;"], [0, "&DZcy;"], [0, "&Acy;"], [0, "&Bcy;"], [0, "&Vcy;"], [0, "&Gcy;"], [0, "&Dcy;"], [0, "&IEcy;"], [0, "&ZHcy;"], [0, "&Zcy;"], [0, "&Icy;"], [0, "&Jcy;"], [0, "&Kcy;"], [0, "&Lcy;"], [0, "&Mcy;"], [0, "&Ncy;"], [0, "&Ocy;"], [0, "&Pcy;"], [0, "&Rcy;"], [0, "&Scy;"], [0, "&Tcy;"], [0, "&Ucy;"], [0, "&Fcy;"], [0, "&KHcy;"], [0, "&TScy;"], [0, "&CHcy;"], [0, "&SHcy;"], [0, "&SHCHcy;"], [0, "&HARDcy;"], [0, "&Ycy;"], [0, "&SOFTcy;"], [0, "&Ecy;"], [0, "&YUcy;"], [0, "&YAcy;"], [0, "&acy;"], [0, "&bcy;"], [0, "&vcy;"], [0, "&gcy;"], [0, "&dcy;"], [0, "&iecy;"], [0, "&zhcy;"], [0, "&zcy;"], [0, "&icy;"], [0, "&jcy;"], [0, "&kcy;"], [0, "&lcy;"], [0, "&mcy;"], [0, "&ncy;"], [0, "&ocy;"], [0, "&pcy;"], [0, "&rcy;"], [0, "&scy;"], [0, "&tcy;"], [0, "&ucy;"], [0, "&fcy;"], [0, "&khcy;"], [0, "&tscy;"], [0, "&chcy;"], [0, "&shcy;"], [0, "&shchcy;"], [0, "&hardcy;"], [0, "&ycy;"], [0, "&softcy;"], [0, "&ecy;"], [0, "&yucy;"], [0, "&yacy;"], [1, "&iocy;"], [0, "&djcy;"], [0, "&gjcy;"], [0, "&jukcy;"], [0, "&dscy;"], [0, "&iukcy;"], [0, "&yicy;"], [0, "&jsercy;"], [0, "&ljcy;"], [0, "&njcy;"], [0, "&tshcy;"], [0, "&kjcy;"], [1, "&ubrcy;"], [0, "&dzcy;"], [7074, "&ensp;"], [0, "&emsp;"], [0, "&emsp13;"], [0, "&emsp14;"], [1, "&numsp;"], [0, "&puncsp;"], [0, "&ThinSpace;"], [0, "&hairsp;"], [0, "&NegativeMediumSpace;"], [0, "&zwnj;"], [0, "&zwj;"], [0, "&lrm;"], [0, "&rlm;"], [0, "&dash;"], [2, "&ndash;"], [0, "&mdash;"], [0, "&horbar;"], [0, "&Verbar;"], [1, "&lsquo;"], [0, "&CloseCurlyQuote;"], [0, "&lsquor;"], [1, "&ldquo;"], [0, "&CloseCurlyDoubleQuote;"], [0, "&bdquo;"], [1, "&dagger;"], [0, "&Dagger;"], [0, "&bull;"], [2, "&nldr;"], [0, "&hellip;"], [9, "&permil;"], [0, "&pertenk;"], [0, "&prime;"], [0, "&Prime;"], [0, "&tprime;"], [0, "&backprime;"], [3, "&lsaquo;"], [0, "&rsaquo;"], [3, "&oline;"], [2, "&caret;"], [1, "&hybull;"], [0, "&frasl;"], [10, "&bsemi;"], [7, "&qprime;"], [7, { v: "&MediumSpace;", n: 8202, o: "&ThickSpace;" }], [0, "&NoBreak;"], [0, "&af;"], [0, "&InvisibleTimes;"], [0, "&ic;"], [72, "&euro;"], [46, "&tdot;"], [0, "&DotDot;"], [37, "&complexes;"], [2, "&incare;"], [4, "&gscr;"], [0, "&hamilt;"], [0, "&Hfr;"], [0, "&Hopf;"], [0, "&planckh;"], [0, "&hbar;"], [0, "&imagline;"], [0, "&Ifr;"], [0, "&lagran;"], [0, "&ell;"], [1, "&naturals;"], [0, "&numero;"], [0, "&copysr;"], [0, "&weierp;"], [0, "&Popf;"], [0, "&Qopf;"], [0, "&realine;"], [0, "&real;"], [0, "&reals;"], [0, "&rx;"], [3, "&trade;"], [1, "&integers;"], [2, "&mho;"], [0, "&zeetrf;"], [0, "&iiota;"], [2, "&bernou;"], [0, "&Cayleys;"], [1, "&escr;"], [0, "&Escr;"], [0, "&Fouriertrf;"], [1, "&Mellintrf;"], [0, "&order;"], [0, "&alefsym;"], [0, "&beth;"], [0, "&gimel;"], [0, "&daleth;"], [12, "&CapitalDifferentialD;"], [0, "&dd;"], [0, "&ee;"], [0, "&ii;"], [10, "&frac13;"], [0, "&frac23;"], [0, "&frac15;"], [0, "&frac25;"], [0, "&frac35;"], [0, "&frac45;"], [0, "&frac16;"], [0, "&frac56;"], [0, "&frac18;"], [0, "&frac38;"], [0, "&frac58;"], [0, "&frac78;"], [49, "&larr;"], [0, "&ShortUpArrow;"], [0, "&rarr;"], [0, "&darr;"], [0, "&harr;"], [0, "&updownarrow;"], [0, "&nwarr;"], [0, "&nearr;"], [0, "&LowerRightArrow;"], [0, "&LowerLeftArrow;"], [0, "&nlarr;"], [0, "&nrarr;"], [1, { v: "&rarrw;", n: 824, o: "&nrarrw;" }], [0, "&Larr;"], [0, "&Uarr;"], [0, "&Rarr;"], [0, "&Darr;"], [0, "&larrtl;"], [0, "&rarrtl;"], [0, "&LeftTeeArrow;"], [0, "&mapstoup;"], [0, "&map;"], [0, "&DownTeeArrow;"], [1, "&hookleftarrow;"], [0, "&hookrightarrow;"], [0, "&larrlp;"], [0, "&looparrowright;"], [0, "&harrw;"], [0, "&nharr;"], [1, "&lsh;"], [0, "&rsh;"], [0, "&ldsh;"], [0, "&rdsh;"], [1, "&crarr;"], [0, "&cularr;"], [0, "&curarr;"], [2, "&circlearrowleft;"], [0, "&circlearrowright;"], [0, "&leftharpoonup;"], [0, "&DownLeftVector;"], [0, "&RightUpVector;"], [0, "&LeftUpVector;"], [0, "&rharu;"], [0, "&DownRightVector;"], [0, "&dharr;"], [0, "&dharl;"], [0, "&RightArrowLeftArrow;"], [0, "&udarr;"], [0, "&LeftArrowRightArrow;"], [0, "&leftleftarrows;"], [0, "&upuparrows;"], [0, "&rightrightarrows;"], [0, "&ddarr;"], [0, "&leftrightharpoons;"], [0, "&Equilibrium;"], [0, "&nlArr;"], [0, "&nhArr;"], [0, "&nrArr;"], [0, "&DoubleLeftArrow;"], [0, "&DoubleUpArrow;"], [0, "&DoubleRightArrow;"], [0, "&dArr;"], [0, "&DoubleLeftRightArrow;"], [0, "&DoubleUpDownArrow;"], [0, "&nwArr;"], [0, "&neArr;"], [0, "&seArr;"], [0, "&swArr;"], [0, "&lAarr;"], [0, "&rAarr;"], [1, "&zigrarr;"], [6, "&larrb;"], [0, "&rarrb;"], [15, "&DownArrowUpArrow;"], [7, "&loarr;"], [0, "&roarr;"], [0, "&hoarr;"], [0, "&forall;"], [0, "&comp;"], [0, { v: "&part;", n: 824, o: "&npart;" }], [0, "&exist;"], [0, "&nexist;"], [0, "&empty;"], [1, "&Del;"], [0, "&Element;"], [0, "&NotElement;"], [1, "&ni;"], [0, "&notni;"], [2, "&prod;"], [0, "&coprod;"], [0, "&sum;"], [0, "&minus;"], [0, "&MinusPlus;"], [0, "&dotplus;"], [1, "&Backslash;"], [0, "&lowast;"], [0, "&compfn;"], [1, "&radic;"], [2, "&prop;"], [0, "&infin;"], [0, "&angrt;"], [0, { v: "&ang;", n: 8402, o: "&nang;" }], [0, "&angmsd;"], [0, "&angsph;"], [0, "&mid;"], [0, "&nmid;"], [0, "&DoubleVerticalBar;"], [0, "&NotDoubleVerticalBar;"], [0, "&and;"], [0, "&or;"], [0, { v: "&cap;", n: 65024, o: "&caps;" }], [0, { v: "&cup;", n: 65024, o: "&cups;" }], [0, "&int;"], [0, "&Int;"], [0, "&iiint;"], [0, "&conint;"], [0, "&Conint;"], [0, "&Cconint;"], [0, "&cwint;"], [0, "&ClockwiseContourIntegral;"], [0, "&awconint;"], [0, "&there4;"], [0, "&becaus;"], [0, "&ratio;"], [0, "&Colon;"], [0, "&dotminus;"], [1, "&mDDot;"], [0, "&homtht;"], [0, { v: "&sim;", n: 8402, o: "&nvsim;" }], [0, { v: "&backsim;", n: 817, o: "&race;" }], [0, { v: "&ac;", n: 819, o: "&acE;" }], [0, "&acd;"], [0, "&VerticalTilde;"], [0, "&NotTilde;"], [0, { v: "&eqsim;", n: 824, o: "&nesim;" }], [0, "&sime;"], [0, "&NotTildeEqual;"], [0, "&cong;"], [0, "&simne;"], [0, "&ncong;"], [0, "&ap;"], [0, "&nap;"], [0, "&ape;"], [0, { v: "&apid;", n: 824, o: "&napid;" }], [0, "&backcong;"], [0, { v: "&asympeq;", n: 8402, o: "&nvap;" }], [0, { v: "&bump;", n: 824, o: "&nbump;" }], [0, { v: "&bumpe;", n: 824, o: "&nbumpe;" }], [0, { v: "&doteq;", n: 824, o: "&nedot;" }], [0, "&doteqdot;"], [0, "&efDot;"], [0, "&erDot;"], [0, "&Assign;"], [0, "&ecolon;"], [0, "&ecir;"], [0, "&circeq;"], [1, "&wedgeq;"], [0, "&veeeq;"], [1, "&triangleq;"], [2, "&equest;"], [0, "&ne;"], [0, { v: "&Congruent;", n: 8421, o: "&bnequiv;" }], [0, "&nequiv;"], [1, { v: "&le;", n: 8402, o: "&nvle;" }], [0, { v: "&ge;", n: 8402, o: "&nvge;" }], [0, { v: "&lE;", n: 824, o: "&nlE;" }], [0, { v: "&gE;", n: 824, o: "&ngE;" }], [0, { v: "&lnE;", n: 65024, o: "&lvertneqq;" }], [0, { v: "&gnE;", n: 65024, o: "&gvertneqq;" }], [0, { v: "&ll;", n: new Map(/* @__PURE__ */ restoreDiff([[824, "&nLtv;"], [7577, "&nLt;"]])) }], [0, { v: "&gg;", n: new Map(/* @__PURE__ */ restoreDiff([[824, "&nGtv;"], [7577, "&nGt;"]])) }], [0, "&between;"], [0, "&NotCupCap;"], [0, "&nless;"], [0, "&ngt;"], [0, "&nle;"], [0, "&nge;"], [0, "&lesssim;"], [0, "&GreaterTilde;"], [0, "&nlsim;"], [0, "&ngsim;"], [0, "&LessGreater;"], [0, "&gl;"], [0, "&NotLessGreater;"], [0, "&NotGreaterLess;"], [0, "&pr;"], [0, "&sc;"], [0, "&prcue;"], [0, "&sccue;"], [0, "&PrecedesTilde;"], [0, { v: "&scsim;", n: 824, o: "&NotSucceedsTilde;" }], [0, "&NotPrecedes;"], [0, "&NotSucceeds;"], [0, { v: "&sub;", n: 8402, o: "&NotSubset;" }], [0, { v: "&sup;", n: 8402, o: "&NotSuperset;" }], [0, "&nsub;"], [0, "&nsup;"], [0, "&sube;"], [0, "&supe;"], [0, "&NotSubsetEqual;"], [0, "&NotSupersetEqual;"], [0, { v: "&subne;", n: 65024, o: "&varsubsetneq;" }], [0, { v: "&supne;", n: 65024, o: "&varsupsetneq;" }], [1, "&cupdot;"], [0, "&UnionPlus;"], [0, { v: "&sqsub;", n: 824, o: "&NotSquareSubset;" }], [0, { v: "&sqsup;", n: 824, o: "&NotSquareSuperset;" }], [0, "&sqsube;"], [0, "&sqsupe;"], [0, { v: "&sqcap;", n: 65024, o: "&sqcaps;" }], [0, { v: "&sqcup;", n: 65024, o: "&sqcups;" }], [0, "&CirclePlus;"], [0, "&CircleMinus;"], [0, "&CircleTimes;"], [0, "&osol;"], [0, "&CircleDot;"], [0, "&circledcirc;"], [0, "&circledast;"], [1, "&circleddash;"], [0, "&boxplus;"], [0, "&boxminus;"], [0, "&boxtimes;"], [0, "&dotsquare;"], [0, "&RightTee;"], [0, "&dashv;"], [0, "&DownTee;"], [0, "&bot;"], [1, "&models;"], [0, "&DoubleRightTee;"], [0, "&Vdash;"], [0, "&Vvdash;"], [0, "&VDash;"], [0, "&nvdash;"], [0, "&nvDash;"], [0, "&nVdash;"], [0, "&nVDash;"], [0, "&prurel;"], [1, "&LeftTriangle;"], [0, "&RightTriangle;"], [0, { v: "&LeftTriangleEqual;", n: 8402, o: "&nvltrie;" }], [0, { v: "&RightTriangleEqual;", n: 8402, o: "&nvrtrie;" }], [0, "&origof;"], [0, "&imof;"], [0, "&multimap;"], [0, "&hercon;"], [0, "&intcal;"], [0, "&veebar;"], [1, "&barvee;"], [0, "&angrtvb;"], [0, "&lrtri;"], [0, "&bigwedge;"], [0, "&bigvee;"], [0, "&bigcap;"], [0, "&bigcup;"], [0, "&diam;"], [0, "&sdot;"], [0, "&sstarf;"], [0, "&divideontimes;"], [0, "&bowtie;"], [0, "&ltimes;"], [0, "&rtimes;"], [0, "&leftthreetimes;"], [0, "&rightthreetimes;"], [0, "&backsimeq;"], [0, "&curlyvee;"], [0, "&curlywedge;"], [0, "&Sub;"], [0, "&Sup;"], [0, "&Cap;"], [0, "&Cup;"], [0, "&fork;"], [0, "&epar;"], [0, "&lessdot;"], [0, "&gtdot;"], [0, { v: "&Ll;", n: 824, o: "&nLl;" }], [0, { v: "&Gg;", n: 824, o: "&nGg;" }], [0, { v: "&leg;", n: 65024, o: "&lesg;" }], [0, { v: "&gel;", n: 65024, o: "&gesl;" }], [2, "&cuepr;"], [0, "&cuesc;"], [0, "&NotPrecedesSlantEqual;"], [0, "&NotSucceedsSlantEqual;"], [0, "&NotSquareSubsetEqual;"], [0, "&NotSquareSupersetEqual;"], [2, "&lnsim;"], [0, "&gnsim;"], [0, "&precnsim;"], [0, "&scnsim;"], [0, "&nltri;"], [0, "&NotRightTriangle;"], [0, "&nltrie;"], [0, "&NotRightTriangleEqual;"], [0, "&vellip;"], [0, "&ctdot;"], [0, "&utdot;"], [0, "&dtdot;"], [0, "&disin;"], [0, "&isinsv;"], [0, "&isins;"], [0, { v: "&isindot;", n: 824, o: "&notindot;" }], [0, "&notinvc;"], [0, "&notinvb;"], [1, { v: "&isinE;", n: 824, o: "&notinE;" }], [0, "&nisd;"], [0, "&xnis;"], [0, "&nis;"], [0, "&notnivc;"], [0, "&notnivb;"], [6, "&barwed;"], [0, "&Barwed;"], [1, "&lceil;"], [0, "&rceil;"], [0, "&LeftFloor;"], [0, "&rfloor;"], [0, "&drcrop;"], [0, "&dlcrop;"], [0, "&urcrop;"], [0, "&ulcrop;"], [0, "&bnot;"], [1, "&profline;"], [0, "&profsurf;"], [1, "&telrec;"], [0, "&target;"], [5, "&ulcorn;"], [0, "&urcorn;"], [0, "&dlcorn;"], [0, "&drcorn;"], [2, "&frown;"], [0, "&smile;"], [9, "&cylcty;"], [0, "&profalar;"], [7, "&topbot;"], [6, "&ovbar;"], [1, "&solbar;"], [60, "&angzarr;"], [51, "&lmoustache;"], [0, "&rmoustache;"], [2, "&OverBracket;"], [0, "&bbrk;"], [0, "&bbrktbrk;"], [37, "&OverParenthesis;"], [0, "&UnderParenthesis;"], [0, "&OverBrace;"], [0, "&UnderBrace;"], [2, "&trpezium;"], [4, "&elinters;"], [59, "&blank;"], [164, "&circledS;"], [55, "&boxh;"], [1, "&boxv;"], [9, "&boxdr;"], [3, "&boxdl;"], [3, "&boxur;"], [3, "&boxul;"], [3, "&boxvr;"], [7, "&boxvl;"], [7, "&boxhd;"], [7, "&boxhu;"], [7, "&boxvh;"], [19, "&boxH;"], [0, "&boxV;"], [0, "&boxdR;"], [0, "&boxDr;"], [0, "&boxDR;"], [0, "&boxdL;"], [0, "&boxDl;"], [0, "&boxDL;"], [0, "&boxuR;"], [0, "&boxUr;"], [0, "&boxUR;"], [0, "&boxuL;"], [0, "&boxUl;"], [0, "&boxUL;"], [0, "&boxvR;"], [0, "&boxVr;"], [0, "&boxVR;"], [0, "&boxvL;"], [0, "&boxVl;"], [0, "&boxVL;"], [0, "&boxHd;"], [0, "&boxhD;"], [0, "&boxHD;"], [0, "&boxHu;"], [0, "&boxhU;"], [0, "&boxHU;"], [0, "&boxvH;"], [0, "&boxVh;"], [0, "&boxVH;"], [19, "&uhblk;"], [3, "&lhblk;"], [3, "&block;"], [8, "&blk14;"], [0, "&blk12;"], [0, "&blk34;"], [13, "&square;"], [8, "&blacksquare;"], [0, "&EmptyVerySmallSquare;"], [1, "&rect;"], [0, "&marker;"], [2, "&fltns;"], [1, "&bigtriangleup;"], [0, "&blacktriangle;"], [0, "&triangle;"], [2, "&blacktriangleright;"], [0, "&rtri;"], [3, "&bigtriangledown;"], [0, "&blacktriangledown;"], [0, "&dtri;"], [2, "&blacktriangleleft;"], [0, "&ltri;"], [6, "&loz;"], [0, "&cir;"], [32, "&tridot;"], [2, "&bigcirc;"], [8, "&ultri;"], [0, "&urtri;"], [0, "&lltri;"], [0, "&EmptySmallSquare;"], [0, "&FilledSmallSquare;"], [8, "&bigstar;"], [0, "&star;"], [7, "&phone;"], [49, "&female;"], [1, "&male;"], [29, "&spades;"], [2, "&clubs;"], [1, "&hearts;"], [0, "&diamondsuit;"], [3, "&sung;"], [2, "&flat;"], [0, "&natural;"], [0, "&sharp;"], [163, "&check;"], [3, "&cross;"], [8, "&malt;"], [21, "&sext;"], [33, "&VerticalSeparator;"], [25, "&lbbrk;"], [0, "&rbbrk;"], [84, "&bsolhsub;"], [0, "&suphsol;"], [28, "&LeftDoubleBracket;"], [0, "&RightDoubleBracket;"], [0, "&lang;"], [0, "&rang;"], [0, "&Lang;"], [0, "&Rang;"], [0, "&loang;"], [0, "&roang;"], [7, "&longleftarrow;"], [0, "&longrightarrow;"], [0, "&longleftrightarrow;"], [0, "&DoubleLongLeftArrow;"], [0, "&DoubleLongRightArrow;"], [0, "&DoubleLongLeftRightArrow;"], [1, "&longmapsto;"], [2, "&dzigrarr;"], [258, "&nvlArr;"], [0, "&nvrArr;"], [0, "&nvHarr;"], [0, "&Map;"], [6, "&lbarr;"], [0, "&bkarow;"], [0, "&lBarr;"], [0, "&dbkarow;"], [0, "&drbkarow;"], [0, "&DDotrahd;"], [0, "&UpArrowBar;"], [0, "&DownArrowBar;"], [2, "&Rarrtl;"], [2, "&latail;"], [0, "&ratail;"], [0, "&lAtail;"], [0, "&rAtail;"], [0, "&larrfs;"], [0, "&rarrfs;"], [0, "&larrbfs;"], [0, "&rarrbfs;"], [2, "&nwarhk;"], [0, "&nearhk;"], [0, "&hksearow;"], [0, "&hkswarow;"], [0, "&nwnear;"], [0, "&nesear;"], [0, "&seswar;"], [0, "&swnwar;"], [8, { v: "&rarrc;", n: 824, o: "&nrarrc;" }], [1, "&cudarrr;"], [0, "&ldca;"], [0, "&rdca;"], [0, "&cudarrl;"], [0, "&larrpl;"], [2, "&curarrm;"], [0, "&cularrp;"], [7, "&rarrpl;"], [2, "&harrcir;"], [0, "&Uarrocir;"], [0, "&lurdshar;"], [0, "&ldrushar;"], [2, "&LeftRightVector;"], [0, "&RightUpDownVector;"], [0, "&DownLeftRightVector;"], [0, "&LeftUpDownVector;"], [0, "&LeftVectorBar;"], [0, "&RightVectorBar;"], [0, "&RightUpVectorBar;"], [0, "&RightDownVectorBar;"], [0, "&DownLeftVectorBar;"], [0, "&DownRightVectorBar;"], [0, "&LeftUpVectorBar;"], [0, "&LeftDownVectorBar;"], [0, "&LeftTeeVector;"], [0, "&RightTeeVector;"], [0, "&RightUpTeeVector;"], [0, "&RightDownTeeVector;"], [0, "&DownLeftTeeVector;"], [0, "&DownRightTeeVector;"], [0, "&LeftUpTeeVector;"], [0, "&LeftDownTeeVector;"], [0, "&lHar;"], [0, "&uHar;"], [0, "&rHar;"], [0, "&dHar;"], [0, "&luruhar;"], [0, "&ldrdhar;"], [0, "&ruluhar;"], [0, "&rdldhar;"], [0, "&lharul;"], [0, "&llhard;"], [0, "&rharul;"], [0, "&lrhard;"], [0, "&udhar;"], [0, "&duhar;"], [0, "&RoundImplies;"], [0, "&erarr;"], [0, "&simrarr;"], [0, "&larrsim;"], [0, "&rarrsim;"], [0, "&rarrap;"], [0, "&ltlarr;"], [1, "&gtrarr;"], [0, "&subrarr;"], [1, "&suplarr;"], [0, "&lfisht;"], [0, "&rfisht;"], [0, "&ufisht;"], [0, "&dfisht;"], [5, "&lopar;"], [0, "&ropar;"], [4, "&lbrke;"], [0, "&rbrke;"], [0, "&lbrkslu;"], [0, "&rbrksld;"], [0, "&lbrksld;"], [0, "&rbrkslu;"], [0, "&langd;"], [0, "&rangd;"], [0, "&lparlt;"], [0, "&rpargt;"], [0, "&gtlPar;"], [0, "&ltrPar;"], [3, "&vzigzag;"], [1, "&vangrt;"], [0, "&angrtvbd;"], [6, "&ange;"], [0, "&range;"], [0, "&dwangle;"], [0, "&uwangle;"], [0, "&angmsdaa;"], [0, "&angmsdab;"], [0, "&angmsdac;"], [0, "&angmsdad;"], [0, "&angmsdae;"], [0, "&angmsdaf;"], [0, "&angmsdag;"], [0, "&angmsdah;"], [0, "&bemptyv;"], [0, "&demptyv;"], [0, "&cemptyv;"], [0, "&raemptyv;"], [0, "&laemptyv;"], [0, "&ohbar;"], [0, "&omid;"], [0, "&opar;"], [1, "&operp;"], [1, "&olcross;"], [0, "&odsold;"], [1, "&olcir;"], [0, "&ofcir;"], [0, "&olt;"], [0, "&ogt;"], [0, "&cirscir;"], [0, "&cirE;"], [0, "&solb;"], [0, "&bsolb;"], [3, "&boxbox;"], [3, "&trisb;"], [0, "&rtriltri;"], [0, { v: "&LeftTriangleBar;", n: 824, o: "&NotLeftTriangleBar;" }], [0, { v: "&RightTriangleBar;", n: 824, o: "&NotRightTriangleBar;" }], [11, "&iinfin;"], [0, "&infintie;"], [0, "&nvinfin;"], [4, "&eparsl;"], [0, "&smeparsl;"], [0, "&eqvparsl;"], [5, "&blacklozenge;"], [8, "&RuleDelayed;"], [1, "&dsol;"], [9, "&bigodot;"], [0, "&bigoplus;"], [0, "&bigotimes;"], [1, "&biguplus;"], [1, "&bigsqcup;"], [5, "&iiiint;"], [0, "&fpartint;"], [2, "&cirfnint;"], [0, "&awint;"], [0, "&rppolint;"], [0, "&scpolint;"], [0, "&npolint;"], [0, "&pointint;"], [0, "&quatint;"], [0, "&intlarhk;"], [10, "&pluscir;"], [0, "&plusacir;"], [0, "&simplus;"], [0, "&plusdu;"], [0, "&plussim;"], [0, "&plustwo;"], [1, "&mcomma;"], [0, "&minusdu;"], [2, "&loplus;"], [0, "&roplus;"], [0, "&Cross;"], [0, "&timesd;"], [0, "&timesbar;"], [1, "&smashp;"], [0, "&lotimes;"], [0, "&rotimes;"], [0, "&otimesas;"], [0, "&Otimes;"], [0, "&odiv;"], [0, "&triplus;"], [0, "&triminus;"], [0, "&tritime;"], [0, "&intprod;"], [2, "&amalg;"], [0, "&capdot;"], [1, "&ncup;"], [0, "&ncap;"], [0, "&capand;"], [0, "&cupor;"], [0, "&cupcap;"], [0, "&capcup;"], [0, "&cupbrcap;"], [0, "&capbrcup;"], [0, "&cupcup;"], [0, "&capcap;"], [0, "&ccups;"], [0, "&ccaps;"], [2, "&ccupssm;"], [2, "&And;"], [0, "&Or;"], [0, "&andand;"], [0, "&oror;"], [0, "&orslope;"], [0, "&andslope;"], [1, "&andv;"], [0, "&orv;"], [0, "&andd;"], [0, "&ord;"], [1, "&wedbar;"], [6, "&sdote;"], [3, "&simdot;"], [2, { v: "&congdot;", n: 824, o: "&ncongdot;" }], [0, "&easter;"], [0, "&apacir;"], [0, { v: "&apE;", n: 824, o: "&napE;" }], [0, "&eplus;"], [0, "&pluse;"], [0, "&Esim;"], [0, "&Colone;"], [0, "&Equal;"], [1, "&ddotseq;"], [0, "&equivDD;"], [0, "&ltcir;"], [0, "&gtcir;"], [0, "&ltquest;"], [0, "&gtquest;"], [0, { v: "&leqslant;", n: 824, o: "&nleqslant;" }], [0, { v: "&geqslant;", n: 824, o: "&ngeqslant;" }], [0, "&lesdot;"], [0, "&gesdot;"], [0, "&lesdoto;"], [0, "&gesdoto;"], [0, "&lesdotor;"], [0, "&gesdotol;"], [0, "&lap;"], [0, "&gap;"], [0, "&lne;"], [0, "&gne;"], [0, "&lnap;"], [0, "&gnap;"], [0, "&lEg;"], [0, "&gEl;"], [0, "&lsime;"], [0, "&gsime;"], [0, "&lsimg;"], [0, "&gsiml;"], [0, "&lgE;"], [0, "&glE;"], [0, "&lesges;"], [0, "&gesles;"], [0, "&els;"], [0, "&egs;"], [0, "&elsdot;"], [0, "&egsdot;"], [0, "&el;"], [0, "&eg;"], [2, "&siml;"], [0, "&simg;"], [0, "&simlE;"], [0, "&simgE;"], [0, { v: "&LessLess;", n: 824, o: "&NotNestedLessLess;" }], [0, { v: "&GreaterGreater;", n: 824, o: "&NotNestedGreaterGreater;" }], [1, "&glj;"], [0, "&gla;"], [0, "&ltcc;"], [0, "&gtcc;"], [0, "&lescc;"], [0, "&gescc;"], [0, "&smt;"], [0, "&lat;"], [0, { v: "&smte;", n: 65024, o: "&smtes;" }], [0, { v: "&late;", n: 65024, o: "&lates;" }], [0, "&bumpE;"], [0, { v: "&PrecedesEqual;", n: 824, o: "&NotPrecedesEqual;" }], [0, { v: "&sce;", n: 824, o: "&NotSucceedsEqual;" }], [2, "&prE;"], [0, "&scE;"], [0, "&precneqq;"], [0, "&scnE;"], [0, "&prap;"], [0, "&scap;"], [0, "&precnapprox;"], [0, "&scnap;"], [0, "&Pr;"], [0, "&Sc;"], [0, "&subdot;"], [0, "&supdot;"], [0, "&subplus;"], [0, "&supplus;"], [0, "&submult;"], [0, "&supmult;"], [0, "&subedot;"], [0, "&supedot;"], [0, { v: "&subE;", n: 824, o: "&nsubE;" }], [0, { v: "&supE;", n: 824, o: "&nsupE;" }], [0, "&subsim;"], [0, "&supsim;"], [2, { v: "&subnE;", n: 65024, o: "&varsubsetneqq;" }], [0, { v: "&supnE;", n: 65024, o: "&varsupsetneqq;" }], [2, "&csub;"], [0, "&csup;"], [0, "&csube;"], [0, "&csupe;"], [0, "&subsup;"], [0, "&supsub;"], [0, "&subsub;"], [0, "&supsup;"], [0, "&suphsub;"], [0, "&supdsub;"], [0, "&forkv;"], [0, "&topfork;"], [0, "&mlcp;"], [8, "&Dashv;"], [1, "&Vdashl;"], [0, "&Barv;"], [0, "&vBar;"], [0, "&vBarv;"], [1, "&Vbar;"], [0, "&Not;"], [0, "&bNot;"], [0, "&rnmid;"], [0, "&cirmid;"], [0, "&midcir;"], [0, "&topcir;"], [0, "&nhpar;"], [0, "&parsim;"], [9, { v: "&parsl;", n: 8421, o: "&nparsl;" }], [44343, { n: new Map(/* @__PURE__ */ restoreDiff([[56476, "&Ascr;"], [1, "&Cscr;"], [0, "&Dscr;"], [2, "&Gscr;"], [2, "&Jscr;"], [0, "&Kscr;"], [2, "&Nscr;"], [0, "&Oscr;"], [0, "&Pscr;"], [0, "&Qscr;"], [1, "&Sscr;"], [0, "&Tscr;"], [0, "&Uscr;"], [0, "&Vscr;"], [0, "&Wscr;"], [0, "&Xscr;"], [0, "&Yscr;"], [0, "&Zscr;"], [0, "&ascr;"], [0, "&bscr;"], [0, "&cscr;"], [0, "&dscr;"], [1, "&fscr;"], [1, "&hscr;"], [0, "&iscr;"], [0, "&jscr;"], [0, "&kscr;"], [0, "&lscr;"], [0, "&mscr;"], [0, "&nscr;"], [1, "&pscr;"], [0, "&qscr;"], [0, "&rscr;"], [0, "&sscr;"], [0, "&tscr;"], [0, "&uscr;"], [0, "&vscr;"], [0, "&wscr;"], [0, "&xscr;"], [0, "&yscr;"], [0, "&zscr;"], [52, "&Afr;"], [0, "&Bfr;"], [1, "&Dfr;"], [0, "&Efr;"], [0, "&Ffr;"], [0, "&Gfr;"], [2, "&Jfr;"], [0, "&Kfr;"], [0, "&Lfr;"], [0, "&Mfr;"], [0, "&Nfr;"], [0, "&Ofr;"], [0, "&Pfr;"], [0, "&Qfr;"], [1, "&Sfr;"], [0, "&Tfr;"], [0, "&Ufr;"], [0, "&Vfr;"], [0, "&Wfr;"], [0, "&Xfr;"], [0, "&Yfr;"], [1, "&afr;"], [0, "&bfr;"], [0, "&cfr;"], [0, "&dfr;"], [0, "&efr;"], [0, "&ffr;"], [0, "&gfr;"], [0, "&hfr;"], [0, "&ifr;"], [0, "&jfr;"], [0, "&kfr;"], [0, "&lfr;"], [0, "&mfr;"], [0, "&nfr;"], [0, "&ofr;"], [0, "&pfr;"], [0, "&qfr;"], [0, "&rfr;"], [0, "&sfr;"], [0, "&tfr;"], [0, "&ufr;"], [0, "&vfr;"], [0, "&wfr;"], [0, "&xfr;"], [0, "&yfr;"], [0, "&zfr;"], [0, "&Aopf;"], [0, "&Bopf;"], [1, "&Dopf;"], [0, "&Eopf;"], [0, "&Fopf;"], [0, "&Gopf;"], [1, "&Iopf;"], [0, "&Jopf;"], [0, "&Kopf;"], [0, "&Lopf;"], [0, "&Mopf;"], [1, "&Oopf;"], [3, "&Sopf;"], [0, "&Topf;"], [0, "&Uopf;"], [0, "&Vopf;"], [0, "&Wopf;"], [0, "&Xopf;"], [0, "&Yopf;"], [1, "&aopf;"], [0, "&bopf;"], [0, "&copf;"], [0, "&dopf;"], [0, "&eopf;"], [0, "&fopf;"], [0, "&gopf;"], [0, "&hopf;"], [0, "&iopf;"], [0, "&jopf;"], [0, "&kopf;"], [0, "&lopf;"], [0, "&mopf;"], [0, "&nopf;"], [0, "&oopf;"], [0, "&popf;"], [0, "&qopf;"], [0, "&ropf;"], [0, "&sopf;"], [0, "&topf;"], [0, "&uopf;"], [0, "&vopf;"], [0, "&wopf;"], [0, "&xopf;"], [0, "&yopf;"], [0, "&zopf;"]])) }], [8906, "&fflig;"], [0, "&filig;"], [0, "&fllig;"], [0, "&ffilig;"], [0, "&ffllig;"]]));
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/escape.js
 var require_escape = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/escape.js"(exports) {
     "use strict";
@@ -43138,9 +43727,9 @@ var require_escape = __commonJS({
       return str.codePointAt(index);
     } : (
       // http://mathiasbynens.be/notes/javascript-encoding#surrogate-formulae
-      function(c, index) {
+      (function(c, index) {
         return (c.charCodeAt(index) & 64512) === 55296 ? (c.charCodeAt(index) - 55296) * 1024 + c.charCodeAt(index + 1) - 56320 + 65536 : c.charCodeAt(index);
-      }
+      })
     );
     function encodeXML(str) {
       var ret = "";
@@ -43161,10 +43750,11 @@ var require_escape = __commonJS({
       return ret + str.substr(lastIdx);
     }
     __name(encodeXML, "encodeXML");
+    __name2(encodeXML, "encodeXML");
     exports.encodeXML = encodeXML;
     exports.escape = encodeXML;
     function getEscaper(regex, map) {
-      return /* @__PURE__ */ __name(function escape(data) {
+      return /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function escape2(data) {
         var match;
         var lastIdx = 0;
         var result = "";
@@ -43176,9 +43766,10 @@ var require_escape = __commonJS({
           lastIdx = match.index + 1;
         }
         return result + data.substring(lastIdx);
-      }, "escape");
+      }, "escape"), "escape");
     }
     __name(getEscaper, "getEscaper");
+    __name2(getEscaper, "getEscaper");
     exports.escapeUTF8 = getEscaper(/[&<>'"]/g, xmlCodeMap);
     exports.escapeAttribute = getEscaper(/["&\u00A0]/g, /* @__PURE__ */ new Map([
       [34, "&quot;"],
@@ -43193,8 +43784,6 @@ var require_escape = __commonJS({
     ]));
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/encode.js
 var require_encode = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/encode.js"(exports) {
     "use strict";
@@ -43210,11 +43799,13 @@ var require_encode = __commonJS({
       return encodeHTMLTrieRe(htmlReplacer, data);
     }
     __name(encodeHTML, "encodeHTML");
+    __name2(encodeHTML, "encodeHTML");
     exports.encodeHTML = encodeHTML;
     function encodeNonAsciiHTML(data) {
       return encodeHTMLTrieRe(escape_js_1.xmlReplacer, data);
     }
     __name(encodeNonAsciiHTML, "encodeNonAsciiHTML");
+    __name2(encodeNonAsciiHTML, "encodeNonAsciiHTML");
     exports.encodeNonAsciiHTML = encodeNonAsciiHTML;
     function encodeHTMLTrieRe(regExp, str) {
       var ret = "";
@@ -43249,10 +43840,9 @@ var require_encode = __commonJS({
       return ret + str.substr(lastIdx);
     }
     __name(encodeHTMLTrieRe, "encodeHTMLTrieRe");
+    __name2(encodeHTMLTrieRe, "encodeHTMLTrieRe");
   }
 });
-
-// node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/index.js
 var require_lib4 = __commonJS({
   "node_modules/.pnpm/entities@4.5.0/node_modules/entities/lib/index.js"(exports) {
     "use strict";
@@ -43274,7 +43864,7 @@ var require_lib4 = __commonJS({
       EncodingMode2[EncodingMode2["Attribute"] = 3] = "Attribute";
       EncodingMode2[EncodingMode2["Text"] = 4] = "Text";
     })(EncodingMode = exports.EncodingMode || (exports.EncodingMode = {}));
-    function decode(data, options) {
+    function decode2(data, options) {
       if (options === void 0) {
         options = EntityLevel.XML;
       }
@@ -43285,8 +43875,9 @@ var require_lib4 = __commonJS({
       }
       return (0, decode_js_1.decodeXML)(data);
     }
-    __name(decode, "decode");
-    exports.decode = decode;
+    __name(decode2, "decode");
+    __name2(decode2, "decode");
+    exports.decode = decode2;
     function decodeStrict(data, options) {
       var _a;
       if (options === void 0) {
@@ -43294,11 +43885,12 @@ var require_lib4 = __commonJS({
       }
       var opts = typeof options === "number" ? { level: options } : options;
       (_a = opts.mode) !== null && _a !== void 0 ? _a : opts.mode = decode_js_1.DecodingMode.Strict;
-      return decode(data, opts);
+      return decode2(data, opts);
     }
     __name(decodeStrict, "decodeStrict");
+    __name2(decodeStrict, "decodeStrict");
     exports.decodeStrict = decodeStrict;
-    function encode(data, options) {
+    function encode3(data, options) {
       if (options === void 0) {
         options = EntityLevel.XML;
       }
@@ -43317,75 +43909,74 @@ var require_lib4 = __commonJS({
       }
       return (0, escape_js_1.encodeXML)(data);
     }
-    __name(encode, "encode");
-    exports.encode = encode;
+    __name(encode3, "encode");
+    __name2(encode3, "encode");
+    exports.encode = encode3;
     var escape_js_2 = require_escape();
-    Object.defineProperty(exports, "encodeXML", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "encodeXML", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return escape_js_2.encodeXML;
     }, "get") });
-    Object.defineProperty(exports, "escape", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "escape", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return escape_js_2.escape;
     }, "get") });
-    Object.defineProperty(exports, "escapeUTF8", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "escapeUTF8", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return escape_js_2.escapeUTF8;
     }, "get") });
-    Object.defineProperty(exports, "escapeAttribute", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "escapeAttribute", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return escape_js_2.escapeAttribute;
     }, "get") });
-    Object.defineProperty(exports, "escapeText", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "escapeText", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return escape_js_2.escapeText;
     }, "get") });
     var encode_js_2 = require_encode();
-    Object.defineProperty(exports, "encodeHTML", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "encodeHTML", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return encode_js_2.encodeHTML;
     }, "get") });
-    Object.defineProperty(exports, "encodeNonAsciiHTML", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "encodeNonAsciiHTML", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return encode_js_2.encodeNonAsciiHTML;
     }, "get") });
-    Object.defineProperty(exports, "encodeHTML4", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "encodeHTML4", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return encode_js_2.encodeHTML;
     }, "get") });
-    Object.defineProperty(exports, "encodeHTML5", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "encodeHTML5", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return encode_js_2.encodeHTML;
     }, "get") });
     var decode_js_2 = require_decode2();
-    Object.defineProperty(exports, "EntityDecoder", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "EntityDecoder", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.EntityDecoder;
     }, "get") });
-    Object.defineProperty(exports, "DecodingMode", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "DecodingMode", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.DecodingMode;
     }, "get") });
-    Object.defineProperty(exports, "decodeXML", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeXML", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeXML;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTML", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTML", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTML;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTMLStrict", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTMLStrict", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTMLStrict;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTMLAttribute", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTMLAttribute", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTMLAttribute;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTML4", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTML4", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTML;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTML5", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTML5", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTML;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTML4Strict", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTML4Strict", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTMLStrict;
     }, "get") });
-    Object.defineProperty(exports, "decodeHTML5Strict", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeHTML5Strict", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeHTMLStrict;
     }, "get") });
-    Object.defineProperty(exports, "decodeXMLStrict", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "decodeXMLStrict", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return decode_js_2.decodeXML;
     }, "get") });
   }
 });
-
-// node_modules/.pnpm/dom-serializer@2.0.0/node_modules/dom-serializer/lib/foreignNames.js
 var require_foreignNames = __commonJS({
   "node_modules/.pnpm/dom-serializer@2.0.0/node_modules/dom-serializer/lib/foreignNames.js"(exports) {
     "use strict";
@@ -43497,8 +44088,6 @@ var require_foreignNames = __commonJS({
     }));
   }
 });
-
-// node_modules/.pnpm/dom-serializer@2.0.0/node_modules/dom-serializer/lib/index.js
 var require_lib5 = __commonJS({
   "node_modules/.pnpm/dom-serializer@2.0.0/node_modules/dom-serializer/lib/index.js"(exports) {
     "use strict";
@@ -43517,7 +44106,7 @@ var require_lib5 = __commonJS({
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: /* @__PURE__ */ __name(function() {
+        desc = { enumerable: true, get: /* @__PURE__ */ __name2(function() {
           return m[k];
         }, "get") };
       }
@@ -43559,24 +44148,26 @@ var require_lib5 = __commonJS({
       return value.replace(/"/g, "&quot;");
     }
     __name(replaceQuotes, "replaceQuotes");
+    __name2(replaceQuotes, "replaceQuotes");
     function formatAttributes(attributes, opts) {
       var _a;
       if (!attributes)
         return;
-      var encode = ((_a = opts.encodeEntities) !== null && _a !== void 0 ? _a : opts.decodeEntities) === false ? replaceQuotes : opts.xmlMode || opts.encodeEntities !== "utf8" ? entities_1.encodeXML : entities_1.escapeAttribute;
-      return Object.keys(attributes).map(function(key) {
+      var encode3 = ((_a = opts.encodeEntities) !== null && _a !== void 0 ? _a : opts.decodeEntities) === false ? replaceQuotes : opts.xmlMode || opts.encodeEntities !== "utf8" ? entities_1.encodeXML : entities_1.escapeAttribute;
+      return Object.keys(attributes).map(function(key2) {
         var _a2, _b;
-        var value = (_a2 = attributes[key]) !== null && _a2 !== void 0 ? _a2 : "";
+        var value = (_a2 = attributes[key2]) !== null && _a2 !== void 0 ? _a2 : "";
         if (opts.xmlMode === "foreign") {
-          key = (_b = foreignNames_js_1.attributeNames.get(key)) !== null && _b !== void 0 ? _b : key;
+          key2 = (_b = foreignNames_js_1.attributeNames.get(key2)) !== null && _b !== void 0 ? _b : key2;
         }
         if (!opts.emptyAttrs && !opts.xmlMode && value === "") {
-          return key;
+          return key2;
         }
-        return "".concat(key, '="').concat(encode(value), '"');
+        return "".concat(key2, '="').concat(encode3(value), '"');
       }).join(" ");
     }
     __name(formatAttributes, "formatAttributes");
+    __name2(formatAttributes, "formatAttributes");
     var singleTag = /* @__PURE__ */ new Set([
       "area",
       "base",
@@ -43610,6 +44201,7 @@ var require_lib5 = __commonJS({
       return output;
     }
     __name(render, "render");
+    __name2(render, "render");
     exports.render = render;
     exports.default = render;
     function renderNode(node, options) {
@@ -43633,6 +44225,7 @@ var require_lib5 = __commonJS({
       }
     }
     __name(renderNode, "renderNode");
+    __name2(renderNode, "renderNode");
     var foreignModeIntegrationPoints = /* @__PURE__ */ new Set([
       "mi",
       "mo",
@@ -43683,10 +44276,12 @@ var require_lib5 = __commonJS({
       return tag;
     }
     __name(renderTag, "renderTag");
+    __name2(renderTag, "renderTag");
     function renderDirective(elem) {
       return "<".concat(elem.data, ">");
     }
     __name(renderDirective, "renderDirective");
+    __name2(renderDirective, "renderDirective");
     function renderText(elem, opts) {
       var _a;
       var data = elem.data || "";
@@ -43696,18 +44291,19 @@ var require_lib5 = __commonJS({
       return data;
     }
     __name(renderText, "renderText");
+    __name2(renderText, "renderText");
     function renderCdata(elem) {
       return "<![CDATA[".concat(elem.children[0].data, "]]>");
     }
     __name(renderCdata, "renderCdata");
+    __name2(renderCdata, "renderCdata");
     function renderComment(elem) {
       return "<!--".concat(elem.data, "-->");
     }
     __name(renderComment, "renderComment");
+    __name2(renderComment, "renderComment");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/stringify.js
 var require_stringify = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/stringify.js"(exports) {
     "use strict";
@@ -43727,12 +44323,14 @@ var require_stringify = __commonJS({
       return (0, dom_serializer_1.default)(node, options);
     }
     __name(getOuterHTML, "getOuterHTML");
+    __name2(getOuterHTML, "getOuterHTML");
     function getInnerHTML(node, options) {
       return (0, domhandler_1.hasChildren)(node) ? node.children.map(function(node2) {
         return getOuterHTML(node2, options);
       }).join("") : "";
     }
     __name(getInnerHTML, "getInnerHTML");
+    __name2(getInnerHTML, "getInnerHTML");
     function getText(node) {
       if (Array.isArray(node))
         return node.map(getText).join("");
@@ -43745,6 +44343,7 @@ var require_stringify = __commonJS({
       return "";
     }
     __name(getText, "getText");
+    __name2(getText, "getText");
     function textContent(node) {
       if (Array.isArray(node))
         return node.map(textContent).join("");
@@ -43756,6 +44355,7 @@ var require_stringify = __commonJS({
       return "";
     }
     __name(textContent, "textContent");
+    __name2(textContent, "textContent");
     function innerText(node) {
       if (Array.isArray(node))
         return node.map(innerText).join("");
@@ -43767,10 +44367,9 @@ var require_stringify = __commonJS({
       return "";
     }
     __name(innerText, "innerText");
+    __name2(innerText, "innerText");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/traversal.js
 var require_traversal = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/traversal.js"(exports) {
     "use strict";
@@ -43788,10 +44387,12 @@ var require_traversal = __commonJS({
       return (0, domhandler_1.hasChildren)(elem) ? elem.children : [];
     }
     __name(getChildren, "getChildren");
+    __name2(getChildren, "getChildren");
     function getParent(elem) {
       return elem.parent || null;
     }
     __name(getParent, "getParent");
+    __name2(getParent, "getParent");
     function getSiblings(elem) {
       var _a, _b;
       var parent = getParent(elem);
@@ -43810,19 +44411,23 @@ var require_traversal = __commonJS({
       return siblings;
     }
     __name(getSiblings, "getSiblings");
+    __name2(getSiblings, "getSiblings");
     function getAttributeValue(elem, name) {
       var _a;
       return (_a = elem.attribs) === null || _a === void 0 ? void 0 : _a[name];
     }
     __name(getAttributeValue, "getAttributeValue");
+    __name2(getAttributeValue, "getAttributeValue");
     function hasAttrib(elem, name) {
       return elem.attribs != null && Object.prototype.hasOwnProperty.call(elem.attribs, name) && elem.attribs[name] != null;
     }
     __name(hasAttrib, "hasAttrib");
+    __name2(hasAttrib, "hasAttrib");
     function getName(elem) {
       return elem.name;
     }
     __name(getName, "getName");
+    __name2(getName, "getName");
     function nextElementSibling(elem) {
       var _a;
       var next = elem.next;
@@ -43831,6 +44436,7 @@ var require_traversal = __commonJS({
       return next;
     }
     __name(nextElementSibling, "nextElementSibling");
+    __name2(nextElementSibling, "nextElementSibling");
     function prevElementSibling(elem) {
       var _a;
       var prev = elem.prev;
@@ -43839,10 +44445,9 @@ var require_traversal = __commonJS({
       return prev;
     }
     __name(prevElementSibling, "prevElementSibling");
+    __name2(prevElementSibling, "prevElementSibling");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/manipulation.js
 var require_manipulation = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/manipulation.js"(exports) {
     "use strict";
@@ -43870,6 +44475,7 @@ var require_manipulation = __commonJS({
       elem.parent = null;
     }
     __name(removeElement, "removeElement");
+    __name2(removeElement, "removeElement");
     function replaceElement(elem, replacement) {
       var prev = replacement.prev = elem.prev;
       if (prev) {
@@ -43887,6 +44493,7 @@ var require_manipulation = __commonJS({
       }
     }
     __name(replaceElement, "replaceElement");
+    __name2(replaceElement, "replaceElement");
     function appendChild(parent, child) {
       removeElement(child);
       child.next = null;
@@ -43900,6 +44507,7 @@ var require_manipulation = __commonJS({
       }
     }
     __name(appendChild, "appendChild");
+    __name2(appendChild, "appendChild");
     function append(elem, next) {
       removeElement(next);
       var parent = elem.parent;
@@ -43919,6 +44527,7 @@ var require_manipulation = __commonJS({
       }
     }
     __name(append, "append");
+    __name2(append, "append");
     function prependChild(parent, child) {
       removeElement(child);
       child.parent = parent;
@@ -43932,6 +44541,7 @@ var require_manipulation = __commonJS({
       }
     }
     __name(prependChild, "prependChild");
+    __name2(prependChild, "prependChild");
     function prepend(elem, prev) {
       removeElement(prev);
       var parent = elem.parent;
@@ -43948,10 +44558,9 @@ var require_manipulation = __commonJS({
       elem.prev = prev;
     }
     __name(prepend, "prepend");
+    __name2(prepend, "prepend");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/querying.js
 var require_querying = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/querying.js"(exports) {
     "use strict";
@@ -43973,6 +44582,7 @@ var require_querying = __commonJS({
       return find(test, Array.isArray(node) ? node : [node], recurse, limit);
     }
     __name(filter, "filter");
+    __name2(filter, "filter");
     function find(test, nodes, recurse, limit) {
       var result = [];
       var nodeStack = [Array.isArray(nodes) ? nodes : [nodes]];
@@ -43999,10 +44609,12 @@ var require_querying = __commonJS({
       }
     }
     __name(find, "find");
+    __name2(find, "find");
     function findOneChild(test, nodes) {
       return nodes.find(test);
     }
     __name(findOneChild, "findOneChild");
+    __name2(findOneChild, "findOneChild");
     function findOne(test, nodes, recurse) {
       if (recurse === void 0) {
         recurse = true;
@@ -44022,12 +44634,14 @@ var require_querying = __commonJS({
       return null;
     }
     __name(findOne, "findOne");
+    __name2(findOne, "findOne");
     function existsOne(test, nodes) {
       return (Array.isArray(nodes) ? nodes : [nodes]).some(function(node) {
         return (0, domhandler_1.isTag)(node) && test(node) || (0, domhandler_1.hasChildren)(node) && existsOne(test, node.children);
       });
     }
     __name(existsOne, "existsOne");
+    __name2(existsOne, "existsOne");
     function findAll(test, nodes) {
       var result = [];
       var nodeStack = [Array.isArray(nodes) ? nodes : [nodes]];
@@ -44051,10 +44665,9 @@ var require_querying = __commonJS({
       }
     }
     __name(findAll, "findAll");
+    __name2(findAll, "findAll");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/legacy.js
 var require_legacy = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/legacy.js"(exports) {
     "use strict";
@@ -44068,7 +44681,7 @@ var require_legacy = __commonJS({
     var domhandler_1 = require_lib3();
     var querying_js_1 = require_querying();
     var Checks = {
-      tag_name: /* @__PURE__ */ __name(function(name) {
+      tag_name: /* @__PURE__ */ __name2(function(name) {
         if (typeof name === "function") {
           return function(elem) {
             return (0, domhandler_1.isTag)(elem) && name(elem.name);
@@ -44080,7 +44693,7 @@ var require_legacy = __commonJS({
           return (0, domhandler_1.isTag)(elem) && elem.name === name;
         };
       }, "tag_name"),
-      tag_type: /* @__PURE__ */ __name(function(type) {
+      tag_type: /* @__PURE__ */ __name2(function(type) {
         if (typeof type === "function") {
           return function(elem) {
             return type(elem.type);
@@ -44090,7 +44703,7 @@ var require_legacy = __commonJS({
           return elem.type === type;
         };
       }, "tag_type"),
-      tag_contains: /* @__PURE__ */ __name(function(data) {
+      tag_contains: /* @__PURE__ */ __name2(function(data) {
         if (typeof data === "function") {
           return function(elem) {
             return (0, domhandler_1.isText)(elem) && data(elem.data);
@@ -44112,25 +44725,29 @@ var require_legacy = __commonJS({
       };
     }
     __name(getAttribCheck, "getAttribCheck");
+    __name2(getAttribCheck, "getAttribCheck");
     function combineFuncs(a, b) {
       return function(elem) {
         return a(elem) || b(elem);
       };
     }
     __name(combineFuncs, "combineFuncs");
+    __name2(combineFuncs, "combineFuncs");
     function compileTest(options) {
-      var funcs = Object.keys(options).map(function(key) {
-        var value = options[key];
-        return Object.prototype.hasOwnProperty.call(Checks, key) ? Checks[key](value) : getAttribCheck(key, value);
+      var funcs = Object.keys(options).map(function(key2) {
+        var value = options[key2];
+        return Object.prototype.hasOwnProperty.call(Checks, key2) ? Checks[key2](value) : getAttribCheck(key2, value);
       });
       return funcs.length === 0 ? null : funcs.reduce(combineFuncs);
     }
     __name(compileTest, "compileTest");
+    __name2(compileTest, "compileTest");
     function testElement(options, node) {
       var test = compileTest(options);
       return test ? test(node) : true;
     }
     __name(testElement, "testElement");
+    __name2(testElement, "testElement");
     function getElements(options, nodes, recurse, limit) {
       if (limit === void 0) {
         limit = Infinity;
@@ -44139,6 +44756,7 @@ var require_legacy = __commonJS({
       return test ? (0, querying_js_1.filter)(test, nodes, recurse, limit) : [];
     }
     __name(getElements, "getElements");
+    __name2(getElements, "getElements");
     function getElementById(id, nodes, recurse) {
       if (recurse === void 0) {
         recurse = true;
@@ -44148,6 +44766,7 @@ var require_legacy = __commonJS({
       return (0, querying_js_1.findOne)(getAttribCheck("id", id), nodes, recurse);
     }
     __name(getElementById, "getElementById");
+    __name2(getElementById, "getElementById");
     function getElementsByTagName(tagName, nodes, recurse, limit) {
       if (recurse === void 0) {
         recurse = true;
@@ -44158,6 +44777,7 @@ var require_legacy = __commonJS({
       return (0, querying_js_1.filter)(Checks["tag_name"](tagName), nodes, recurse, limit);
     }
     __name(getElementsByTagName, "getElementsByTagName");
+    __name2(getElementsByTagName, "getElementsByTagName");
     function getElementsByClassName(className, nodes, recurse, limit) {
       if (recurse === void 0) {
         recurse = true;
@@ -44168,6 +44788,7 @@ var require_legacy = __commonJS({
       return (0, querying_js_1.filter)(getAttribCheck("class", className), nodes, recurse, limit);
     }
     __name(getElementsByClassName, "getElementsByClassName");
+    __name2(getElementsByClassName, "getElementsByClassName");
     function getElementsByTagType(type, nodes, recurse, limit) {
       if (recurse === void 0) {
         recurse = true;
@@ -44178,10 +44799,9 @@ var require_legacy = __commonJS({
       return (0, querying_js_1.filter)(Checks["tag_type"](type), nodes, recurse, limit);
     }
     __name(getElementsByTagType, "getElementsByTagType");
+    __name2(getElementsByTagType, "getElementsByTagType");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/helpers.js
 var require_helpers = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/helpers.js"(exports) {
     "use strict";
@@ -44209,6 +44829,7 @@ var require_helpers = __commonJS({
       return nodes;
     }
     __name(removeSubsets, "removeSubsets");
+    __name2(removeSubsets, "removeSubsets");
     var DocumentPosition;
     (function(DocumentPosition2) {
       DocumentPosition2[DocumentPosition2["DISCONNECTED"] = 1] = "DISCONNECTED";
@@ -44257,6 +44878,7 @@ var require_helpers = __commonJS({
       return DocumentPosition.PRECEDING;
     }
     __name(compareDocumentPosition, "compareDocumentPosition");
+    __name2(compareDocumentPosition, "compareDocumentPosition");
     function uniqueSort(nodes) {
       nodes = nodes.filter(function(node, i, arr) {
         return !arr.includes(node, i + 1);
@@ -44273,10 +44895,9 @@ var require_helpers = __commonJS({
       return nodes;
     }
     __name(uniqueSort, "uniqueSort");
+    __name2(uniqueSort, "uniqueSort");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/feeds.js
 var require_feeds = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/feeds.js"(exports) {
     "use strict";
@@ -44289,6 +44910,7 @@ var require_feeds = __commonJS({
       return !feedRoot ? null : feedRoot.name === "feed" ? getAtomFeed(feedRoot) : getRssFeed(feedRoot);
     }
     __name(getFeed, "getFeed");
+    __name2(getFeed, "getFeed");
     function getAtomFeed(feedRoot) {
       var _a;
       var childs = feedRoot.children;
@@ -44330,6 +44952,7 @@ var require_feeds = __commonJS({
       return feed;
     }
     __name(getAtomFeed, "getAtomFeed");
+    __name2(getAtomFeed, "getAtomFeed");
     function getRssFeed(feedRoot) {
       var _a, _b;
       var childs = (_b = (_a = getOneElement("channel", feedRoot.children)) === null || _a === void 0 ? void 0 : _a.children) !== null && _b !== void 0 ? _b : [];
@@ -44360,6 +44983,7 @@ var require_feeds = __commonJS({
       return feed;
     }
     __name(getRssFeed, "getRssFeed");
+    __name2(getRssFeed, "getRssFeed");
     var MEDIA_KEYS_STRING = ["url", "type", "lang"];
     var MEDIA_KEYS_INT = [
       "fileSize",
@@ -44397,17 +45021,20 @@ var require_feeds = __commonJS({
       });
     }
     __name(getMediaElements, "getMediaElements");
+    __name2(getMediaElements, "getMediaElements");
     function getOneElement(tagName, node) {
       return (0, legacy_js_1.getElementsByTagName)(tagName, node, true, 1)[0];
     }
     __name(getOneElement, "getOneElement");
+    __name2(getOneElement, "getOneElement");
     function fetch2(tagName, where, recurse) {
       if (recurse === void 0) {
         recurse = false;
       }
       return (0, stringify_js_1.textContent)((0, legacy_js_1.getElementsByTagName)(tagName, where, recurse, 1)).trim();
     }
-    __name(fetch2, "fetch");
+    __name(fetch2, "fetch2");
+    __name2(fetch2, "fetch");
     function addConditionally(obj, prop, tagName, where, recurse) {
       if (recurse === void 0) {
         recurse = false;
@@ -44417,14 +45044,14 @@ var require_feeds = __commonJS({
         obj[prop] = val;
     }
     __name(addConditionally, "addConditionally");
+    __name2(addConditionally, "addConditionally");
     function isValidFeed(value) {
       return value === "rss" || value === "feed" || value === "rdf:RDF";
     }
     __name(isValidFeed, "isValidFeed");
+    __name2(isValidFeed, "isValidFeed");
   }
 });
-
-// node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/index.js
 var require_lib6 = __commonJS({
   "node_modules/.pnpm/domutils@3.2.2/node_modules/domutils/lib/index.js"(exports) {
     "use strict";
@@ -44432,7 +45059,7 @@ var require_lib6 = __commonJS({
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: /* @__PURE__ */ __name(function() {
+        desc = { enumerable: true, get: /* @__PURE__ */ __name2(function() {
           return m[k];
         }, "get") };
       }
@@ -44454,28 +45081,26 @@ var require_lib6 = __commonJS({
     __exportStar(require_helpers(), exports);
     __exportStar(require_feeds(), exports);
     var domhandler_1 = require_lib3();
-    Object.defineProperty(exports, "isTag", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "isTag", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_1.isTag;
     }, "get") });
-    Object.defineProperty(exports, "isCDATA", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "isCDATA", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_1.isCDATA;
     }, "get") });
-    Object.defineProperty(exports, "isText", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "isText", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_1.isText;
     }, "get") });
-    Object.defineProperty(exports, "isComment", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "isComment", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_1.isComment;
     }, "get") });
-    Object.defineProperty(exports, "isDocument", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "isDocument", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_1.isDocument;
     }, "get") });
-    Object.defineProperty(exports, "hasChildren", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "hasChildren", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_1.hasChildren;
     }, "get") });
   }
 });
-
-// node_modules/.pnpm/htmlparser2@10.1.0/node_modules/htmlparser2/dist/commonjs/index.js
 var require_commonjs = __commonJS({
   "node_modules/.pnpm/htmlparser2@10.1.0/node_modules/htmlparser2/dist/commonjs/index.js"(exports) {
     "use strict";
@@ -44483,7 +45108,7 @@ var require_commonjs = __commonJS({
       if (k2 === void 0) k2 = k;
       var desc = Object.getOwnPropertyDescriptor(m, k);
       if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-        desc = { enumerable: true, get: /* @__PURE__ */ __name(function() {
+        desc = { enumerable: true, get: /* @__PURE__ */ __name2(function() {
           return m[k];
         }, "get") };
       }
@@ -44498,7 +45123,7 @@ var require_commonjs = __commonJS({
       o["default"] = v;
     });
     var __importStar = exports && exports.__importStar || /* @__PURE__ */ (function() {
-      var ownKeys = /* @__PURE__ */ __name(function(o) {
+      var ownKeys = /* @__PURE__ */ __name2(function(o) {
         ownKeys = Object.getOwnPropertyNames || function(o2) {
           var ar = [];
           for (var k in o2) if (Object.prototype.hasOwnProperty.call(o2, k)) ar[ar.length] = k;
@@ -44528,15 +45153,15 @@ var require_commonjs = __commonJS({
     exports.parseFeed = parseFeed;
     var Parser_js_1 = require_Parser();
     var Parser_js_2 = require_Parser();
-    Object.defineProperty(exports, "Parser", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "Parser", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return Parser_js_2.Parser;
     }, "get") });
     var domhandler_1 = require_lib3();
     var domhandler_2 = require_lib3();
-    Object.defineProperty(exports, "DomHandler", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "DomHandler", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_2.DomHandler;
     }, "get") });
-    Object.defineProperty(exports, "DefaultHandler", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "DefaultHandler", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domhandler_2.DomHandler;
     }, "get") });
     function parseDocument(data, options) {
@@ -44545,31 +45170,35 @@ var require_commonjs = __commonJS({
       return handler.root;
     }
     __name(parseDocument, "parseDocument");
+    __name2(parseDocument, "parseDocument");
     function parseDOM(data, options) {
       return parseDocument(data, options).children;
     }
     __name(parseDOM, "parseDOM");
+    __name2(parseDOM, "parseDOM");
     function createDocumentStream(callback, options, elementCallback) {
       const handler = new domhandler_1.DomHandler((error) => callback(error, handler.root), options, elementCallback);
       return new Parser_js_1.Parser(handler, options);
     }
     __name(createDocumentStream, "createDocumentStream");
+    __name2(createDocumentStream, "createDocumentStream");
     function createDomStream(callback, options, elementCallback) {
       const handler = new domhandler_1.DomHandler(callback, options, elementCallback);
       return new Parser_js_1.Parser(handler, options);
     }
     __name(createDomStream, "createDomStream");
+    __name2(createDomStream, "createDomStream");
     var Tokenizer_js_1 = require_Tokenizer();
-    Object.defineProperty(exports, "Tokenizer", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "Tokenizer", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return __importDefault(Tokenizer_js_1).default;
     }, "get") });
-    Object.defineProperty(exports, "QuoteType", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "QuoteType", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return Tokenizer_js_1.QuoteType;
     }, "get") });
     exports.ElementType = __importStar(require_lib2());
     var domutils_1 = require_lib6();
     var domutils_2 = require_lib6();
-    Object.defineProperty(exports, "getFeed", { enumerable: true, get: /* @__PURE__ */ __name(function() {
+    Object.defineProperty(exports, "getFeed", { enumerable: true, get: /* @__PURE__ */ __name2(function() {
       return domutils_2.getFeed;
     }, "get") });
     var parseFeedDefaultOptions = { xmlMode: true };
@@ -44577,11 +45206,10 @@ var require_commonjs = __commonJS({
       return (0, domutils_1.getFeed)(parseDOM(feed, options));
     }
     __name(parseFeed, "parseFeed");
+    __name2(parseFeed, "parseFeed");
     exports.DomUtils = __importStar(require_lib6());
   }
 });
-
-// node_modules/.pnpm/deepmerge-ts@7.1.6/node_modules/deepmerge-ts/dist/index.cjs
 var require_dist = __commonJS({
   "node_modules/.pnpm/deepmerge-ts@7.1.6/node_modules/deepmerge-ts/dist/index.cjs"(exports) {
     "use strict";
@@ -44596,10 +45224,12 @@ var require_dist = __commonJS({
       return metaMeta;
     }
     __name(defaultMetaDataUpdater, "defaultMetaDataUpdater");
+    __name2(defaultMetaDataUpdater, "defaultMetaDataUpdater");
     function defaultFilterValues(values, meta) {
       return values.filter((value) => value !== void 0);
     }
     __name(defaultFilterValues, "defaultFilterValues");
+    __name2(defaultFilterValues, "defaultFilterValues");
     var ObjectType;
     (function(ObjectType2) {
       ObjectType2[ObjectType2["NOT"] = 0] = "NOT";
@@ -44628,20 +45258,23 @@ var require_dist = __commonJS({
       return ObjectType.OTHER;
     }
     __name(getObjectType, "getObjectType");
+    __name2(getObjectType, "getObjectType");
     function getKeys(objects) {
       const keys = /* @__PURE__ */ new Set();
       for (const object of objects) {
-        for (const key of [...Object.keys(object), ...Object.getOwnPropertySymbols(object)]) {
-          keys.add(key);
+        for (const key2 of [...Object.keys(object), ...Object.getOwnPropertySymbols(object)]) {
+          keys.add(key2);
         }
       }
       return keys;
     }
     __name(getKeys, "getKeys");
+    __name2(getKeys, "getKeys");
     function objectHasProperty(object, property) {
       return typeof object === "object" && Object.prototype.propertyIsEnumerable.call(object, property);
     }
     __name(objectHasProperty, "objectHasProperty");
+    __name2(objectHasProperty, "objectHasProperty");
     function getIterableOfIterables(iterables) {
       let mut_iterablesIndex = 0;
       let mut_iterator = iterables[0]?.[Symbol.iterator]();
@@ -44670,6 +45303,7 @@ var require_dist = __commonJS({
       };
     }
     __name(getIterableOfIterables, "getIterableOfIterables");
+    __name2(getIterableOfIterables, "getIterableOfIterables");
     var validRecordToStringValues = ["[object Object]", "[object Module]"];
     function isRecord(value) {
       if (!validRecordToStringValues.includes(Object.prototype.toString.call(value))) {
@@ -44689,56 +45323,62 @@ var require_dist = __commonJS({
       return true;
     }
     __name(isRecord, "isRecord");
+    __name2(isRecord, "isRecord");
     function mergeRecords$1(values, utils, meta) {
       const result = {};
-      for (const key of getKeys(values)) {
+      for (const key2 of getKeys(values)) {
         const propValues = [];
         for (const value of values) {
-          if (objectHasProperty(value, key)) {
-            propValues.push(value[key]);
+          if (objectHasProperty(value, key2)) {
+            propValues.push(value[key2]);
           }
         }
         if (propValues.length === 0) {
           continue;
         }
         const updatedMeta = utils.metaDataUpdater(meta, {
-          key,
+          key: key2,
           parents: values
         });
         const propertyResult = mergeUnknowns(propValues, utils, updatedMeta);
         if (propertyResult === actions.skip) {
           continue;
         }
-        if (key === "__proto__") {
-          Object.defineProperty(result, key, {
+        if (key2 === "__proto__") {
+          Object.defineProperty(result, key2, {
             value: propertyResult,
             configurable: true,
             enumerable: true,
             writable: true
           });
         } else {
-          result[key] = propertyResult;
+          result[key2] = propertyResult;
         }
       }
       return result;
     }
     __name(mergeRecords$1, "mergeRecords$1");
+    __name2(mergeRecords$1, "mergeRecords$1");
     function mergeArrays$1(values) {
       return values.flat();
     }
     __name(mergeArrays$1, "mergeArrays$1");
+    __name2(mergeArrays$1, "mergeArrays$1");
     function mergeSets$1(values) {
       return new Set(getIterableOfIterables(values));
     }
     __name(mergeSets$1, "mergeSets$1");
+    __name2(mergeSets$1, "mergeSets$1");
     function mergeMaps$1(values) {
       return new Map(getIterableOfIterables(values));
     }
     __name(mergeMaps$1, "mergeMaps$1");
+    __name2(mergeMaps$1, "mergeMaps$1");
     function mergeOthers$1(values) {
       return values.at(-1);
     }
     __name(mergeOthers$1, "mergeOthers$1");
+    __name2(mergeOthers$1, "mergeOthers$1");
     var mergeFunctions = {
       mergeRecords: mergeRecords$1,
       mergeArrays: mergeArrays$1,
@@ -44750,21 +45390,24 @@ var require_dist = __commonJS({
       return deepmergeCustom({})(...objects);
     }
     __name(deepmerge, "deepmerge");
+    __name2(deepmerge, "deepmerge");
     function deepmergeCustom(options, rootMetaData) {
       const utils = getUtils(options, customizedDeepmerge);
       function customizedDeepmerge(...objects) {
         return mergeUnknowns(objects, utils, rootMetaData);
       }
       __name(customizedDeepmerge, "customizedDeepmerge");
+      __name2(customizedDeepmerge, "customizedDeepmerge");
       return customizedDeepmerge;
     }
     __name(deepmergeCustom, "deepmergeCustom");
+    __name2(deepmergeCustom, "deepmergeCustom");
     function getUtils(options, customizedDeepmerge) {
       return {
         defaultMergeFunctions: mergeFunctions,
         mergeFunctions: {
           ...mergeFunctions,
-          ...Object.fromEntries(Object.entries(options).filter(([key, option]) => Object.hasOwn(mergeFunctions, key)).map(([key, option]) => option === false ? [key, mergeFunctions.mergeOthers] : [key, option]))
+          ...Object.fromEntries(Object.entries(options).filter(([key2, option]) => Object.hasOwn(mergeFunctions, key2)).map(([key2, option]) => option === false ? [key2, mergeFunctions.mergeOthers] : [key2, option]))
         },
         metaDataUpdater: options.metaDataUpdater ?? defaultMetaDataUpdater,
         deepmerge: customizedDeepmerge,
@@ -44774,6 +45417,7 @@ var require_dist = __commonJS({
       };
     }
     __name(getUtils, "getUtils");
+    __name2(getUtils, "getUtils");
     function mergeUnknowns(values, utils, meta) {
       const filteredValues = utils.filterValues?.(values, meta) ?? values;
       if (filteredValues.length === 0) {
@@ -44810,6 +45454,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeUnknowns, "mergeUnknowns");
+    __name2(mergeUnknowns, "mergeUnknowns");
     function mergeRecords(values, utils, meta) {
       const result = utils.mergeFunctions.mergeRecords(values, utils, meta);
       if (result === actions.defaultMerge || utils.useImplicitDefaultMerging && result === void 0 && utils.mergeFunctions.mergeRecords !== utils.defaultMergeFunctions.mergeRecords) {
@@ -44818,6 +45463,7 @@ var require_dist = __commonJS({
       return result;
     }
     __name(mergeRecords, "mergeRecords");
+    __name2(mergeRecords, "mergeRecords");
     function mergeArrays(values, utils, meta) {
       const result = utils.mergeFunctions.mergeArrays(values, utils, meta);
       if (result === actions.defaultMerge || utils.useImplicitDefaultMerging && result === void 0 && utils.mergeFunctions.mergeArrays !== utils.defaultMergeFunctions.mergeArrays) {
@@ -44826,6 +45472,7 @@ var require_dist = __commonJS({
       return result;
     }
     __name(mergeArrays, "mergeArrays");
+    __name2(mergeArrays, "mergeArrays");
     function mergeSets(values, utils, meta) {
       const result = utils.mergeFunctions.mergeSets(values, utils, meta);
       if (result === actions.defaultMerge || utils.useImplicitDefaultMerging && result === void 0 && utils.mergeFunctions.mergeSets !== utils.defaultMergeFunctions.mergeSets) {
@@ -44834,6 +45481,7 @@ var require_dist = __commonJS({
       return result;
     }
     __name(mergeSets, "mergeSets");
+    __name2(mergeSets, "mergeSets");
     function mergeMaps(values, utils, meta) {
       const result = utils.mergeFunctions.mergeMaps(values, utils, meta);
       if (result === actions.defaultMerge || utils.useImplicitDefaultMerging && result === void 0 && utils.mergeFunctions.mergeMaps !== utils.defaultMergeFunctions.mergeMaps) {
@@ -44842,6 +45490,7 @@ var require_dist = __commonJS({
       return result;
     }
     __name(mergeMaps, "mergeMaps");
+    __name2(mergeMaps, "mergeMaps");
     function mergeOthers(values, utils, meta) {
       const result = utils.mergeFunctions.mergeOthers(values, utils, meta);
       if (result === actions.defaultMerge || utils.useImplicitDefaultMerging && result === void 0 && utils.mergeFunctions.mergeOthers !== utils.defaultMergeFunctions.mergeOthers) {
@@ -44850,56 +45499,62 @@ var require_dist = __commonJS({
       return result;
     }
     __name(mergeOthers, "mergeOthers");
+    __name2(mergeOthers, "mergeOthers");
     function mergeRecordsInto$1(mut_target, values, utils, meta) {
-      for (const key of getKeys(values)) {
+      for (const key2 of getKeys(values)) {
         const propValues = [];
         for (const value of values) {
-          if (objectHasProperty(value, key)) {
-            propValues.push(value[key]);
+          if (objectHasProperty(value, key2)) {
+            propValues.push(value[key2]);
           }
         }
         if (propValues.length === 0) {
           continue;
         }
         const updatedMeta = utils.metaDataUpdater(meta, {
-          key,
+          key: key2,
           parents: values
         });
         const propertyTarget = { value: propValues[0] };
         mergeUnknownsInto(propertyTarget, propValues, utils, updatedMeta);
-        if (key === "__proto__") {
-          Object.defineProperty(mut_target.value, key, {
+        if (key2 === "__proto__") {
+          Object.defineProperty(mut_target.value, key2, {
             value: propertyTarget.value,
             configurable: true,
             enumerable: true,
             writable: true
           });
         } else {
-          mut_target.value[key] = propertyTarget.value;
+          mut_target.value[key2] = propertyTarget.value;
         }
       }
     }
     __name(mergeRecordsInto$1, "mergeRecordsInto$1");
+    __name2(mergeRecordsInto$1, "mergeRecordsInto$1");
     function mergeArraysInto$1(mut_target, values) {
       mut_target.value.push(...values.slice(1).flat());
     }
     __name(mergeArraysInto$1, "mergeArraysInto$1");
+    __name2(mergeArraysInto$1, "mergeArraysInto$1");
     function mergeSetsInto$1(mut_target, values) {
       for (const value of getIterableOfIterables(values.slice(1))) {
         mut_target.value.add(value);
       }
     }
     __name(mergeSetsInto$1, "mergeSetsInto$1");
+    __name2(mergeSetsInto$1, "mergeSetsInto$1");
     function mergeMapsInto$1(mut_target, values) {
-      for (const [key, value] of getIterableOfIterables(values.slice(1))) {
-        mut_target.value.set(key, value);
+      for (const [key2, value] of getIterableOfIterables(values.slice(1))) {
+        mut_target.value.set(key2, value);
       }
     }
     __name(mergeMapsInto$1, "mergeMapsInto$1");
+    __name2(mergeMapsInto$1, "mergeMapsInto$1");
     function mergeOthersInto$1(mut_target, values) {
       mut_target.value = values.at(-1);
     }
     __name(mergeOthersInto$1, "mergeOthersInto$1");
+    __name2(mergeOthersInto$1, "mergeOthersInto$1");
     var mergeIntoFunctions = {
       mergeRecords: mergeRecordsInto$1,
       mergeArrays: mergeArraysInto$1,
@@ -44911,21 +45566,24 @@ var require_dist = __commonJS({
       return void deepmergeIntoCustom({})(target, ...objects);
     }
     __name(deepmergeInto, "deepmergeInto");
+    __name2(deepmergeInto, "deepmergeInto");
     function deepmergeIntoCustom(options, rootMetaData) {
       const utils = getIntoUtils(options, customizedDeepmergeInto);
       function customizedDeepmergeInto(target, ...objects) {
         mergeUnknownsInto({ value: target }, [target, ...objects], utils, rootMetaData);
       }
       __name(customizedDeepmergeInto, "customizedDeepmergeInto");
+      __name2(customizedDeepmergeInto, "customizedDeepmergeInto");
       return customizedDeepmergeInto;
     }
     __name(deepmergeIntoCustom, "deepmergeIntoCustom");
+    __name2(deepmergeIntoCustom, "deepmergeIntoCustom");
     function getIntoUtils(options, customizedDeepmergeInto) {
       return {
         defaultMergeFunctions: mergeIntoFunctions,
         mergeFunctions: {
           ...mergeIntoFunctions,
-          ...Object.fromEntries(Object.entries(options).filter(([key, option]) => Object.hasOwn(mergeIntoFunctions, key)).map(([key, option]) => option === false ? [key, mergeIntoFunctions.mergeOthers] : [key, option]))
+          ...Object.fromEntries(Object.entries(options).filter(([key2, option]) => Object.hasOwn(mergeIntoFunctions, key2)).map(([key2, option]) => option === false ? [key2, mergeIntoFunctions.mergeOthers] : [key2, option]))
         },
         metaDataUpdater: options.metaDataUpdater ?? defaultMetaDataUpdater,
         deepmergeInto: customizedDeepmergeInto,
@@ -44934,6 +45592,7 @@ var require_dist = __commonJS({
       };
     }
     __name(getIntoUtils, "getIntoUtils");
+    __name2(getIntoUtils, "getIntoUtils");
     function mergeUnknownsInto(mut_target, values, utils, meta) {
       const filteredValues = utils.filterValues?.(values, meta) ?? values;
       if (filteredValues.length === 0) {
@@ -44970,6 +45629,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeUnknownsInto, "mergeUnknownsInto");
+    __name2(mergeUnknownsInto, "mergeUnknownsInto");
     function mergeRecordsInto(mut_target, values, utils, meta) {
       const action = utils.mergeFunctions.mergeRecords(mut_target, values, utils, meta);
       if (action === actionsInto.defaultMerge) {
@@ -44977,6 +45637,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeRecordsInto, "mergeRecordsInto");
+    __name2(mergeRecordsInto, "mergeRecordsInto");
     function mergeArraysInto(mut_target, values, utils, meta) {
       const action = utils.mergeFunctions.mergeArrays(mut_target, values, utils, meta);
       if (action === actionsInto.defaultMerge) {
@@ -44984,6 +45645,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeArraysInto, "mergeArraysInto");
+    __name2(mergeArraysInto, "mergeArraysInto");
     function mergeSetsInto(mut_target, values, utils, meta) {
       const action = utils.mergeFunctions.mergeSets(mut_target, values, utils, meta);
       if (action === actionsInto.defaultMerge) {
@@ -44991,6 +45653,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeSetsInto, "mergeSetsInto");
+    __name2(mergeSetsInto, "mergeSetsInto");
     function mergeMapsInto(mut_target, values, utils, meta) {
       const action = utils.mergeFunctions.mergeMaps(mut_target, values, utils, meta);
       if (action === actionsInto.defaultMerge) {
@@ -44998,6 +45661,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeMapsInto, "mergeMapsInto");
+    __name2(mergeMapsInto, "mergeMapsInto");
     function mergeOthersInto(mut_target, values, utils, meta) {
       const action = utils.mergeFunctions.mergeOthers(mut_target, values, utils, meta);
       if (action === actionsInto.defaultMerge || mut_target.value === actionsInto.defaultMerge) {
@@ -45005,6 +45669,7 @@ var require_dist = __commonJS({
       }
     }
     __name(mergeOthersInto, "mergeOthersInto");
+    __name2(mergeOthersInto, "mergeOthersInto");
     exports.deepmerge = deepmerge;
     exports.deepmergeCustom = deepmergeCustom;
     exports.deepmergeInto = deepmergeInto;
@@ -45014,8 +45679,6 @@ var require_dist = __commonJS({
     exports.objectHasProperty = objectHasProperty;
   }
 });
-
-// node_modules/.pnpm/html-to-text@10.0.0/node_modules/html-to-text/lib/html-to-text.cjs
 var require_html_to_text = __commonJS({
   "node_modules/.pnpm/html-to-text@10.0.0/node_modules/html-to-text/lib/html-to-text.cjs"(exports) {
     "use strict";
@@ -45026,7 +45689,7 @@ var require_html_to_text = __commonJS({
     var deepmergeTs = require_dist();
     function limitedDepthRecursive(n, f, g = () => void 0) {
       if (n === void 0) {
-        const f1 = /* @__PURE__ */ __name(function(...args) {
+        const f1 = /* @__PURE__ */ __name2(function(...args) {
           return f(f1, ...args);
         }, "f1");
         return f1;
@@ -45039,6 +45702,7 @@ var require_html_to_text = __commonJS({
       return g;
     }
     __name(limitedDepthRecursive, "limitedDepthRecursive");
+    __name2(limitedDepthRecursive, "limitedDepthRecursive");
     function trimCharacter(str, char) {
       let start = 0;
       let end = str.length;
@@ -45051,6 +45715,7 @@ var require_html_to_text = __commonJS({
       return start > 0 || end < str.length ? str.substring(start, end) : str;
     }
     __name(trimCharacter, "trimCharacter");
+    __name2(trimCharacter, "trimCharacter");
     function trimCharacterEnd(str, char) {
       let end = str.length;
       while (end > 0 && str[end - 1] === char) {
@@ -45059,20 +45724,23 @@ var require_html_to_text = __commonJS({
       return end < str.length ? str.substring(0, end) : str;
     }
     __name(trimCharacterEnd, "trimCharacterEnd");
+    __name2(trimCharacterEnd, "trimCharacterEnd");
     function unicodeEscape(str) {
       return str.replace(/[\s\S]/g, (c) => "\\u" + c.charCodeAt().toString(16).padStart(4, "0"));
     }
     __name(unicodeEscape, "unicodeEscape");
+    __name2(unicodeEscape, "unicodeEscape");
     function get(obj, path) {
-      for (const key of path) {
+      for (const key2 of path) {
         if (!obj) {
           return void 0;
         }
-        obj = obj[key];
+        obj = obj[key2];
       }
       return obj;
     }
     __name(get, "get");
+    __name2(get, "get");
     function numberToLetterSequence(num, baseChar = "a", base = 26) {
       const digits = [];
       do {
@@ -45084,15 +45752,20 @@ var require_html_to_text = __commonJS({
       return digits.reverse().map((n) => String.fromCharCode(baseCode + n)).join("");
     }
     __name(numberToLetterSequence, "numberToLetterSequence");
+    __name2(numberToLetterSequence, "numberToLetterSequence");
     var I = ["I", "X", "C", "M"];
     var V = ["V", "L", "D"];
     function numberToRoman(num) {
       return [...num + ""].map((n) => +n).reverse().map((v, i) => v % 5 < 4 ? (v < 5 ? "" : V[i]) + I[i].repeat(v % 5) : I[i] + (v < 5 ? V[i] : I[i + 1])).reverse().join("");
     }
     __name(numberToRoman, "numberToRoman");
+    __name2(numberToRoman, "numberToRoman");
     var InlineTextBuilder = class {
       static {
         __name(this, "InlineTextBuilder");
+      }
+      static {
+        __name2(this, "InlineTextBuilder");
       }
       /**
        * Creates an instance of InlineTextBuilder.
@@ -45250,6 +45923,9 @@ var require_html_to_text = __commonJS({
       static {
         __name(this, "StackItem");
       }
+      static {
+        __name2(this, "StackItem");
+      }
       constructor(next = null) {
         this.next = next;
       }
@@ -45260,6 +45936,9 @@ var require_html_to_text = __commonJS({
     var BlockStackItem = class extends StackItem {
       static {
         __name(this, "BlockStackItem");
+      }
+      static {
+        __name2(this, "BlockStackItem");
       }
       constructor(options, next = null, leadingLineBreaks = 1, maxLineLength = void 0) {
         super(next);
@@ -45274,6 +45953,9 @@ var require_html_to_text = __commonJS({
     var ListStackItem = class extends BlockStackItem {
       static {
         __name(this, "ListStackItem");
+      }
+      static {
+        __name2(this, "ListStackItem");
       }
       constructor(options, next = null, {
         interRowLineBreaks = 1,
@@ -45292,6 +45974,9 @@ var require_html_to_text = __commonJS({
       static {
         __name(this, "ListItemStackItem");
       }
+      static {
+        __name2(this, "ListItemStackItem");
+      }
       constructor(options, next = null, {
         leadingLineBreaks = 1,
         maxLineLength = void 0,
@@ -45305,6 +45990,9 @@ var require_html_to_text = __commonJS({
       static {
         __name(this, "TableStackItem");
       }
+      static {
+        __name2(this, "TableStackItem");
+      }
       constructor(next = null) {
         super(next);
         this.rows = [];
@@ -45316,6 +46004,9 @@ var require_html_to_text = __commonJS({
       static {
         __name(this, "TableRowStackItem");
       }
+      static {
+        __name2(this, "TableRowStackItem");
+      }
       constructor(next = null) {
         super(next);
         this.cells = [];
@@ -45326,6 +46017,9 @@ var require_html_to_text = __commonJS({
     var TableCellStackItem = class extends StackItem {
       static {
         __name(this, "TableCellStackItem");
+      }
+      static {
+        __name2(this, "TableCellStackItem");
       }
       constructor(options, next = null, maxColumnWidth = void 0) {
         super(next);
@@ -45340,6 +46034,9 @@ var require_html_to_text = __commonJS({
       static {
         __name(this, "TransformerStackItem");
       }
+      static {
+        __name2(this, "TransformerStackItem");
+      }
       constructor(next = null, transform) {
         super(next);
         this.transform = transform;
@@ -45349,9 +46046,13 @@ var require_html_to_text = __commonJS({
       return [...str].map((c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")).join("");
     }
     __name(charactersToCodes, "charactersToCodes");
+    __name2(charactersToCodes, "charactersToCodes");
     var WhitespaceProcessor = class {
       static {
         __name(this, "WhitespaceProcessor");
+      }
+      static {
+        __name2(this, "WhitespaceProcessor");
       }
       /**
        * Creates an instance of WhitespaceProcessor.
@@ -45510,6 +46211,9 @@ var require_html_to_text = __commonJS({
     var BlockTextBuilder = class {
       static {
         __name(this, "BlockTextBuilder");
+      }
+      static {
+        __name2(this, "BlockTextBuilder");
       }
       /**
        * Creates an instance of BlockTextBuilder.
@@ -45889,6 +46593,7 @@ var require_html_to_text = __commonJS({
       return stackItem.inlineTextBuilder.isEmpty() ? stackItem.rawText : stackItem.rawText + stackItem.inlineTextBuilder.toString();
     }
     __name(getText, "getText");
+    __name2(getText, "getText");
     function addText(stackItem, text, leadingLineBreaks, trailingLineBreaks) {
       if (!(stackItem instanceof BlockStackItem || stackItem instanceof ListItemStackItem || stackItem instanceof TableCellStackItem)) {
         throw new Error("Only blocks, list items and table cells can contain text.");
@@ -45905,10 +46610,12 @@ var require_html_to_text = __commonJS({
       stackItem.stashedLineBreaks = trailingLineBreaks;
     }
     __name(addText, "addText");
+    __name2(addText, "addText");
     function applyTransformer(str, transformer) {
       return transformer ? applyTransformer(transformer.transform(str), transformer.next) : str;
     }
     __name(applyTransformer, "applyTransformer");
+    __name2(applyTransformer, "applyTransformer");
     function compile$1(options = {}) {
       const selectorsWithoutFormat = options.selectors.filter((s) => !s.format);
       if (selectorsWithoutFormat.length) {
@@ -45929,6 +46636,7 @@ var require_html_to_text = __commonJS({
         return findBases(dom, options, baseSelectorsPicker);
       }
       __name(findBaseElements, "findBaseElements");
+      __name2(findBaseElements, "findBaseElements");
       const limitedWalk = limitedDepthRecursive(
         options.limits.maxDepth,
         recursiveWalk,
@@ -45941,6 +46649,7 @@ var require_html_to_text = __commonJS({
       };
     }
     __name(compile$1, "compile$1");
+    __name2(compile$1, "compile$1");
     function process2(html, metadata, options, picker, findBaseElements, walk) {
       const maxInputLength = options.limits.maxInputLength;
       if (maxInputLength && html && html.length > maxInputLength) {
@@ -45955,7 +46664,8 @@ var require_html_to_text = __commonJS({
       walk(bases, builder);
       return builder.toString();
     }
-    __name(process2, "process");
+    __name(process2, "process2");
+    __name2(process2, "process");
     function findBases(dom, options, baseSelectorsPicker) {
       const results = [];
       function recursiveWalk2(walk, dom2) {
@@ -45975,7 +46685,8 @@ var require_html_to_text = __commonJS({
           }
         }
       }
-      __name(recursiveWalk2, "recursiveWalk");
+      __name(recursiveWalk2, "recursiveWalk2");
+      __name2(recursiveWalk2, "recursiveWalk");
       const limitedWalk = limitedDepthRecursive(
         options.limits.maxDepth,
         recursiveWalk2
@@ -45987,6 +46698,7 @@ var require_html_to_text = __commonJS({
       return options.baseElements.returnDomByDefault && results.length === 0 ? dom : results.map((x) => x.element);
     }
     __name(findBases, "findBases");
+    __name2(findBases, "findBases");
     function recursiveWalk(walk, dom, builder) {
       if (!dom) {
         return;
@@ -46017,6 +46729,7 @@ var require_html_to_text = __commonJS({
       return;
     }
     __name(recursiveWalk, "recursiveWalk");
+    __name2(recursiveWalk, "recursiveWalk");
     function makeReplacerFromDict(dict) {
       if (!dict || Object.keys(dict).length === 0) {
         return void 0;
@@ -46027,42 +46740,50 @@ var require_html_to_text = __commonJS({
         "g"
       );
       const values = entries.map(([, v]) => v);
-      const replacer = /* @__PURE__ */ __name((m, ...cgs) => values[cgs.findIndex((cg) => cg)], "replacer");
+      const replacer = /* @__PURE__ */ __name2((m, ...cgs) => values[cgs.findIndex((cg) => cg)], "replacer");
       return (str) => str.replace(regex, replacer);
     }
     __name(makeReplacerFromDict, "makeReplacerFromDict");
+    __name2(makeReplacerFromDict, "makeReplacerFromDict");
     function formatSkip(elem, walk, builder, formatOptions) {
     }
     __name(formatSkip, "formatSkip");
+    __name2(formatSkip, "formatSkip");
     function formatInlineString(elem, walk, builder, formatOptions) {
       builder.addLiteral(formatOptions.string || "");
     }
     __name(formatInlineString, "formatInlineString");
+    __name2(formatInlineString, "formatInlineString");
     function formatBlockString(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       builder.addLiteral(formatOptions.string || "");
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatBlockString, "formatBlockString");
+    __name2(formatBlockString, "formatBlockString");
     function formatInline(elem, walk, builder, formatOptions) {
       walk(elem.children, builder);
     }
     __name(formatInline, "formatInline");
+    __name2(formatInline, "formatInline");
     function formatBlock$1(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       walk(elem.children, builder);
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatBlock$1, "formatBlock$1");
+    __name2(formatBlock$1, "formatBlock$1");
     function renderOpenTag(elem) {
       const attrs = elem.attribs && elem.attribs.length ? " " + Object.entries(elem.attribs).map(([k, v]) => v === "" ? k : `${k}=${v.replace(/"/g, "&quot;")}`).join(" ") : "";
       return `<${elem.name}${attrs}>`;
     }
     __name(renderOpenTag, "renderOpenTag");
+    __name2(renderOpenTag, "renderOpenTag");
     function renderCloseTag(elem) {
       return `</${elem.name}>`;
     }
     __name(renderCloseTag, "renderCloseTag");
+    __name2(renderCloseTag, "renderCloseTag");
     function formatInlineTag(elem, walk, builder, formatOptions) {
       builder.startNoWrap();
       builder.addLiteral(renderOpenTag(elem));
@@ -46073,6 +46794,7 @@ var require_html_to_text = __commonJS({
       builder.stopNoWrap();
     }
     __name(formatInlineTag, "formatInlineTag");
+    __name2(formatInlineTag, "formatInlineTag");
     function formatBlockTag(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       builder.startNoWrap();
@@ -46085,6 +46807,7 @@ var require_html_to_text = __commonJS({
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatBlockTag, "formatBlockTag");
+    __name2(formatBlockTag, "formatBlockTag");
     function formatInlineHtml(elem, walk, builder, formatOptions) {
       builder.startNoWrap();
       builder.addLiteral(
@@ -46093,6 +46816,7 @@ var require_html_to_text = __commonJS({
       builder.stopNoWrap();
     }
     __name(formatInlineHtml, "formatInlineHtml");
+    __name2(formatInlineHtml, "formatInlineHtml");
     function formatBlockHtml(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       builder.startNoWrap();
@@ -46103,12 +46827,14 @@ var require_html_to_text = __commonJS({
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatBlockHtml, "formatBlockHtml");
+    __name2(formatBlockHtml, "formatBlockHtml");
     function formatInlineSurround(elem, walk, builder, formatOptions) {
       builder.addLiteral(formatOptions.prefix || "");
       walk(elem.children, builder);
       builder.addLiteral(formatOptions.suffix || "");
     }
     __name(formatInlineSurround, "formatInlineSurround");
+    __name2(formatInlineSurround, "formatInlineSurround");
     var genericFormatters = /* @__PURE__ */ Object.freeze({
       __proto__: null,
       block: formatBlock$1,
@@ -46122,7 +46848,7 @@ var require_html_to_text = __commonJS({
       inlineTag: formatInlineTag,
       skip: formatSkip
     });
-    var mergeArraysOverwrite = /* @__PURE__ */ __name((values) => {
+    var mergeArraysOverwrite = /* @__PURE__ */ __name2((values) => {
       const lastValue = values[values.length - 1];
       return Array.isArray(lastValue) ? [...lastValue] : [];
     }, "mergeArraysOverwrite");
@@ -46132,12 +46858,12 @@ var require_html_to_text = __commonJS({
     });
     var deepMergeWithOptionsComposeRules = deepmergeTs.deepmergeCustom({
       filterValues: false,
-      mergeArrays: /* @__PURE__ */ __name((values, utils, meta) => {
+      mergeArrays: /* @__PURE__ */ __name2((values, utils, meta) => {
         const keyPath = meta?.keyPath ? meta.keyPath : [];
         const isRootSelectors = keyPath.length === 1 && keyPath[0] === "selectors";
         return isRootSelectors ? values.flatMap((value) => value) : mergeArraysOverwrite(values);
       }, "mergeArrays"),
-      metaDataUpdater: /* @__PURE__ */ __name((previousMeta, metaMeta) => {
+      metaDataUpdater: /* @__PURE__ */ __name2((previousMeta, metaMeta) => {
         if (previousMeta === void 0) {
           return metaMeta.key === void 0 ? { keyPath: [] } : { keyPath: [metaMeta.key] };
         }
@@ -46151,15 +46877,16 @@ var require_html_to_text = __commonJS({
       const map = /* @__PURE__ */ new Map();
       for (let i = items.length; i-- > 0; ) {
         const item = items[i];
-        const key = getKey(item);
+        const key2 = getKey(item);
         map.set(
-          key,
-          map.has(key) ? deepMergeWithOverwriteArrays(item, map.get(key)) : item
+          key2,
+          map.has(key2) ? deepMergeWithOverwriteArrays(item, map.get(key2)) : item
         );
       }
       return [...map.values()].reverse();
     }
     __name(mergeDuplicatesPreferLast, "mergeDuplicatesPreferLast");
+    __name2(mergeDuplicatesPreferLast, "mergeDuplicatesPreferLast");
     function composeOptions({
       defaultOptions,
       userOptions = {},
@@ -46176,6 +46903,7 @@ var require_html_to_text = __commonJS({
       return options;
     }
     __name(composeOptions, "composeOptions");
+    __name2(composeOptions, "composeOptions");
     function getRow(matrix, j) {
       if (!matrix[j]) {
         matrix[j] = [];
@@ -46183,6 +46911,7 @@ var require_html_to_text = __commonJS({
       return matrix[j];
     }
     __name(getRow, "getRow");
+    __name2(getRow, "getRow");
     function findFirstVacantIndex(row, x = 0) {
       while (row[x]) {
         x++;
@@ -46190,6 +46919,7 @@ var require_html_to_text = __commonJS({
       return x;
     }
     __name(findFirstVacantIndex, "findFirstVacantIndex");
+    __name2(findFirstVacantIndex, "findFirstVacantIndex");
     function transposeInPlace(matrix, maxSize) {
       for (let i = 0; i < maxSize; i++) {
         const rowI = getRow(matrix, i);
@@ -46204,6 +46934,7 @@ var require_html_to_text = __commonJS({
       }
     }
     __name(transposeInPlace, "transposeInPlace");
+    __name2(transposeInPlace, "transposeInPlace");
     function putCellIntoLayout(cell, layout, baseRow, baseCol) {
       for (let r = 0; r < cell.rowspan; r++) {
         const layoutRow = getRow(layout, baseRow + r);
@@ -46213,6 +46944,7 @@ var require_html_to_text = __commonJS({
       }
     }
     __name(putCellIntoLayout, "putCellIntoLayout");
+    __name2(putCellIntoLayout, "putCellIntoLayout");
     function getOrInitOffset(offsets, index) {
       if (offsets[index] === void 0) {
         offsets[index] = index === 0 ? 0 : 1 + getOrInitOffset(offsets, index - 1);
@@ -46220,6 +46952,7 @@ var require_html_to_text = __commonJS({
       return offsets[index];
     }
     __name(getOrInitOffset, "getOrInitOffset");
+    __name2(getOrInitOffset, "getOrInitOffset");
     function updateOffset(offsets, base, span, value) {
       offsets[base + span] = Math.max(
         getOrInitOffset(offsets, base + span),
@@ -46227,6 +46960,7 @@ var require_html_to_text = __commonJS({
       );
     }
     __name(updateOffset, "updateOffset");
+    __name2(updateOffset, "updateOffset");
     function tableToString(tableRows, rowSpacing, colSpacing) {
       const layout = [];
       let colNumber = 0;
@@ -46279,26 +47013,31 @@ var require_html_to_text = __commonJS({
       return outputLines.join("\n");
     }
     __name(tableToString, "tableToString");
+    __name2(tableToString, "tableToString");
     function formatLineBreak(elem, walk, builder, formatOptions) {
       builder.addLineBreak();
     }
     __name(formatLineBreak, "formatLineBreak");
+    __name2(formatLineBreak, "formatLineBreak");
     function formatWbr(elem, walk, builder, formatOptions) {
       builder.addWordBreakOpportunity();
     }
     __name(formatWbr, "formatWbr");
+    __name2(formatWbr, "formatWbr");
     function formatHorizontalLine(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       builder.addInline("-".repeat(formatOptions.length || builder.options.wordwrap || 40));
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatHorizontalLine, "formatHorizontalLine");
+    __name2(formatHorizontalLine, "formatHorizontalLine");
     function formatParagraph(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       walk(elem.children, builder);
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatParagraph, "formatParagraph");
+    __name2(formatParagraph, "formatParagraph");
     function formatPre(elem, walk, builder, formatOptions) {
       builder.openBlock({
         isPre: true,
@@ -46308,6 +47047,7 @@ var require_html_to_text = __commonJS({
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatPre, "formatPre");
+    __name2(formatPre, "formatPre");
     function formatHeading(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks || 2 });
       if (formatOptions.uppercase !== false) {
@@ -46320,6 +47060,7 @@ var require_html_to_text = __commonJS({
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatHeading, "formatHeading");
+    __name2(formatHeading, "formatHeading");
     function formatBlockquote(elem, walk, builder, formatOptions) {
       builder.openBlock({
         leadingLineBreaks: formatOptions.leadingLineBreaks || 2,
@@ -46328,10 +47069,11 @@ var require_html_to_text = __commonJS({
       walk(elem.children, builder);
       builder.closeBlock({
         trailingLineBreaks: formatOptions.trailingLineBreaks || 2,
-        blockTransform: /* @__PURE__ */ __name((str) => (formatOptions.trimEmptyLines !== false ? trimCharacter(str, "\n") : str).split("\n").map((line) => "> " + line).join("\n"), "blockTransform")
+        blockTransform: /* @__PURE__ */ __name2((str) => (formatOptions.trimEmptyLines !== false ? trimCharacter(str, "\n") : str).split("\n").map((line) => "> " + line).join("\n"), "blockTransform")
       });
     }
     __name(formatBlockquote, "formatBlockquote");
+    __name2(formatBlockquote, "formatBlockquote");
     function withBrackets(str, brackets) {
       if (!brackets) {
         return str;
@@ -46341,11 +47083,13 @@ var require_html_to_text = __commonJS({
       return lbr + str + rbr;
     }
     __name(withBrackets, "withBrackets");
+    __name2(withBrackets, "withBrackets");
     function pathRewrite(path, rewriter, baseUrl, metadata, elem) {
       const modifiedPath = typeof rewriter === "function" ? rewriter(path, metadata, elem) : path;
       return modifiedPath[0] === "/" && baseUrl ? trimCharacterEnd(baseUrl, "/") + modifiedPath : modifiedPath;
     }
     __name(pathRewrite, "pathRewrite");
+    __name2(pathRewrite, "pathRewrite");
     function formatImage(elem, walk, builder, formatOptions) {
       const attribs = elem.attribs || {};
       const alt = attribs.alt ? attribs.alt : "";
@@ -46354,6 +47098,7 @@ var require_html_to_text = __commonJS({
       builder.addInline(text, { noWordTransform: true });
     }
     __name(formatImage, "formatImage");
+    __name2(formatImage, "formatImage");
     function formatAnchor(elem, walk, builder, formatOptions) {
       function getHref() {
         if (formatOptions.ignoreHref) {
@@ -46370,6 +47115,7 @@ var require_html_to_text = __commonJS({
         return href2;
       }
       __name(getHref, "getHref");
+      __name2(getHref, "getHref");
       const href = getHref();
       if (!href) {
         walk(elem.children, builder);
@@ -46395,6 +47141,7 @@ var require_html_to_text = __commonJS({
       }
     }
     __name(formatAnchor, "formatAnchor");
+    __name2(formatAnchor, "formatAnchor");
     function formatList(elem, walk, builder, formatOptions, nextPrefixCallback) {
       const isNestedList = get(elem, ["parent", "name"]) === "li";
       let maxPrefixLength = 0;
@@ -46425,18 +47172,21 @@ var require_html_to_text = __commonJS({
       builder.closeList({ trailingLineBreaks: isNestedList ? 1 : formatOptions.trailingLineBreaks || 2 });
     }
     __name(formatList, "formatList");
+    __name2(formatList, "formatList");
     function formatUnorderedList(elem, walk, builder, formatOptions) {
       const prefix = formatOptions.itemPrefix || " * ";
       return formatList(elem, walk, builder, formatOptions, () => prefix);
     }
     __name(formatUnorderedList, "formatUnorderedList");
+    __name2(formatUnorderedList, "formatUnorderedList");
     function formatOrderedList(elem, walk, builder, formatOptions) {
       let nextIndex = Number(elem.attribs.start || "1");
       const indexFunction = getOrderedListIndexFunction(elem.attribs.type);
-      const nextPrefixCallback = /* @__PURE__ */ __name(() => " " + indexFunction(nextIndex++) + ". ", "nextPrefixCallback");
+      const nextPrefixCallback = /* @__PURE__ */ __name2(() => " " + indexFunction(nextIndex++) + ". ", "nextPrefixCallback");
       return formatList(elem, walk, builder, formatOptions, nextPrefixCallback);
     }
     __name(formatOrderedList, "formatOrderedList");
+    __name2(formatOrderedList, "formatOrderedList");
     function getOrderedListIndexFunction(olType = "1") {
       switch (olType) {
         case "a":
@@ -46453,6 +47203,7 @@ var require_html_to_text = __commonJS({
       }
     }
     __name(getOrderedListIndexFunction, "getOrderedListIndexFunction");
+    __name2(getOrderedListIndexFunction, "getOrderedListIndexFunction");
     function splitClassesAndIds(selectors) {
       const classes = [];
       const ids = [];
@@ -46466,6 +47217,7 @@ var require_html_to_text = __commonJS({
       return { classes, ids };
     }
     __name(splitClassesAndIds, "splitClassesAndIds");
+    __name2(splitClassesAndIds, "splitClassesAndIds");
     function isDataTable(attr, tables) {
       if (tables === true) {
         return true;
@@ -46479,21 +47231,24 @@ var require_html_to_text = __commonJS({
       return attrClasses.some((x) => classes.includes(x)) || attrIds.some((x) => ids.includes(x));
     }
     __name(isDataTable, "isDataTable");
+    __name2(isDataTable, "isDataTable");
     function formatTable(elem, walk, builder, formatOptions) {
       return isDataTable(elem.attribs, builder.options.tables) ? formatDataTable(elem, walk, builder, formatOptions) : formatBlock(elem, walk, builder, formatOptions);
     }
     __name(formatTable, "formatTable");
+    __name2(formatTable, "formatTable");
     function formatBlock(elem, walk, builder, formatOptions) {
       builder.openBlock({ leadingLineBreaks: formatOptions.leadingLineBreaks });
       walk(elem.children, builder);
       builder.closeBlock({ trailingLineBreaks: formatOptions.trailingLineBreaks });
     }
     __name(formatBlock, "formatBlock");
+    __name2(formatBlock, "formatBlock");
     function formatDataTable(elem, walk, builder, formatOptions) {
       builder.openTable();
       elem.children.forEach(walkTable);
       builder.closeTable({
-        tableToString: /* @__PURE__ */ __name((rows) => tableToString(rows, formatOptions.rowSpacing ?? 0, formatOptions.colSpacing ?? 3), "tableToString"),
+        tableToString: /* @__PURE__ */ __name2((rows) => tableToString(rows, formatOptions.rowSpacing ?? 0, formatOptions.colSpacing ?? 3), "tableToString"),
         leadingLineBreaks: formatOptions.leadingLineBreaks,
         trailingLineBreaks: formatOptions.trailingLineBreaks
       });
@@ -46505,6 +47260,7 @@ var require_html_to_text = __commonJS({
         builder.closeTableCell({ colspan, rowspan });
       }
       __name(formatCell, "formatCell");
+      __name2(formatCell, "formatCell");
       function walkTable(elem2) {
         if (elem2.type !== "tag") {
           return;
@@ -46544,8 +47300,10 @@ var require_html_to_text = __commonJS({
         }
       }
       __name(walkTable, "walkTable");
+      __name2(walkTable, "walkTable");
     }
     __name(formatDataTable, "formatDataTable");
+    __name2(formatDataTable, "formatDataTable");
     var textFormatters = /* @__PURE__ */ Object.freeze({
       __proto__: null,
       anchor: formatAnchor,
@@ -46671,10 +47429,12 @@ var require_html_to_text = __commonJS({
       return compile$1(options);
     }
     __name(compile, "compile");
+    __name2(compile, "compile");
     function convert(html, options = {}, metadata = void 0) {
       return compile(options)(html, metadata);
     }
     __name(convert, "convert");
+    __name2(convert, "convert");
     function handleDeprecatedOptions(options) {
       if (options.tags) {
         const tagDefinitions = Object.entries(options.tags).map(
@@ -46685,17 +47445,18 @@ var require_html_to_text = __commonJS({
       }
       function set(obj, path, value) {
         const valueKey = path.pop();
-        for (const key of path) {
-          let nested = obj[key];
+        for (const key2 of path) {
+          let nested = obj[key2];
           if (!nested) {
             nested = {};
-            obj[key] = nested;
+            obj[key2] = nested;
           }
           obj = nested;
         }
         obj[valueKey] = value;
       }
       __name(set, "set");
+      __name2(set, "set");
       if (options["baseElement"]) {
         const baseElement = options["baseElement"];
         set(
@@ -46714,13 +47475,12 @@ var require_html_to_text = __commonJS({
       }
     }
     __name(handleDeprecatedOptions, "handleDeprecatedOptions");
+    __name2(handleDeprecatedOptions, "handleDeprecatedOptions");
     exports.compile = compile;
     exports.convert = convert;
     exports.htmlToText = convert;
   }
 });
-
-// node_modules/.pnpm/he@1.2.0/node_modules/he/he.js
 var require_he = __commonJS({
   "node_modules/.pnpm/he@1.2.0/node_modules/he/he.js"(exports, module) {
     (function(root) {
@@ -46762,10 +47522,10 @@ var require_he = __commonJS({
       var stringFromCharCode = String.fromCharCode;
       var object = {};
       var hasOwnProperty = object.hasOwnProperty;
-      var has = /* @__PURE__ */ __name(function(object2, propertyName) {
+      var has = /* @__PURE__ */ __name2(function(object2, propertyName) {
         return hasOwnProperty.call(object2, propertyName);
       }, "has");
-      var contains = /* @__PURE__ */ __name(function(array, value) {
+      var contains = /* @__PURE__ */ __name2(function(array, value) {
         var index = -1;
         var length = array.length;
         while (++index < length) {
@@ -46775,18 +47535,18 @@ var require_he = __commonJS({
         }
         return false;
       }, "contains");
-      var merge = /* @__PURE__ */ __name(function(options, defaults) {
+      var merge = /* @__PURE__ */ __name2(function(options, defaults) {
         if (!options) {
           return defaults;
         }
         var result = {};
-        var key2;
-        for (key2 in defaults) {
-          result[key2] = has(options, key2) ? options[key2] : defaults[key2];
+        var key22;
+        for (key22 in defaults) {
+          result[key22] = has(options, key22) ? options[key22] : defaults[key22];
         }
         return result;
       }, "merge");
-      var codePointToSymbol = /* @__PURE__ */ __name(function(codePoint, strict) {
+      var codePointToSymbol = /* @__PURE__ */ __name2(function(codePoint, strict) {
         var output = "";
         if (codePoint >= 55296 && codePoint <= 57343 || codePoint > 1114111) {
           if (strict) {
@@ -46811,17 +47571,17 @@ var require_he = __commonJS({
         output += stringFromCharCode(codePoint);
         return output;
       }, "codePointToSymbol");
-      var hexEscape = /* @__PURE__ */ __name(function(codePoint) {
+      var hexEscape = /* @__PURE__ */ __name2(function(codePoint) {
         return "&#x" + codePoint.toString(16).toUpperCase() + ";";
       }, "hexEscape");
-      var decEscape = /* @__PURE__ */ __name(function(codePoint) {
+      var decEscape = /* @__PURE__ */ __name2(function(codePoint) {
         return "&#" + codePoint + ";";
       }, "decEscape");
-      var parseError = /* @__PURE__ */ __name(function(message) {
+      var parseError = /* @__PURE__ */ __name2(function(message) {
         throw Error("Parse error: " + message);
       }, "parseError");
-      var encode = /* @__PURE__ */ __name(function(string, options) {
-        options = merge(options, encode.options);
+      var encode3 = /* @__PURE__ */ __name2(function(string, options) {
+        options = merge(options, encode3.options);
         var strict = options.strict;
         if (strict && regexInvalidRawCodePoint.test(string)) {
           parseError("forbidden code point");
@@ -46830,7 +47590,7 @@ var require_he = __commonJS({
         var useNamedReferences = options.useNamedReferences;
         var allowUnsafeSymbols = options.allowUnsafeSymbols;
         var escapeCodePoint = options.decimal ? decEscape : hexEscape;
-        var escapeBmpSymbol = /* @__PURE__ */ __name(function(symbol) {
+        var escapeBmpSymbol = /* @__PURE__ */ __name2(function(symbol) {
           return escapeCodePoint(symbol.charCodeAt(0));
         }, "escapeBmpSymbol");
         if (encodeEverything) {
@@ -46868,15 +47628,15 @@ var require_he = __commonJS({
           return escapeCodePoint(codePoint);
         }).replace(regexBmpWhitelist, escapeBmpSymbol);
       }, "encode");
-      encode.options = {
+      encode3.options = {
         "allowUnsafeSymbols": false,
         "encodeEverything": false,
         "strict": false,
         "useNamedReferences": false,
         "decimal": false
       };
-      var decode = /* @__PURE__ */ __name(function(html, options) {
-        options = merge(options, decode.options);
+      var decode2 = /* @__PURE__ */ __name2(function(html, options) {
+        options = merge(options, decode2.options);
         var strict = options.strict;
         if (strict && regexInvalidEntity.test(html)) {
           parseError("malformed character reference");
@@ -46935,21 +47695,21 @@ var require_he = __commonJS({
           return $0;
         });
       }, "decode");
-      decode.options = {
+      decode2.options = {
         "isAttributeValue": false,
         "strict": false
       };
-      var escape = /* @__PURE__ */ __name(function(string) {
+      var escape2 = /* @__PURE__ */ __name2(function(string) {
         return string.replace(regexEscape, function($0) {
           return escapeMap[$0];
         });
       }, "escape");
       var he = {
         "version": "1.2.0",
-        "encode": encode,
-        "decode": decode,
-        "escape": escape,
-        "unescape": decode
+        "encode": encode3,
+        "decode": decode2,
+        "escape": escape2,
+        "unescape": decode2
       };
       if (typeof define == "function" && typeof define.amd == "object" && define.amd) {
         define(function() {
@@ -46959,8 +47719,8 @@ var require_he = __commonJS({
         if (freeModule) {
           freeModule.exports = he;
         } else {
-          for (var key in he) {
-            has(he, key) && (freeExports[key] = he[key]);
+          for (var key2 in he) {
+            has(he, key2) && (freeExports[key2] = he[key2]);
           }
         }
       } else {
@@ -46969,8 +47729,6 @@ var require_he = __commonJS({
     })(exports);
   }
 });
-
-// node_modules/.pnpm/uc.micro@2.1.0/node_modules/uc.micro/build/index.cjs.js
 var require_index_cjs = __commonJS({
   "node_modules/.pnpm/uc.micro@2.1.0/node_modules/uc.micro/build/index.cjs.js"(exports) {
     "use strict";
@@ -46988,8 +47746,6 @@ var require_index_cjs = __commonJS({
     exports.Z = regex;
   }
 });
-
-// node_modules/.pnpm/linkify-it@5.0.2/node_modules/linkify-it/build/index.cjs.js
 var require_index_cjs2 = __commonJS({
   "node_modules/.pnpm/linkify-it@5.0.2/node_modules/linkify-it/build/index.cjs.js"(exports, module) {
     "use strict";
@@ -47035,43 +47791,51 @@ var require_index_cjs2 = __commonJS({
       return re;
     }
     __name(reFactory, "reFactory");
+    __name2(reFactory, "reFactory");
     function assign(obj) {
       const sources = Array.prototype.slice.call(arguments, 1);
       sources.forEach(function(source) {
         if (!source) {
           return;
         }
-        Object.keys(source).forEach(function(key) {
-          obj[key] = source[key];
+        Object.keys(source).forEach(function(key2) {
+          obj[key2] = source[key2];
         });
       });
       return obj;
     }
     __name(assign, "assign");
+    __name2(assign, "assign");
     function _class(obj) {
       return Object.prototype.toString.call(obj);
     }
     __name(_class, "_class");
+    __name2(_class, "_class");
     function isString(obj) {
       return _class(obj) === "[object String]";
     }
     __name(isString, "isString");
+    __name2(isString, "isString");
     function isObject(obj) {
       return _class(obj) === "[object Object]";
     }
     __name(isObject, "isObject");
+    __name2(isObject, "isObject");
     function isRegExp(obj) {
       return _class(obj) === "[object RegExp]";
     }
     __name(isRegExp, "isRegExp");
+    __name2(isRegExp, "isRegExp");
     function isFunction(obj) {
       return _class(obj) === "[object Function]";
     }
     __name(isFunction, "isFunction");
+    __name2(isFunction, "isFunction");
     function escapeRE(str) {
       return str.replace(/[.?*+^$[\]\\(){}|-]/g, "\\$&");
     }
     __name(escapeRE, "escapeRE");
+    __name2(escapeRE, "escapeRE");
     var defaultOptions = {
       fuzzyLink: true,
       fuzzyEmail: true,
@@ -47083,9 +47847,10 @@ var require_index_cjs2 = __commonJS({
       }, false);
     }
     __name(isOptionsObj, "isOptionsObj");
+    __name2(isOptionsObj, "isOptionsObj");
     var defaultSchemas = {
       "http:": {
-        validate: /* @__PURE__ */ __name(function(text, pos, self) {
+        validate: /* @__PURE__ */ __name2(function(text, pos, self) {
           const tail = text.slice(pos);
           if (!self.re.http) {
             self.re.http = new RegExp(
@@ -47102,7 +47867,7 @@ var require_index_cjs2 = __commonJS({
       "https:": "http:",
       "ftp:": "http:",
       "//": {
-        validate: /* @__PURE__ */ __name(function(text, pos, self) {
+        validate: /* @__PURE__ */ __name2(function(text, pos, self) {
           const tail = text.slice(pos);
           if (!self.re.no_http) {
             self.re.no_http = new RegExp(
@@ -47125,7 +47890,7 @@ var require_index_cjs2 = __commonJS({
         }, "validate")
       },
       "mailto:": {
-        validate: /* @__PURE__ */ __name(function(text, pos, self) {
+        validate: /* @__PURE__ */ __name2(function(text, pos, self) {
           const tail = text.slice(pos);
           if (!self.re.mailto) {
             self.re.mailto = new RegExp(
@@ -47152,12 +47917,14 @@ var require_index_cjs2 = __commonJS({
       };
     }
     __name(createValidator, "createValidator");
+    __name2(createValidator, "createValidator");
     function createNormalizer() {
       return function(match, self) {
         self.normalize(match);
       };
     }
     __name(createNormalizer, "createNormalizer");
+    __name2(createNormalizer, "createNormalizer");
     function compile(self) {
       const re = self.re = reFactory(self.__opts__);
       const tlds = self.__tlds__.slice();
@@ -47171,6 +47938,7 @@ var require_index_cjs2 = __commonJS({
         return tpl.replace("%TLDS%", re.src_tlds);
       }
       __name(untpl, "untpl");
+      __name2(untpl, "untpl");
       re.email_fuzzy = RegExp(untpl(re.tpl_email_fuzzy), "i");
       re.email_fuzzy_global = RegExp(untpl(re.tpl_email_fuzzy), "ig");
       re.link_fuzzy = RegExp(untpl(re.tpl_link_fuzzy), "i");
@@ -47184,6 +47952,7 @@ var require_index_cjs2 = __commonJS({
         throw new Error(`(LinkifyIt) Invalid schema "${name}": ${val}`);
       }
       __name(schemaError, "schemaError");
+      __name2(schemaError, "schemaError");
       Object.keys(self.__schemas__).forEach(function(name) {
         const val = self.__schemas__[name];
         if (val === null) {
@@ -47234,6 +48003,7 @@ var require_index_cjs2 = __commonJS({
       );
     }
     __name(compile, "compile");
+    __name2(compile, "compile");
     function Match(text, schema, index, lastIndex) {
       const raw = text.slice(index, lastIndex);
       this.schema = schema.toLowerCase();
@@ -47244,6 +48014,7 @@ var require_index_cjs2 = __commonJS({
       this.url = raw;
     }
     __name(Match, "Match");
+    __name2(Match, "Match");
     function LinkifyIt(schemas, options) {
       if (!(this instanceof LinkifyIt)) {
         return new LinkifyIt(schemas, options);
@@ -47263,16 +48034,17 @@ var require_index_cjs2 = __commonJS({
       compile(this);
     }
     __name(LinkifyIt, "LinkifyIt");
-    LinkifyIt.prototype.add = /* @__PURE__ */ __name(function add(schema, definition) {
+    __name2(LinkifyIt, "LinkifyIt");
+    LinkifyIt.prototype.add = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function add(schema, definition) {
       this.__schemas__[schema] = definition;
       compile(this);
       return this;
-    }, "add");
-    LinkifyIt.prototype.set = /* @__PURE__ */ __name(function set(options) {
+    }, "add"), "add");
+    LinkifyIt.prototype.set = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function set(options) {
       this.__opts__ = assign(this.__opts__, options);
       return this;
-    }, "set");
-    LinkifyIt.prototype.test = /* @__PURE__ */ __name(function test(text) {
+    }, "set"), "set");
+    LinkifyIt.prototype.test = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function test(text) {
       if (!text.length) {
         return false;
       }
@@ -47301,17 +48073,17 @@ var require_index_cjs2 = __commonJS({
         }
       }
       return false;
-    }, "test");
-    LinkifyIt.prototype.pretest = /* @__PURE__ */ __name(function pretest(text) {
+    }, "test"), "test");
+    LinkifyIt.prototype.pretest = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function pretest(text) {
       return this.re.pretest.test(text);
-    }, "pretest");
-    LinkifyIt.prototype.testSchemaAt = /* @__PURE__ */ __name(function testSchemaAt(text, schema, pos) {
+    }, "pretest"), "pretest");
+    LinkifyIt.prototype.testSchemaAt = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function testSchemaAt(text, schema, pos) {
       if (!this.__compiled__[schema.toLowerCase()]) {
         return 0;
       }
       return this.__compiled__[schema.toLowerCase()].validate(text, pos, this);
-    }, "testSchemaAt");
-    LinkifyIt.prototype.match = /* @__PURE__ */ __name(function match(text) {
+    }, "testSchemaAt"), "testSchemaAt");
+    LinkifyIt.prototype.match = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function match(text) {
       const result = [];
       const type_schemed = [];
       const type_fuzzy_link = [];
@@ -47330,6 +48102,7 @@ var require_index_cjs2 = __commonJS({
         return a.lastIndex >= b.lastIndex ? a : b;
       }
       __name(choose, "choose");
+      __name2(choose, "choose");
       if (!text.length) {
         return null;
       }
@@ -47400,8 +48173,8 @@ var require_index_cjs2 = __commonJS({
         return result;
       }
       return null;
-    }, "match");
-    LinkifyIt.prototype.matchAtStart = /* @__PURE__ */ __name(function matchAtStart(text) {
+    }, "match"), "match");
+    LinkifyIt.prototype.matchAtStart = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function matchAtStart(text) {
       if (!text.length) return null;
       const m = this.re.schema_at_start.exec(text);
       if (!m) return null;
@@ -47410,8 +48183,8 @@ var require_index_cjs2 = __commonJS({
       const match = new Match(text, m[2], m.index + m[1].length, m.index + m[0].length + len);
       this.__compiled__[match.schema].normalize(match, this);
       return match;
-    }, "matchAtStart");
-    LinkifyIt.prototype.tlds = /* @__PURE__ */ __name(function tlds(list, keepOld) {
+    }, "matchAtStart"), "matchAtStart");
+    LinkifyIt.prototype.tlds = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function tlds(list, keepOld) {
       list = Array.isArray(list) ? list : [list];
       if (!keepOld) {
         this.__tlds__ = list.slice();
@@ -47424,22 +48197,20 @@ var require_index_cjs2 = __commonJS({
       }).reverse();
       compile(this);
       return this;
-    }, "tlds");
-    LinkifyIt.prototype.normalize = /* @__PURE__ */ __name(function normalize(match) {
+    }, "tlds"), "tlds");
+    LinkifyIt.prototype.normalize = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function normalize(match) {
       if (!match.schema) {
         match.url = `http://${match.url}`;
       }
       if (match.schema === "mailto:" && !/^mailto:/i.test(match.url)) {
         match.url = `mailto:${match.url}`;
       }
-    }, "normalize");
-    LinkifyIt.prototype.onCompile = /* @__PURE__ */ __name(function onCompile() {
-    }, "onCompile");
+    }, "normalize"), "normalize");
+    LinkifyIt.prototype.onCompile = /* @__PURE__ */ __name2(/* @__PURE__ */ __name(function onCompile() {
+    }, "onCompile"), "onCompile");
     module.exports = LinkifyIt;
   }
 });
-
-// node_modules/.pnpm/tlds@1.261.0/node_modules/tlds/index.json
 var require_tlds = __commonJS({
   "node_modules/.pnpm/tlds@1.261.0/node_modules/tlds/index.json"(exports, module) {
     module.exports = [
@@ -48884,8 +49655,6 @@ var require_tlds = __commonJS({
     ];
   }
 });
-
-// node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/lib/mail-parser.js
 var require_mail_parser = __commonJS({
   "node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/lib/mail-parser.js"(exports, module) {
     "use strict";
@@ -48927,6 +49696,9 @@ var require_mail_parser = __commonJS({
       static {
         __name(this, "IconvDecoder");
       }
+      static {
+        __name2(this, "IconvDecoder");
+      }
       constructor(Iconv, charset) {
         super();
         if (charset.toLowerCase() === "ks_c_5601-1987") {
@@ -48956,6 +49728,9 @@ var require_mail_parser = __commonJS({
     var JPDecoder = class extends Transform {
       static {
         __name(this, "JPDecoder");
+      }
+      static {
+        __name2(this, "JPDecoder");
       }
       constructor(charset) {
         super();
@@ -48994,6 +49769,9 @@ var require_mail_parser = __commonJS({
     var MailParser = class extends Transform {
       static {
         __name(this, "MailParser");
+      }
+      static {
+        __name2(this, "MailParser");
       }
       constructor(config) {
         super({
@@ -49124,7 +49902,7 @@ var require_mail_parser = __commonJS({
         };
       }
       cleanup(done) {
-        let finish = /* @__PURE__ */ __name(() => {
+        let finish = /* @__PURE__ */ __name2(() => {
           try {
             let t = this.getTextContent();
             this.push(t);
@@ -49147,10 +49925,10 @@ var require_mail_parser = __commonJS({
       processHeaders(lines) {
         let headers = /* @__PURE__ */ new Map();
         (lines || []).forEach((line) => {
-          let key = line.key;
+          let key2 = line.key;
           let value = ((this.libmime.decodeHeader(line.line) || {}).value || "").toString().trim();
           value = Buffer.from(value, "binary").toString();
-          switch (key) {
+          switch (key2) {
             case "content-type":
             case "content-disposition":
             case "dkim-signature":
@@ -49158,9 +49936,9 @@ var require_mail_parser = __commonJS({
               if (value.value) {
                 value.value = this.libmime.decodeWords(value.value);
               }
-              Object.keys(value && value.params || {}).forEach((key2) => {
+              Object.keys(value && value.params || {}).forEach((key22) => {
                 try {
-                  value.params[key2] = this.libmime.decodeWords(value.params[key2]);
+                  value.params[key22] = this.libmime.decodeWords(value.params[key22]);
                 } catch (E) {
                 }
               });
@@ -49198,7 +49976,7 @@ var require_mail_parser = __commonJS({
             case "x-priority":
             case "x-msmail-priority":
             case "importance":
-              key = "priority";
+              key2 = "priority";
               value = this.parsePriority(value);
               break;
             case "from":
@@ -49219,17 +49997,17 @@ var require_mail_parser = __commonJS({
               };
               break;
           }
-          if (key.substr(0, 5) === "list-") {
-            value = this.parseListHeader(key.substr(5), value);
-            key = "list";
+          if (key2.substr(0, 5) === "list-") {
+            value = this.parseListHeader(key2.substr(5), value);
+            key2 = "list";
           }
           if (value) {
-            if (!headers.has(key)) {
-              headers.set(key, [].concat(value || []));
+            if (!headers.has(key2)) {
+              headers.set(key2, [].concat(value || []));
             } else if (Array.isArray(value)) {
-              headers.set(key, headers.get(key).concat(value));
+              headers.set(key2, headers.get(key2).concat(value));
             } else {
-              headers.get(key).push(value);
+              headers.get(key2).push(value);
             }
           }
         });
@@ -49252,27 +50030,27 @@ var require_mail_parser = __commonJS({
           "errors-to",
           "disposition-notification-to"
         ];
-        headers.forEach((value, key) => {
+        headers.forEach((value, key2) => {
           if (Array.isArray(value)) {
-            if (singleKeys.includes(key) && value.length) {
-              headers.set(key, value[value.length - 1]);
+            if (singleKeys.includes(key2) && value.length) {
+              headers.set(key2, value[value.length - 1]);
             } else if (value.length === 1) {
-              headers.set(key, value[0]);
+              headers.set(key2, value[0]);
             }
           }
-          if (key === "list") {
+          if (key2 === "list") {
             let listValue = {};
             [].concat(value || []).forEach((val) => {
               Object.keys(val || {}).forEach((listKey) => {
                 listValue[listKey] = val[listKey];
               });
             });
-            headers.set(key, listValue);
+            headers.set(key2, listValue);
           }
         });
         return headers;
       }
-      parseListHeader(key, value) {
+      parseListHeader(key2, value) {
         let addresses = addressparser(value);
         let response = {};
         let data = addresses.map((address) => {
@@ -49295,7 +50073,7 @@ var require_mail_parser = __commonJS({
         }).filter((address) => address);
         if (data.length) {
           return {
-            [key]: response
+            [key2]: response
           };
         }
         return false;
@@ -49464,14 +50242,14 @@ var require_mail_parser = __commonJS({
       getTextContent() {
         let text = [];
         let html = [];
-        let processNode = /* @__PURE__ */ __name((alternative, level, node) => {
+        let processNode = /* @__PURE__ */ __name2((alternative, level, node) => {
           if (node.showMeta) {
             let meta = ["From", "Subject", "Date", "To", "Cc", "Bcc"].map((fkey) => {
-              let key = fkey.toLowerCase();
-              if (!node.headers.has(key)) {
+              let key2 = fkey.toLowerCase();
+              if (!node.headers.has(key2)) {
                 return false;
               }
-              let value = node.headers.get(key);
+              let value = node.headers.get(key2);
               if (!value) {
                 return false;
               }
@@ -49588,9 +50366,9 @@ var require_mail_parser = __commonJS({
           case "node": {
             let node = this.createNode(data);
             if (node === this.tree) {
-              ["subject", "references", "date", "to", "from", "to", "cc", "bcc", "message-id", "in-reply-to", "reply-to"].forEach((key) => {
-                if (node.headers.has(key)) {
-                  this[key.replace(/-([a-z])/g, (m, c) => c.toUpperCase())] = node.headers.get(key);
+              ["subject", "references", "date", "to", "from", "to", "cc", "bcc", "message-id", "in-reply-to", "reply-to"].forEach((key2) => {
+                if (node.headers.has(key2)) {
+                  this[key2.replace(/-([a-z])/g, (m, c) => c.toUpperCase())] = node.headers.get(key2);
                 }
               });
               this.emit("headers", node.headers);
@@ -49614,7 +50392,7 @@ var require_mail_parser = __commonJS({
                 content: null,
                 contentType,
                 partId,
-                release: /* @__PURE__ */ __name(() => {
+                release: /* @__PURE__ */ __name2(() => {
                   attachment.release = null;
                   if (this.waitUntilAttachmentEnd && typeof this.attachmentCallback === "function") {
                     setImmediate(this.attachmentCallback);
@@ -49747,7 +50525,7 @@ var require_mail_parser = __commonJS({
         return partId;
       }
       getAddressesHTML(value) {
-        let formatSingleLevel = /* @__PURE__ */ __name((addresses) => addresses.map((address) => {
+        let formatSingleLevel = /* @__PURE__ */ __name2((addresses) => addresses.map((address) => {
           let str = '<span class="mp_address_group">';
           if (address.name) {
             str += '<span class="mp_address_name">' + he.encode(address.name) + (address.group ? ": " : "") + "</span>";
@@ -49768,7 +50546,7 @@ var require_mail_parser = __commonJS({
         return formatSingleLevel([].concat(value || []));
       }
       getAddressesText(value) {
-        let formatSingleLevel = /* @__PURE__ */ __name((addresses) => addresses.map((address) => {
+        let formatSingleLevel = /* @__PURE__ */ __name2((addresses) => addresses.map((address) => {
           let str = "";
           if (address.name) {
             str += `"${address.name}"` + (address.group ? ": " : "");
@@ -49813,7 +50591,7 @@ var require_mail_parser = __commonJS({
           cidList.push(entry);
         });
         let pos = 0;
-        let processNext = /* @__PURE__ */ __name(() => {
+        let processNext = /* @__PURE__ */ __name2(() => {
           if (pos >= cidList.length) {
             html = html.replace(/\bcid:([^'"\s]{1,256})/g, (match, cid) => {
               if (cids.has(cid) && cids.get(cid).url) {
@@ -49882,8 +50660,6 @@ var require_mail_parser = __commonJS({
     module.exports = MailParser;
   }
 });
-
-// node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/lib/simple-parser.js
 var require_simple_parser = __commonJS({
   "node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/lib/simple-parser.js"(exports, module) {
     "use strict";
@@ -49916,7 +50692,7 @@ var require_simple_parser = __commonJS({
         mail.headerLines = parser.headerLines;
       });
       let reading = false;
-      let reader = /* @__PURE__ */ __name(() => {
+      let reader = /* @__PURE__ */ __name2(() => {
         reading = true;
         let data = parser.read();
         if (data === null) {
@@ -49924,9 +50700,9 @@ var require_simple_parser = __commonJS({
           return;
         }
         if (data.type === "text") {
-          Object.keys(data).forEach((key) => {
-            if (["text", "html", "textAsHtml"].includes(key)) {
-              mail[key] = data[key];
+          Object.keys(data).forEach((key2) => {
+            if (["text", "html", "textAsHtml"].includes(key2)) {
+              mail[key2] = data[key2];
             }
           });
         }
@@ -49956,9 +50732,9 @@ var require_simple_parser = __commonJS({
         }
       });
       parser.on("end", () => {
-        ["subject", "references", "date", "to", "from", "to", "cc", "bcc", "message-id", "in-reply-to", "reply-to"].forEach((key) => {
-          if (mail.headers && mail.headers.has(key)) {
-            mail[key.replace(/-([a-z])/g, (m, c) => c.toUpperCase())] = mail.headers.get(key);
+        ["subject", "references", "date", "to", "from", "to", "cc", "bcc", "message-id", "in-reply-to", "reply-to"].forEach((key2) => {
+          if (mail.headers && mail.headers.has(key2)) {
+            mail[key2.replace(/-([a-z])/g, (m, c) => c.toUpperCase())] = mail.headers.get(key2);
           }
         });
         if (keepCidLinks) {
@@ -49999,10 +50775,9 @@ var require_simple_parser = __commonJS({
       };
     }
     __name(callbackPromise, "callbackPromise");
+    __name2(callbackPromise, "callbackPromise");
   }
 });
-
-// node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/index.js
 var require_mailparser = __commonJS({
   "node_modules/.pnpm/mailparser@3.9.15/node_modules/mailparser/index.js"(exports, module) {
     "use strict";
@@ -50014,8 +50789,6 @@ var require_mailparser = __commonJS({
     };
   }
 });
-
-// shared/paymentNotice.ts
 function classifyPaymentNotice(subject, body) {
   const text = `${subject}
 ${body}`.toLowerCase();
@@ -50029,8 +50802,10 @@ ${body}`.toLowerCase();
     return "confirmed";
   return "review";
 }
+__name(classifyPaymentNotice, "classifyPaymentNotice");
 function classifyMailboxTopic(subject, body) {
-  const text = `${subject}\n${body}`.toLowerCase();
+  const text = `${subject}
+${body}`.toLowerCase();
   if (classifyPaymentNotice(subject, body) === "attention") return "returned_payment";
   if (/(medical exam|paramed|laborator|blood draw|urine sample|exam request|exame|laborat[oó]rio|coleta de sangue|muestra de sangre|examen m[eé]dico)/i.test(text)) return "exams";
   if (/(additional information|more information|information required|outstanding requirement|pending requirement|informações adicionais|informacao adicional|informa[cç][aã]o pendente|documentaci[oó]n adicional|informaci[oó]n adicional)/i.test(text)) return "extra_information";
@@ -50038,12 +50813,17 @@ function classifyMailboxTopic(subject, body) {
   if (/(underwriting|policy status|approved|declined|issued|decision|subscri[cç][aã]o|status da ap[oó]lice|ap[oó]lice emitida|evaluaci[oó]n|p[oó]liza emitida)/i.test(text)) return "underwriting";
   return "general";
 }
+__name(classifyMailboxTopic, "classifyMailboxTopic");
 function isProfessionalMailboxMessage(subject, body, fromEmail, toEmail, isKnownClient = false) {
   if (isKnownClient) return true;
-  const text = `${subject}\n${body}\n${fromEmail}\n${toEmail}`.toLowerCase();
+  const text = `${subject}
+${body}
+${fromEmail}
+${toEmail}`.toLowerCase();
   return /(national\s+life|\bnlg\b|five\s*rings|fiverings|mga360|corebridge|american\s+general|docusign|my\s*wfg|mywfg|\bwfg\b|world\s+financial\s+group)/i.test(text);
 }
-const PROFESSIONAL_MAILBOX_SQL = `(m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
+__name(isProfessionalMailboxMessage, "isProfessionalMailboxMessage");
+var PROFESSIONAL_MAILBOX_SQL = `(m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
 function extractPolicyNumbers(subject, body) {
   const text = `${subject}
 ${body}`;
@@ -50060,8 +50840,10 @@ ${body}`;
   }
   return values;
 }
+__name(extractPolicyNumbers, "extractPolicyNumbers");
 function extractPaymentClientName(subject, body) {
-  const text = `${subject}\n${body}`.replace(/<[^>]+>/g, " ");
+  const text = `${subject}
+${body}`.replace(/<[^>]+>/g, " ");
   const patterns = [
     /\b\d{7,12}\s*-\s*([A-ZÀ-Ý][A-ZÀ-Ý' -]{3,80})(?:\r?\n|$)/m,
     /(?:insured|policy\s*owner|customer|client|proposed\s*insured|nome|name)\s*(?:name)?\s*[:#-]\s*([A-ZÀ-Ý][A-Za-zÀ-ÿ' -]{3,80})/i,
@@ -50073,8 +50855,10 @@ function extractPaymentClientName(subject, body) {
   }
   return "";
 }
+__name(extractPaymentClientName, "extractPaymentClientName");
 function extractPaymentAmount(subject, body) {
-  const text = `${subject}\n${body}`;
+  const text = `${subject}
+${body}`;
   const patterns = [
     /(?:amount|payment\s+amount|premium\s+amount|valor)\s*[:#-]?\s*\$\s*([\d,]+(?:\.\d{1,2})?)/i,
     /\$\s*([\d,]+\.\d{2})\b/
@@ -50086,47 +50870,44 @@ function extractPaymentAmount(subject, body) {
   }
   return 0;
 }
+__name(extractPaymentAmount, "extractPaymentAmount");
 function paymentPolicyNumbersMatch(left, right) {
   const a = policyNumberIdentity(left);
   const b = policyNumberIdentity(right);
   if (!a || !b) return false;
   if (a === b) return true;
-  // Carrier messages sometimes omit the product prefix stored in the CRM
-  // (for example 811046300 in the e-mail and LS811046300 in the policy).
   return Math.min(a.length, b.length) >= 7 && (a.endsWith(b) || b.endsWith(a));
 }
+__name(paymentPolicyNumbersMatch, "paymentPolicyNumbersMatch");
 function policyNumberIdentity(value) {
   const normalized = normalizePolicyNumber(String(value || ""));
   return normalized.replace(/^LS(?=\d)/, "");
 }
 __name(policyNumberIdentity, "policyNumberIdentity");
+__name2(policyNumberIdentity, "policyNumberIdentity");
 var normalizePolicyNumber;
 var init_paymentNotice = __esm({
   "shared/paymentNotice.ts"() {
     "use strict";
-    normalizePolicyNumber = /* @__PURE__ */ __name((value) => {
+    normalizePolicyNumber = /* @__PURE__ */ __name2((value) => {
       const compact = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       const prefix = compact.match(/^[A-Z]+/)?.[0] || "";
       let digits = compact.replace(/^[A-Z]+/, "");
       if (digits.length === 9 && digits.endsWith("00")) digits = digits.slice(0, -2);
       return `${prefix}${digits}`;
     }, "normalizePolicyNumber");
-    __name(classifyPaymentNotice, "classifyPaymentNotice");
-    __name(classifyMailboxTopic, "classifyMailboxTopic");
-    __name(extractPolicyNumbers, "extractPolicyNumbers");
+    __name2(classifyPaymentNotice, "classifyPaymentNotice");
+    __name2(classifyMailboxTopic, "classifyMailboxTopic");
+    __name2(extractPolicyNumbers, "extractPolicyNumbers");
   }
 });
-
-// worker/icloud-email.ts
 var icloud_email_exports = {};
 __export(icloud_email_exports, {
-  manageIcloudFolder: () => manageIcloudFolder,
-  moveIcloudEmail: () => moveIcloudEmail,
-  syncAllIcloudInboxes: () => syncAllIcloudInboxes,
-  syncIcloudInbox: () => syncIcloudInbox
+  manageIcloudFolder: /* @__PURE__ */ __name(() => manageIcloudFolder, "manageIcloudFolder"),
+  moveIcloudEmail: /* @__PURE__ */ __name(() => moveIcloudEmail, "moveIcloudEmail"),
+  syncAllIcloudInboxes: /* @__PURE__ */ __name(() => syncAllIcloudInboxes, "syncAllIcloudInboxes"),
+  syncIcloudInbox: /* @__PURE__ */ __name(() => syncIcloudInbox, "syncIcloudInbox")
 });
-import { connect } from "cloudflare:sockets";
-import { Buffer as Buffer2 } from "node:buffer";
 async function handlePaymentNotice(env, owner, config, uid, parsed) {
   const subject = String(parsed.subject || "Aviso sobre pagamento da ap\xF3lice");
   const rawBody = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
@@ -50137,13 +50918,14 @@ async function handlePaymentNotice(env, owner, config, uid, parsed) {
   const alreadySent = await env.DB.prepare(
     "SELECT id FROM clientEmails WHERE lower(agentEmail)=? AND externalId=? LIMIT 1"
   ).bind(owner, externalId).first();
-  if (alreadySent) return { actionStatus: "sent", actionDetail: "Aviso já processado anteriormente" };
+  if (alreadySent) return { actionStatus: "sent", actionDetail: "Aviso j\xE1 processado anteriormente" };
   const policies = await env.DB.prepare(
     "SELECT p.id policyId,p.policyNumber,p.clientId,c.name,c.email FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId WHERE lower(p.agentEmail)=?"
   ).bind(owner).all();
   const mentionedPolicies = extractPolicyNumbers(subject, rawBody);
   const loweredBody = rawBody.toLowerCase();
-  const loweredNotice = `${subject}\n${rawBody}`.toLowerCase();
+  const loweredNotice = `${subject}
+${rawBody}`.toLowerCase();
   const normalizedNotice = normalizePolicyNumber(`${subject} ${rawBody}`);
   const policyMatches = policies.results.filter((row) => {
     const policy = normalizePolicyNumber(row.policyNumber);
@@ -50179,7 +50961,7 @@ async function handlePaymentNotice(env, owner, config, uid, parsed) {
   const paymentAmount = extractPaymentAmount(subject, rawBody);
   if (paymentAmount > 0 && resolvedMatch.policyId) {
     const annualTarget = Math.round(paymentAmount * 12 * 100) / 100;
-    await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount,annualTarget,Math.round(annualTarget),Number(resolvedMatch.policyId),owner).run();
+    await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount, annualTarget, Math.round(annualTarget), Number(resolvedMatch.policyId), owner).run();
   }
   const agent = await env.DB.prepare(
     "SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1"
@@ -50210,7 +50992,7 @@ Ap\xF3lice n\xBA {apolice}`;
   const reservation = await env.DB.prepare(
     "INSERT OR IGNORE INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,'Processando aviso de pagamento','Processando aviso de pagamento',?,?,CURRENT_TIMESTAMP,'central')"
   ).bind(owner, Number(resolvedMatch.clientId), externalId, String(config.fromEmail || owner), String(resolvedMatch.email)).run();
-  if (Number(reservation.meta?.changes || 0) === 0) return { actionStatus: "sent", actionDetail: "Aviso já processado anteriormente", policyNumber: clearPolicyNumber, clientId: Number(resolvedMatch.clientId) };
+  if (Number(reservation.meta?.changes || 0) === 0) return { actionStatus: "sent", actionDetail: "Aviso j\xE1 processado anteriormente", policyNumber: clearPolicyNumber, clientId: Number(resolvedMatch.clientId) };
   try {
     const sent = await sendAgentEmail(env, owner, {
       to: String(resolvedMatch.email),
@@ -50240,6 +51022,7 @@ Ap\xF3lice n\xBA {apolice}`;
   }
   return { actionStatus: "sent", actionDetail: "Modelo enviado automaticamente ao cliente", policyNumber: clearPolicyNumber, clientId: Number(resolvedMatch.clientId) };
 }
+__name(handlePaymentNotice, "handlePaymentNotice");
 function sanitizeMailboxHtml(value, attachments = []) {
   let html = String(value || "");
   if (!html) return null;
@@ -50254,13 +51037,9 @@ function sanitizeMailboxHtml(value, attachments = []) {
     html = html.replace(new RegExp(`cid:${cid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gi"), data);
     embeddedBytes += size;
   }
-  return html
-    .replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|meta|base)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
-    .replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|meta|base)\b[^>]*\/?\s*>/gi, "")
-    .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
-    .replace(/\s+(?:href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\1/gi, "")
-    .slice(0, 8e5);
+  return html.replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|meta|base)[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "").replace(/<\s*(script|iframe|object|embed|form|input|button|textarea|select|meta|base)\b[^>]*\/?\s*>/gi, "").replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "").replace(/\s+(?:href|src)\s*=\s*(["'])\s*javascript:[\s\S]*?\1/gi, "").slice(0, 8e5);
 }
+__name(sanitizeMailboxHtml, "sanitizeMailboxHtml");
 async function openAgentImap(env, owner) {
   const config = await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
   if (!config) throw new Error("Configure o e-mail do agente primeiro");
@@ -50271,6 +51050,7 @@ async function openAgentImap(env, owner) {
   await client.command("F1", `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`);
   return { client, config };
 }
+__name(openAgentImap, "openAgentImap");
 function parseImapFolders(text) {
   const folders = [];
   const pattern = /(?:^|\r\n)\* LIST \(([^)]*)\) (?:"[^"]*"|NIL) (?:"((?:[^"\\]|\\.)*)"|([^\r\n]+))/gi;
@@ -50282,6 +51062,7 @@ function parseImapFolders(text) {
   }
   return [...new Set(folders)];
 }
+__name(parseImapFolders, "parseImapFolders");
 async function syncIcloudFolderList(env, owner, client, tag = "F2") {
   const result = await client.command(tag, 'LIST "" "*"');
   const hidden = /^(INBOX|Sent|Sent Messages|Deleted Messages|Trash|Junk|Junk E-mail|Spam)$/i;
@@ -50289,6 +51070,7 @@ async function syncIcloudFolderList(env, owner, client, tag = "F2") {
     await env.DB.prepare("INSERT INTO agentMailboxFolders (agentEmail,name,providerName,isProvider) VALUES (?,?,?,1) ON CONFLICT(agentEmail,name) DO UPDATE SET providerName=excluded.providerName,isProvider=1").bind(owner, providerName, providerName).run();
   }
 }
+__name(syncIcloudFolderList, "syncIcloudFolderList");
 async function manageIcloudFolder(env, agentEmail, action, currentName, nextName = "") {
   const owner = agentEmail.toLowerCase();
   const { client } = await openAgentImap(env, owner);
@@ -50296,23 +51078,30 @@ async function manageIcloudFolder(env, agentEmail, action, currentName, nextName
     if (action === "create") await client.command("F2", `CREATE ${quoteImap(nextName)}`);
     else if (action === "rename") await client.command("F2", `RENAME ${quoteImap(currentName)} ${quoteImap(nextName)}`);
     else if (action === "delete") await client.command("F2", `DELETE ${quoteImap(currentName)}`);
-    else throw new Error("Ação de pasta inválida");
-  } finally { await client.close(); }
+    else throw new Error("A\xE7\xE3o de pasta inv\xE1lida");
+  } finally {
+    await client.close();
+  }
 }
+__name(manageIcloudFolder, "manageIcloudFolder");
 async function moveIcloudEmail(env, agentEmail, uid, sourceFolder, destinationFolder) {
   if (!uid) return;
   const owner = agentEmail.toLowerCase();
   const { client } = await openAgentImap(env, owner);
   try {
     await client.command("M2", `SELECT ${quoteImap(sourceFolder)}`);
-    try { await client.command("M3", `UID MOVE ${uid} ${quoteImap(destinationFolder)}`); }
-    catch (error) {
+    try {
+      await client.command("M3", `UID MOVE ${uid} ${quoteImap(destinationFolder)}`);
+    } catch (error) {
       await client.command("M4", `UID COPY ${uid} ${quoteImap(destinationFolder)}`);
       await client.command("M5", `UID STORE ${uid} +FLAGS.SILENT (\\Deleted)`);
       await client.command("M6", "EXPUNGE");
     }
-  } finally { await client.close(); }
+  } finally {
+    await client.close();
+  }
 }
+__name(moveIcloudEmail, "moveIcloudEmail");
 async function syncIcloudInbox(env, agentEmail) {
   const owner = agentEmail.toLowerCase();
   const config = await env.DB.prepare(
@@ -50339,9 +51128,13 @@ async function syncIcloudInbox(env, agentEmail) {
       `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`
     );
     await client.command("A2", "SELECT INBOX");
-    try { await syncIcloudFolderList(env, owner, client, "A2F"); } catch (error) { console.error("icloud_folder_sync_failed", owner, error); }
+    try {
+      await syncIcloudFolderList(env, owner, client, "A2F");
+    } catch (error) {
+      console.error("icloud_folder_sync_failed", owner, error);
+    }
     await client.command("A2I", "SELECT INBOX");
-    const previousSync = config.lastImapSyncAt ? new Date(String(config.lastImapSyncAt).replace(" ", "T") + "Z") : null;
+    const previousSync = config.lastImapSyncAt ? /* @__PURE__ */ new Date(String(config.lastImapSyncAt).replace(" ", "T") + "Z") : null;
     const thirtyDaysAgo = Date.now() - 30 * 864e5;
     const since = new Date(previousSync && !Number.isNaN(previousSync.getTime()) ? Math.max(thirtyDaysAgo, previousSync.getTime() - 2 * 864e5) : thirtyDaysAgo);
     const customers = await env.DB.prepare(
@@ -50362,9 +51155,6 @@ async function syncIcloudInbox(env, agentEmail) {
       "SELECT imapUid FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND imapUid IS NOT NULL"
     ).bind(owner).all();
     const knownInboxUids = new Set(knownInbox.results.map((row) => String(row.imapUid)));
-    // Do not download and parse messages that are already in D1. Keeping each
-    // request to a small batch also prevents the Worker from exceeding its
-    // execution limit when an account contains hundreds of messages.
     const uids = [...uidSet].filter((uid) => !knownInboxUids.has(String(uid))).slice(-20);
     for (const uid of uids) {
       const fetched = await client.command(
@@ -50380,7 +51170,7 @@ async function syncIcloudInbox(env, agentEmail) {
       if (!customer) {
         const references = [
           parsed.inReplyTo,
-          ...(Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : [])
+          ...Array.isArray(parsed.references) ? parsed.references : parsed.references ? [parsed.references] : []
         ].map((value) => String(value || "").trim()).filter(Boolean).slice(0, 5);
         for (const reference of references) {
           const threaded = await env.DB.prepare(
@@ -50414,7 +51204,7 @@ async function syncIcloudInbox(env, agentEmail) {
         (parsed.date || /* @__PURE__ */ new Date()).toISOString(),
         paymentKind,
         paymentKind === "attention" ? "processing" : null,
-        paymentKind === "attention" ? "Aguardando identificação e ação automática" : null,
+        paymentKind === "attention" ? "Aguardando identifica\xE7\xE3o e a\xE7\xE3o autom\xE1tica" : null,
         topic
       ).run();
       if (htmlBody) await env.DB.prepare("UPDATE agentMailboxEmails SET htmlBody=coalesce(htmlBody,?) WHERE lower(agentEmail)=? AND externalId=? AND direction='received'").bind(htmlBody, owner, externalId).run();
@@ -50494,6 +51284,7 @@ async function syncIcloudInbox(env, agentEmail) {
     await client.close();
   }
 }
+__name(syncIcloudInbox, "syncIcloudInbox");
 async function syncAllIcloudInboxes(env) {
   const rows = await env.DB.prepare(
     "SELECT agentEmail FROM agentEmailSettings WHERE imapHost IS NOT NULL AND trim(imapHost)<>'' AND imapUser IS NOT NULL AND trim(imapUser)<>''"
@@ -50506,7 +51297,16 @@ async function syncAllIcloudInboxes(env) {
     }
   }));
 }
-var import_mailparser, cleanAddress, cleanReplyBody, escapeHtml, personalizeTemplate, quoteImap, ImapConnection, imapDate, extractLiteral;
+__name(syncAllIcloudInboxes, "syncAllIcloudInboxes");
+var import_mailparser;
+var cleanAddress;
+var cleanReplyBody;
+var escapeHtml;
+var personalizeTemplate;
+var quoteImap;
+var ImapConnection;
+var imapDate;
+var extractLiteral;
 var init_icloud_email = __esm({
   "worker/icloud-email.ts"() {
     "use strict";
@@ -50514,19 +51314,22 @@ var init_icloud_email = __esm({
     init_cloudflare_email();
     init_paymentNotice();
     init_paymentReturnTemplate();
-    cleanAddress = /* @__PURE__ */ __name((value) => value.trim().toLowerCase().replace(/^.*<([^>]+)>.*$/, "$1"), "cleanAddress");
-    cleanReplyBody = /* @__PURE__ */ __name((value) => value.split(/\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i)[0].replace(/\r?\n>[\s\S]*$/gi, "").trim(), "cleanReplyBody");
-    escapeHtml = /* @__PURE__ */ __name((value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"), "escapeHtml");
-    personalizeTemplate = /* @__PURE__ */ __name((value, client, agent, phone, policyNumber = "") => String(value || "").replaceAll("{cliente}", client).replaceAll("{agente}", agent).replaceAll("{Agente}", agent).replaceAll("{telefone}", phone).replaceAll("{telefone do agente}", phone).replaceAll("{apolice}", policyNumber).replaceAll("{apolice numero}", policyNumber), "personalizeTemplate");
-    __name(handlePaymentNotice, "handlePaymentNotice");
-    __name(sanitizeMailboxHtml, "sanitizeMailboxHtml");
-    __name(openAgentImap, "openAgentImap");
-    __name(parseImapFolders, "parseImapFolders");
-    __name(syncIcloudFolderList, "syncIcloudFolderList");
-    __name(manageIcloudFolder, "manageIcloudFolder");
-    __name(moveIcloudEmail, "moveIcloudEmail");
-    quoteImap = /* @__PURE__ */ __name((value) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`, "quoteImap");
+    cleanAddress = /* @__PURE__ */ __name2((value) => value.trim().toLowerCase().replace(/^.*<([^>]+)>.*$/, "$1"), "cleanAddress");
+    cleanReplyBody = /* @__PURE__ */ __name2((value) => value.split(/\r?\n(?=(?:Sent from my (?:iPhone|iPad)|On .+ wrote:|Em .+ escreveu:|>))/i)[0].replace(/\r?\n>[\s\S]*$/gi, "").trim(), "cleanReplyBody");
+    escapeHtml = /* @__PURE__ */ __name2((value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"), "escapeHtml");
+    personalizeTemplate = /* @__PURE__ */ __name2((value, client, agent, phone, policyNumber = "") => String(value || "").replaceAll("{cliente}", client).replaceAll("{agente}", agent).replaceAll("{Agente}", agent).replaceAll("{telefone}", phone).replaceAll("{telefone do agente}", phone).replaceAll("{apolice}", policyNumber).replaceAll("{apolice numero}", policyNumber), "personalizeTemplate");
+    __name2(handlePaymentNotice, "handlePaymentNotice");
+    __name2(sanitizeMailboxHtml, "sanitizeMailboxHtml");
+    __name2(openAgentImap, "openAgentImap");
+    __name2(parseImapFolders, "parseImapFolders");
+    __name2(syncIcloudFolderList, "syncIcloudFolderList");
+    __name2(manageIcloudFolder, "manageIcloudFolder");
+    __name2(moveIcloudEmail, "moveIcloudEmail");
+    quoteImap = /* @__PURE__ */ __name2((value) => `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`, "quoteImap");
     ImapConnection = class {
+      static {
+        __name(this, "ImapConnection");
+      }
       constructor(socket) {
         this.socket = socket;
         this.reader = socket.readable.getReader();
@@ -50534,7 +51337,7 @@ var init_icloud_email = __esm({
       }
       socket;
       static {
-        __name(this, "ImapConnection");
+        __name2(this, "ImapConnection");
       }
       reader;
       writer;
@@ -50579,23 +51382,21 @@ var init_icloud_email = __esm({
         return data;
       }
     };
-    imapDate = /* @__PURE__ */ __name((date) => {
+    imapDate = /* @__PURE__ */ __name2((date) => {
       const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
       return `${date.getUTCDate()}-${month[date.getUTCMonth()]}-${date.getUTCFullYear()}`;
     }, "imapDate");
-    extractLiteral = /* @__PURE__ */ __name((bytes) => {
+    extractLiteral = /* @__PURE__ */ __name2((bytes) => {
       const preview = new TextDecoder().decode(bytes);
       const match = /\{(\d+)\}\r\n/.exec(preview);
       if (!match || match.index === void 0) return null;
       const start = match.index + match[0].length;
       return bytes.slice(start, start + Number(match[1]));
     }, "extractLiteral");
-    __name(syncIcloudInbox, "syncIcloudInbox");
-    __name(syncAllIcloudInboxes, "syncAllIcloudInboxes");
+    __name2(syncIcloudInbox, "syncIcloudInbox");
+    __name2(syncAllIcloudInboxes, "syncAllIcloudInboxes");
   }
 });
-
-// shared/videoUrl.ts
 var YOUTUBE_ID = /^[A-Za-z0-9_-]{6,20}$/;
 var VIMEO_ID = /^\d+$/;
 var VIDEO_FILE = /\.(mp4|webm|ogg|ogv|mov|m4v)$/i;
@@ -50627,6 +51428,7 @@ function getVideoSource(rawValue) {
   return null;
 }
 __name(getVideoSource, "getVideoSource");
+__name2(getVideoSource, "getVideoSource");
 function isValidMediaUrl(rawValue, mediaType) {
   const value = rawValue.trim();
   if (!value) return true;
@@ -50639,16 +51441,15 @@ function isValidMediaUrl(rawValue, mediaType) {
   }
 }
 __name(isValidMediaUrl, "isValidMediaUrl");
-
-// shared/clientProfile.ts
-var present = /* @__PURE__ */ __name((value) => value !== null && value !== void 0 && String(value).trim() !== "", "present");
-var positive = /* @__PURE__ */ __name((value) => Number(value || 0) > 0, "positive");
+__name2(isValidMediaUrl, "isValidMediaUrl");
+var present = /* @__PURE__ */ __name2((value) => value !== null && value !== void 0 && String(value).trim() !== "", "present");
+var positive = /* @__PURE__ */ __name2((value) => Number(value || 0) > 0, "positive");
 function primaryBeneficiaryName(value) {
-  const beneficiaryCandidate = (candidate) => {
+  const beneficiaryCandidate = /* @__PURE__ */ __name((candidate) => {
     const name2 = String(candidate || "").trim();
     if (!name2 || /(?:as\s+stated\s+in\s+the\s+application|unless\s+later\s+changed|see\s+(?:the\s+)?application|continued\s+(?:on|in)|national\s+life|life\s+insurance|insurance\s+company|centralized|mailing\s+address|montpelier|one\s+national|policy|customer|service|address|street|\b(?:inc|llc|corp)\b)/i.test(name2) || /\d{4,}/.test(name2) || name2.length > 100) return "";
     return name2;
-  };
+  }, "beneficiaryCandidate");
   if (Array.isArray(value)) {
     const first = value.find((item) => beneficiaryCandidate(item?.name || item?.fullName || item?.beneficiaryName));
     return beneficiaryCandidate(first?.name || first?.fullName || first?.beneficiaryName);
@@ -50660,18 +51461,15 @@ function primaryBeneficiaryName(value) {
     const parsed = JSON.parse(text);
     if (Array.isArray(parsed) && parsed.length) return primaryBeneficiaryName(parsed);
     if (parsed && typeof parsed === "object") return primaryBeneficiaryName(parsed);
-  } catch {}
-  const name = text
-    .split(/\s+(?:—|-)\s+(?:Parentesco|Relationship|Porcentagem|Percentage)\s*:/i)[0]
-    .split(/;|\n/)[0]
-    .replace(/^(?:Primary|Principal)(?: Beneficiary| Beneficiário)?\s*[:\-]?\s*/i, "")
-    .trim();
+  } catch {
+  }
+  const name = text.split(/\s+(?:—|-)\s+(?:Parentesco|Relationship|Porcentagem|Percentage)\s*:/i)[0].split(/;|\n/)[0].replace(/^(?:Primary|Principal)(?: Beneficiary| Beneficiário)?\s*[:\-]?\s*/i, "").trim();
   return beneficiaryCandidate(name);
 }
+__name(primaryBeneficiaryName, "primaryBeneficiaryName");
 function missingClientProfileFields(client, policies) {
-  const inactiveStatuses = new Set(["inactive", "inativa", "lapse", "lapsed", "cancelled", "canceled", "cancelada", "declined", "recusada", "surrendered", "terminated", "expired"]);
+  const inactiveStatuses = /* @__PURE__ */ new Set(["inactive", "inativa", "lapse", "lapsed", "cancelled", "canceled", "cancelada", "declined", "recusada", "surrendered", "terminated", "expired"]);
   const activePolicies = policies.filter((policy) => !inactiveStatuses.has(String(policy.status || "").trim().toLowerCase()));
-  // This badge belongs to the policy portfolio, not leads without policies.
   if (activePolicies.length === 0) return [];
   const missing = [];
   if (!present(client.email)) missing.push("e-mail");
@@ -50691,11 +51489,8 @@ function missingClientProfileFields(client, policies) {
   return missing;
 }
 __name(missingClientProfileFields, "missingClientProfileFields");
-
-// worker/cloudflare-staging.ts
+__name2(missingClientProfileFields, "missingClientProfileFields");
 init_paymentReturnTemplate();
-
-// shared/flexLifeReviewTemplate.ts
 var DEFAULT_FLEX_LIFE_REVIEW_SUBJECT = "Revis\xE3o anual da sua ap\xF3lice n\xBA {apolice numero}";
 var DEFAULT_FLEX_LIFE_REVIEW_MESSAGE = `Ol\xE1, {nome}! Tudo bem? \u{1F44B}
 
@@ -50718,6 +51513,7 @@ function isFlexLifeProduct(product) {
   return /flex\s*life/i.test(String(product || ""));
 }
 __name(isFlexLifeProduct, "isFlexLifeProduct");
+__name2(isFlexLifeProduct, "isFlexLifeProduct");
 function flexLifeReviewDates(applicationDate) {
   const normalized = typeof applicationDate === "string" && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(applicationDate) ? `${applicationDate.replace(" ", "T")}Z` : applicationDate;
   const application = new Date(normalized);
@@ -50734,8 +51530,7 @@ function flexLifeReviewDates(applicationDate) {
   return { reviewAt, noticeAt };
 }
 __name(flexLifeReviewDates, "flexLifeReviewDates");
-
-// shared/thanksgivingTemplate.ts
+__name2(flexLifeReviewDates, "flexLifeReviewDates");
 var DEFAULT_THANKSGIVING_SUBJECT = "Feliz Dia de A\xE7\xE3o de Gra\xE7as, {nome}! \u{1F342}";
 var DEFAULT_THANKSGIVING_MESSAGE = `Ol\xE1, {nome}! \u{1F342}\u{1F983}
 
@@ -50756,9 +51551,6 @@ var LEGACY_THANKSGIVING_MESSAGES = [
   "Ol\xE1 {nome}, neste Dia de A\xE7\xE3o de Gra\xE7as desejamos muita uni\xE3o, gratid\xE3o e bons momentos para voc\xEA e sua fam\xEDlia. Conte sempre conosco.",
   "Ol\xE1 {nome}, desejo a voc\xEA e sua fam\xEDlia um Dia de A\xE7\xE3o de Gra\xE7as cheio de uni\xE3o, gratid\xE3o e bons momentos."
 ];
-
-// node_modules/.pnpm/bcryptjs@3.0.3/node_modules/bcryptjs/index.js
-import nodeCrypto from "crypto";
 var randomFallback = null;
 function randomBytes(len) {
   try {
@@ -50777,10 +51569,12 @@ function randomBytes(len) {
   return randomFallback(len);
 }
 __name(randomBytes, "randomBytes");
+__name2(randomBytes, "randomBytes");
 function setRandomFallback(random) {
   randomFallback = random;
 }
 __name(setRandomFallback, "setRandomFallback");
+__name2(setRandomFallback, "setRandomFallback");
 function genSaltSync(rounds, seed_length) {
   rounds = rounds || GENSALT_DEFAULT_LOG2_ROUNDS;
   if (typeof rounds !== "number")
@@ -50798,6 +51592,7 @@ function genSaltSync(rounds, seed_length) {
   return salt.join("");
 }
 __name(genSaltSync, "genSaltSync");
+__name2(genSaltSync, "genSaltSync");
 function genSalt(rounds, seed_length, callback) {
   if (typeof seed_length === "function")
     callback = seed_length, seed_length = void 0;
@@ -50815,6 +51610,7 @@ function genSalt(rounds, seed_length, callback) {
     });
   }
   __name(_async, "_async");
+  __name2(_async, "_async");
   if (callback) {
     if (typeof callback !== "function")
       throw Error("Illegal callback: " + typeof callback);
@@ -50831,6 +51627,7 @@ function genSalt(rounds, seed_length, callback) {
     });
 }
 __name(genSalt, "genSalt");
+__name2(genSalt, "genSalt");
 function hashSync(password, salt) {
   if (typeof salt === "undefined") salt = GENSALT_DEFAULT_LOG2_ROUNDS;
   if (typeof salt === "number") salt = genSaltSync(salt);
@@ -50839,6 +51636,7 @@ function hashSync(password, salt) {
   return _hash(password, salt);
 }
 __name(hashSync, "hashSync");
+__name2(hashSync, "hashSync");
 function hash(password, salt, callback, progressCallback) {
   function _async(callback2) {
     if (typeof password === "string" && typeof salt === "number")
@@ -50856,6 +51654,7 @@ function hash(password, salt, callback, progressCallback) {
       );
   }
   __name(_async, "_async");
+  __name2(_async, "_async");
   if (callback) {
     if (typeof callback !== "function")
       throw Error("Illegal callback: " + typeof callback);
@@ -50872,6 +51671,7 @@ function hash(password, salt, callback, progressCallback) {
     });
 }
 __name(hash, "hash");
+__name2(hash, "hash");
 function safeStringCompare(known, unknown) {
   var diff = known.length ^ unknown.length;
   for (var i = 0; i < known.length; ++i) {
@@ -50880,6 +51680,7 @@ function safeStringCompare(known, unknown) {
   return diff === 0;
 }
 __name(safeStringCompare, "safeStringCompare");
+__name2(safeStringCompare, "safeStringCompare");
 function compareSync(password, hash2) {
   if (typeof password !== "string" || typeof hash2 !== "string")
     throw Error("Illegal arguments: " + typeof password + ", " + typeof hash2);
@@ -50890,6 +51691,7 @@ function compareSync(password, hash2) {
   );
 }
 __name(compareSync, "compareSync");
+__name2(compareSync, "compareSync");
 function compare(password, hashValue, callback, progressCallback) {
   function _async(callback2) {
     if (typeof password !== "string" || typeof hashValue !== "string") {
@@ -50918,6 +51720,7 @@ function compare(password, hashValue, callback, progressCallback) {
     );
   }
   __name(_async, "_async");
+  __name2(_async, "_async");
   if (callback) {
     if (typeof callback !== "function")
       throw Error("Illegal callback: " + typeof callback);
@@ -50934,12 +51737,14 @@ function compare(password, hashValue, callback, progressCallback) {
     });
 }
 __name(compare, "compare");
+__name2(compare, "compare");
 function getRounds(hash2) {
   if (typeof hash2 !== "string")
     throw Error("Illegal arguments: " + typeof hash2);
   return parseInt(hash2.split("$")[2], 10);
 }
 __name(getRounds, "getRounds");
+__name2(getRounds, "getRounds");
 function getSalt(hash2) {
   if (typeof hash2 !== "string")
     throw Error("Illegal arguments: " + typeof hash2);
@@ -50948,12 +51753,14 @@ function getSalt(hash2) {
   return hash2.substring(0, 29);
 }
 __name(getSalt, "getSalt");
+__name2(getSalt, "getSalt");
 function truncates(password) {
   if (typeof password !== "string")
     throw Error("Illegal arguments: " + typeof password);
   return utf8Length(password) > 72;
 }
 __name(truncates, "truncates");
+__name2(truncates, "truncates");
 var nextTick = typeof setImmediate === "function" ? setImmediate : typeof scheduler === "object" && typeof scheduler.postTask === "function" ? scheduler.postTask.bind(scheduler) : setTimeout;
 function utf8Length(string) {
   var len = 0, c = 0;
@@ -50969,6 +51776,7 @@ function utf8Length(string) {
   return len;
 }
 __name(utf8Length, "utf8Length");
+__name2(utf8Length, "utf8Length");
 function utf8Array(string) {
   var offset = 0, c1, c2;
   var buffer = new Array(utf8Length(string));
@@ -50995,6 +51803,7 @@ function utf8Array(string) {
   return buffer;
 }
 __name(utf8Array, "utf8Array");
+__name2(utf8Array, "utf8Array");
 var BASE64_CODE = "./ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789".split("");
 var BASE64_INDEX = [
   -1,
@@ -51153,6 +51962,7 @@ function base64_encode(b, len) {
   return rs.join("");
 }
 __name(base64_encode, "base64_encode");
+__name2(base64_encode, "base64_encode");
 function base64_decode(s, len) {
   var off = 0, slen = s.length, olen = 0, rs = [], c1, c2, c3, c4, o, code;
   if (len <= 0) throw Error("Illegal len: " + len);
@@ -51185,6 +51995,7 @@ function base64_decode(s, len) {
   return res;
 }
 __name(base64_decode, "base64_decode");
+__name2(base64_decode, "base64_decode");
 var BCRYPT_SALT_LEN = 16;
 var GENSALT_DEFAULT_LOG2_ROUNDS = 10;
 var BLOWFISH_NUM_ROUNDS = 16;
@@ -52331,26 +53142,29 @@ function _encipher(lr, off, P, S) {
   return lr;
 }
 __name(_encipher, "_encipher");
+__name2(_encipher, "_encipher");
 function _streamtoword(data, offp) {
   for (var i = 0, word = 0; i < 4; ++i)
     word = word << 8 | data[offp] & 255, offp = (offp + 1) % data.length;
   return { key: word, offp };
 }
 __name(_streamtoword, "_streamtoword");
-function _key(key, P, S) {
+__name2(_streamtoword, "_streamtoword");
+function _key(key2, P, S) {
   var offset = 0, lr = [0, 0], plen = P.length, slen = S.length, sw;
   for (var i = 0; i < plen; i++)
-    sw = _streamtoword(key, offset), offset = sw.offp, P[i] = P[i] ^ sw.key;
+    sw = _streamtoword(key2, offset), offset = sw.offp, P[i] = P[i] ^ sw.key;
   for (i = 0; i < plen; i += 2)
     lr = _encipher(lr, 0, P, S), P[i] = lr[0], P[i + 1] = lr[1];
   for (i = 0; i < slen; i += 2)
     lr = _encipher(lr, 0, P, S), S[i] = lr[0], S[i + 1] = lr[1];
 }
 __name(_key, "_key");
-function _ekskey(data, key, P, S) {
+__name2(_key, "_key");
+function _ekskey(data, key2, P, S) {
   var offp = 0, lr = [0, 0], plen = P.length, slen = S.length, sw;
   for (var i = 0; i < plen; i++)
-    sw = _streamtoword(key, offp), offp = sw.offp, P[i] = P[i] ^ sw.key;
+    sw = _streamtoword(key2, offp), offp = sw.offp, P[i] = P[i] ^ sw.key;
   offp = 0;
   for (i = 0; i < plen; i += 2)
     sw = _streamtoword(data, offp), offp = sw.offp, lr[0] ^= sw.key, sw = _streamtoword(data, offp), offp = sw.offp, lr[1] ^= sw.key, lr = _encipher(lr, 0, P, S), P[i] = lr[0], P[i + 1] = lr[1];
@@ -52358,6 +53172,7 @@ function _ekskey(data, key, P, S) {
     sw = _streamtoword(data, offp), offp = sw.offp, lr[0] ^= sw.key, sw = _streamtoword(data, offp), offp = sw.offp, lr[1] ^= sw.key, lr = _encipher(lr, 0, P, S), S[i] = lr[0], S[i + 1] = lr[1];
 }
 __name(_ekskey, "_ekskey");
+__name2(_ekskey, "_ekskey");
 function _crypt(b, salt, rounds, callback, progressCallback) {
   var cdata = C_ORIG.slice(), clen = cdata.length, err;
   if (rounds < 4 || rounds > 31) {
@@ -52410,6 +53225,7 @@ function _crypt(b, salt, rounds, callback, progressCallback) {
     if (callback) nextTick(next);
   }
   __name(next, "next");
+  __name2(next, "next");
   if (typeof callback !== "undefined") {
     next();
   } else {
@@ -52418,6 +53234,7 @@ function _crypt(b, salt, rounds, callback, progressCallback) {
   }
 }
 __name(_crypt, "_crypt");
+__name2(_crypt, "_crypt");
 function _hash(password, salt, callback, progressCallback) {
   var err;
   if (typeof password !== "string" || typeof salt !== "string") {
@@ -52470,6 +53287,7 @@ function _hash(password, salt, callback, progressCallback) {
     return res.join("");
   }
   __name(finish, "finish");
+  __name2(finish, "finish");
   if (typeof callback == "undefined")
     return finish(_crypt(passwordb, saltb, rounds));
   else {
@@ -52486,14 +53304,17 @@ function _hash(password, salt, callback, progressCallback) {
   }
 }
 __name(_hash, "_hash");
+__name2(_hash, "_hash");
 function encodeBase64(bytes, length) {
   return base64_encode(bytes, length);
 }
 __name(encodeBase64, "encodeBase64");
+__name2(encodeBase64, "encodeBase64");
 function decodeBase64(string, length) {
   return base64_decode(string, length);
 }
 __name(decodeBase64, "decodeBase64");
+__name2(decodeBase64, "decodeBase64");
 var bcryptjs_default = {
   setRandomFallback,
   genSaltSync,
@@ -52508,42 +53329,54 @@ var bcryptjs_default = {
   encodeBase64,
   decodeBase64
 };
-
-// worker/cloudflare-staging.ts
 init_cloudflare_email();
 function fiveRingsFetch(input, init = {}, timeoutMs = 12e3) {
   return fetch(input, { ...init, signal: AbortSignal.timeout(timeoutMs) });
 }
 __name(fiveRingsFetch, "fiveRingsFetch");
+__name2(fiveRingsFetch, "fiveRingsFetch");
 async function ensureCarrierConnectionTables(env) {
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS agentNationalLifeConnections (agentEmail TEXT PRIMARY KEY,portalEmail TEXT NOT NULL,encryptedPassword TEXT NOT NULL,trustDevice INTEGER NOT NULL DEFAULT 1,status TEXT NOT NULL DEFAULT 'configured',encryptedChallenge TEXT,encryptedSession TEXT,lastSyncAt TEXT,lastError TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
   const fiveRingsColumns = await env.DB.prepare("PRAGMA table_info(agentFiveRingsConnections)").all();
   if (!(fiveRingsColumns.results || []).some((column) => String(column.name) === "trustDevice")) {
-    try { await env.DB.prepare("ALTER TABLE agentFiveRingsConnections ADD COLUMN trustDevice INTEGER NOT NULL DEFAULT 1").run(); } catch {}
+    try {
+      await env.DB.prepare("ALTER TABLE agentFiveRingsConnections ADD COLUMN trustDevice INTEGER NOT NULL DEFAULT 1").run();
+    } catch {
+    }
   }
 }
 __name(ensureCarrierConnectionTables, "ensureCarrierConnectionTables");
-const NATIONAL_LIFE_AGENT_URL = "https://www.nationallife.com/agent/";
-const NATIONAL_LIFE_INFORCE_URL = "https://www.nationallife.com/agent/book-of-business/inforce-book/all-clients/all-clients-agent";
+__name2(ensureCarrierConnectionTables, "ensureCarrierConnectionTables");
+var NATIONAL_LIFE_AGENT_URL = "https://www.nationallife.com/agent/";
+var NATIONAL_LIFE_INFORCE_URL = "https://www.nationallife.com/agent/book-of-business/inforce-book/all-clients/all-clients-agent";
 function nationalLifeConfig(html) {
   const encoded = html.match(/window\.authconfigurations\s*=\s*window\.atob\(['"]([^'"]+)/i)?.[1];
-  if (!encoded) throw new Error("A National Life não forneceu a configuração segura do login");
-  try { return JSON.parse(atob(encoded)); } catch { throw new Error("A configuração de login da National Life não pôde ser interpretada"); }
+  if (!encoded) throw new Error("A National Life n\xE3o forneceu a configura\xE7\xE3o segura do login");
+  try {
+    return JSON.parse(atob(encoded));
+  } catch {
+    throw new Error("A configura\xE7\xE3o de login da National Life n\xE3o p\xF4de ser interpretada");
+  }
 }
 __name(nationalLifeConfig, "nationalLifeConfig");
+__name2(nationalLifeConfig, "nationalLifeConfig");
 async function nationalLifeFollow(url, cookies = "", init = {}, limit = 12) {
   let current = url, jar = cookies, response, html = "";
   for (let step = 0; step < limit; step += 1) {
-    response = await fiveRingsFetch(current, { ...init, redirect: "manual", headers: { ...(init.headers || {}), ...(jar ? { cookie: jar } : {}) } }, 2e4);
+    response = await fiveRingsFetch(current, { ...init, redirect: "manual", headers: { ...init.headers || {}, ...jar ? { cookie: jar } : {} } }, 2e4);
     jar = mergeFiveRingsCookies(jar, response.headers);
     const location = response.headers.get("location");
-    if (!location || response.status < 300 || response.status >= 400) { html = await response.text(); break; }
+    if (!location || response.status < 300 || response.status >= 400) {
+      html = await response.text();
+      break;
+    }
     current = new URL(location, current).toString();
     init = { method: "GET", headers: {} };
   }
   return { response, html, url: response?.url || current, cookies: jar };
 }
 __name(nationalLifeFollow, "nationalLifeFollow");
+__name2(nationalLifeFollow, "nationalLifeFollow");
 function nationalLifeHiddenForm(html, pageUrl) {
   const form = [...html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/gi)].find((item) => /type=["']hidden["']/i.test(item[2]));
   if (!form) return null;
@@ -52556,48 +53389,64 @@ function nationalLifeHiddenForm(html, pageUrl) {
   return { action, body };
 }
 __name(nationalLifeHiddenForm, "nationalLifeHiddenForm");
+__name2(nationalLifeHiddenForm, "nationalLifeHiddenForm");
 async function verifyNationalLifeLogin(portalEmail, password) {
   const landing = await nationalLifeFollow(NATIONAL_LIFE_AGENT_URL);
   const config = nationalLifeConfig(landing.html);
   const authBase = String(config.authorizationServer?.url || `https://${config.auth0Domain}`).replace(/\/$/, "");
   const authResponse = await fiveRingsFetch(`${authBase}/oauth/token`, {
-    method: "POST", redirect: "manual", headers: { "content-type": "application/json" },
+    method: "POST",
+    redirect: "manual",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify({ grant_type: "http://auth0.com/oauth/grant-type/password-realm", client_id: config.clientID, username: portalEmail, password, realm: config.connection || "NLGAgentsDB", audience: config.extraParams?.audience || "https://api.nlg.net/agent-portal", scope: config.extraParams?.scope || "openid profile email" })
   }, 2e4);
   const authText = await authResponse.text();
-  let authResult = {}; try { authResult = JSON.parse(authText); } catch {}
+  let authResult = {};
+  try {
+    authResult = JSON.parse(authText);
+  } catch {
+  }
   if (authResult.error === "mfa_required" || authResult.mfa_token) return { requiresCode: true, challenge: { type: "mfa", mfaToken: authResult.mfa_token, authBase, clientId: config.clientID, cookies: landing.cookies } };
-  if (!authResponse.ok || !authResult.access_token) throw new Error(authResult.error_description || authResult.description || "Usuário ou senha recusados pela National Life");
+  if (!authResponse.ok || !authResult.access_token) throw new Error(authResult.error_description || authResult.description || "Usu\xE1rio ou senha recusados pela National Life");
   return { requiresCode: false, session: { accessToken: authResult.access_token, refreshToken: authResult.refresh_token || null, idToken: authResult.id_token || null, cookies: landing.cookies || "", url: NATIONAL_LIFE_INFORCE_URL }, title: "National Life Book of Business" };
 }
 __name(verifyNationalLifeLogin, "verifyNationalLifeLogin");
+__name2(verifyNationalLifeLogin, "verifyNationalLifeLogin");
 async function readNationalLifeRecords(session) {
   const page = await nationalLifeFollow(NATIONAL_LIFE_INFORCE_URL, String(session?.cookies || ""), { headers: session?.accessToken ? { authorization: `Bearer ${session.accessToken}`, accept: "text/html,application/json" } : {} });
-  if (/id=["']loginForm["']|name=["']password["']/i.test(page.html) || new URL(page.url).hostname.includes("auth0.com")) throw new Error("Sua sessão da National Life expirou. Clique em conectar novamente.");
+  if (/id=["']loginForm["']|name=["']password["']/i.test(page.html) || new URL(page.url).hostname.includes("auth0.com")) throw new Error("Sua sess\xE3o da National Life expirou. Clique em conectar novamente.");
   const rows = [...fiveRingsTableRecords(page.html), ...fiveRingsJsonRecords(page.html)];
   const records = rows.map((row) => normalizeFiveRingsRecord(row)).filter((record) => record.clientName || record.policyNumber);
-  const unique = new Map();
+  const unique = /* @__PURE__ */ new Map();
   for (const record of records) {
-    const key = record.policyNumber || record.email || `${record.clientName}|${record.phone}`;
-    const current = unique.get(key) || {};
-    unique.set(key, { ...current, ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0)) });
+    const key2 = record.policyNumber || record.email || `${record.clientName}|${record.phone}`;
+    const current = unique.get(key2) || {};
+    unique.set(key2, { ...current, ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0)) });
   }
   return { records: [...unique.values()], session: { cookies: page.cookies, url: NATIONAL_LIFE_INFORCE_URL, html: page.html } };
 }
 __name(readNationalLifeRecords, "readNationalLifeRecords");
+__name2(readNationalLifeRecords, "readNationalLifeRecords");
 async function submitNationalLifeCode(challenge, code) {
-  if (challenge?.type !== "mfa" || !challenge.mfaToken) throw new Error("A confirmação expirou. Conecte novamente.");
+  if (challenge?.type !== "mfa" || !challenge.mfaToken) throw new Error("A confirma\xE7\xE3o expirou. Conecte novamente.");
   const response = await fiveRingsFetch(`${challenge.authBase}/oauth/token`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ grant_type: "http://auth0.com/oauth/grant-type/mfa-otp", client_id: challenge.clientId, mfa_token: challenge.mfaToken, otp: code }) }, 2e4);
-  const text = await response.text(); let result = {}; try { result = JSON.parse(text); } catch {}
-  if (!response.ok || !result.access_token) throw new Error(result.error_description || "Código incorreto ou expirado");
+  const text = await response.text();
+  let result = {};
+  try {
+    result = JSON.parse(text);
+  } catch {
+  }
+  if (!response.ok || !result.access_token) throw new Error(result.error_description || "C\xF3digo incorreto ou expirado");
   return { session: { accessToken: result.access_token, refreshToken: result.refresh_token || null, cookies: challenge.cookies || "", url: NATIONAL_LIFE_AGENT_URL } };
 }
 __name(submitNationalLifeCode, "submitNationalLifeCode");
+__name2(submitNationalLifeCode, "submitNationalLifeCode");
 function fiveRingsCookies(headers) {
   const values = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [headers.get("set-cookie") || ""];
   return values.map((value) => value.split(";", 1)[0]).filter(Boolean).join("; ");
 }
 __name(fiveRingsCookies, "fiveRingsCookies");
+__name2(fiveRingsCookies, "fiveRingsCookies");
 function mergeFiveRingsCookies(current, headers) {
   const jar = new Map(current.split("; ").filter(Boolean).map((item) => {
     const index = item.indexOf("=");
@@ -52607,13 +53456,15 @@ function mergeFiveRingsCookies(current, headers) {
     const index = item.indexOf("=");
     jar.set(item.slice(0, index), item.slice(index + 1));
   }
-  return [...jar].map(([key, value]) => `${key}=${value}`).join("; ");
+  return [...jar].map(([key2, value]) => `${key2}=${value}`).join("; ");
 }
 __name(mergeFiveRingsCookies, "mergeFiveRingsCookies");
+__name2(mergeFiveRingsCookies, "mergeFiveRingsCookies");
 function fiveRingsCodeField(html) {
   return [...html.matchAll(/<input\b[^>]*>/gi)].filter((match) => !/type=["']hidden["']/i.test(match[0])).map((match) => match[0].match(/name=["']([^"']+)["']/i)?.[1]).find((name) => name && name !== "_token" && /(code|otp|verification|two.?factor|mfa)/i.test(name));
 }
 __name(fiveRingsCodeField, "fiveRingsCodeField");
+__name2(fiveRingsCodeField, "fiveRingsCodeField");
 function fiveRingsEmailChoice(html) {
   const controls = [...html.matchAll(/<(?:input|button)\b[^>]*(?:type=["'](?:radio|submit)["'])?[^>]*>/gi)].map((match) => match[0]);
   for (const control of controls) {
@@ -52632,6 +53483,7 @@ function fiveRingsEmailChoice(html) {
   return null;
 }
 __name(fiveRingsEmailChoice, "fiveRingsEmailChoice");
+__name2(fiveRingsEmailChoice, "fiveRingsEmailChoice");
 async function requestFiveRingsEmailCode(html, pageUrl, cookies) {
   const base = "https://portal.fiveringsfinancial.com";
   const choice = fiveRingsEmailChoice(html);
@@ -52660,6 +53512,7 @@ async function requestFiveRingsEmailCode(html, pageUrl, cookies) {
   return { html: await next.text(), url: next.url, cookies: nextCookies };
 }
 __name(requestFiveRingsEmailCode, "requestFiveRingsEmailCode");
+__name2(requestFiveRingsEmailCode, "requestFiveRingsEmailCode");
 function fiveRingsSections(html, base) {
   const links = [...html.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)].map((match) => ({
     url: new URL(match[1], base).toString(),
@@ -52672,6 +53525,7 @@ function fiveRingsSections(html, base) {
   return [...links, ...dataLinks].filter((item) => item.url.startsWith(base) && item.label).filter((item, index, all) => all.findIndex((other) => other.url === item.url) === index).slice(0, 160);
 }
 __name(fiveRingsSections, "fiveRingsSections");
+__name2(fiveRingsSections, "fiveRingsSections");
 async function verifyFiveRingsLogin(portalEmail, password) {
   const base = "https://portal.fiveringsfinancial.com";
   const loginPage = await fiveRingsFetch(`${base}/`, { redirect: "manual" });
@@ -52717,6 +53571,7 @@ async function verifyFiveRingsLogin(portalEmail, password) {
   };
 }
 __name(verifyFiveRingsLogin, "verifyFiveRingsLogin");
+__name2(verifyFiveRingsLogin, "verifyFiveRingsLogin");
 async function submitFiveRingsCode(challenge, code) {
   const base = "https://portal.fiveringsfinancial.com";
   let cookies = challenge.cookies;
@@ -52788,14 +53643,17 @@ async function submitFiveRingsCode(challenge, code) {
   };
 }
 __name(submitFiveRingsCode, "submitFiveRingsCode");
+__name2(submitFiveRingsCode, "submitFiveRingsCode");
 function fiveRingsText(value) {
   return value.replace(/<script\b[\s\S]*?<\/script>/gi, " ").replace(/<style\b[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&#39;/g, "'").replace(/&quot;/gi, '"').replace(/\s+/g, " ").trim();
 }
 __name(fiveRingsText, "fiveRingsText");
+__name2(fiveRingsText, "fiveRingsText");
 function fiveRingsKey(value) {
   return fiveRingsText(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[_-]+/g, " ").toLowerCase();
 }
 __name(fiveRingsKey, "fiveRingsKey");
+__name2(fiveRingsKey, "fiveRingsKey");
 function fiveRingsTableRecords(html) {
   const records = [];
   for (const table of html.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
@@ -52819,26 +53677,28 @@ function fiveRingsTableRecords(html) {
   return records;
 }
 __name(fiveRingsTableRecords, "fiveRingsTableRecords");
+__name2(fiveRingsTableRecords, "fiveRingsTableRecords");
 function fiveRingsDataListRecord(html) {
   const record = {};
   const pattern = /<div\b[^>]*class=["'][^"']*font-weight-semibold[^"']*["'][^>]*>([\s\S]*?)<\/div>\s*<div\b[^>]*class=["'][^"']*ml-auto[^"']*["'][^>]*>([\s\S]*?)<\/div>/gi;
   for (const match of html.matchAll(pattern)) {
-    const key = fiveRingsKey(match[1]).replace(/:$/, "");
+    const key2 = fiveRingsKey(match[1]).replace(/:$/, "");
     const value = fiveRingsText(match[2]);
-    if (key && value) record[key] = value;
+    if (key2 && value) record[key2] = value;
   }
   return record;
 }
 __name(fiveRingsDataListRecord, "fiveRingsDataListRecord");
+__name2(fiveRingsDataListRecord, "fiveRingsDataListRecord");
 function fiveRingsJsonValueRecords(value) {
   const records = [];
-  const visit = /* @__PURE__ */ __name((value2) => {
+  const visit = /* @__PURE__ */ __name2((value2) => {
     if (Array.isArray(value2)) return value2.forEach(visit);
     if (!value2 || typeof value2 !== "object") return;
     const object = value2;
     const flat = {};
-    for (const [key, item] of Object.entries(object))
-      if (["string", "number"].includes(typeof item)) flat[fiveRingsKey(key)] = String(item);
+    for (const [key2, item] of Object.entries(object))
+      if (["string", "number"].includes(typeof item)) flat[fiveRingsKey(key2)] = String(item);
     const keys = Object.keys(flat).join(" ");
     if (/(client|customer|insured|policy|contract)/i.test(keys)) records.push(flat);
     Object.values(object).forEach(visit);
@@ -52847,6 +53707,7 @@ function fiveRingsJsonValueRecords(value) {
   return records;
 }
 __name(fiveRingsJsonValueRecords, "fiveRingsJsonValueRecords");
+__name2(fiveRingsJsonValueRecords, "fiveRingsJsonValueRecords");
 function fiveRingsJsonRecords(html) {
   const records = [];
   for (const script of html.matchAll(/<script\b[^>]*type=["']application\/(?:json|ld\+json)["'][^>]*>([\s\S]*?)<\/script>/gi))
@@ -52857,11 +53718,13 @@ function fiveRingsJsonRecords(html) {
   return records;
 }
 __name(fiveRingsJsonRecords, "fiveRingsJsonRecords");
+__name2(fiveRingsJsonRecords, "fiveRingsJsonRecords");
 function fiveRingsValue(row, patterns) {
-  const entry = Object.entries(row).find(([key]) => patterns.some((pattern) => pattern.test(key)));
+  const entry = Object.entries(row).find(([key2]) => patterns.some((pattern) => pattern.test(key2)));
   return entry ? fiveRingsText(entry[1]) : "";
 }
 __name(fiveRingsValue, "fiveRingsValue");
+__name2(fiveRingsValue, "fiveRingsValue");
 function fiveRingsMoney(value) {
   const cleaned = value.replace(/[^0-9,.-]/g, "");
   if (!cleaned) return 0;
@@ -52869,10 +53732,12 @@ function fiveRingsMoney(value) {
   return Math.max(0, Number(normalized) || 0);
 }
 __name(fiveRingsMoney, "fiveRingsMoney");
+__name2(fiveRingsMoney, "fiveRingsMoney");
 function fiveRingsPolicyNumber(value) {
   return fiveRingsText(value).split(/\s+-\s+/)[0].replace(/[^a-z0-9]/gi, "").toUpperCase();
 }
 __name(fiveRingsPolicyNumber, "fiveRingsPolicyNumber");
+__name2(fiveRingsPolicyNumber, "fiveRingsPolicyNumber");
 function normalizeFiveRingsRecord(row) {
   const firstName = fiveRingsValue(row, [/^first.?name$/, /^firstname$/]);
   const lastName = fiveRingsValue(row, [/^last.?name$/, /^lastname$/]);
@@ -52915,6 +53780,7 @@ function normalizeFiveRingsRecord(row) {
   };
 }
 __name(normalizeFiveRingsRecord, "normalizeFiveRingsRecord");
+__name2(normalizeFiveRingsRecord, "normalizeFiveRingsRecord");
 function fiveRingsDataTableUrl(path, columns) {
   const params = new URLSearchParams({ draw: "1", start: "0", length: "2000", "search[value]": "", "search[regex]": "false" });
   columns.forEach((column, index) => {
@@ -52928,6 +53794,7 @@ function fiveRingsDataTableUrl(path, columns) {
   return `https://portal.fiveringsfinancial.com/account/${path}/data?${params}`;
 }
 __name(fiveRingsDataTableUrl, "fiveRingsDataTableUrl");
+__name2(fiveRingsDataTableUrl, "fiveRingsDataTableUrl");
 async function fiveRingsDataTableRecords(path, cookies) {
   const columns = path === "clients" ? ["", "entity_name", "type", "status", "latest_policy", "latest_policy_status", "policies", "products", "product_types", "product_categories", "primary_email", "primary_phone", "primary_address", "gender", "birth_date", "start_date", ""] : ["number", "status", "client_names", "owner_email", "owner_phone", "agent_names", "carrier_name", "product_name", "product_type_name", "product_category_name", "state", "annual_premium", "submitted_date", "issued_date", "effective_date", "updated_at", "requirement_name", ""];
   const response = await fiveRingsFetch(fiveRingsDataTableUrl(path, columns), {
@@ -52939,6 +53806,7 @@ async function fiveRingsDataTableRecords(path, cookies) {
   return fiveRingsJsonValueRecords(payload.data || []).map((row) => normalizeFiveRingsRecord(row));
 }
 __name(fiveRingsDataTableRecords, "fiveRingsDataTableRecords");
+__name2(fiveRingsDataTableRecords, "fiveRingsDataTableRecords");
 async function readFiveRingsRecords(session, sections) {
   const directResults = await Promise.allSettled([
     fiveRingsDataTableRecords("clients", session.cookies),
@@ -53002,7 +53870,7 @@ async function readFiveRingsRecords(session, sections) {
     const byUrl = new Map(enriched.flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => [url, record])));
     all = all.map((record) => byUrl.get(record.detailUrl) || byUrl.get(record.clientDetailUrl) || record);
   }
-  const clientDetails = new Map();
+  const clientDetails = /* @__PURE__ */ new Map();
   for (const record of all) {
     const nameKey = String(record.clientName || "").trim().toLowerCase();
     if (!nameKey) continue;
@@ -53012,16 +53880,16 @@ async function readFiveRingsRecords(session, sections) {
   all = all.map((record) => {
     const client = clientDetails.get(String(record.clientName || "").trim().toLowerCase());
     if (!client) return record;
-    return { ...client, ...record, ...Object.fromEntries(Object.entries(client).filter(([key, value]) => ["email", "phone", "birthDate", "address", "beneficiaries", "clientDetailUrl"].includes(key) && value !== "" && value !== 0)) };
+    return { ...client, ...record, ...Object.fromEntries(Object.entries(client).filter(([key2, value]) => ["email", "phone", "birthDate", "address", "beneficiaries", "clientDetailUrl"].includes(key2) && value !== "" && value !== 0)) };
   });
   const unique = /* @__PURE__ */ new Map();
   for (const record of all) {
     if (!record.clientName) continue;
-    const key = record.policyNumber || record.email || `${record.clientName.toLowerCase()}|${record.phone}`;
-    if (!key) continue;
-    const current = unique.get(key);
-    if (!current) unique.set(key, record);
-    else unique.set(key, {
+    const key2 = record.policyNumber || record.email || `${record.clientName.toLowerCase()}|${record.phone}`;
+    if (!key2) continue;
+    const current = unique.get(key2);
+    if (!current) unique.set(key2, record);
+    else unique.set(key2, {
       ...current,
       ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0))
     });
@@ -53029,6 +53897,7 @@ async function readFiveRingsRecords(session, sections) {
   return [...unique.values()];
 }
 __name(readFiveRingsRecords, "readFiveRingsRecords");
+__name2(readFiveRingsRecords, "readFiveRingsRecords");
 async function resumeFiveRingsSession(session) {
   const base = "https://portal.fiveringsfinancial.com";
   const url = new URL(session.url, base);
@@ -53048,6 +53917,7 @@ async function resumeFiveRingsSession(session) {
   };
 }
 __name(resumeFiveRingsSession, "resumeFiveRingsSession");
+__name2(resumeFiveRingsSession, "resumeFiveRingsSession");
 var ADMIN_COOKIE = "affinity_admin_session";
 var AFFILIATE_COOKIE = "affinity_affiliate_session";
 function normalizeBirthDate(value) {
@@ -53062,6 +53932,7 @@ function normalizeBirthDate(value) {
   return "";
 }
 __name(normalizeBirthDate, "normalizeBirthDate");
+__name2(normalizeBirthDate, "normalizeBirthDate");
 function jsonResponse(body, status = 200, headers) {
   return new Response(JSON.stringify(body), {
     status,
@@ -53069,6 +53940,7 @@ function jsonResponse(body, status = 200, headers) {
   });
 }
 __name(jsonResponse, "jsonResponse");
+__name2(jsonResponse, "jsonResponse");
 var contentSecurityPolicy = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -53097,15 +53969,10 @@ function secureResponse(response, options = {}) {
     "camera=(self), microphone=(), geolocation=()"
   );
   secured.headers.set("Cross-Origin-Opener-Policy", "same-origin");
-  // Stage the stricter policy without breaking legacy portals or third-party
-  // media. Nonces are unique per response; never cache a rewritten document.
   const isHtml = (secured.headers.get("Content-Type") || "").includes("text/html");
   const nonce = isHtml ? toBase64Url(crypto.getRandomValues(new Uint8Array(24))) : null;
   if (nonce) {
-    secured.headers.set("Content-Security-Policy-Report-Only", contentSecurityPolicy
-      .replace("'unsafe-inline'", `'nonce-${nonce}'`)
-      .replace("connect-src 'self' https:", "connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com https://calendly.com https://assets.calendly.com https://player.vimeo.com https://vimeo.com")
-      + "; worker-src 'self' blob:; script-src-attr 'none'");
+    secured.headers.set("Content-Security-Policy-Report-Only", contentSecurityPolicy.replace("'unsafe-inline'", `'nonce-${nonce}'`).replace("connect-src 'self' https:", "connect-src 'self' https://maps.googleapis.com https://maps.gstatic.com https://calendly.com https://assets.calendly.com https://player.vimeo.com https://vimeo.com") + "; worker-src 'self' blob:; script-src-attr 'none'");
     secured.headers.set("Cache-Control", "private, no-store, max-age=0");
     secured.headers.delete("ETag");
     secured.headers.delete("Content-Length");
@@ -53119,12 +53986,15 @@ function secureResponse(response, options = {}) {
   }
   if (nonce) {
     return new HTMLRewriter().on("script", {
-      element(element) { element.setAttribute("nonce", nonce); }
+      element(element) {
+        element.setAttribute("nonce", nonce);
+      }
     }).transform(secured);
   }
   return secured;
 }
 __name(secureResponse, "secureResponse");
+__name2(secureResponse, "secureResponse");
 function clearPortalSessions(response) {
   const cleared = new Response(response.body, response);
   cleared.headers.append("Set-Cookie", `${ADMIN_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
@@ -53133,10 +54003,12 @@ function clearPortalSessions(response) {
   return cleared;
 }
 __name(clearPortalSessions, "clearPortalSessions");
+__name2(clearPortalSessions, "clearPortalSessions");
 function trpcResult(data) {
   return { result: { data: { json: data } } };
 }
 __name(trpcResult, "trpcResult");
+__name2(trpcResult, "trpcResult");
 function trpcError(message, code = "BAD_REQUEST", httpStatus = 400) {
   return {
     error: {
@@ -53149,20 +54021,23 @@ function trpcError(message, code = "BAD_REQUEST", httpStatus = 400) {
   };
 }
 __name(trpcError, "trpcError");
+__name2(trpcError, "trpcError");
 function toBase64Url(bytes) {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 __name(toBase64Url, "toBase64Url");
+__name2(toBase64Url, "toBase64Url");
 function fromBase64Url(value) {
   const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
   const binary = atob(padded);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }
 __name(fromBase64Url, "fromBase64Url");
+__name2(fromBase64Url, "fromBase64Url");
 async function hmac(value, secret) {
-  const key = await crypto.subtle.importKey(
+  const key2 = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
     { name: "HMAC", hash: "SHA-256" },
@@ -53170,10 +54045,11 @@ async function hmac(value, secret) {
     ["sign"]
   );
   return new Uint8Array(
-    await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value))
+    await crypto.subtle.sign("HMAC", key2, new TextEncoder().encode(value))
   );
 }
 __name(hmac, "hmac");
+__name2(hmac, "hmac");
 function constantTimeEqual(left, right) {
   if (left.length !== right.length) return false;
   let mismatch = 0;
@@ -53182,6 +54058,7 @@ function constantTimeEqual(left, right) {
   return mismatch === 0;
 }
 __name(constantTimeEqual, "constantTimeEqual");
+__name2(constantTimeEqual, "constantTimeEqual");
 async function createSession(data, env, maxAge) {
   const payload = toBase64Url(
     new TextEncoder().encode(
@@ -53194,6 +54071,7 @@ async function createSession(data, env, maxAge) {
   return `${payload}.${toBase64Url(await hmac(payload, env.JWT_SECRET))}`;
 }
 __name(createSession, "createSession");
+__name2(createSession, "createSession");
 async function getSession(request, env, cookieName) {
   const cookie = request.headers.get("cookie") ?? "";
   const encoded = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
@@ -53214,11 +54092,13 @@ async function getSession(request, env, cookieName) {
   }
 }
 __name(getSession, "getSession");
+__name2(getSession, "getSession");
 async function getAdminEmail(request, env) {
   const session = await getSession(request, env, ADMIN_COOKIE);
   return session?.type === "admin" && typeof session.email === "string" ? session.email : null;
 }
 __name(getAdminEmail, "getAdminEmail");
+__name2(getAdminEmail, "getAdminEmail");
 async function getAdminAccess(email, env) {
   const account = await env.DB.prepare(
     "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive FROM adminAccounts WHERE lower(email)=?"
@@ -53231,15 +54111,18 @@ async function getAdminAccess(email, env) {
   };
 }
 __name(getAdminAccess, "getAdminAccess");
+__name2(getAdminAccess, "getAdminAccess");
 async function getAffiliateId(request, env) {
   const session = await getSession(request, env, AFFILIATE_COOKIE);
   return session?.type === "affiliate" ? Number(session.affiliateId) : null;
 }
 __name(getAffiliateId, "getAffiliateId");
+__name2(getAffiliateId, "getAffiliateId");
 function validEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 __name(validEmail, "validEmail");
+__name2(validEmail, "validEmail");
 function parseAmericanBirthDate(value) {
   if (!value) return null;
   const match = value.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -53255,14 +54138,17 @@ function parseAmericanBirthDate(value) {
   };
 }
 __name(parseAmericanBirthDate, "parseAmericanBirthDate");
+__name2(parseAmericanBirthDate, "parseAmericanBirthDate");
 function validStrongPassword(value) {
   return value.length >= 6 && /[A-Z]/.test(value) && /[a-z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value);
 }
 __name(validStrongPassword, "validStrongPassword");
+__name2(validStrongPassword, "validStrongPassword");
 function randomToken(bytes = 32) {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(bytes)));
 }
 __name(randomToken, "randomToken");
+__name2(randomToken, "randomToken");
 function normalizeAffiliate(row) {
   const { passwordHash: _passwordHash, ...safe } = row;
   return {
@@ -53273,6 +54159,7 @@ function normalizeAffiliate(row) {
   };
 }
 __name(normalizeAffiliate, "normalizeAffiliate");
+__name2(normalizeAffiliate, "normalizeAffiliate");
 function normalizePolicy(row) {
   return {
     ...row,
@@ -53282,26 +54169,27 @@ function normalizePolicy(row) {
   };
 }
 __name(normalizePolicy, "normalizePolicy");
+__name2(normalizePolicy, "normalizePolicy");
 function policyCompletenessScore(row) {
   const textFields = ["clientName", "clientEmail", "clientPhone", "product", "premiumFrequency", "beneficiaries", "issuedAt"];
   const numberFields = ["premiumAmount", "targetPremium", "points", "coverageAmount"];
-  return textFields.reduce((total, field) => total + (String(row[field] || "").trim() ? 1 : 0), 0) +
-    numberFields.reduce((total, field) => total + (Number(row[field] || 0) > 0 ? 1 : 0), 0);
+  return textFields.reduce((total, field) => total + (String(row[field] || "").trim() ? 1 : 0), 0) + numberFields.reduce((total, field) => total + (Number(row[field] || 0) > 0 ? 1 : 0), 0);
 }
 __name(policyCompletenessScore, "policyCompletenessScore");
+__name2(policyCompletenessScore, "policyCompletenessScore");
 async function mergePaddedPolicyDuplicates(env, owner) {
   const query = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
   const groups = /* @__PURE__ */ new Map();
   for (const row of query.results || []) {
-    const key = policyNumberIdentity(row.policyNumber);
-    if (!key) continue;
-    const group = groups.get(key) || [];
+    const key2 = policyNumberIdentity(row.policyNumber);
+    if (!key2) continue;
+    const group = groups.get(key2) || [];
     group.push(row);
-    groups.set(key, group);
+    groups.set(key2, group);
   }
   for (const [identity, group] of groups) {
     if (group.length < 2) continue;
-    const canonical = `${group.some(row => String(row.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "").startsWith("LS")) ? "LS" : ""}${identity}`;
+    const canonical = `${group.some((row) => String(row.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "").startsWith("LS")) ? "LS" : ""}${identity}`;
     group.sort((left, right) => {
       const leftCanonical = String(left.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === canonical ? 1 : 0;
       const rightCanonical = String(right.policyNumber || "").toUpperCase().replace(/[^A-Z0-9]/g, "") === canonical ? 1 : 0;
@@ -53309,14 +54197,27 @@ async function mergePaddedPolicyDuplicates(env, owner) {
     });
     const keeper = group[0];
     const newest = [...group].sort((left, right) => String(right.updatedAt || right.createdAt || "").localeCompare(String(left.updatedAt || left.createdAt || "")))[0];
-    const firstText = (field) => String(keeper[field] || "").trim() || String(group.find((row) => String(row[field] || "").trim())?.[field] || "").trim() || null;
-    const firstNumber = (field) => Number(keeper[field] || 0) > 0 ? Number(keeper[field]) : Number(group.find((row) => Number(row[field] || 0) > 0)?.[field] || 0);
+    const firstText = /* @__PURE__ */ __name((field) => String(keeper[field] || "").trim() || String(group.find((row) => String(row[field] || "").trim())?.[field] || "").trim() || null, "firstText");
+    const firstNumber = /* @__PURE__ */ __name((field) => Number(keeper[field] || 0) > 0 ? Number(keeper[field]) : Number(group.find((row) => Number(row[field] || 0) > 0)?.[field] || 0), "firstNumber");
     const clientId = Number(keeper.clientId || group.find((row) => Number(row.clientId || 0) > 0)?.clientId || 0) || null;
     await env.DB.prepare("UPDATE agentPolicies SET clientId=?,clientName=?,clientEmail=?,clientPhone=?,birthDate=?,policyNumber=?,status=?,product=?,issuedAt=?,premiumAmount=?,premiumFrequency=?,targetPremium=?,points=?,coverageAmount=?,beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(
-      clientId, firstText("clientName"), firstText("clientEmail"), firstText("clientPhone"), firstText("birthDate"), canonical,
-      String(newest.status || keeper.status || "active"), firstText("product"), firstText("issuedAt"), firstNumber("premiumAmount"),
-      firstText("premiumFrequency"), firstNumber("targetPremium"), Math.round(firstNumber("points")), firstNumber("coverageAmount"),
-      firstText("beneficiaries"), Number(keeper.id), owner
+      clientId,
+      firstText("clientName"),
+      firstText("clientEmail"),
+      firstText("clientPhone"),
+      firstText("birthDate"),
+      canonical,
+      String(newest.status || keeper.status || "active"),
+      firstText("product"),
+      firstText("issuedAt"),
+      firstNumber("premiumAmount"),
+      firstText("premiumFrequency"),
+      firstNumber("targetPremium"),
+      Math.round(firstNumber("points")),
+      firstNumber("coverageAmount"),
+      firstText("beneficiaries"),
+      Number(keeper.id),
+      owner
     ).run();
     for (const duplicate of group.slice(1)) {
       await env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=? WHERE matchedPolicyId=? AND lower(agentEmail)=?").bind(Number(keeper.id), Number(duplicate.id), owner).run();
@@ -53325,6 +54226,7 @@ async function mergePaddedPolicyDuplicates(env, owner) {
   }
 }
 __name(mergePaddedPolicyDuplicates, "mergePaddedPolicyDuplicates");
+__name2(mergePaddedPolicyDuplicates, "mergePaddedPolicyDuplicates");
 async function sendEmailIfConfigured(env, options) {
   try {
     await sendEmail(env, options);
@@ -53338,6 +54240,7 @@ async function sendEmailIfConfigured(env, options) {
   }
 }
 __name(sendEmailIfConfigured, "sendEmailIfConfigured");
+__name2(sendEmailIfConfigured, "sendEmailIfConfigured");
 function getInput(raw) {
   if (!raw || typeof raw !== "object") return {};
   const record = raw;
@@ -53345,20 +54248,33 @@ function getInput(raw) {
   return value && typeof value === "object" ? value : {};
 }
 __name(getInput, "getInput");
+__name2(getInput, "getInput");
 async function parseInputs(request) {
   if (request.method === "GET") {
     const encoded = new URL(request.url).searchParams.get("input");
     return encoded ? JSON.parse(encoded) : {};
   }
-  if(new URL(request.url).pathname.includes('agent.sendMailboxEmail')){
-    const reader=request.body?.getReader();if(!reader)return {};
-    let size=0;const parts=[];
-    while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>15*1024*1024){await reader.cancel();throw Error('Os anexos devem somar no máximo 10 MB.');}parts.push(value);}
+  if (new URL(request.url).pathname.includes("agent.sendMailboxEmail")) {
+    const reader = request.body?.getReader();
+    if (!reader) return {};
+    let size = 0;
+    const parts = [];
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.length;
+      if (size > 15 * 1024 * 1024) {
+        await reader.cancel();
+        throw Error("Os anexos devem somar no m\xE1ximo 10 MB.");
+      }
+      parts.push(value);
+    }
     return JSON.parse(await new Blob(parts).text());
   }
   return await request.json();
 }
 __name(parseInputs, "parseInputs");
+__name2(parseInputs, "parseInputs");
 function normalizeTestimonial(row) {
   return {
     ...row,
@@ -53368,6 +54284,7 @@ function normalizeTestimonial(row) {
   };
 }
 __name(normalizeTestimonial, "normalizeTestimonial");
+__name2(normalizeTestimonial, "normalizeTestimonial");
 var supportedLanguages = ["pt", "en", "es"];
 var workerAiLanguage = {
   pt: "portuguese",
@@ -53378,6 +54295,7 @@ function isSupportedLanguage(value) {
   return supportedLanguages.includes(value);
 }
 __name(isSupportedLanguage, "isSupportedLanguage");
+__name2(isSupportedLanguage, "isSupportedLanguage");
 async function translationCacheKey(content, target) {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -53392,6 +54310,7 @@ async function translationCacheKey(content, target) {
   );
 }
 __name(translationCacheKey, "translationCacheKey");
+__name2(translationCacheKey, "translationCacheKey");
 function parseTranslationBatch(value) {
   const cleaned = value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const parsed = JSON.parse(cleaned);
@@ -53408,6 +54327,7 @@ function parseTranslationBatch(value) {
   });
 }
 __name(parseTranslationBatch, "parseTranslationBatch");
+__name2(parseTranslationBatch, "parseTranslationBatch");
 async function translateTestimonialsBatch(rows, target, env) {
   const inputRows = rows.map((row) => ({
     id: Number(row.id),
@@ -53464,6 +54384,7 @@ async function translateTestimonialsBatch(rows, target, env) {
   return translations;
 }
 __name(translateTestimonialsBatch, "translateTestimonialsBatch");
+__name2(translateTestimonialsBatch, "translateTestimonialsBatch");
 async function localizeTestimonials(rows, target, env) {
   const rowsToTranslate = rows.filter(
     (row) => String(row.language ?? "pt") !== target
@@ -53497,12 +54418,13 @@ async function localizeTestimonials(rows, target, env) {
   }
 }
 __name(localizeTestimonials, "localizeTestimonials");
+__name2(localizeTestimonials, "localizeTestimonials");
 async function ensureCalendlyTables(env) {
   const tables = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('agentCalendlyConnections','calendlyMeetings','agentPublicProfiles','agentDirectContacts')").all();
   if (tables.results.length === 4) {
     const columns = await env.DB.prepare("PRAGMA table_info(agentPublicProfiles)").all();
     const names = new Set(columns.results.map((column) => String(column.name)));
-    if (["jobTitle","companies","specialties","professionalHistory","education","licenses","languages","achievements","website","linkedInUrl","instagramUrl","facebookUrl","additionalInfo"].every((name) => names.has(name))) return;
+    if (["jobTitle", "companies", "specialties", "professionalHistory", "education", "licenses", "languages", "achievements", "website", "linkedInUrl", "instagramUrl", "facebookUrl", "additionalInfo"].every((name) => names.has(name))) return;
   }
   await env.DB.batch([
     env.DB.prepare("CREATE TABLE IF NOT EXISTS agentCalendlyConnections (agentEmail TEXT PRIMARY KEY,encryptedToken TEXT NOT NULL,userUri TEXT,organizationUri TEXT,schedulingUrl TEXT,status TEXT NOT NULL DEFAULT 'connected',lastSyncAt TEXT,lastError TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
@@ -53514,25 +54436,34 @@ async function ensureCalendlyTables(env) {
   const existingColumns = new Set(((await env.DB.prepare("PRAGMA table_info(agentPublicProfiles)").all()).results || []).map((column) => String(column.name)));
   for (const definition of profileColumns) {
     const columnName = definition.split(" ")[0];
-    if (!existingColumns.has(columnName)) try { await env.DB.prepare(`ALTER TABLE agentPublicProfiles ADD COLUMN ${definition}`).run(); } catch {}
+    if (!existingColumns.has(columnName)) try {
+      await env.DB.prepare(`ALTER TABLE agentPublicProfiles ADD COLUMN ${definition}`).run();
+    } catch {
+    }
   }
 }
 __name(ensureCalendlyTables, "ensureCalendlyTables");
-function calendlyUuid(uri) { return String(uri || "").split("/").filter(Boolean).pop() || ""; }
+__name2(ensureCalendlyTables, "ensureCalendlyTables");
+function calendlyUuid(uri) {
+  return String(uri || "").split("/").filter(Boolean).pop() || "";
+}
 __name(calendlyUuid, "calendlyUuid");
+__name2(calendlyUuid, "calendlyUuid");
 function calendlyApiPath(uri, fallbackId = "") {
   try {
     const parsed = new URL(String(uri || ""));
     if (parsed.hostname === "api.calendly.com" && parsed.pathname.startsWith("/")) return parsed.pathname;
-  } catch {}
+  } catch {
+  }
   const id = calendlyUuid(uri) || String(fallbackId || "").trim();
   return id ? `/meeting_recaps/${encodeURIComponent(id)}` : "";
 }
 __name(calendlyApiPath, "calendlyApiPath");
+__name2(calendlyApiPath, "calendlyApiPath");
 function calendlyPhoneFrom(value) {
   if (!value || typeof value !== "object") return "";
-  for (const [key, item] of Object.entries(value)) {
-    if (/phone|mobile|cell|telefone|teléfono|celular|whatsapp/i.test(key) && typeof item === "string" && item.replace(/\D/g, "").length >= 10) return item.trim();
+  for (const [key2, item] of Object.entries(value)) {
+    if (/phone|mobile|cell|telefone|teléfono|celular|whatsapp/i.test(key2) && typeof item === "string" && item.replace(/\D/g, "").length >= 10) return item.trim();
   }
   for (const item of Object.values(value)) {
     if (item && typeof item === "object") {
@@ -53543,6 +54474,7 @@ function calendlyPhoneFrom(value) {
   return "";
 }
 __name(calendlyPhoneFrom, "calendlyPhoneFrom");
+__name2(calendlyPhoneFrom, "calendlyPhoneFrom");
 function calendlyPhoneFromAnswers(answers) {
   if (!Array.isArray(answers)) return "";
   const phoneLabel = /phone|telefone|tel[eé]fono|whatsapp|mobile|cell|celular|m[oó]vel|n[uú]mero.*(?:contato|contact)|contact.*number/i;
@@ -53559,12 +54491,16 @@ function calendlyPhoneFromAnswers(answers) {
   return phoneLike?.answer || "";
 }
 __name(calendlyPhoneFromAnswers, "calendlyPhoneFromAnswers");
+__name2(calendlyPhoneFromAnswers, "calendlyPhoneFromAnswers");
 async function backfillStoredCalendlyPhones(env, agentEmail) {
   const rows = await env.DB.prepare("SELECT id,clientId,questionsJson FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))='' AND trim(coalesce(questionsJson,'')) NOT IN ('','[]') ORDER BY id DESC LIMIT 1000").bind(agentEmail.toLowerCase()).all();
   let updated = 0;
   for (const row of rows.results || []) {
     let answers = [];
-    try { answers = JSON.parse(String(row.questionsJson || "[]")); } catch {}
+    try {
+      answers = JSON.parse(String(row.questionsJson || "[]"));
+    } catch {
+    }
     const phone = calendlyPhoneFromAnswers(answers);
     if (!phone) continue;
     await env.DB.prepare("UPDATE calendlyMeetings SET inviteePhone=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(phone, Number(row.id)).run();
@@ -53576,12 +54512,23 @@ async function backfillStoredCalendlyPhones(env, agentEmail) {
   return updated;
 }
 __name(backfillStoredCalendlyPhones, "backfillStoredCalendlyPhones");
-function sourceEmail(value) { return String(value || "").trim().toLowerCase(); }
+__name2(backfillStoredCalendlyPhones, "backfillStoredCalendlyPhones");
+function sourceEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
 __name(sourceEmail, "sourceEmail");
-function sourcePhone(value) { const digits = String(value || "").replace(/\D/g, ""); return digits.length >= 10 ? digits.slice(-10) : ""; }
+__name2(sourceEmail, "sourceEmail");
+function sourcePhone(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : "";
+}
 __name(sourcePhone, "sourcePhone");
-function sourceName(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(); }
+__name2(sourcePhone, "sourcePhone");
+function sourceName(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
 __name(sourceName, "sourceName");
+__name2(sourceName, "sourceName");
 function sourceValue(rows, field) {
   for (const row of rows) {
     const value = row?.[field];
@@ -53590,9 +54537,13 @@ function sourceValue(rows, field) {
   return null;
 }
 __name(sourceValue, "sourceValue");
+__name2(sourceValue, "sourceValue");
 function applicationBeneficiaries(application) {
   let data = {};
-  try { data = JSON.parse(String(application?.applicationData || "{}")) || {}; } catch {}
+  try {
+    data = JSON.parse(String(application?.applicationData || "{}")) || {};
+  } catch {
+  }
   const list = Array.isArray(data.beneficiaries) ? data.beneficiaries.filter((item) => item && typeof item === "object") : [];
   if (list.length) return JSON.stringify(list.map((item) => ({
     name: String(item.name || item.fullName || item.beneficiaryName || "").trim(),
@@ -53605,6 +54556,7 @@ function applicationBeneficiaries(application) {
   return JSON.stringify([{ name, relationship: String(application?.beneficiaryRelationship || data.beneficiaryRelationship || "").trim(), percentage: Number(application?.beneficiaryPercentage || data.beneficiaryPercentage || 100) }]);
 }
 __name(applicationBeneficiaries, "applicationBeneficiaries");
+__name2(applicationBeneficiaries, "applicationBeneficiaries");
 async function mergeClientSourcesForAgent(env, agentEmail) {
   const owner = String(agentEmail || "").trim().toLowerCase();
   const [clientResult, applicationResult, policyResult, meetingResult] = await Promise.all([
@@ -53620,23 +54572,40 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
     if (existingClient) continue;
     const composedAddress = [application.address, application.city, application.state, application.zipCode].filter((value) => String(value || "").trim()).join(", ");
     const completed = ["submitted", "completed", "complete", "concluida", "concluido"].includes(String(application.status || "").toLowerCase());
-    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplicação").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, "proposal", "Aplicação do portal", owner, `Ficha criada automaticamente a partir da aplicação nº ${Number(application.id)}.`).run();
-    clients.push({ id: Number(inserted.meta.last_row_id), name: String(application.clientName || "Cliente da aplicação").trim(), email: applicationEmail || null, phone: String(application.clientPhone || "").trim() || null, whatsapp: String(application.clientPhone || "").trim() || null, birthDate: String(application.birthDate || "").trim() || null, address: composedAddress || null });
+    const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?,?)").bind(String(application.clientName || "Cliente da aplica\xE7\xE3o").trim(), applicationEmail || null, String(application.clientPhone || "").trim() || null, String(application.clientPhone || "").trim() || null, String(application.birthDate || "").trim() || null, composedAddress || null, "proposal", "Aplica\xE7\xE3o do portal", owner, `Ficha criada automaticamente a partir da aplica\xE7\xE3o n\xBA ${Number(application.id)}.`).run();
+    clients.push({ id: Number(inserted.meta.last_row_id), name: String(application.clientName || "Cliente da aplica\xE7\xE3o").trim(), email: applicationEmail || null, phone: String(application.clientPhone || "").trim() || null, whatsapp: String(application.clientPhone || "").trim() || null, birthDate: String(application.birthDate || "").trim() || null, address: composedAddress || null });
   }
-  const emailMap = new Map(), phoneMap = new Map(), nameMap = new Map();
-  const addMatch = (map, key, row) => { if (!key) return; const list = map.get(key) || []; list.push(row); map.set(key, list); };
+  const emailMap = /* @__PURE__ */ new Map(), phoneMap = /* @__PURE__ */ new Map(), nameMap = /* @__PURE__ */ new Map();
+  const addMatch = /* @__PURE__ */ __name((map, key2, row) => {
+    if (!key2) return;
+    const list = map.get(key2) || [];
+    list.push(row);
+    map.set(key2, list);
+  }, "addMatch");
   for (const row of applications) {
     const rawApplicationDate = String(row.submittedAt || row.completedAt || row.createdAt || "").trim();
     const item = { ...row, sourceType: "application", beneficiaries: applicationBeneficiaries(row), issuedAt: rawApplicationDate ? rawApplicationDate.slice(0, 10) : null, product: row.productInterest || null, premiumAmount: Number(row.premiumBudget || 0), coverageAmount: Number(row.coverageRequested || 0) };
-    addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item);
+    addMatch(emailMap, sourceEmail(row.clientEmail), item);
+    addMatch(phoneMap, sourcePhone(row.clientPhone), item);
+    addMatch(nameMap, sourceName(row.clientName), item);
   }
-  for (const row of policies) { const item = { ...row, sourceType: "policy" }; addMatch(emailMap, sourceEmail(row.clientEmail), item); addMatch(phoneMap, sourcePhone(row.clientPhone), item); addMatch(nameMap, sourceName(row.clientName), item); }
-  for (const row of meetings) { const item = { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }; addMatch(emailMap, sourceEmail(row.inviteeEmail), item); addMatch(phoneMap, sourcePhone(row.inviteePhone), item); addMatch(nameMap, sourceName(row.inviteeName), item); }
+  for (const row of policies) {
+    const item = { ...row, sourceType: "policy" };
+    addMatch(emailMap, sourceEmail(row.clientEmail), item);
+    addMatch(phoneMap, sourcePhone(row.clientPhone), item);
+    addMatch(nameMap, sourceName(row.clientName), item);
+  }
+  for (const row of meetings) {
+    const item = { ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" };
+    addMatch(emailMap, sourceEmail(row.inviteeEmail), item);
+    addMatch(phoneMap, sourcePhone(row.inviteePhone), item);
+    addMatch(nameMap, sourceName(row.inviteeName), item);
+  }
   let clientsUpdated = 0, policiesUpdated = 0, applicationsUpdated = 0;
   for (const client of clients) {
-    const matches = [...(emailMap.get(sourceEmail(client.email)) || []), ...(phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || []), ...(nameMap.get(sourceName(client.name)) || []), ...policies.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, sourceType: "policy" })), ...meetings.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }))].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
+    const matches = [...emailMap.get(sourceEmail(client.email)) || [], ...phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || [], ...nameMap.get(sourceName(client.name)) || [], ...policies.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, sourceType: "policy" })), ...meetings.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }))].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
     if (!matches.length) continue;
-    const prioritized = matches.sort((a, b) => ({ application: 0, policy: 1, calendly: 2 }[a.sourceType] - ({ application: 0, policy: 1, calendly: 2 }[b.sourceType])));
+    const prioritized = matches.sort((a, b) => ({ application: 0, policy: 1, calendly: 2 })[a.sourceType] - { application: 0, policy: 1, calendly: 2 }[b.sourceType]);
     const app = prioritized.find((row) => row.sourceType === "application");
     const composedAddress = app ? [app.address, app.city, app.state, app.zipCode].filter((value) => String(value || "").trim()).join(", ") : "";
     const name = String(app?.clientName || prioritized.find((row) => row.sourceType === "policy")?.clientName || client.name || "").trim() || client.name;
@@ -53672,57 +54641,83 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
   return { clientsUpdated, policiesUpdated, applicationsUpdated };
 }
 __name(mergeClientSourcesForAgent, "mergeClientSourcesForAgent");
+__name2(mergeClientSourcesForAgent, "mergeClientSourcesForAgent");
 async function calendlyRequest(token, path, options = {}) {
-  const response = await fetch(`https://api.calendly.com${path}`, { ...options, headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", ...(options.headers || {}) } });
+  const response = await fetch(`https://api.calendly.com${path}`, { ...options, headers: { authorization: `Bearer ${token}`, accept: "application/json", "content-type": "application/json", ...options.headers || {} } });
   const text = await response.text();
-  let data = {}; try { data = text ? JSON.parse(text) : {}; } catch {}
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+  }
   if (!response.ok) {
     const required = Array.isArray(data?.required_scopes) ? data.required_scopes.join(", ") : "";
-    const detail = required ? ` Permissões necessárias: ${required}.` : "";
+    const detail = required ? ` Permiss\xF5es necess\xE1rias: ${required}.` : "";
     throw new Error(`${String(data?.message || data?.title || `Calendly respondeu ${response.status}`)}${detail}`);
   }
   return data;
 }
 __name(calendlyRequest, "calendlyRequest");
+__name2(calendlyRequest, "calendlyRequest");
 function nextEastern830ISOString() {
-  const now = new Date(), parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(now).reduce((result, part) => { if (part.type !== "literal") result[part.type] = part.value; return result; }, {});
+  const now = /* @__PURE__ */ new Date(), parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(now).reduce((result, part) => {
+    if (part.type !== "literal") result[part.type] = part.value;
+    return result;
+  }, {});
   const localToday = `${parts.year}-${parts.month}-${parts.day}`;
   let targetDay = localToday;
   if (Number(parts.hour) > 8 || Number(parts.hour) === 8 && Number(parts.minute) >= 30) targetDay = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1)).toISOString().slice(0, 10);
-  const offsetName = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(`${targetDay}T12:00:00Z`)).find((part) => part.type === "timeZoneName")?.value || "GMT-5";
+  const offsetName = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(/* @__PURE__ */ new Date(`${targetDay}T12:00:00Z`)).find((part) => part.type === "timeZoneName")?.value || "GMT-5";
   const match = offsetName.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/), offsetMinutes = match ? (match[1] === "+" ? 1 : -1) * (Number(match[2]) * 60 + Number(match[3] || 0)) : -300;
   return new Date(Date.UTC(Number(targetDay.slice(0, 4)), Number(targetDay.slice(5, 7)) - 1, Number(targetDay.slice(8, 10)), 8, 30) - offsetMinutes * 6e4).toISOString();
 }
 __name(nextEastern830ISOString, "nextEastern830ISOString");
+__name2(nextEastern830ISOString, "nextEastern830ISOString");
 function easternTodayBoundsISOString() {
-  const now = new Date();
-  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).reduce((result, part) => { if (part.type !== "literal") result[part.type] = part.value; return result; }, {});
+  const now = /* @__PURE__ */ new Date();
+  const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(now).reduce((result, part) => {
+    if (part.type !== "literal") result[part.type] = part.value;
+    return result;
+  }, {});
   const localToday = `${parts.year}-${parts.month}-${parts.day}`;
   const nextDay = new Date(Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day) + 1)).toISOString().slice(0, 10);
-  const toUtcMidnight = (day) => {
-    const offsetName = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(new Date(`${day}T12:00:00Z`)).find((part) => part.type === "timeZoneName")?.value || "GMT-5";
+  const toUtcMidnight = /* @__PURE__ */ __name((day) => {
+    const offsetName = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", timeZoneName: "shortOffset" }).formatToParts(/* @__PURE__ */ new Date(`${day}T12:00:00Z`)).find((part) => part.type === "timeZoneName")?.value || "GMT-5";
     const match = offsetName.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
     const offsetMinutes = match ? (match[1] === "+" ? 1 : -1) * (Number(match[2]) * 60 + Number(match[3] || 0)) : -300;
     return new Date(Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10))) - offsetMinutes * 6e4).toISOString();
-  };
+  }, "toUtcMidnight");
   return { start: toUtcMidnight(localToday), end: toUtcMidnight(nextDay) };
 }
 __name(easternTodayBoundsISOString, "easternTodayBoundsISOString");
+__name2(easternTodayBoundsISOString, "easternTodayBoundsISOString");
 async function schedulePolicyWelcome(env, agentEmail, clientId, clientName, policyNumber) {
-  const existing = await env.DB.prepare("SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND clientId=? AND occasion='custom' AND title='Boas-vindas à Affinity' LIMIT 1").bind(String(agentEmail).toLowerCase(), Number(clientId)).first();
+  const existing = await env.DB.prepare("SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND clientId=? AND occasion='custom' AND title='Boas-vindas \xE0 Affinity' LIMIT 1").bind(String(agentEmail).toLowerCase(), Number(clientId)).first();
   if (existing) return false;
-  const message = `Olá, {nome}! 💙\n\nSeja muito bem-vindo(a) à Affinity Financial Consulting. É uma satisfação ter você conosco.\n\nSua apólice nº ${String(policyNumber || "").trim() || "—"} já consta em nosso acompanhamento. A partir de agora, estaremos à disposição para ajudar com dúvidas, atualizações e revisões sempre que precisar.\n\nSalve nosso contato e conte comigo durante toda a sua jornada de proteção e planejamento financeiro.\n\n{agente_nome}\n📞 {agente_telefone}\nAffinity Financial Consulting\n🌐 www.affinityfc.org`;
-  await env.DB.prepare("INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,message,scheduledAt,isActive) VALUES (?,?,'custom','email','Boas-vindas à Affinity','Bem-vindo(a) à Affinity Financial Consulting','individual',?,?,1)").bind(String(agentEmail).toLowerCase(), Number(clientId), message, nextEastern830ISOString()).run();
-  await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'status',?,?)").bind(Number(clientId), `Mensagem de boas-vindas programada para ${String(clientName || "Cliente")}, após a inclusão da apólice ${String(policyNumber || "")}.`, String(agentEmail).toLowerCase()).run();
+  const message = `Ol\xE1, {nome}! \u{1F499}
+
+Seja muito bem-vindo(a) \xE0 Affinity Financial Consulting. \xC9 uma satisfa\xE7\xE3o ter voc\xEA conosco.
+
+Sua ap\xF3lice n\xBA ${String(policyNumber || "").trim() || "\u2014"} j\xE1 consta em nosso acompanhamento. A partir de agora, estaremos \xE0 disposi\xE7\xE3o para ajudar com d\xFAvidas, atualiza\xE7\xF5es e revis\xF5es sempre que precisar.
+
+Salve nosso contato e conte comigo durante toda a sua jornada de prote\xE7\xE3o e planejamento financeiro.
+
+{agente_nome}
+\u{1F4DE} {agente_telefone}
+Affinity Financial Consulting
+\u{1F310} www.affinityfc.org`;
+  await env.DB.prepare("INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,message,scheduledAt,isActive) VALUES (?,?,'custom','email','Boas-vindas \xE0 Affinity','Bem-vindo(a) \xE0 Affinity Financial Consulting','individual',?,?,1)").bind(String(agentEmail).toLowerCase(), Number(clientId), message, nextEastern830ISOString()).run();
+  await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'status',?,?)").bind(Number(clientId), `Mensagem de boas-vindas programada para ${String(clientName || "Cliente")}, ap\xF3s a inclus\xE3o da ap\xF3lice ${String(policyNumber || "")}.`, String(agentEmail).toLowerCase()).run();
   return true;
 }
 __name(schedulePolicyWelcome, "schedulePolicyWelcome");
+__name2(schedulePolicyWelcome, "schedulePolicyWelcome");
 async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   await ensureCalendlyTables(env);
   let phonesUpdated = await backfillStoredCalendlyPhones(env, agentEmail);
   await mergeClientSourcesForAgent(env, agentEmail);
   const connection = await env.DB.prepare("SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first();
-  if (!connection) throw new Error("Calendly ainda não foi conectado");
+  if (!connection) throw new Error("Calendly ainda n\xE3o foi conectado");
   const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
   const now = Date.now();
   const day = 864e5;
@@ -53736,18 +54731,19 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
       const params = new URLSearchParams(baseParams);
       if (nextPageToken) params.set("page_token", nextPageToken);
       let payload;
-      try { payload = await calendlyRequest(token, `/scheduled_events?${params}`); }
-      catch (error) {
+      try {
+        payload = await calendlyRequest(token, `/scheduled_events?${params}`);
+      } catch (error) {
         console.warn(JSON.stringify({ event: "calendly_range_skipped", agentEmail, startDay, endDay, message: String(error?.message || error) }));
         break;
       }
       successfulRanges += 1;
-      eventRows.push(...(Array.isArray(payload.collection) ? payload.collection : []));
+      eventRows.push(...Array.isArray(payload.collection) ? payload.collection : []);
       nextPageToken = String(payload.pagination?.next_page_token || "");
       if (!nextPageToken) break;
     }
   }
-  if (!successfulRanges) throw new Error("O Calendly não aceitou nenhum dos períodos solicitados");
+  if (!successfulRanges) throw new Error("O Calendly n\xE3o aceitou nenhum dos per\xEDodos solicitados");
   const completedMeetingResult = options.backfill ? await env.DB.prepare("SELECT eventUri,inviteeUri FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))<>''").bind(agentEmail.toLowerCase()).all() : { results: [] };
   const completedMeetingKeys = new Set((completedMeetingResult.results || []).map((row) => `${String(row.eventUri)}|${String(row.inviteeUri || "")}`));
   const pendingMeetingResult = options.backfill ? await env.DB.prepare("SELECT DISTINCT eventUri FROM calendlyMeetings WHERE lower(agentEmail)=? AND trim(coalesce(inviteePhone,''))=''").bind(agentEmail.toLowerCase()).all() : { results: [] };
@@ -53771,7 +54767,8 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
       if (inviteeId) try {
         const detail = await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(eventId)}/invitees/${encodeURIComponent(inviteeId)}`);
         invitee = detail.resource || listedInvitee;
-      } catch {}
+      } catch {
+      }
       const answers = Array.isArray(invitee.questions_and_answers) ? invitee.questions_and_answers : [];
       const answerText = answers.map((item) => `${item.question || ""}: ${item.answer || ""}`).join("\n");
       const phoneAnswer = calendlyPhoneFromAnswers(answers);
@@ -53780,7 +54777,8 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
       if (!phone && email) try {
         const contacts = await calendlyRequest(token, `/contacts?${new URLSearchParams({ email, count: "1" })}`);
         phone = calendlyPhoneFrom(contacts.collection?.[0] || contacts.resource || contacts);
-      } catch {}
+      } catch {
+      }
       let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1").bind(agentEmail.toLowerCase(), email).first() : null;
       if (!client && phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ','') LIKE ? LIMIT 1").bind(agentEmail.toLowerCase(), `%${phone.replace(/\D/g, "").slice(-10)}%`).first();
       if (!client && (email || phone)) {
@@ -53793,7 +54791,7 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
       }
       const location = event.location || {};
       const meetingUrl = String(location.join_url || location.location || "");
-      await env.DB.prepare("INSERT INTO calendlyMeetings (agentEmail,eventUri,inviteeUri,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,status,locationType,meetingUrl,cancelUrl,rescheduleUrl,clientId,questionsJson,lastSyncedAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,eventUri,inviteeUri) DO UPDATE SET eventName=excluded.eventName,inviteeName=excluded.inviteeName,inviteeEmail=excluded.inviteeEmail,inviteePhone=COALESCE(NULLIF(excluded.inviteePhone,''),calendlyMeetings.inviteePhone),startTime=excluded.startTime,endTime=excluded.endTime,status=CASE WHEN calendlyMeetings.status IN ('no_show','completed') AND excluded.status NOT IN ('canceled','cancelled') THEN calendlyMeetings.status ELSE excluded.status END,locationType=excluded.locationType,meetingUrl=excluded.meetingUrl,cancelUrl=excluded.cancelUrl,rescheduleUrl=excluded.rescheduleUrl,clientId=coalesce(calendlyMeetings.clientId,excluded.clientId),questionsJson=CASE WHEN excluded.questionsJson='[]' THEN calendlyMeetings.questionsJson ELSE excluded.questionsJson END,lastSyncedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP").bind(agentEmail.toLowerCase(), String(event.uri), String(invitee.uri || ""), String(event.name || "Reunião"), String(invitee.name || "Cliente"), email || null, phone || null, String(event.start_time || ""), String(event.end_time || ""), String(invitee.status || event.status || "active"), String(location.type || ""), meetingUrl || null, String(invitee.cancel_url || ""), String(invitee.reschedule_url || ""), Number(client?.id || 0) || null, JSON.stringify(answers)).run();
+      await env.DB.prepare("INSERT INTO calendlyMeetings (agentEmail,eventUri,inviteeUri,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,status,locationType,meetingUrl,cancelUrl,rescheduleUrl,clientId,questionsJson,lastSyncedAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,eventUri,inviteeUri) DO UPDATE SET eventName=excluded.eventName,inviteeName=excluded.inviteeName,inviteeEmail=excluded.inviteeEmail,inviteePhone=COALESCE(NULLIF(excluded.inviteePhone,''),calendlyMeetings.inviteePhone),startTime=excluded.startTime,endTime=excluded.endTime,status=CASE WHEN calendlyMeetings.status IN ('no_show','completed') AND excluded.status NOT IN ('canceled','cancelled') THEN calendlyMeetings.status ELSE excluded.status END,locationType=excluded.locationType,meetingUrl=excluded.meetingUrl,cancelUrl=excluded.cancelUrl,rescheduleUrl=excluded.rescheduleUrl,clientId=coalesce(calendlyMeetings.clientId,excluded.clientId),questionsJson=CASE WHEN excluded.questionsJson='[]' THEN calendlyMeetings.questionsJson ELSE excluded.questionsJson END,lastSyncedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP").bind(agentEmail.toLowerCase(), String(event.uri), String(invitee.uri || ""), String(event.name || "Reuni\xE3o"), String(invitee.name || "Cliente"), email || null, phone || null, String(event.start_time || ""), String(event.end_time || ""), String(invitee.status || event.status || "active"), String(location.type || ""), meetingUrl || null, String(invitee.cancel_url || ""), String(invitee.reschedule_url || ""), Number(client?.id || 0) || null, JSON.stringify(answers)).run();
       saved += 1;
     }
   }
@@ -53810,15 +54808,19 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   return { saved, phonesUpdated, ...merged };
 }
 __name(syncCalendlyForAgent, "syncCalendlyForAgent");
+__name2(syncCalendlyForAgent, "syncCalendlyForAgent");
 async function syncAllCalendlyConnections(env) {
   await ensureCalendlyTables(env);
   const rows = await env.DB.prepare("SELECT agentEmail,lastSyncAt FROM agentCalendlyConnections WHERE status='connected'").all();
   for (const row of rows.results || []) try {
     const needsPhoneBackfill = !row.lastSyncAt || String(row.lastSyncAt) < "2026-08-29 01:02:00";
     await syncCalendlyForAgent(env, String(row.agentEmail), { backfill: needsPhoneBackfill });
-  } catch (error) { await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0,500), String(row.agentEmail).toLowerCase()).run(); }
+  } catch (error) {
+    await env.DB.prepare("UPDATE agentCalendlyConnections SET lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error?.message || error).slice(0, 500), String(row.agentEmail).toLowerCase()).run();
+  }
 }
 __name(syncAllCalendlyConnections, "syncAllCalendlyConnections");
+__name2(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 async function runProcedure(name, input, request, env) {
   if (name === "system.ping") return trpcResult("pong");
   if (name === "auth.me") {
@@ -54161,7 +55163,7 @@ Detalhes: ${details}` : ""}`;
     }
   }
   if (name === "careers.submit") {
-    const safeCareerText = (value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
+    const safeCareerText = /* @__PURE__ */ __name((value) => String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;"), "safeCareerText");
     const applicantName = String(input.name || "").trim().slice(0, 140);
     const email = String(input.email || "").trim().toLowerCase().slice(0, 180);
     const phone = String(input.phone || "").trim().slice(0, 40);
@@ -54174,14 +55176,14 @@ Detalhes: ${details}` : ""}`;
     const startAvailability = String(input.startAvailability || "").trim().slice(0, 80);
     const contactTime = String(input.contactTime || "").trim().slice(0, 80);
     const performanceBased = String(input.performanceBased || "").trim();
-    const motivation = String(input.motivation || "").trim().slice(0, 2000);
+    const motivation = String(input.motivation || "").trim().slice(0, 2e3);
     const source = String(input.source || "").trim().slice(0, 300);
     if (String(input.website || "").trim()) return trpcResult({ success: true });
-    if (applicantName.length < 3 || !validEmail(email) || phone.replace(/\D/g, "").length < 10) return trpcError("Informe nome, e-mail e telefone válidos");
+    if (applicantName.length < 3 || !validEmail(email) || phone.replace(/\D/g, "").length < 10) return trpcError("Informe nome, e-mail e telefone v\xE1lidos");
     if (!["Full-time", "Part-time", "Estou aberto(a) aos dois"].includes(workType)) return trpcError("Selecione a oportunidade desejada");
-    if (legallyAuthorized !== "Sim") return trpcError("É obrigatório ter autorização legal válida para trabalhar nos Estados Unidos");
-    if (!["Employment Authorization Document (EAD)", "Green Card", "Cidadania americana"].includes(authorizationType)) return trpcError("Informe o tipo de autorização de trabalho");
-    if (!["Sim", "Não"].includes(salesExperience) || !languages || !startAvailability || !contactTime || !["Sim", "Não"].includes(performanceBased) || motivation.length < 20) return trpcError("Conclua todas as perguntas obrigatórias");
+    if (legallyAuthorized !== "Sim") return trpcError("\xC9 obrigat\xF3rio ter autoriza\xE7\xE3o legal v\xE1lida para trabalhar nos Estados Unidos");
+    if (!["Employment Authorization Document (EAD)", "Green Card", "Cidadania americana"].includes(authorizationType)) return trpcError("Informe o tipo de autoriza\xE7\xE3o de trabalho");
+    if (!["Sim", "N\xE3o"].includes(salesExperience) || !languages || !startAvailability || !contactTime || !["Sim", "N\xE3o"].includes(performanceBased) || motivation.length < 20) return trpcError("Conclua todas as perguntas obrigat\xF3rias");
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS careerApplications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -54204,15 +55206,15 @@ Detalhes: ${details}` : ""}`;
     )`).run();
     const recent = await env.DB.prepare("SELECT id FROM careerApplications WHERE lower(email)=? AND createdAt>=datetime('now','-10 minutes') LIMIT 1").bind(email).first();
     if (!recent) {
-      await env.DB.prepare("INSERT INTO careerApplications (name,email,phone,workType,legallyAuthorized,authorizationType,salesExperience,experienceDetails,languages,startAvailability,contactTime,performanceBased,motivation,source) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?)").bind(applicantName,email,phone,workType,authorizationType,salesExperience === "Sim" ? 1 : 0,experienceDetails||null,languages,startAvailability,contactTime,performanceBased === "Sim" ? 1 : 0,motivation,source||null).run();
+      await env.DB.prepare("INSERT INTO careerApplications (name,email,phone,workType,legallyAuthorized,authorizationType,salesExperience,experienceDetails,languages,startAvailability,contactTime,performanceBased,motivation,source) VALUES (?,?,?,?,1,?,?,?,?,?,?,?,?,?)").bind(applicantName, email, phone, workType, authorizationType, salesExperience === "Sim" ? 1 : 0, experienceDetails || null, languages, startAvailability, contactTime, performanceBased === "Sim" ? 1 : 0, motivation, source || null).run();
       await sendEmailIfConfigured(env, {
         to: "info@affinityfc.org",
         replyTo: email,
-        subject: `Nova candidatura: ${applicantName} — ${workType}`,
-        html: emailHtml("Nova candidatura — Trabalhe conosco", `<p><b>Nome:</b> ${safeCareerText(applicantName)}</p><p><b>E-mail:</b> ${safeCareerText(email)}<br><b>Telefone:</b> ${safeCareerText(phone)}<br><b>Interesse:</b> ${safeCareerText(workType)}<br><b>Autorização:</b> ${safeCareerText(authorizationType)}<br><b>Experiência em vendas:</b> ${safeCareerText(salesExperience)}<br><b>Idiomas:</b> ${safeCareerText(languages)}<br><b>Disponibilidade:</b> ${safeCareerText(startAvailability)}<br><b>Melhor horário:</b> ${safeCareerText(contactTime)}<br><b>Confortável com metas:</b> ${safeCareerText(performanceBased)}</p><p><b>Experiência:</b><br>${safeCareerText(experienceDetails || "Não informada")}</p><p><b>Motivação:</b><br>${safeCareerText(motivation)}</p><p><b>Origem:</b> ${safeCareerText(source || "Não informada")}</p>`)
+        subject: `Nova candidatura: ${applicantName} \u2014 ${workType}`,
+        html: emailHtml("Nova candidatura \u2014 Trabalhe conosco", `<p><b>Nome:</b> ${safeCareerText(applicantName)}</p><p><b>E-mail:</b> ${safeCareerText(email)}<br><b>Telefone:</b> ${safeCareerText(phone)}<br><b>Interesse:</b> ${safeCareerText(workType)}<br><b>Autoriza\xE7\xE3o:</b> ${safeCareerText(authorizationType)}<br><b>Experi\xEAncia em vendas:</b> ${safeCareerText(salesExperience)}<br><b>Idiomas:</b> ${safeCareerText(languages)}<br><b>Disponibilidade:</b> ${safeCareerText(startAvailability)}<br><b>Melhor hor\xE1rio:</b> ${safeCareerText(contactTime)}<br><b>Confort\xE1vel com metas:</b> ${safeCareerText(performanceBased)}</p><p><b>Experi\xEAncia:</b><br>${safeCareerText(experienceDetails || "N\xE3o informada")}</p><p><b>Motiva\xE7\xE3o:</b><br>${safeCareerText(motivation)}</p><p><b>Origem:</b> ${safeCareerText(source || "N\xE3o informada")}</p>`)
       });
     }
-    return trpcResult({ success: true, message: "Recebemos suas informações. Entraremos em contato." });
+    return trpcResult({ success: true, message: "Recebemos suas informa\xE7\xF5es. Entraremos em contato." });
   }
   if (name === "passwordReset.requestReset") {
     const email = String(input.email ?? "").trim().toLowerCase();
@@ -54267,49 +55269,63 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "applications.uploadDocument") {
     const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase(), token = String(input.token || "").trim().toLowerCase();
-    const row = token
-      ? await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND clientToken=?").bind(id, token).first()
-      : await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
-    if (!row || (token ? !/^[a-f0-9]{32}$/.test(token) : !/^[A-Z0-9]{8}$/.test(code))) return trpcError("Link ou código inválido", "UNAUTHORIZED", 401);
-    if (row.status === "completed") return trpcError("Esta aplicação já foi concluída");
-    try { return trpcResult(await storeApplicationDocument(env, Number(row.id), row.agentEmail, input)); }
-    catch (error) { return trpcError(error.message || "Não foi possível armazenar o PDF"); }
+    const row = token ? await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND clientToken=?").bind(id, token).first() : await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
+    if (!row || (token ? !/^[a-f0-9]{32}$/.test(token) : !/^[A-Z0-9]{8}$/.test(code))) return trpcError("Link ou c\xF3digo inv\xE1lido", "UNAUTHORIZED", 401);
+    if (row.status === "completed") return trpcError("Esta aplica\xE7\xE3o j\xE1 foi conclu\xEDda");
+    try {
+      return trpcResult(await storeApplicationDocument(env, Number(row.id), row.agentEmail, input));
+    } catch (error) {
+      return trpcError(error.message || "N\xE3o foi poss\xEDvel armazenar o PDF");
+    }
   }
   if (name === "applications.verifyCode" || name === "applications.clientSave") {
     const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase(), token = String(input.token || "").trim().toLowerCase();
-    try { await env.DB.prepare("ALTER TABLE agentApplications ADD COLUMN clientToken TEXT").run(); } catch {}
-    const row = token
-      ? await env.DB.prepare("SELECT * FROM agentApplications WHERE clientToken=?").bind(token).first()
-      : await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
-    if (!row || (token ? !/^[a-f0-9]{32}$/.test(token) : !/^[A-Z0-9]{8}$/.test(code))) return trpcError("Link ou código inválido", "UNAUTHORIZED", 401);
-    if (row.status === "completed") return trpcError("Esta aplicação já foi concluída");
+    try {
+      await env.DB.prepare("ALTER TABLE agentApplications ADD COLUMN clientToken TEXT").run();
+    } catch {
+    }
+    const row = token ? await env.DB.prepare("SELECT * FROM agentApplications WHERE clientToken=?").bind(token).first() : await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
+    if (!row || (token ? !/^[a-f0-9]{32}$/.test(token) : !/^[A-Z0-9]{8}$/.test(code))) return trpcError("Link ou c\xF3digo inv\xE1lido", "UNAUTHORIZED", 401);
+    if (row.status === "completed") return trpcError("Esta aplica\xE7\xE3o j\xE1 foi conclu\xEDda");
     if (name === "applications.verifyCode") {
-      let extra = {}, sensitive = {};
-      try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
-      try { sensitive = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)); } catch {}
-      return trpcResult({ success: true, application: { ...extra, ...sensitive, clientName: row.clientName, clientEmail: row.clientEmail, clientPhone: row.clientPhone, birthDate: row.birthDate, address: row.address, city: row.city, state: row.state, zipCode: row.zipCode } });
+      let extra2 = {}, sensitive2 = {};
+      try {
+        extra2 = JSON.parse(String(row.applicationData || "{}"));
+      } catch {
+      }
+      try {
+        sensitive2 = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET));
+      } catch {
+      }
+      return trpcResult({ success: true, application: { ...extra2, ...sensitive2, clientName: row.clientName, clientEmail: row.clientEmail, clientPhone: row.clientPhone, birthDate: row.birthDate, address: row.address, city: row.city, state: row.state, zipCode: row.zipCode } });
     }
     const payload = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : {};
     const clientName = String(payload.clientName || "").trim(), clientEmail = String(payload.clientEmail || "").trim().toLowerCase();
     if (!clientName) return trpcError("Informe seu nome completo");
-    if (!validEmail(clientEmail)) return trpcError("Informe um e-mail válido");
-    const sensitiveKeys = new Set(["ssn","passportNumber","driverLicenseNumber","bankName","routingNumber","accountNumber","medicalDetails","medications","physicianName"]), extra = {}, sensitive = {};
-    try { Object.assign(extra, JSON.parse(String(row.applicationData || "{}"))); } catch {}
-    try { Object.assign(sensitive, JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET))); } catch {}
-    for (const [key,value] of Object.entries(payload)) (sensitiveKeys.has(key) ? sensitive : extra)[key] = value;
+    if (!validEmail(clientEmail)) return trpcError("Informe um e-mail v\xE1lido");
+    const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName"]), extra = {}, sensitive = {};
+    try {
+      Object.assign(extra, JSON.parse(String(row.applicationData || "{}")));
+    } catch {
+    }
+    try {
+      Object.assign(sensitive, JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)));
+    } catch {
+    }
+    for (const [key2, value] of Object.entries(payload)) (sensitiveKeys.has(key2) ? sensitive : extra)[key2] = value;
     const encrypted = await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET);
-    await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(clientName,clientEmail||null,String(payload.clientPhone||"").trim()||null,String(payload.birthDate||"").trim()||null,String(payload.address||"").trim()||null,String(payload.city||"").trim()||null,String(payload.state||"").trim()||null,String(payload.zipCode||"").trim()||null,JSON.stringify(extra),encrypted,Number(row.id)).run();
-    return trpcResult({ success: true, message: "Informações enviadas ao seu agente." });
+    await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(clientName, clientEmail || null, String(payload.clientPhone || "").trim() || null, String(payload.birthDate || "").trim() || null, String(payload.address || "").trim() || null, String(payload.city || "").trim() || null, String(payload.state || "").trim() || null, String(payload.zipCode || "").trim() || null, JSON.stringify(extra), encrypted, Number(row.id)).run();
+    return trpcResult({ success: true, message: "Informa\xE7\xF5es enviadas ao seu agente." });
   }
   if (name === "reviewInvites.get" || name === "reviewInvites.submit") {
     const token = String(input.token || "").trim();
     const invite = await env.DB.prepare("SELECT * FROM reviewInvites WHERE token=? AND usedAt IS NULL").bind(token).first();
-    if (!invite) return trpcError("Este convite é inválido ou já foi utilizado", "NOT_FOUND", 404);
+    if (!invite) return trpcError("Este convite \xE9 inv\xE1lido ou j\xE1 foi utilizado", "NOT_FOUND", 404);
     if (name === "reviewInvites.get") return trpcResult({ clientName: invite.clientName || "" });
     const clientName = String(invite.clientName || "Cliente").trim(), email = String(invite.clientEmail || "").trim().toLowerCase(), city = String(invite.city || "").trim(), state = String(invite.state || "").trim().toUpperCase(), quote = String(input.quote || "").trim(), rating = Number(input.rating || 0);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5 || quote.length < 10) return trpcError("Escolha de 1 a 5 estrelas e deixe uma mensagem sobre seu atendimento");
     await env.DB.batch([
-      env.DB.prepare("INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client','pt','image',0)").bind(clientName,email||null,[city,state].filter(Boolean).join(', '),city||null,state||null,String(invite.agentEmail).toLowerCase(),quote,rating),
+      env.DB.prepare("INSERT INTO testimonials (name,email,role,city,state,agentEmail,agentDecision,adminDecision,quote,rating,source,language,mediaType,isActive) VALUES (?,?,?,?,?,?,'pending','pending',?,?,'client','pt','image',0)").bind(clientName, email || null, [city, state].filter(Boolean).join(", "), city || null, state || null, String(invite.agentEmail).toLowerCase(), quote, rating),
       env.DB.prepare("UPDATE reviewInvites SET usedAt=CURRENT_TIMESTAMP WHERE id=? AND usedAt IS NULL").bind(Number(invite.id))
     ]);
     return trpcResult({ success: true });
@@ -54318,13 +55334,13 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS serviceFeedbackInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,meetingId INTEGER,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,rating INTEGER,comment TEXT,reason TEXT,doubts TEXT,submittedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     const token = String(input.token || "").trim().toLowerCase();
     const invite = await env.DB.prepare("SELECT * FROM serviceFeedbackInvites WHERE token=? AND submittedAt IS NULL").bind(token).first();
-    if (!invite) return trpcError("Este link é inválido ou já foi utilizado", "NOT_FOUND", 404);
+    if (!invite) return trpcError("Este link \xE9 inv\xE1lido ou j\xE1 foi utilizado", "NOT_FOUND", 404);
     if (name === "serviceFeedback.get") return trpcResult({ clientName: invite.clientName || "" });
     const rating = Number(input.rating || 0), comment = String(input.comment || "").trim(), reason = String(input.reason || "").trim(), doubts = String(input.doubts || "").trim();
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) return trpcError("Escolha uma nota de 1 a 5 estrelas");
     if (comment.length < 10) return trpcError("Deixe uma mensagem sobre o atendimento");
     if (reason.length < 3) return trpcError("Conte por que decidiu pensar um pouco mais");
-    await env.DB.prepare("UPDATE serviceFeedbackInvites SET rating=?,comment=?,reason=?,doubts=?,submittedAt=CURRENT_TIMESTAMP WHERE id=? AND submittedAt IS NULL").bind(rating,comment,reason,doubts||null,Number(invite.id)).run();
+    await env.DB.prepare("UPDATE serviceFeedbackInvites SET rating=?,comment=?,reason=?,doubts=?,submittedAt=CURRENT_TIMESTAMP WHERE id=? AND submittedAt IS NULL").bind(rating, comment, reason, doubts || null, Number(invite.id)).run();
     return trpcResult({ success: true });
   }
   if (name === "address.search") {
@@ -54359,26 +55375,39 @@ Detalhes: ${details}` : ""}`;
   if (name === "calendly.contactAgent") {
     await ensureCalendlyTables(env);
     const slug = String(input.slug || "").trim().toLowerCase(), clientName = String(input.name || "").trim(), email = String(input.email || "").trim().toLowerCase(), phone = String(input.phone || "").trim(), message = String(input.message || "").trim();
-    if (!clientName || (!validEmail(email) && !phone) || !message) return trpcError("Informe nome, mensagem e pelo menos um contato");
+    if (!clientName || !validEmail(email) && !phone || !message) return trpcError("Informe nome, mensagem e pelo menos um contato");
     const agent = await env.DB.prepare("SELECT p.agentEmail,a.name,a.contactEmail,a.email FROM agentPublicProfiles p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.slug=? AND p.isPublished=1 AND a.isActive=1 LIMIT 1").bind(slug).first();
-    if (!agent) return trpcError("Consultor não encontrado", "NOT_FOUND", 404);
-    let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=lower(?) AND lower(email)=? LIMIT 1").bind(String(agent.agentEmail),email).first() : null;
-    if (!client) { const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,status,source,assignedAdminEmail,notes) VALUES (?,?,?,'new','Perfil público',?,?)").bind(clientName,email||null,phone||null,String(agent.agentEmail).toLowerCase(),message).run(); client={id:Number(inserted.meta.last_row_id)}; }
-    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'note',?,?)").bind(Number(client.id),`Contato pelo perfil público: ${message}`,email||phone).run();
-    await env.DB.prepare("INSERT INTO agentDirectContacts (agentEmail,clientId,name,email,phone,message) VALUES (?,?,?,?,?,?)").bind(String(agent.agentEmail).toLowerCase(),Number(client.id),clientName,email||null,phone||null,message).run();
-    await sendEmailIfConfigured(env,{to:String(agent.contactEmail||agent.email),subject:`Novo contato pelo seu perfil: ${clientName}`,html:emailHtml("Novo contato no site",`<p><strong>${escapeAutomationHtml(clientName)}</strong> enviou uma mensagem pelo seu perfil.</p><p>${escapeAutomationHtml(message)}</p><p>E-mail: ${escapeAutomationHtml(email||"Não informado")}<br>Telefone: ${escapeAutomationHtml(phone||"Não informado")}</p>`)});
-    return trpcResult({success:true});
+    if (!agent) return trpcError("Consultor n\xE3o encontrado", "NOT_FOUND", 404);
+    let client = email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=lower(?) AND lower(email)=? LIMIT 1").bind(String(agent.agentEmail), email).first() : null;
+    if (!client) {
+      const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,status,source,assignedAdminEmail,notes) VALUES (?,?,?,'new','Perfil p\xFAblico',?,?)").bind(clientName, email || null, phone || null, String(agent.agentEmail).toLowerCase(), message).run();
+      client = { id: Number(inserted.meta.last_row_id) };
+    }
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'note',?,?)").bind(Number(client.id), `Contato pelo perfil p\xFAblico: ${message}`, email || phone).run();
+    await env.DB.prepare("INSERT INTO agentDirectContacts (agentEmail,clientId,name,email,phone,message) VALUES (?,?,?,?,?,?)").bind(String(agent.agentEmail).toLowerCase(), Number(client.id), clientName, email || null, phone || null, message).run();
+    await sendEmailIfConfigured(env, { to: String(agent.contactEmail || agent.email), subject: `Novo contato pelo seu perfil: ${clientName}`, html: emailHtml("Novo contato no site", `<p><strong>${escapeAutomationHtml(clientName)}</strong> enviou uma mensagem pelo seu perfil.</p><p>${escapeAutomationHtml(message)}</p><p>E-mail: ${escapeAutomationHtml(email || "N\xE3o informado")}<br>Telefone: ${escapeAutomationHtml(phone || "N\xE3o informado")}</p>`) });
+    return trpcResult({ success: true });
   }
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail)
     return trpcError("Acesso administrativo necess\xE1rio", "UNAUTHORIZED", 401);
   const adminAccess = await getAdminAccess(adminEmail, env);
   const accountType = String(adminAccess.account?.accountType || "admin");
-  const adminMailboxProcedures = new Set([
-    "agent.mailbox", "agent.mailboxMessage", "agent.mailboxFolders", "agent.createMailboxFolder",
-    "agent.renameMailboxFolder", "agent.deleteMailboxFolder", "agent.moveMailboxEmail",
-    "agent.completeMailboxEmail", "agent.deleteMailboxEmail", "agent.restoreMailboxEmail",
-    "agent.mailboxClients", "agent.markMailboxRead", "agent.sendMailboxEmail", "agent.syncInbox"
+  const adminMailboxProcedures = /* @__PURE__ */ new Set([
+    "agent.mailbox",
+    "agent.mailboxMessage",
+    "agent.mailboxFolders",
+    "agent.createMailboxFolder",
+    "agent.renameMailboxFolder",
+    "agent.deleteMailboxFolder",
+    "agent.moveMailboxEmail",
+    "agent.completeMailboxEmail",
+    "agent.deleteMailboxEmail",
+    "agent.restoreMailboxEmail",
+    "agent.mailboxClients",
+    "agent.markMailboxRead",
+    "agent.sendMailboxEmail",
+    "agent.syncInbox"
   ]);
   if (name.startsWith("agent.") && !["agent", "both"].includes(accountType) && !adminMailboxProcedures.has(name))
     return trpcError("Acesso restrito ao agente", "FORBIDDEN", 403);
@@ -54386,7 +55415,6 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
   if (name.startsWith("careers.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-  // Presence is optional telemetry, not a prerequisite for reading portal data.
   if (name === "crm.presence") {
     try {
       await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-2 minutes'))").bind(adminEmail.toLowerCase()).run();
@@ -54397,7 +55425,7 @@ Detalhes: ${details}` : ""}`;
   const auditedActions = {
     "agent.saveClient": "Criou ou alterou um cliente",
     "agent.requestClientDeletion": "Solicitou a exclus\xE3o de um cliente",
-    "agent.requestApplicationDeletion": "Solicitou a exclusão de uma aplicação",
+    "agent.requestApplicationDeletion": "Solicitou a exclus\xE3o de uma aplica\xE7\xE3o",
     "agent.updatePolicyDetails": "Alterou uma ap\xF3lice",
     "agent.deletePolicy": "Excluiu uma ap\xF3lice",
     "agent.importPcSheet": "Importou um PC Sheet",
@@ -54415,7 +55443,7 @@ Detalhes: ${details}` : ""}`;
     "admin.setInternalUserStatus": "Alterou o status de um usu\xE1rio",
     "admin.setInternalPortalAccess": "Alterou os acessos de um usu\xE1rio",
     "admin.updateAffiliateUser": "Alterou dados de um afiliado",
-    "admin.deleteApplication": "Excluiu uma aplicação",
+    "admin.deleteApplication": "Excluiu uma aplica\xE7\xE3o",
     "admin.approveAffiliate": "Aprovou um afiliado",
     "admin.rejectAffiliate": "Recusou um afiliado",
     "admin.blockAffiliate": "Bloqueou um afiliado",
@@ -54439,7 +55467,10 @@ Detalhes: ${details}` : ""}`;
       reviewedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`).run();
     for (const column of ["adminNotes TEXT", "reviewedBy TEXT", "reviewedAt TEXT"]) {
-      try { await env.DB.prepare(`ALTER TABLE careerApplications ADD COLUMN ${column}`).run(); } catch {}
+      try {
+        await env.DB.prepare(`ALTER TABLE careerApplications ADD COLUMN ${column}`).run();
+      } catch {
+      }
     }
     const pending = await env.DB.prepare("SELECT COUNT(*) AS total FROM careerApplications WHERE status='new'").first();
     if (name === "careers.access") {
@@ -54451,42 +55482,50 @@ Detalhes: ${details}` : ""}`;
       return trpcResult({ applications: rows.results || [], pendingCount: Number(pending?.total || 0) });
     }
     const id = Number(input.id || 0), status = String(input.status || "").trim();
-    const allowedStatuses = new Set(["new", "reviewing", "contacted", "interview", "approved", "rejected", "archived"]);
-    if (!id || !allowedStatuses.has(status)) return trpcError("Candidatura ou situação inválida");
-    const adminNotes = String(input.adminNotes || "").trim().slice(0, 3000) || null;
-    const result = await env.DB.prepare("UPDATE careerApplications SET status=?,adminNotes=?,reviewedBy=?,reviewedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(status,adminNotes,adminEmail.toLowerCase(),id).run();
-    if (!result.meta.changes) return trpcError("Candidatura não encontrada", "NOT_FOUND", 404);
-    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,'Atualizou uma candidatura','careerApplication',?)").bind(adminEmail.toLowerCase(),String(id)).run();
+    const allowedStatuses = /* @__PURE__ */ new Set(["new", "reviewing", "contacted", "interview", "approved", "rejected", "archived"]);
+    if (!id || !allowedStatuses.has(status)) return trpcError("Candidatura ou situa\xE7\xE3o inv\xE1lida");
+    const adminNotes = String(input.adminNotes || "").trim().slice(0, 3e3) || null;
+    const result = await env.DB.prepare("UPDATE careerApplications SET status=?,adminNotes=?,reviewedBy=?,reviewedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(status, adminNotes, adminEmail.toLowerCase(), id).run();
+    if (!result.meta.changes) return trpcError("Candidatura n\xE3o encontrada", "NOT_FOUND", 404);
+    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,'Atualizou uma candidatura','careerApplication',?)").bind(adminEmail.toLowerCase(), String(id)).run();
     return trpcResult({ success: true });
   }
   if (name === "agent.createReviewInvite") {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-    for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+    for (const column of ["accessCode TEXT", "city TEXT", "state TEXT", "applicationId INTEGER"]) {
+      try {
+        await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run();
+      } catch {
+      }
+    }
     const applicationId = Number(input.applicationId || 0);
     if (applicationId) {
-      const application = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(applicationId,adminEmail.toLowerCase()).first();
-      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      const application = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(applicationId, adminEmail.toLowerCase()).first();
+      if (!application) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
       const existing = await env.DB.prepare("SELECT token FROM reviewInvites WHERE applicationId=? AND usedAt IS NULL ORDER BY id DESC LIMIT 1").bind(applicationId).first();
       if (existing) return trpcResult({ token: existing.token, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${existing.token}` });
       let details = {};
-      try { details = JSON.parse(String(application.applicationData || "{}")); } catch {}
-      const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
-      await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode,city,state,applicationId) VALUES (?,?,?,?,NULL,?,?,?)").bind(adminEmail.toLowerCase(),String(application.clientName||details.clientName||"").trim()||null,String(application.clientEmail||details.clientEmail||"").trim().toLowerCase()||null,token,String(application.city||details.city||"").trim()||null,String(application.state||details.state||"").trim().toUpperCase()||null,applicationId).run();
-      return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token}` });
+      try {
+        details = JSON.parse(String(application.applicationData || "{}"));
+      } catch {
+      }
+      const token2 = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+      await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode,city,state,applicationId) VALUES (?,?,?,?,NULL,?,?,?)").bind(adminEmail.toLowerCase(), String(application.clientName || details.clientName || "").trim() || null, String(application.clientEmail || details.clientEmail || "").trim().toLowerCase() || null, token2, String(application.city || details.city || "").trim() || null, String(application.state || details.state || "").trim().toUpperCase() || null, applicationId).run();
+      return trpcResult({ token: token2, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token2}` });
     }
-    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
-    await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode) VALUES (?,?,?,?,NULL)").bind(adminEmail.toLowerCase(),String(input.clientName||"").trim()||null,String(input.clientEmail||"").trim().toLowerCase()||null,token).run();
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode) VALUES (?,?,?,?,NULL)").bind(adminEmail.toLowerCase(), String(input.clientName || "").trim() || null, String(input.clientEmail || "").trim().toLowerCase() || null, token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token}` });
   }
   if (name === "agent.createServiceFeedbackInvite") {
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS serviceFeedbackInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,meetingId INTEGER,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,rating INTEGER,comment TEXT,reason TEXT,doubts TEXT,submittedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     const meetingId = Number(input.meetingId || 0), clientName = String(input.clientName || "").trim(), clientEmail = String(input.clientEmail || "").trim().toLowerCase();
     if (meetingId) {
-      const existing = await env.DB.prepare("SELECT token FROM serviceFeedbackInvites WHERE lower(agentEmail)=? AND meetingId=? AND submittedAt IS NULL ORDER BY id DESC LIMIT 1").bind(adminEmail.toLowerCase(),meetingId).first();
+      const existing = await env.DB.prepare("SELECT token FROM serviceFeedbackInvites WHERE lower(agentEmail)=? AND meetingId=? AND submittedAt IS NULL ORDER BY id DESC LIMIT 1").bind(adminEmail.toLowerCase(), meetingId).first();
       if (existing) return trpcResult({ token: existing.token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${existing.token}` });
     }
-    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
-    await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(),meetingId||null,clientName||null,clientEmail||null,token).run();
+    const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(), meetingId || null, clientName || null, clientEmail || null, token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
   if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail" || name === "agent.openMeetingClient") {
@@ -54496,11 +55535,11 @@ Detalhes: ${details}` : ""}`;
     const template = String(input.template || "Mensagem").trim().slice(0, 120);
     const channel = String(input.channel || "whatsapp").toLowerCase() === "email" ? "email" : "whatsapp";
     const openClient = name === "agent.openMeetingClient";
-    if (!meetingId || (!openClient && !message)) return trpcError("Mensagem ou compromisso inválido");
+    if (!meetingId || !openClient && !message) return trpcError("Mensagem ou compromisso inv\xE1lido");
     const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
-    if (!meeting) return trpcError("Compromisso não encontrado", "NOT_FOUND", 404);
+    if (!meeting) return trpcError("Compromisso n\xE3o encontrado", "NOT_FOUND", 404);
     const sendMeetingEmail = name === "agent.sendMeetingEmail";
-    if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso não possui e-mail válido");
+    if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso n\xE3o possui e-mail v\xE1lido");
     let clientId = Number(meeting.clientId || 0);
     if (clientId && !await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first()) clientId = 0;
     if (!clientId) {
@@ -54518,17 +55557,18 @@ Detalhes: ${details}` : ""}`;
     if (sendMeetingEmail) {
       const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
-      const subject = String(input.subject || "Seu atendimento — Affinity Financial Consulting").trim().slice(0, 300);
+      const subject = String(input.subject || "Seu atendimento \u2014 Affinity Financial Consulting").trim().slice(0, 300);
       const sent = await sendAgentEmail(env, owner, { to: String(meeting.inviteeEmail), subject, html: clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n", "<br>")}</p>`), replyTo: String(config.fromEmail) });
       await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message, String(config.fromEmail), String(meeting.inviteeEmail)).run();
     }
-    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : channel, `${template}\n${message}`, owner).run();
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : channel, `${template}
+${message}`, owner).run();
     return trpcResult({ success: true, clientId });
   }
   if (name === "admin.deleteApplication") {
-    if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplicações", "FORBIDDEN", 403);
+    if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplica\xE7\xF5es", "FORBIDDEN", 403);
     const result = await env.DB.prepare("DELETE FROM agentApplications WHERE id=?").bind(Number(input.id || 0)).run();
-    if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+    if (!result.meta.changes) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
   if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument", "agent.sendApplicationEmail"].includes(name)) {
@@ -54568,11 +55608,14 @@ Detalhes: ${details}` : ""}`;
       createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`).run();
-    for (const column of ["applicationData TEXT", "sensitiveData TEXT", "accessCode TEXT", "clientToken TEXT"]) {
-      try { await env.DB.prepare(`ALTER TABLE agentApplications ADD COLUMN ${column}`).run(); } catch {}
-    }
-    await env.DB.prepare("CREATE INDEX IF NOT EXISTS agentApplications_owner_status ON agentApplications(agentEmail,status)").run();
-    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS applicationDeletionRequests (
+      for (const column of ["applicationData TEXT", "sensitiveData TEXT", "accessCode TEXT", "clientToken TEXT"]) {
+        try {
+          await env.DB.prepare(`ALTER TABLE agentApplications ADD COLUMN ${column}`).run();
+        } catch {
+        }
+      }
+      await env.DB.prepare("CREATE INDEX IF NOT EXISTS agentApplications_owner_status ON agentApplications(agentEmail,status)").run();
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS applicationDeletionRequests (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       applicationId INTEGER NOT NULL,
       agentEmail TEXT NOT NULL,
@@ -54584,17 +55627,22 @@ Detalhes: ${details}` : ""}`;
       requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       reviewedAt TEXT
     )`).run();
-    await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-    for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+      await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+      for (const column of ["accessCode TEXT", "city TEXT", "state TEXT", "applicationId INTEGER"]) {
+        try {
+          await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run();
+        } catch {
+        }
+      }
     }
     if (name === "agent.sendApplicationEmail") {
       const applicationId = Number(input.applicationId || 0);
       const subject = String(input.subject || "").trim();
       const body = String(input.body || "").trim();
       const application = await env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone FROM agentApplications WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(applicationId, owner).first();
-      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      if (!application) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
       const recipient = String(application.clientEmail || "").trim().toLowerCase();
-      if (!validEmail(recipient)) return trpcError("Esta cliente não possui um e-mail válido");
+      if (!validEmail(recipient)) return trpcError("Esta cliente n\xE3o possui um e-mail v\xE1lido");
       if (!subject || subject.length > 500 || !body || body.length > 5e4) return trpcError("Revise o assunto e a mensagem");
       const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
@@ -54620,29 +55668,29 @@ Detalhes: ${details}` : ""}`;
     }
     if (name === "agent.uploadApplicationDocument") {
       const application = await env.DB.prepare("SELECT id,agentEmail FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id || 0), owner).first();
-      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
-      try { return trpcResult(await storeApplicationDocument(env, Number(application.id), owner, input)); }
-      catch (error) { return trpcError(error.message || "Não foi possível armazenar o PDF"); }
+      if (!application) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
+      try {
+        return trpcResult(await storeApplicationDocument(env, Number(application.id), owner, input));
+      } catch (error) {
+        return trpcError(error.message || "N\xE3o foi poss\xEDvel armazenar o PDF");
+      }
     }
     if (name === "agent.getApplicationDocument") {
       const storageKey = String(input.storageKey || "").replace(/^d1:/, "");
       const document = await env.DB.prepare("SELECT * FROM applicationDocuments WHERE storageKey=? AND applicationId=? AND lower(agentEmail)=?").bind(storageKey, Number(input.applicationId || 0), owner).first();
-      if (!document) return trpcError("Documento não encontrado", "NOT_FOUND", 404);
+      if (!document) return trpcError("Documento n\xE3o encontrado", "NOT_FOUND", 404);
       const result = await env.DB.prepare("SELECT data FROM applicationDocumentChunks WHERE storageKey=? ORDER BY chunkIndex").bind(storageKey).all();
-      if (!result.results.length) return trpcError("O arquivo do documento está incompleto");
-      const parts = await Promise.all(result.results.map((chunk) =>
-        decryptSmtpPassword(String(chunk.data), env.JWT_SECRET)
+      if (!result.results.length) return trpcError("O arquivo do documento est\xE1 incompleto");
+      const parts = await Promise.all(result.results.map(
+        (chunk) => decryptSmtpPassword(String(chunk.data), env.JWT_SECRET)
       ));
       return trpcResult({ name: document.name, type: document.type, data: `data:${document.type};base64,${parts.join("")}` });
     }
     if (name === "agent.listApplications") {
       try {
-      await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
-      await env.DB.prepare("UPDATE agentApplications SET clientToken=lower(hex(randomblob(16))) WHERE lower(agentEmail)=? AND (clientToken IS NULL OR trim(clientToken)='')").bind(owner).run();
-      // A completed application must always have a real policy. Older logic
-      // incorrectly completed an application just because its CRM profile was
-      // labelled as a client.
-      await env.DB.prepare(`UPDATE agentApplications SET
+        await env.DB.prepare("UPDATE agentApplications SET accessCode=upper(hex(randomblob(4))) WHERE lower(agentEmail)=? AND (accessCode IS NULL OR trim(accessCode)='')").bind(owner).run();
+        await env.DB.prepare("UPDATE agentApplications SET clientToken=lower(hex(randomblob(16))) WHERE lower(agentEmail)=? AND (clientToken IS NULL OR trim(clientToken)='')").bind(owner).run();
+        await env.DB.prepare(`UPDATE agentApplications SET
         status=CASE WHEN submittedAt IS NOT NULL THEN 'submitted' ELSE 'draft' END,
         matchedPolicyId=NULL,completedAt=NULL,updatedAt=CURRENT_TIMESTAMP
         WHERE lower(agentEmail)=? AND status='completed'
@@ -54651,7 +55699,7 @@ Detalhes: ${details}` : ""}`;
           WHERE p.id=agentApplications.matchedPolicyId
           AND lower(p.agentEmail)=lower(agentApplications.agentEmail)
         ))`).bind(owner).run();
-      await env.DB.prepare(`UPDATE agentApplications AS a SET
+        await env.DB.prepare(`UPDATE agentApplications AS a SET
         status='completed',
         matchedPolicyId=(SELECT p.id FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId
           WHERE lower(p.agentEmail)=lower(a.agentEmail)
@@ -54678,7 +55726,10 @@ Detalhes: ${details}` : ""}`;
         WHERE lower(a.agentEmail)=? ORDER BY CASE a.status WHEN 'submitted' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,a.updatedAt DESC`).bind(owner).all();
       return trpcResult(rows.results.map((row) => {
         let extra = {};
-        try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
+        try {
+          extra = JSON.parse(String(row.applicationData || "{}"));
+        } catch {
+        }
         delete row.sensitiveData;
         delete row.applicationData;
         return { ...row, ...extra, id: Number(row.id) };
@@ -54686,10 +55737,16 @@ Detalhes: ${details}` : ""}`;
     }
     if (name === "agent.getApplication") {
       const row = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id || 0), owner).first();
-      if (!row) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      if (!row) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
       let extra = {}, sensitive = {};
-      try { extra = JSON.parse(String(row.applicationData || "{}")); } catch {}
-      try { sensitive = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)); } catch {}
+      try {
+        extra = JSON.parse(String(row.applicationData || "{}"));
+      } catch {
+      }
+      try {
+        sensitive = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET));
+      } catch {
+      }
       try {
         const stored = await env.DB.prepare("SELECT storageKey,name,type,category,size FROM applicationDocuments WHERE applicationId=? AND lower(agentEmail)=? ORDER BY createdAt").bind(Number(row.id), owner).all();
         const attachments = Array.isArray(extra.attachments) ? extra.attachments : [];
@@ -54700,7 +55757,7 @@ Detalhes: ${details}` : ""}`;
             name: document.name,
             type: document.type,
             category: document.category,
-            size: Number(document.size || 0),
+            size: Number(document.size || 0)
           });
         }
         extra.attachments = attachments;
@@ -54715,16 +55772,16 @@ Detalhes: ${details}` : ""}`;
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
       const clientEmail = String(input.clientEmail || "").trim().toLowerCase();
       if (!clientName) return trpcError("Informe o nome completo do cliente");
-      if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail válido");
-      const sensitiveKeys = new Set(["ssn","passportNumber","residentCardNumber","visaNumber","driverLicenseNumber","bankName","routingNumber","accountNumber","medicalDetails","medications","physicianName","physicianAddress","healthHistory"]);
+      if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail v\xE1lido");
+      const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "residentCardNumber", "visaNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName", "physicianAddress", "healthHistory"]);
       const extra = {}, sensitive = {};
       const supplied = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : input;
-      for (const [key,value] of Object.entries(supplied)) {
-        if (["id","clientName","clientEmail","clientPhone"].includes(key)) continue;
-        (sensitiveKeys.has(key) ? sensitive : extra)[key] = value;
+      for (const [key2, value] of Object.entries(supplied)) {
+        if (["id", "clientName", "clientEmail", "clientPhone"].includes(key2)) continue;
+        (sensitiveKeys.has(key2) ? sensitive : extra)[key2] = value;
       }
       const encryptedSensitive = Object.keys(sensitive).length ? await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET) : null;
-      const values = [clientName,clientEmail||null,String(input.clientPhone||"").trim()||null,String(input.birthDate||"").trim()||null,String(input.address||"").trim()||null,String(input.city||"").trim()||null,String(input.state||"").trim()||null,String(input.zipCode||"").trim()||null,String(input.maritalStatus||"").trim()||null,String(input.occupation||"").trim()||null,Number(input.annualIncome||0),String(input.beneficiaryName||"").trim()||null,String(input.beneficiaryRelationship||"").trim()||null,Number(input.beneficiaryPercentage||100),String(input.productInterest||"").trim()||null,Number(input.coverageRequested||0),Number(input.premiumBudget||0),String(input.applicationReason||"").trim()||null,String(input.notes||"").trim()||null,JSON.stringify(extra),encryptedSensitive];
+      const values = [clientName, clientEmail || null, String(input.clientPhone || "").trim() || null, String(input.birthDate || "").trim() || null, String(input.address || "").trim() || null, String(input.city || "").trim() || null, String(input.state || "").trim() || null, String(input.zipCode || "").trim() || null, String(input.maritalStatus || "").trim() || null, String(input.occupation || "").trim() || null, Number(input.annualIncome || 0), String(input.beneficiaryName || "").trim() || null, String(input.beneficiaryRelationship || "").trim() || null, Number(input.beneficiaryPercentage || 100), String(input.productInterest || "").trim() || null, Number(input.coverageRequested || 0), Number(input.premiumBudget || 0), String(input.applicationReason || "").trim() || null, String(input.notes || "").trim() || null, JSON.stringify(extra), encryptedSensitive];
       if (id) {
         const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),status=CASE WHEN status='submitted' THEN 'draft' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?`).bind(...values,id,owner).run();
         if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
@@ -54736,37 +55793,48 @@ Detalhes: ${details}` : ""}`;
     }
     if (name === "agent.submitApplication") {
       const id = Number(input.id || 0);
-      const application = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first();
-      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      const application = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
+      if (!application) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
       let completed = {}, protectedData = {};
-      try { completed = JSON.parse(String(application.applicationData || "{}")); } catch {}
-      try { protectedData = JSON.parse(await decryptSmtpPassword(String(application.sensitiveData || ""), env.JWT_SECRET)); } catch {}
-      const all = { ...application, ...completed, ...protectedData };
-      all.existingInsurance = String(all.existingInsurance || "Não").trim();
-      const required = {clientName:"nome completo",clientEmail:"e-mail",clientPhone:"telefone",birthDate:"data de nascimento",address:"endereço",city:"cidade",state:"estado",zipCode:"ZIP Code",birthCountry:"país de nascimento",gender:"sexo",maritalStatus:"estado civil",ssn:"SSN/ITIN",passportNumber:"passaporte",driverHasLicense:"informação sobre Driver's License",height:"altura",weight:"peso",employer:"empresa",industry:"área profissional",occupation:"ocupação",employmentLength:"tempo de trabalho",personalWeeklyIncome:"renda pessoal semanal",personalWeeklyExpenses:"despesas pessoais semanais",weeklyIncome:"renda familiar semanal",weeklyFixedExpenses:"despesas familiares semanais",householdSize:"quantidade de pessoas na residência",bankName:"banco",routingNumber:"routing number",accountNumber:"account number",seenDoctor:"consulta médica",tobacco:"histórico de fumo",hasMedicalCondition:"informação sobre doença ou diagnóstico",usesMedication:"informação sobre medicamentos",fatherLiving:"situação do pai",motherLiving:"situação da mãe",productInterest:"produto",coverageRequested:"cobertura",premiumBudget:"premium",existingInsurance:"seguro existente"};
-      const missing = Object.entries(required).filter(([key])=>all[key]===null||all[key]===void 0||String(all[key]).trim()==="").map(([,label])=>label);
-      if (String(all.bornInUSA||"") === "Sim" && !String(all.birthState||"").trim()) missing.push("estado onde nasceu");
-      if (String(all.driverHasLicense||"").toLowerCase() === "sim" && (!String(all.driverLicenseNumber||"").trim() || !String(all.driverLicenseState||"").trim())) missing.push("número e estado da Driver's License");
-      if (String(all.hasMedicalCondition||"").toLowerCase() === "sim" && !String(all.medicalDetails||"").trim()) missing.push("qual doença ou diagnóstico");
-      if (String(all.usesMedication||"").toLowerCase() === "sim" && !String(all.medications||"").trim()) missing.push("quais medicamentos e dosagens");
-      if (String(all.seenDoctor||"").toLowerCase() === "sim" && (!String(all.lastDoctorVisit||"").trim() || !String(all.physicianName||"").trim())) missing.push("mês da consulta e médico ou hospital");
-      for (const parent of ["father","mother"]) {
-        const living = String(all[`${parent}Living`]||"").toLowerCase();
-        if (living === "sim" && !String(all[`${parent}Age`]??"").trim()) missing.push(`idade atual ${parent==="father"?"do pai":"da mãe"}`);
-        if (living === "não" && (!String(all[`${parent}DeathAge`]??"").trim() || !String(all[`${parent}DeathReason`]??"").trim())) missing.push(`idade e motivo do falecimento ${parent==="father"?"do pai":"da mãe"}`);
+      try {
+        completed = JSON.parse(String(application.applicationData || "{}"));
+      } catch {
       }
-      if (!Array.isArray(all.beneficiaries) || !all.beneficiaries.length || all.beneficiaries.some((b)=>!b.name||!b.relationship||!b.birthDate||String(b.percentage??"").trim()==="")) missing.push("beneficiário completo");
-      else if (Math.abs(all.beneficiaries.reduce((sum,b)=>sum+Number(b.percentage||0),0)-100) > 0.001) missing.push("percentuais dos beneficiários devem somar exatamente 100%");
+      try {
+        protectedData = JSON.parse(await decryptSmtpPassword(String(application.sensitiveData || ""), env.JWT_SECRET));
+      } catch {
+      }
+      const all = { ...application, ...completed, ...protectedData };
+      all.existingInsurance = String(all.existingInsurance || "N\xE3o").trim();
+      const required = { clientName: "nome completo", clientEmail: "e-mail", clientPhone: "telefone", birthDate: "data de nascimento", address: "endere\xE7o", city: "cidade", state: "estado", zipCode: "ZIP Code", birthCountry: "pa\xEDs de nascimento", gender: "sexo", maritalStatus: "estado civil", ssn: "SSN/ITIN", passportNumber: "passaporte", driverHasLicense: "informa\xE7\xE3o sobre Driver's License", height: "altura", weight: "peso", employer: "empresa", industry: "\xE1rea profissional", occupation: "ocupa\xE7\xE3o", employmentLength: "tempo de trabalho", personalWeeklyIncome: "renda pessoal semanal", personalWeeklyExpenses: "despesas pessoais semanais", weeklyIncome: "renda familiar semanal", weeklyFixedExpenses: "despesas familiares semanais", householdSize: "quantidade de pessoas na resid\xEAncia", bankName: "banco", routingNumber: "routing number", accountNumber: "account number", seenDoctor: "consulta m\xE9dica", tobacco: "hist\xF3rico de fumo", hasMedicalCondition: "informa\xE7\xE3o sobre doen\xE7a ou diagn\xF3stico", usesMedication: "informa\xE7\xE3o sobre medicamentos", fatherLiving: "situa\xE7\xE3o do pai", motherLiving: "situa\xE7\xE3o da m\xE3e", productInterest: "produto", coverageRequested: "cobertura", premiumBudget: "premium", existingInsurance: "seguro existente" };
+      const missing = Object.entries(required).filter(([key2]) => all[key2] === null || all[key2] === void 0 || String(all[key2]).trim() === "").map(([, label]) => label);
+      if (String(all.bornInUSA || "") === "Sim" && !String(all.birthState || "").trim()) missing.push("estado onde nasceu");
+      if (String(all.driverHasLicense || "").toLowerCase() === "sim" && (!String(all.driverLicenseNumber || "").trim() || !String(all.driverLicenseState || "").trim())) missing.push("n\xFAmero e estado da Driver's License");
+      if (String(all.hasMedicalCondition || "").toLowerCase() === "sim" && !String(all.medicalDetails || "").trim()) missing.push("qual doen\xE7a ou diagn\xF3stico");
+      if (String(all.usesMedication || "").toLowerCase() === "sim" && !String(all.medications || "").trim()) missing.push("quais medicamentos e dosagens");
+      if (String(all.seenDoctor || "").toLowerCase() === "sim" && (!String(all.lastDoctorVisit || "").trim() || !String(all.physicianName || "").trim())) missing.push("m\xEAs da consulta e m\xE9dico ou hospital");
+      for (const parent of ["father", "mother"]) {
+        const living = String(all[`${parent}Living`] || "").toLowerCase();
+        if (living === "sim" && !String(all[`${parent}Age`] ?? "").trim()) missing.push(`idade atual ${parent === "father" ? "do pai" : "da m\xE3e"}`);
+        if (living === "n\xE3o" && (!String(all[`${parent}DeathAge`] ?? "").trim() || !String(all[`${parent}DeathReason`] ?? "").trim())) missing.push(`idade e motivo do falecimento ${parent === "father" ? "do pai" : "da m\xE3e"}`);
+      }
+      if (!Array.isArray(all.beneficiaries) || !all.beneficiaries.length || all.beneficiaries.some((b) => !b.name || !b.relationship || !b.birthDate || String(b.percentage ?? "").trim() === "")) missing.push("benefici\xE1rio completo");
+      else if (Math.abs(all.beneficiaries.reduce((sum, b) => sum + Number(b.percentage || 0), 0) - 100) > 1e-3) missing.push("percentuais dos benefici\xE1rios devem somar exatamente 100%");
       if (missing.length) return trpcError(`Complete antes de concluir: ${[...new Set(missing)].join(", ")}`);
-      if (String(application.status) === "completed") return trpcError("Esta aplicação já foi concluída");
-      const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status IN ('draft','submitted')").bind(id,owner).run();
+      if (String(application.status) === "completed") return trpcError("Esta aplica\xE7\xE3o j\xE1 foi conclu\xEDda");
+      const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status IN ('draft','submitted')").bind(id, owner).run();
       if (!result.meta.changes) return trpcError("Salve o rascunho antes de submeter");
       await env.DB.prepare("CREATE TABLE IF NOT EXISTS reviewInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,accessCode TEXT,city TEXT,state TEXT,applicationId INTEGER,usedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-      for (const column of ["accessCode TEXT","city TEXT","state TEXT","applicationId INTEGER"]) { try { await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run(); } catch {} }
+      for (const column of ["accessCode TEXT", "city TEXT", "state TEXT", "applicationId INTEGER"]) {
+        try {
+          await env.DB.prepare(`ALTER TABLE reviewInvites ADD COLUMN ${column}`).run();
+        } catch {
+        }
+      }
       let invite = await env.DB.prepare("SELECT token FROM reviewInvites WHERE applicationId=? AND usedAt IS NULL ORDER BY id DESC LIMIT 1").bind(id).first();
       if (!invite) {
-        const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2,"0")).join("");
-        await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode,city,state,applicationId) VALUES (?,?,?,?,NULL,?,?,?)").bind(owner,String(all.clientName||"Cliente"),String(all.clientEmail||"").toLowerCase()||null,token,String(all.city||"")||null,String(all.state||"").toUpperCase()||null,id).run();
+        const token = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+        await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode,city,state,applicationId) VALUES (?,?,?,?,NULL,?,?,?)").bind(owner, String(all.clientName || "Cliente"), String(all.clientEmail || "").toLowerCase() || null, token, String(all.city || "") || null, String(all.state || "").toUpperCase() || null, id).run();
         invite = { token };
       }
       return trpcResult({ success: true, reviewInvite: { link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${invite.token}`, token: invite.token } });
@@ -54774,8 +55842,8 @@ Detalhes: ${details}` : ""}`;
     if (name === "agent.requestApplicationDeletion") {
       const id = Number(input.id || 0), reason = String(input.reason || "").trim();
       if (reason.length < 5) return trpcError("Explique o motivo com pelo menos 5 caracteres");
-      const application = await env.DB.prepare("SELECT id,clientName FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first();
-      if (!application) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
+      const application = await env.DB.prepare("SELECT id,clientName FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
+      if (!application) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
       if (accountType === "both") {
         await env.DB.batch([
           env.DB.prepare("DELETE FROM applicationDeletionRequests WHERE applicationId=?").bind(id),
@@ -54784,8 +55852,8 @@ Detalhes: ${details}` : ""}`;
         return trpcResult({ success: true, deleted: true, requiresApproval: false });
       }
       const pending = await env.DB.prepare("SELECT id FROM applicationDeletionRequests WHERE applicationId=? AND status='pending'").bind(id).first();
-      if (pending) return trpcError("Esta solicitação já está aguardando o administrador");
-      await env.DB.prepare("INSERT INTO applicationDeletionRequests (applicationId,agentEmail,applicationName,reason) VALUES (?,?,?,?)").bind(id,owner,String(application.clientName||"Aplicação"),reason).run();
+      if (pending) return trpcError("Esta solicita\xE7\xE3o j\xE1 est\xE1 aguardando o administrador");
+      await env.DB.prepare("INSERT INTO applicationDeletionRequests (applicationId,agentEmail,applicationName,reason) VALUES (?,?,?,?)").bind(id, owner, String(application.clientName || "Aplica\xE7\xE3o"), reason).run();
       return trpcResult({ success: true, deleted: false, requiresApproval: true });
     }
   }
@@ -54848,7 +55916,7 @@ Detalhes: ${details}` : ""}`;
   if (name === "agent.paymentCase") {
     const owner = adminEmail.toLowerCase(), taskId = Number(input.taskId || 0);
     const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
-    if (!task) return trpcError("Pendência de pagamento não encontrada", "NOT_FOUND", 404);
+    if (!task) return trpcError("Pend\xEAncia de pagamento n\xE3o encontrada", "NOT_FOUND", 404);
     const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
     const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
     const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
@@ -54886,36 +55954,36 @@ Detalhes: ${details}` : ""}`;
   if (name === "agent.resolvePaymentCase") {
     const owner = adminEmail.toLowerCase(), taskId = Number(input.taskId || 0);
     const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
-    if (!task) return trpcError("Pendência de pagamento não encontrada", "NOT_FOUND", 404);
+    if (!task) return trpcError("Pend\xEAncia de pagamento n\xE3o encontrada", "NOT_FOUND", 404);
     const clientName = String(input.name || "").replace(/\s+/g, " ").trim();
     const email = String(input.email || "").trim().toLowerCase();
     const phone = String(input.phone || "").trim();
     const policyNumber = String(input.policyNumber || "").trim().toUpperCase();
-    if (!clientName || !policyNumber) return trpcError("Informe o nome do cliente e o número da apólice");
-    if (email && !validEmail(email)) return trpcError("Informe um e-mail válido");
+    if (!clientName || !policyNumber) return trpcError("Informe o nome do cliente e o n\xFAmero da ap\xF3lice");
+    if (email && !validEmail(email)) return trpcError("Informe um e-mail v\xE1lido");
     let client = Number(input.clientId || task.clientId || 0) ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(input.clientId || task.clientId), owner).first() : null;
     if (!client && email) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? ORDER BY id LIMIT 1").bind(owner, email).first();
     if (!client) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").bind(owner, clientName).first();
     let clientId;
     if (client) {
       clientId = Number(client.id);
-      await env.DB.prepare("UPDATE crmClients SET name=CASE WHEN trim(coalesce(name,''))='' THEN ? ELSE name END,email=CASE WHEN trim(coalesce(email,''))='' THEN ? ELSE email END,phone=CASE WHEN trim(coalesce(phone,''))='' THEN ? ELSE phone END,whatsapp=CASE WHEN trim(coalesce(whatsapp,''))='' THEN ? ELSE whatsapp END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientName,email||null,phone||null,phone||null,clientId,owner).run();
+      await env.DB.prepare("UPDATE crmClients SET name=CASE WHEN trim(coalesce(name,''))='' THEN ? ELSE name END,email=CASE WHEN trim(coalesce(email,''))='' THEN ? ELSE email END,phone=CASE WHEN trim(coalesce(phone,''))='' THEN ? ELSE phone END,whatsapp=CASE WHEN trim(coalesce(whatsapp,''))='' THEN ? ELSE whatsapp END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientName, email || null, phone || null, phone || null, clientId, owner).run();
     } else {
-      const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?, 'client','Aviso de pagamento',?,'Cadastro relacionado a aviso de pagamento recebido')").bind(clientName,email||null,phone||null,phone||null,owner).run();
+      const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?, 'client','Aviso de pagamento',?,'Cadastro relacionado a aviso de pagamento recebido')").bind(clientName, email || null, phone || null, phone || null, owner).run();
       clientId = Number(inserted.meta.last_row_id);
     }
     const policies = await env.DB.prepare("SELECT id,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     let policy = policies.results.find((row) => normalizePolicyNumber(row.policyNumber) === normalizePolicyNumber(policyNumber));
     if (policy) {
-      await env.DB.prepare("UPDATE agentPolicies SET clientId=?,clientName=CASE WHEN trim(coalesce(clientName,''))='' THEN ? ELSE clientName END,clientEmail=CASE WHEN trim(coalesce(clientEmail,''))='' THEN ? ELSE clientEmail END,clientPhone=CASE WHEN trim(coalesce(clientPhone,''))='' THEN ? ELSE clientPhone END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId,clientName,email||null,phone||null,Number(policy.id),owner).run();
+      await env.DB.prepare("UPDATE agentPolicies SET clientId=?,clientName=CASE WHEN trim(coalesce(clientName,''))='' THEN ? ELSE clientName END,clientEmail=CASE WHEN trim(coalesce(clientEmail,''))='' THEN ? ELSE clientEmail END,clientPhone=CASE WHEN trim(coalesce(clientPhone,''))='' THEN ? ELSE clientPhone END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, clientName, email || null, phone || null, Number(policy.id), owner).run();
     } else {
-      const inserted = await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status) VALUES (?,?,?,?,?,?,'inactive')").bind(owner,clientId,clientName,email||null,phone||null,policyNumber).run();
+      const inserted = await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status) VALUES (?,?,?,?,?,?,'inactive')").bind(owner, clientId, clientName, email || null, phone || null, policyNumber).run();
       policy = { id: Number(inserted.meta.last_row_id), policyNumber };
     }
     const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
     await env.DB.batch([
-      env.DB.prepare("UPDATE agentTasks SET clientId=?,title=replace(title,'Identificar cliente e apólice','Pagamento identificado') WHERE id=? AND lower(agentEmail)=?").bind(clientId,taskId,owner),
-      env.DB.prepare("UPDATE agentMailboxEmails SET clientId=?,policyNumber=?,actionStatus='needs_review',actionDetail='Cliente e apólice identificados; mensagem pronta para envio' WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=?").bind(clientId,policyNumber,owner,uid)
+      env.DB.prepare("UPDATE agentTasks SET clientId=?,title=replace(title,'Identificar cliente e ap\xF3lice','Pagamento identificado') WHERE id=? AND lower(agentEmail)=?").bind(clientId, taskId, owner),
+      env.DB.prepare("UPDATE agentMailboxEmails SET clientId=?,policyNumber=?,actionStatus='needs_review',actionDetail='Cliente e ap\xF3lice identificados; mensagem pronta para envio' WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=?").bind(clientId, policyNumber, owner, uid)
     ]);
     return trpcResult({ success: true, clientId, policyId: Number(policy.id), merged: Boolean(client) });
   }
@@ -54926,37 +55994,37 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.markDirectContactRead") {
     await ensureCalendlyTables(env);
-    await env.DB.prepare("UPDATE agentDirectContacts SET readAt=COALESCE(readAt,CURRENT_TIMESTAMP) WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id),adminEmail.toLowerCase()).run();
+    await env.DB.prepare("UPDATE agentDirectContacts SET readAt=COALESCE(readAt,CURRENT_TIMESTAMP) WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id), adminEmail.toLowerCase()).run();
     return trpcResult({ success: true });
   }
   if (name === "agent.extractPolicyDocument") {
     const base64 = String(input.base64 || "");
-    if (!base64 || base64.length > 70_000_000) return trpcError("O PDF está vazio ou excede o limite de 50 MB para leitura");
+    if (!base64 || base64.length > 7e7) return trpcError("O PDF est\xE1 vazio ou excede o limite de 50 MB para leitura");
     try {
       const bytes = Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
       const converted = await env.AI.toMarkdown({ name: String(input.fileName || "policy.pdf"), blob: new Blob([bytes], { type: "application/pdf" }) }, { conversionOptions: { pdf: { metadata: true }, image: { descriptionLanguage: "en" }, output: { format: "text" } } });
       const result = Array.isArray(converted) ? converted[0] : converted;
-      if (!result || result.format === "error" || !String(result.data || "").trim()) return trpcError(String(result?.error || "Esta apólice é digitalizada. Não foi possível reconhecer as imagens do documento"));
+      if (!result || result.format === "error" || !String(result.data || "").trim()) return trpcError(String(result?.error || "Esta ap\xF3lice \xE9 digitalizada. N\xE3o foi poss\xEDvel reconhecer as imagens do documento"));
       return trpcResult({ text: String(result.data), method: "cloudflare-document-reader-ocr" });
     } catch (error) {
-      return trpcError(`Não foi possível reconhecer esta apólice: ${error instanceof Error ? error.message : String(error)}`);
+      return trpcError(`N\xE3o foi poss\xEDvel reconhecer esta ap\xF3lice: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   if (name === "agent.extractPolicyImages") {
     const images = Array.isArray(input.images) ? input.images.slice(0, 24) : [];
-    if (!images.length) return trpcError("Nenhuma página foi recebida para leitura visual");
+    if (!images.length) return trpcError("Nenhuma p\xE1gina foi recebida para leitura visual");
     try {
       const files = images.map((base64, index) => {
-        const bytes = Uint8Array.from(atob(String(base64 || "")), character => character.charCodeAt(0));
+        const bytes = Uint8Array.from(atob(String(base64 || "")), (character) => character.charCodeAt(0));
         return { name: `policy-page-${index + 1}.jpg`, blob: new Blob([bytes], { type: "image/jpeg" }) };
       });
       const converted = await env.AI.toMarkdown(files, { conversionOptions: { image: { descriptionLanguage: "en" }, output: { format: "text" } } });
       const results = Array.isArray(converted) ? converted : [converted];
-      const text = results.filter(result => result && result.format !== "error").map(result => String(result.data || "")).filter(Boolean).join("\n\n");
-      if (!text.trim()) return trpcError("Não foi possível reconhecer o conteúdo visual das páginas selecionadas");
+      const text = results.filter((result) => result && result.format !== "error").map((result) => String(result.data || "")).filter(Boolean).join("\n\n");
+      if (!text.trim()) return trpcError("N\xE3o foi poss\xEDvel reconhecer o conte\xFAdo visual das p\xE1ginas selecionadas");
       return trpcResult({ text, method: "cloudflare-page-image-ocr", pages: images.length });
     } catch (error) {
-      return trpcError(`A leitura visual não foi concluída: ${error instanceof Error ? error.message : String(error)}`);
+      return trpcError(`A leitura visual n\xE3o foi conclu\xEDda: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   if (name === "agent.pendingCounts") {
@@ -55001,30 +56069,31 @@ Detalhes: ${details}` : ""}`;
       env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(owner),
       env.DB.prepare("SELECT id,matchedPolicyId,clientName,clientEmail,clientPhone,state,beneficiaryName,applicationData FROM agentApplications WHERE lower(agentEmail)=?").bind(owner)
     ]);
-    const normalized = (value) => String(value || "").replace(/\D/g, "").slice(-10);
+    const normalized = /* @__PURE__ */ __name((value) => String(value || "").replace(/\D/g, "").slice(-10), "normalized");
     const applicationsList = applications.results || [];
     for (const row of rows.results || []) {
       const currentBeneficiary = primaryBeneficiaryName(row.beneficiaries);
-      const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) ||
-        applicationsList.find((item) => String(item.clientEmail || "").trim().toLowerCase() && String(item.clientEmail).trim().toLowerCase() === String(row.clientEmail || "").trim().toLowerCase()) ||
-        applicationsList.find((item) => normalized(item.clientPhone) && normalized(item.clientPhone) === normalized(row.clientPhone));
+      const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) || applicationsList.find((item) => String(item.clientEmail || "").trim().toLowerCase() && String(item.clientEmail).trim().toLowerCase() === String(row.clientEmail || "").trim().toLowerCase()) || applicationsList.find((item) => normalized(item.clientPhone) && normalized(item.clientPhone) === normalized(row.clientPhone));
       let applicationData = {};
-      try { applicationData = JSON.parse(String(application?.applicationData || "{}")); } catch {}
+      try {
+        applicationData = JSON.parse(String(application?.applicationData || "{}"));
+      } catch {
+      }
       const applicationBeneficiary = primaryBeneficiaryName(application?.beneficiaryName || applicationData.beneficiaryName || applicationData.beneficiaries || "");
       const correctedBeneficiary = applicationBeneficiary || currentBeneficiary;
       if (String(row.beneficiaries || "").trim() !== correctedBeneficiary) {
-        await env.DB.prepare("UPDATE agentPolicies SET beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(correctedBeneficiary || null,Number(row.id),owner).run();
+        await env.DB.prepare("UPDATE agentPolicies SET beneficiaries=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(correctedBeneficiary || null, Number(row.id), owner).run();
         row.beneficiaries = correctedBeneficiary || null;
       }
     }
     return trpcResult(
       rows.results.map((row) => {
-        const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) ||
-          applicationsList.find((item) => String(item.clientEmail || "").trim().toLowerCase() && String(item.clientEmail).trim().toLowerCase() === String(row.clientEmail || "").trim().toLowerCase()) ||
-          applicationsList.find((item) => normalized(item.clientPhone) && normalized(item.clientPhone) === normalized(row.clientPhone)) ||
-          applicationsList.find((item) => String(item.clientName || "").trim().toLowerCase() === String(row.clientName || "").trim().toLowerCase());
+        const application = applicationsList.find((item) => Number(item.matchedPolicyId || 0) === Number(row.id)) || applicationsList.find((item) => String(item.clientEmail || "").trim().toLowerCase() && String(item.clientEmail).trim().toLowerCase() === String(row.clientEmail || "").trim().toLowerCase()) || applicationsList.find((item) => normalized(item.clientPhone) && normalized(item.clientPhone) === normalized(row.clientPhone)) || applicationsList.find((item) => String(item.clientName || "").trim().toLowerCase() === String(row.clientName || "").trim().toLowerCase());
         let applicationData = {};
-        try { applicationData = JSON.parse(String(application?.applicationData || "{}")); } catch {}
+        try {
+          applicationData = JSON.parse(String(application?.applicationData || "{}"));
+        } catch {
+        }
         return {
           ...row,
           id: Number(row.id),
@@ -55059,10 +56128,10 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.requestPolicyDeletion") {
     const owner = adminEmail.toLowerCase(), policyId = Number(input.id || 0), reason = String(input.reason || "").trim();
-    if (!policyId || reason.length < 5) return trpcError("Informe o motivo da solicitação com pelo menos 5 caracteres");
+    if (!policyId || reason.length < 5) return trpcError("Informe o motivo da solicita\xE7\xE3o com pelo menos 5 caracteres");
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS policyDeletionRequests (id INTEGER PRIMARY KEY AUTOINCREMENT,policyId INTEGER NOT NULL,agentEmail TEXT NOT NULL,clientId INTEGER,clientName TEXT,policyNumber TEXT,reason TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',adminNote TEXT,reviewedBy TEXT,requestedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,reviewedAt TEXT)").run();
     const policy = await env.DB.prepare("SELECT id,clientId,clientName,policyNumber FROM agentPolicies WHERE id=? AND lower(agentEmail)=?").bind(policyId, owner).first();
-    if (!policy) return trpcError("Apólice não encontrada", "NOT_FOUND", 404);
+    if (!policy) return trpcError("Ap\xF3lice n\xE3o encontrada", "NOT_FOUND", 404);
     if (accountType === "both") {
       await env.DB.batch([
         env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=NULL WHERE matchedPolicyId=? AND lower(agentEmail)=?").bind(policyId, owner),
@@ -55072,8 +56141,8 @@ Detalhes: ${details}` : ""}`;
       return trpcResult({ success: true, deleted: true, requiresApproval: false });
     }
     const pending = await env.DB.prepare("SELECT id FROM policyDeletionRequests WHERE policyId=? AND status='pending' LIMIT 1").bind(policyId).first();
-    if (pending) return trpcError("Já existe uma solicitação aguardando o administrador");
-    await env.DB.prepare("INSERT INTO policyDeletionRequests (policyId,agentEmail,clientId,clientName,policyNumber,reason) VALUES (?,?,?,?,?,?)").bind(policyId,owner,Number(policy.clientId||0)||null,String(policy.clientName||"Cliente"),String(policy.policyNumber||""),reason).run();
+    if (pending) return trpcError("J\xE1 existe uma solicita\xE7\xE3o aguardando o administrador");
+    await env.DB.prepare("INSERT INTO policyDeletionRequests (policyId,agentEmail,clientId,clientName,policyNumber,reason) VALUES (?,?,?,?,?,?)").bind(policyId, owner, Number(policy.clientId || 0) || null, String(policy.clientName || "Cliente"), String(policy.policyNumber || ""), reason).run();
     return trpcResult({ success: true, deleted: false, requiresApproval: true });
   }
   if (name === "agent.listClients") {
@@ -55130,7 +56199,7 @@ Detalhes: ${details}` : ""}`;
     if (reason.length < 5) return trpcError("Informe o motivo da solicita\xE7\xE3o");
     if (accountType === "both") {
       const linked = await env.DB.prepare("SELECT id FROM agentPolicies WHERE clientId=? LIMIT 1").bind(id).first();
-      if (linked) return trpcError("Este cliente possui apólice vinculada. Exclua ou transfira a apólice antes de excluir o cliente.");
+      if (linked) return trpcError("Este cliente possui ap\xF3lice vinculada. Exclua ou transfira a ap\xF3lice antes de excluir o cliente.");
       await env.DB.batch([
         env.DB.prepare("DELETE FROM clientDeletionRequests WHERE clientId=?").bind(id),
         env.DB.prepare("DELETE FROM crmActivities WHERE clientId=?").bind(id),
@@ -55248,8 +56317,14 @@ Detalhes: ${details}` : ""}`;
       where += " AND m.deletedAt IS NULL";
       if (folder === "inbox") where += " AND m.direction='received' AND m.folderId IS NULL";
       if (folder === "sent") where += " AND m.direction='sent' AND m.folderId IS NULL";
-      if (folder === "custom") { where += " AND m.folderId=?"; binds.push(folderId); }
-      if (topicFolders.includes(folder)) { where += " AND m.topic=? AND m.folderId IS NULL"; binds.push(folder); }
+      if (folder === "custom") {
+        where += " AND m.folderId=?";
+        binds.push(folderId);
+      }
+      if (topicFolders.includes(folder)) {
+        where += " AND m.topic=? AND m.folderId IS NULL";
+        binds.push(folder);
+      }
     }
     if (search) {
       where += " AND (lower(m.subject) LIKE ? OR lower(m.fromEmail) LIKE ? OR lower(m.toEmail) LIKE ? OR lower(m.body) LIKE ? OR lower(coalesce(c.name,'')) LIKE ? OR lower(coalesce(m.policyNumber,'')) LIKE ?)";
@@ -55272,7 +56347,7 @@ Detalhes: ${details}` : ""}`;
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
     const row = await env.DB.prepare("SELECT m.*,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? LIMIT 1").bind(owner, owner, id, owner).first();
-    if (!row) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    if (!row) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null });
   }
   if (name === "agent.mailboxFolders") {
@@ -55285,13 +56360,13 @@ Detalhes: ${details}` : ""}`;
     const owner = adminEmail.toLowerCase();
     const folderName = String(input.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
     if (!folderName) return trpcError("Informe o nome da pasta");
-    if (["entrada", "enviados", "lixeira"].includes(folderName.toLowerCase())) return trpcError("Este nome é reservado pelo sistema");
+    if (["entrada", "enviados", "lixeira"].includes(folderName.toLowerCase())) return trpcError("Este nome \xE9 reservado pelo sistema");
     try {
       const { manageIcloudFolder: manageIcloudFolder2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
       await manageIcloudFolder2(env, owner, "create", "", folderName);
       await env.DB.prepare("INSERT INTO agentMailboxFolders (agentEmail,name,providerName,isProvider) VALUES (?,?,?,1)").bind(owner, folderName, folderName).run();
     } catch (error) {
-      if (String(error).includes("UNIQUE")) return trpcError("Você já possui uma pasta com este nome");
+      if (String(error).includes("UNIQUE")) return trpcError("Voc\xEA j\xE1 possui uma pasta com este nome");
       throw error;
     }
     return trpcResult({ success: true });
@@ -55302,18 +56377,18 @@ Detalhes: ${details}` : ""}`;
     const folderName = String(input.name || "").trim().replace(/\s+/g, " ").slice(0, 80);
     if (!id || !folderName) return trpcError("Revise o nome da pasta");
     const existing = await env.DB.prepare("SELECT providerName,name FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
-    if (!existing) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    if (!existing) return trpcError("Pasta n\xE3o encontrada", "NOT_FOUND", 404);
     const { manageIcloudFolder: manageIcloudFolder2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
     await manageIcloudFolder2(env, owner, "rename", String(existing.providerName || existing.name), folderName);
     const result = await env.DB.prepare("UPDATE agentMailboxFolders SET name=?,providerName=?,isProvider=1 WHERE id=? AND lower(agentEmail)=?").bind(folderName, folderName, id, owner).run();
-    if (!Number(result.meta?.changes || 0)) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    if (!Number(result.meta?.changes || 0)) return trpcError("Pasta n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
   if (name === "agent.deleteMailboxFolder") {
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
     const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
-    if (!folder) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+    if (!folder) return trpcError("Pasta n\xE3o encontrada", "NOT_FOUND", 404);
     const { manageIcloudFolder: manageIcloudFolder2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
     await manageIcloudFolder2(env, owner, "delete", String(folder.providerName || folder.name));
     await env.DB.batch([
@@ -55328,7 +56403,7 @@ Detalhes: ${details}` : ""}`;
     const folderId = input.folderId == null ? null : Number(input.folderId);
     if (folderId) {
       const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE id=? AND lower(agentEmail)=?").bind(folderId, owner).first();
-      if (!folder) return trpcError("Pasta não encontrada", "NOT_FOUND", 404);
+      if (!folder) return trpcError("Pasta n\xE3o encontrada", "NOT_FOUND", 404);
       const message = await env.DB.prepare("SELECT m.imapUid,m.direction,f.providerName AS sourceProvider FROM agentMailboxEmails m LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=?").bind(owner, id, owner).first();
       if (message?.imapUid) {
         const source = String(message.sourceProvider || (message.direction === "sent" ? "Sent Messages" : "INBOX"));
@@ -55337,40 +56412,40 @@ Detalhes: ${details}` : ""}`;
       }
     }
     const result = await env.DB.prepare("UPDATE agentMailboxEmails SET folderId=?,deletedAt=NULL WHERE id=? AND lower(agentEmail)=?").bind(folderId, id, owner).run();
-    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
   if (name === "agent.completeMailboxEmail") {
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
-    const message = await env.DB.prepare("SELECT m.id,m.imapUid,m.direction,m.fromEmail,m.subject,m.body,m.actionDetail,f.providerName AS sourceProvider FROM agentMailboxEmails m LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? AND m.deletedAt IS NULL LIMIT 1").bind(owner,id,owner).first();
-    if (!message) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    const message = await env.DB.prepare("SELECT m.id,m.imapUid,m.direction,m.fromEmail,m.subject,m.body,m.actionDetail,f.providerName AS sourceProvider FROM agentMailboxEmails m LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? AND m.deletedAt IS NULL LIMIT 1").bind(owner, id, owner).first();
+    if (!message) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
     const identity = `${message.subject || ""} ${message.body || ""} ${message.actionDetail || ""} ${message.fromEmail || ""}`.toLowerCase();
     const targetName = /national\s*life|nationallife|nlgroup/.test(identity) ? "NLG" : /five\s*rings|fiverings/.test(identity) ? "Five Rings" : /core\s*bridge|corebridge|aig\.com/.test(identity) ? "Corebridge" : "";
-    if (!targetName) return trpcError("Não foi possível identificar automaticamente a companhia deste e-mail");
+    if (!targetName) return trpcError("N\xE3o foi poss\xEDvel identificar automaticamente a companhia deste e-mail");
     const folderPattern = targetName === "NLG" ? "%nlg%" : targetName === "Five Rings" ? "%five%ring%" : "%corebridge%";
-    const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE lower(agentEmail)=? AND (lower(name) LIKE ? OR lower(providerName) LIKE ?) ORDER BY CASE WHEN lower(name)=lower(?) THEN 0 ELSE 1 END LIMIT 1").bind(owner,folderPattern,folderPattern,targetName).first();
-    if (!folder) return trpcError(`A pasta ${targetName} já deve existir nas configurações do e-mail antes de concluir`);
+    const folder = await env.DB.prepare("SELECT id,name,providerName FROM agentMailboxFolders WHERE lower(agentEmail)=? AND (lower(name) LIKE ? OR lower(providerName) LIKE ?) ORDER BY CASE WHEN lower(name)=lower(?) THEN 0 ELSE 1 END LIMIT 1").bind(owner, folderPattern, folderPattern, targetName).first();
+    if (!folder) return trpcError(`A pasta ${targetName} j\xE1 deve existir nas configura\xE7\xF5es do e-mail antes de concluir`);
     if (message.imapUid) {
       const source = String(message.sourceProvider || (message.direction === "sent" ? "Sent Messages" : "INBOX"));
       const { moveIcloudEmail: moveIcloudEmail2 } = await Promise.resolve().then(() => (init_icloud_email(), icloud_email_exports));
       await moveIcloudEmail2(env, owner, String(message.imapUid), source, String(folder.providerName || folder.name));
     }
-    await env.DB.prepare("UPDATE agentMailboxEmails SET folderId=?,readAt=COALESCE(readAt,CURRENT_TIMESTAMP),deletedAt=NULL WHERE id=? AND lower(agentEmail)=?").bind(Number(folder.id),id,owner).run();
+    await env.DB.prepare("UPDATE agentMailboxEmails SET folderId=?,readAt=COALESCE(readAt,CURRENT_TIMESTAMP),deletedAt=NULL WHERE id=? AND lower(agentEmail)=?").bind(Number(folder.id), id, owner).run();
     return trpcResult({ success: true, folderName: String(folder.name || targetName) });
   }
   if (name === "agent.deleteMailboxEmail") {
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
     const result = await env.DB.prepare("UPDATE agentMailboxEmails SET deletedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(id, owner).run();
-    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
   if (name === "agent.restoreMailboxEmail") {
     const owner = adminEmail.toLowerCase();
     const id = Number(input.id || 0);
     const result = await env.DB.prepare("UPDATE agentMailboxEmails SET deletedAt=NULL,folderId=NULL WHERE id=? AND lower(agentEmail)=?").bind(id, owner).run();
-    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+    if (!Number(result.meta?.changes || 0)) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
   if (name === "agent.mailboxClients") {
@@ -55385,7 +56460,11 @@ Detalhes: ${details}` : ""}`;
   if (name === "agent.sendMailboxEmail") {
     const owner = adminEmail.toLowerCase();
     let attachments;
-    try { attachments=parseMailAttachments(input.attachments); } catch(error){return trpcError(error.message);}
+    try {
+      attachments = parseMailAttachments(input.attachments);
+    } catch (error) {
+      return trpcError(error.message);
+    }
     let body = String(input.body || "").trim();
     const requestedSubject = String(input.subject || "").trim();
     const replyToId = Number(input.replyToId || 0);
@@ -55397,7 +56476,7 @@ Detalhes: ${details}` : ""}`;
     let inReplyTo;
     if (replyToId) {
       const previous = await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(replyToId, owner).first();
-      if (!previous) return trpcError("Mensagem não encontrada", "NOT_FOUND", 404);
+      if (!previous) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
       recipient = String(previous.direction === "received" ? previous.fromEmail : previous.toEmail || "");
       clientId = previous.clientId ? Number(previous.clientId) : null;
       const baseSubject = String(previous.subject || requestedSubject || "Mensagem").replace(/^(?:re:\s*)+/i, "");
@@ -55408,7 +56487,7 @@ Detalhes: ${details}` : ""}`;
       if (!customer) return trpcError("Selecione um dos seus clientes");
       recipient = String(customer.email || "").trim().toLowerCase();
     }
-    if (!validEmail(recipient)) return trpcError("O destinatário não possui um e-mail válido");
+    if (!validEmail(recipient)) return trpcError("O destinat\xE1rio n\xE3o possui um e-mail v\xE1lido");
     if (!subject) subject = "Mensagem da Affinity Financial";
     const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
@@ -55423,7 +56502,7 @@ Detalhes: ${details}` : ""}`;
       references: inReplyTo ? [inReplyTo] : void 0
     });
     const externalId = String(sent.messageId || `portal:${owner}:${Date.now()}`);
-    if(attachments.length)body+='\n\nAnexos enviados: '+attachments.map(a=>a.filename).join(', ');
+    if (attachments.length) body += "\n\nAnexos enviados: " + attachments.map((a) => a.filename).join(", ");
     const topic = classifyMailboxTopic(subject, body);
     const statements = [env.DB.prepare("INSERT INTO agentMailboxEmails (agentEmail,clientId,externalId,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'sent','Enviado diretamente pelo portal',?)").bind(owner, clientId, externalId, String(config.fromEmail), recipient, subject, body, topic)];
     if (clientId) {
@@ -55742,8 +56821,6 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
-    // A collective automation is a dynamic audience. Never retain an old,
-    // frozen selection because every contact added later must be included.
     await env.DB.prepare("UPDATE scheduledMessages SET selectedClientIds=NULL,recipientGroup=NULL WHERE lower(agentEmail)=? AND audience='all' AND occasion<>'custom'").bind(owner).run();
     const defaults = [
       [
@@ -55920,15 +56997,15 @@ Affinity Financial Consulting`,
     );
   }
   if (name === "agent.setAutomationSubscription" || name === "agent.automationSubscriptions") {
-    const owner = adminEmail.toLowerCase(), clientId = Number(input.clientId || 0), occasion = String(input.occasion || '').trim().slice(0,80);
-    if (!Number.isSafeInteger(clientId) || clientId<=0) return trpcError("Cliente inválido");
-    const assigned = await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId,owner).first();
-    if (!assigned) return trpcError("Cliente não encontrado ou sem permissão de acesso");
+    const owner = adminEmail.toLowerCase(), clientId = Number(input.clientId || 0), occasion = String(input.occasion || "").trim().slice(0, 80);
+    if (!Number.isSafeInteger(clientId) || clientId <= 0) return trpcError("Cliente inv\xE1lido");
+    const assigned = await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first();
+    if (!assigned) return trpcError("Cliente n\xE3o encontrado ou sem permiss\xE3o de acesso");
     await ensurePreferences(env.DB);
-    if(name === "agent.automationSubscriptions")return trpcResult((await env.DB.prepare("SELECT occasion,isActive,updatedAt,requestedBy FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=?").bind(owner,clientId).all()).results);
-    if (!/^[a-z_]+(?::\d+)?$/.test(occasion) || typeof input.isActive!=='boolean') return trpcError("Automação inválida");
-    await env.DB.prepare("INSERT INTO crmAutomationSubscriptions(agentEmail,clientId,occasion,isActive,updatedAt,requestedBy) VALUES(?,?,?,?,CURRENT_TIMESTAMP,'agent') ON CONFLICT(agentEmail,clientId,occasion) DO UPDATE SET isActive=excluded.isActive,updatedAt=CURRENT_TIMESTAMP,requestedBy='agent'").bind(owner,clientId,occasion,input.isActive===false?0:1).run();
-    return trpcResult({success:true,isActive:input.isActive!==false});
+    if (name === "agent.automationSubscriptions") return trpcResult((await env.DB.prepare("SELECT occasion,isActive,updatedAt,requestedBy FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=?").bind(owner, clientId).all()).results);
+    if (!/^[a-z_]+(?::\d+)?$/.test(occasion) || typeof input.isActive !== "boolean") return trpcError("Automa\xE7\xE3o inv\xE1lida");
+    await env.DB.prepare("INSERT INTO crmAutomationSubscriptions(agentEmail,clientId,occasion,isActive,updatedAt,requestedBy) VALUES(?,?,?,?,CURRENT_TIMESTAMP,'agent') ON CONFLICT(agentEmail,clientId,occasion) DO UPDATE SET isActive=excluded.isActive,updatedAt=CURRENT_TIMESTAMP,requestedBy='agent'").bind(owner, clientId, occasion, input.isActive === false ? 0 : 1).run();
+    return trpcResult({ success: true, isActive: input.isActive !== false });
   }
   if (name === "agent.messageHistory") {
     const rows = await env.DB.prepare(
@@ -55964,8 +57041,8 @@ Affinity Financial Consulting`,
     const sentAutomation = (deliveries.results || []).map((row) => {
       const count = Number(row.recipientCount || 0);
       const recipients = String(row.recipients || "").split(String.fromCharCode(30)).filter(Boolean).map((entry) => {
-        const [name, email] = entry.split(String.fromCharCode(31));
-        return { name: name || "Contato", email: email || null };
+        const [name2, email] = entry.split(String.fromCharCode(31));
+        return { name: name2 || "Contato", email: email || null };
       });
       return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, recipients, status: "sent", date: row.sentAt, firstSentAt: row.firstSentAt, errorMessage: null };
     });
@@ -56130,14 +57207,16 @@ Affinity Financial Consulting`,
     }
   }
   if (name === "agent.fiveRingsCredits") {
-    const owner=adminEmail.toLowerCase(),cached=await cachedFiveRingsCredits(env.DB,owner);
-    if(cached && !input.refresh)return trpcResult({...cached,error:null});
-    const connection=await env.DB.prepare('SELECT encryptedSession FROM agentFiveRingsConnections WHERE lower(agentEmail)=?').bind(owner).first();
-    if(!connection?.encryptedSession)return trpcResult({...cached,error:'Conecte ou sincronize o Five Rings nas configurações.'});
-    try{
-      const session=JSON.parse(await decryptSmtpPassword(String(connection.encryptedSession),env.JWT_SECRET));
-      return trpcResult({...await refreshFiveRingsCredits(env,owner,session,fiveRingsFetch),error:null});
-    }catch(error){return trpcResult({...cached,error:String(error.message||'Não foi possível atualizar os créditos.')});}
+    const owner = adminEmail.toLowerCase(), cached = await cachedFiveRingsCredits(env.DB, owner);
+    if (cached && !input.refresh) return trpcResult({ ...cached, error: null });
+    const connection = await env.DB.prepare("SELECT encryptedSession FROM agentFiveRingsConnections WHERE lower(agentEmail)=?").bind(owner).first();
+    if (!connection?.encryptedSession) return trpcResult({ ...cached, error: "Conecte ou sincronize o Five Rings nas configura\xE7\xF5es." });
+    try {
+      const session = JSON.parse(await decryptSmtpPassword(String(connection.encryptedSession), env.JWT_SECRET));
+      return trpcResult({ ...await refreshFiveRingsCredits(env, owner, session, fiveRingsFetch), error: null });
+    } catch (error) {
+      return trpcResult({ ...cached, error: String(error.message || "N\xE3o foi poss\xEDvel atualizar os cr\xE9ditos.") });
+    }
   }
   if (name === "agent.syncFiveRings") {
     const owner = adminEmail.toLowerCase();
@@ -56159,7 +57238,8 @@ Affinity Financial Consulting`,
       const login = activeSession ? null : await verifyFiveRingsLogin(String(row.portalEmail), password);
       if (activeSession) {
         const records2 = await readFiveRingsRecords(activeSession, activeSession.sections);
-        await refreshFiveRingsCredits(env,owner,activeSession,fiveRingsFetch).catch(()=>{});
+        await refreshFiveRingsCredits(env, owner, activeSession, fiveRingsFetch).catch(() => {
+        });
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
         const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
         for (const record of records2) {
@@ -56199,10 +57279,11 @@ Affinity Financial Consulting`,
         await env.DB.prepare(
           "UPDATE agentFiveRingsConnections SET status='pending',encryptedChallenge=?,encryptedSession=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
         ).bind(encryptedChallenge, owner).run();
-        return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0, message: "Código solicitado. Informe-o para continuar sem recarregar a página." });
+        return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0, message: "C\xF3digo solicitado. Informe-o para continuar sem recarregar a p\xE1gina." });
       }
       const records = await readFiveRingsRecords(login.session, login.sections);
-      await refreshFiveRingsCredits(env,owner,login.session,fiveRingsFetch).catch(()=>{});
+      await refreshFiveRingsCredits(env, owner, login.session, fiveRingsFetch).catch(() => {
+      });
       let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
       const knownPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
       for (const record of records) {
@@ -56269,7 +57350,7 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (["agent.getNationalLifeConnection", "agent.saveNationalLifeConnection", "agent.verifyNationalLifeConnection", "agent.submitNationalLifeCode", "agent.syncNationalLife"].includes(name)) {
-    return trpcError("Integração temporariamente desativada", 404);
+    return trpcError("Integra\xE7\xE3o temporariamente desativada", 404);
   }
   if (name === "agent.getNationalLifeConnection") {
     await ensureCarrierConnectionTables(env);
@@ -56291,7 +57372,7 @@ Affinity Financial Consulting`,
     const current = await env.DB.prepare("SELECT encryptedPassword FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
     const clear = String(input.password || "");
     const encryptedPassword = clear ? await encryptSmtpPassword(clear, env.JWT_SECRET) : String(current?.encryptedPassword || "");
-    if (String(input.portalEmail || "").trim().length < 2 || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o nome de usuário e a senha do portal National Life Group");
+    if (String(input.portalEmail || "").trim().length < 2 || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o nome de usu\xE1rio e a senha do portal National Life Group");
     await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).trim(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
     return trpcResult({ success: true, status: "configured" });
   }
@@ -56312,7 +57393,7 @@ Affinity Financial Consulting`,
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
       return trpcResult({ success: true, requiresCode: false });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Não foi possível conectar à National Life";
+      const message = error instanceof Error ? error.message : "N\xE3o foi poss\xEDvel conectar \xE0 National Life";
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(message.slice(0, 500), owner).run();
       return trpcError(message);
     }
@@ -56320,16 +57401,18 @@ Affinity Financial Consulting`,
   if (name === "agent.submitNationalLifeCode") {
     await ensureCarrierConnectionTables(env);
     const owner = adminEmail.toLowerCase(), code = String(input.code || "").trim();
-    if (!/^\d{4,10}$/.test(code)) return trpcError("Informe o código recebido");
+    if (!/^\d{4,10}$/.test(code)) return trpcError("Informe o c\xF3digo recebido");
     const row = await env.DB.prepare("SELECT encryptedChallenge FROM agentNationalLifeConnections WHERE lower(agentEmail)=?").bind(owner).first();
-    if (!row?.encryptedChallenge) return trpcError("Conecte novamente para solicitar outro código");
+    if (!row?.encryptedChallenge) return trpcError("Conecte novamente para solicitar outro c\xF3digo");
     try {
       const challenge = JSON.parse(await decryptSmtpPassword(String(row.encryptedChallenge), env.JWT_SECRET));
       const result = await submitNationalLifeCode(challenge, code);
       const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
       return trpcResult({ success: true });
-    } catch (error) { return trpcError(error instanceof Error ? error.message : "Código incorreto ou expirado"); }
+    } catch (error) {
+      return trpcError(error instanceof Error ? error.message : "C\xF3digo incorreto ou expirado");
+    }
   }
   if (name === "agent.syncNationalLife") {
     await ensureCarrierConnectionTables(env);
@@ -56351,21 +57434,24 @@ Affinity Financial Consulting`,
           await env.DB.prepare("UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status=CASE WHEN ?=1 THEN 'client' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? 1 : 0, clientId, owner).run();
         } else if (record.clientName) {
           const inserted = await env.DB.prepare("INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,address,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,'National Life',?,'Importado automaticamente em modo somente leitura')").bind(record.clientName, record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? "client" : "new", owner).run();
-          clientId = Number(inserted.meta.last_row_id); importedClients += 1;
+          clientId = Number(inserted.meta.last_row_id);
+          importedClients += 1;
         }
         if (!record.policyNumber || !clientId) continue;
         const targetPremium = record.targetPremium || record.annualPremium || (record.premiumAmount ? record.premiumAmount * 12 : 0), points = Math.max(0, Math.round(targetPremium));
         if (existingPolicy) {
-          await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName || null, record.email || null, record.phone || null, record.status, record.product || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existingPolicy.id), owner).run(); updatedPolicies += 1;
+          await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName || null, record.email || null, record.phone || null, record.status, record.product || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existingPolicy.id), owner).run();
+          updatedPolicies += 1;
         } else {
-          await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run(); importedPolicies += 1;
+          await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, record.policyNumber, record.status, record.product || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+          importedPolicies += 1;
         }
       }
       const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
       return trpcResult({ success: true, found: result.records.length, importedClients, importedPolicies, updatedPolicies });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Não foi possível sincronizar a National Life";
+      const message = error instanceof Error ? error.message : "N\xE3o foi poss\xEDvel sincronizar a National Life";
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(message.slice(0, 500), owner).run();
       return trpcError(message);
     }
@@ -56417,7 +57503,7 @@ Affinity Financial Consulting`,
     ).bind(String(input.fromEmail), owner).run();
     if (typeof input.messageSignature === "string") {
       await ensureAgentMessageSignatureColumn(env);
-      await env.DB.prepare("UPDATE adminAccounts SET messageSignature=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(input.messageSignature.trim().slice(0,2000) || DEFAULT_AGENT_MESSAGE_SIGNATURE, owner).run();
+      await env.DB.prepare("UPDATE adminAccounts SET messageSignature=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(input.messageSignature.trim().slice(0, 2e3) || DEFAULT_AGENT_MESSAGE_SIGNATURE, owner).run();
     }
     return trpcResult({ success: true });
   }
@@ -56428,7 +57514,7 @@ Affinity Financial Consulting`,
       await sendAgentEmail(env, adminEmail, {
         to: email,
         subject: "Teste de e-mail - Affinity Financial",
-        html: await signedClientEmailHtml(env, adminEmail, "Seu e-mail pessoal está conectado ao Portal do Agente.")
+        html: await signedClientEmailHtml(env, adminEmail, "Seu e-mail pessoal est\xE1 conectado ao Portal do Agente.")
       });
     } catch {
       return trpcError(
@@ -56469,7 +57555,7 @@ Affinity Financial Consulting`,
   if (name === "agent.connectCalendly") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), token = String(input.token || "").trim();
-    if (token.length < 20) return trpcError("Cole um token válido do Calendly");
+    if (token.length < 20) return trpcError("Cole um token v\xE1lido do Calendly");
     try {
       const me = await calendlyRequest(token, "/users/me");
       const resource = me.resource || {};
@@ -56478,13 +57564,16 @@ Affinity Financial Consulting`,
       const current = await env.DB.prepare("SELECT slug FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
       if (!current) {
         const account = await env.DB.prepare("SELECT name FROM adminAccounts WHERE lower(email)=?").bind(owner).first();
-        const base = String(account?.name || owner.split('@')[0]).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || 'consultor';
-        let slug = base, suffix = 1; while (await env.DB.prepare("SELECT 1 FROM agentPublicProfiles WHERE slug=?").bind(slug).first()) slug = `${base}-${++suffix}`;
+        const base = String(account?.name || owner.split("@")[0]).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "consultor";
+        let slug = base, suffix = 1;
+        while (await env.DB.prepare("SELECT 1 FROM agentPublicProfiles WHERE slug=?").bind(slug).first()) slug = `${base}-${++suffix}`;
         await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,calendlyUrl) VALUES (?,?,?,'',?)").bind(owner, slug, "Consultor financeiro", String(resource.scheduling_url || input.schedulingUrl || "")).run();
-      } else if (resource.scheduling_url) await env.DB.prepare("UPDATE agentPublicProfiles SET calendlyUrl=coalesce(nullif(calendlyUrl,''),?),updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(resource.scheduling_url),owner).run();
+      } else if (resource.scheduling_url) await env.DB.prepare("UPDATE agentPublicProfiles SET calendlyUrl=coalesce(nullif(calendlyUrl,''),?),updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(resource.scheduling_url), owner).run();
       const sync = await syncCalendlyForAgent(env, owner);
       return trpcResult({ success: true, ...sync });
-    } catch (error) { return trpcError(`Não foi possível conectar: ${String(error?.message || error)}`); }
+    } catch (error) {
+      return trpcError(`N\xE3o foi poss\xEDvel conectar: ${String(error?.message || error)}`);
+    }
   }
   if (name === "agent.disconnectCalendly") {
     await ensureCalendlyTables(env);
@@ -56492,14 +57581,15 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (name === "agent.syncCalendly") {
-    try { return trpcResult({ success: true, ...(await syncCalendlyForAgent(env, adminEmail.toLowerCase(), { backfill: input.quick !== true })) }); }
-    catch (error) { return trpcError(String(error?.message || error)); }
+    try {
+      return trpcResult({ success: true, ...await syncCalendlyForAgent(env, adminEmail.toLowerCase(), { backfill: input.quick !== true }) });
+    } catch (error) {
+      return trpcError(String(error?.message || error));
+    }
   }
   if (name === "agent.calendlyMeetings") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase();
-    // The scheduled 15-minute sync updates meetings; reading must stay available
-    // even when the provider or database writes are temporarily unavailable.
     const [rows, applications, policies, agents, closedClients] = await Promise.all([
       env.DB.prepare("SELECT m.*,COALESCE(NULLIF(m.inviteePhone,''),(SELECT COALESCE(NULLIF(c.phone,''),NULLIF(c.whatsapp,'')) FROM crmClients c WHERE lower(c.assignedAdminEmail)=lower(m.agentEmail) AND (c.id=m.clientId OR (m.inviteeEmail IS NOT NULL AND lower(trim(c.email))=lower(trim(m.inviteeEmail)))) ORDER BY CASE WHEN c.id=m.clientId THEN 0 ELSE 1 END,c.id DESC LIMIT 1)) AS resolvedPhone FROM calendlyMeetings m WHERE lower(m.agentEmail)=? ORDER BY datetime(m.startTime) DESC LIMIT 250").bind(owner).all(),
       env.DB.prepare("SELECT clientName AS name,clientEmail AS email,clientPhone AS phone FROM agentApplications WHERE lower(agentEmail)=? AND lower(coalesce(status,'')) IN ('submitted','completed','complete','concluida','concluido')").bind(owner).all(),
@@ -56507,8 +57597,8 @@ Affinity Financial Consulting`,
       env.DB.prepare("SELECT name,email,COALESCE(NULLIF(phone,''),whatsapp) AS phone FROM adminAccounts WHERE isActive=1 AND status='approved' AND accountType IN ('agent','both')").all(),
       env.DB.prepare("SELECT id,name,email,COALESCE(NULLIF(phone,''),whatsapp) AS phone FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(coalesce(status,'')) IN ('client','closed','completed')").bind(owner).all()
     ]);
-    const closedIds = new Set(), closedEmails = new Set(), closedPhones = new Set(), closedNames = new Set();
-    const rememberClosed = (row) => {
+    const closedIds = /* @__PURE__ */ new Set(), closedEmails = /* @__PURE__ */ new Set(), closedPhones = /* @__PURE__ */ new Set(), closedNames = /* @__PURE__ */ new Set();
+    const rememberClosed = /* @__PURE__ */ __name((row) => {
       const id = Number(row?.clientId || row?.id || 0);
       const email = sourceEmail(row?.email);
       const phone = sourcePhone(row?.phone);
@@ -56517,14 +57607,18 @@ Affinity Financial Consulting`,
       if (email) closedEmails.add(email);
       if (phone) closedPhones.add(phone);
       if (normalizedName && normalizedName.includes(" ")) closedNames.add(normalizedName);
-    };
-    for (const row of [...(applications.results || []), ...(policies.results || []), ...(agents.results || []), ...(closedClients.results || [])]) rememberClosed(row);
+    }, "rememberClosed");
+    for (const row of [...applications.results || [], ...policies.results || [], ...agents.results || [], ...closedClients.results || []]) rememberClosed(row);
     return trpcResult((rows.results || []).map((row) => {
       let answerPhone = "";
       try {
         const answers = JSON.parse(String(row.questionsJson || "[]"));
-        answerPhone = String(answers.find((item) => /phone|telefone|teléfono|whatsapp|mobile|cell|celular|móvel|número.*contato|contact.*number/i.test(String(item.question || "")))?.answer || answers.find((item) => { const digits = String(item.answer || "").replace(/\D/g, ""); return digits.length >= 10 && digits.length <= 15; })?.answer || "");
-      } catch {}
+        answerPhone = String(answers.find((item) => /phone|telefone|teléfono|whatsapp|mobile|cell|celular|móvel|número.*contato|contact.*number/i.test(String(item.question || "")))?.answer || answers.find((item) => {
+          const digits = String(item.answer || "").replace(/\D/g, "");
+          return digits.length >= 10 && digits.length <= 15;
+        })?.answer || "");
+      } catch {
+      }
       const { resolvedPhone, ...meeting } = row;
       const inviteePhone = String(resolvedPhone || answerPhone || "").trim() || null;
       const isClosed = closedIds.has(Number(row.clientId || 0)) || closedEmails.has(sourceEmail(row.inviteeEmail)) || closedPhones.has(sourcePhone(inviteePhone)) || closedNames.has(sourceName(row.inviteeName));
@@ -56550,14 +57644,14 @@ Affinity Financial Consulting`,
         const attendeeEmail = String(row.attendee_email || row.invitee_email || row.attendee?.email || row.invitee?.email || guest.user_email || "").trim().toLowerCase();
         const matchedMeeting = meetingRows.find((meeting) => eventUri && String(meeting.eventUri) === eventUri) || meetingRows.find((meeting) => attendeeEmail && String(meeting.inviteeEmail || "").trim().toLowerCase() === attendeeEmail);
         return {
-        id: calendlyUuid(row.uri || row.id || row.uuid),
-        apiPath: calendlyApiPath(row.uri, row.id || row.uuid),
-        title: String(row.title || row.name || row.event_name || "Resumo da reunião"),
-        attendee: String(row.attendee_name || row.invitee_name || row.attendee?.name || ""),
-        startTime: String(row.start_time || row.meeting_start_time || row.created_at || "") || null,
-        recordingUrl: String(row.share_link || row.recording_url || row.video_url || row.recording?.url || row.video?.url || "") || null,
-        eventUri: eventUri || null,
-        clientId: Number(matchedMeeting?.clientId || 0) || null
+          id: calendlyUuid(row.uri || row.id || row.uuid),
+          apiPath: calendlyApiPath(row.uri, row.id || row.uuid),
+          title: String(row.title || row.name || row.event_name || "Resumo da reuni\xE3o"),
+          attendee: String(row.attendee_name || row.invitee_name || row.attendee?.name || ""),
+          startTime: String(row.start_time || row.meeting_start_time || row.created_at || "") || null,
+          recordingUrl: String(row.share_link || row.recording_url || row.video_url || row.recording?.url || row.video?.url || "") || null,
+          eventUri: eventUri || null,
+          clientId: Number(matchedMeeting?.clientId || 0) || null
         };
       }).filter((row) => row.id);
       const requestedClientId = Number(input.clientId || 0);
@@ -56568,7 +57662,8 @@ Affinity Financial Consulting`,
         try {
           const detailPayload = await calendlyRequest(token, apiPath || `/meeting_recaps/${encodeURIComponent(item.id)}`);
           const detail = detailPayload.resource || detailPayload;
-          enriched.push({ ...publicItem,
+          enriched.push({
+            ...publicItem,
             title: String(detail.name || detail.title || item.title),
             startTime: String(detail.start_time || item.startTime || "") || null,
             recordingUrl: String(detail.share_link || detail.recording_url || detail.video_url || detail.recording?.url || detail.video?.url || item.recordingUrl || "") || null,
@@ -56577,53 +57672,68 @@ Affinity Financial Consulting`,
             discussion: detail.discussion_md || detail.discussion || null
           });
         } catch (detailError) {
-          enriched.push({ ...publicItem, detailUnavailable: true, detailMessage: String(detailError?.message || "Não foi possível consultar os detalhes da gravação") });
+          enriched.push({ ...publicItem, detailUnavailable: true, detailMessage: String(detailError?.message || "N\xE3o foi poss\xEDvel consultar os detalhes da grava\xE7\xE3o") });
         }
       }
       return trpcResult(enriched);
-    } catch (error) { return trpcError(String(error?.message || error)); }
+    } catch (error) {
+      return trpcError(String(error?.message || error));
+    }
   }
   if (name === "agent.calendlyRecap") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), recapId = String(input.id || "").trim().replace(/[^a-zA-Z0-9_-]/g, "");
-    if (!recapId) return trpcError("Resumo inválido");
+    if (!recapId) return trpcError("Resumo inv\xE1lido");
     const connection = await env.DB.prepare("SELECT encryptedToken,userUri FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(owner).first();
     if (!connection) return trpcError("Conecte seu Calendly para visualizar o resumo");
     try {
       const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
       const query = new URLSearchParams({ count: "100", status: "available" });
       const list = await calendlyRequest(token, `/meeting_recaps?${query}`);
-      const owned = (Array.isArray(list.collection) ? list.collection : []).some((row) => calendlyUuid(row.uri || row.id || row.uuid) === recapId);
-      if (!owned) return trpcError("Resumo não encontrado para este agente", "NOT_FOUND", 404);
+      const owned = (Array.isArray(list.collection) ? list.collection : []).some((row2) => calendlyUuid(row2.uri || row2.id || row2.uuid) === recapId);
+      if (!owned) return trpcError("Resumo n\xE3o encontrado para este agente", "NOT_FOUND", 404);
       const detailPayload = await calendlyRequest(token, `/meeting_recaps/${encodeURIComponent(recapId)}`);
       const row = detailPayload.resource || detailPayload;
       let transcript = null;
-      try { const transcriptPayload = await calendlyRequest(token, `/meeting_recaps/${encodeURIComponent(recapId)}/transcript`); transcript = transcriptPayload.resource || transcriptPayload.collection || transcriptPayload.transcript || transcriptPayload; } catch {}
-      const pick = (...values) => values.find((value) => value !== void 0 && value !== null && value !== "") ?? null;
+      try {
+        const transcriptPayload = await calendlyRequest(token, `/meeting_recaps/${encodeURIComponent(recapId)}/transcript`);
+        transcript = transcriptPayload.resource || transcriptPayload.collection || transcriptPayload.transcript || transcriptPayload;
+      } catch {
+      }
+      const pick = /* @__PURE__ */ __name((...values) => values.find((value) => value !== void 0 && value !== null && value !== "") ?? null, "pick");
       return trpcResult({
         id: recapId,
-        title: String(pick(row.title,row.name,row.event_name,"Resumo da reunião")),
-        startTime: pick(row.start_time,row.meeting_start_time,row.created_at),
-        summary: pick(row.summary_md,row.summary,row.highlights?.summary,row.recap?.summary,row.notes?.summary),
-        actionItems: pick(row.action_items_md,row.action_items,row.highlights?.action_items,row.recap?.action_items,row.next_steps),
-        discussion: pick(row.discussion_md,row.discussion,row.discussion_notes,row.highlights?.discussion,row.recap?.discussion_notes,row.notes),
-        recordingUrl: pick(row.share_link,row.recording_url,row.video_url,row.recording?.url,row.video?.url,row.zoom_recording_url),
+        title: String(pick(row.title, row.name, row.event_name, "Resumo da reuni\xE3o")),
+        startTime: pick(row.start_time, row.meeting_start_time, row.created_at),
+        summary: pick(row.summary_md, row.summary, row.highlights?.summary, row.recap?.summary, row.notes?.summary),
+        actionItems: pick(row.action_items_md, row.action_items, row.highlights?.action_items, row.recap?.action_items, row.next_steps),
+        discussion: pick(row.discussion_md, row.discussion, row.discussion_notes, row.highlights?.discussion, row.recap?.discussion_notes, row.notes),
+        recordingUrl: pick(row.share_link, row.recording_url, row.video_url, row.recording?.url, row.video?.url, row.zoom_recording_url),
         transcript
       });
-    } catch (error) { return trpcError(String(error?.message || error)); }
+    } catch (error) {
+      return trpcError(String(error?.message || error));
+    }
   }
   if (name === "agent.cancelCalendlyMeeting") {
     await ensureCalendlyTables(env);
-    if (String(input.confirmation || "").trim().toUpperCase() !== "CANCELAR") return trpcError("Confirmação de segurança necessária para cancelar a reunião");
-    const owner = adminEmail.toLowerCase(), meeting = await env.DB.prepare("SELECT m.*,c.encryptedToken FROM calendlyMeetings m JOIN agentCalendlyConnections c ON lower(c.agentEmail)=lower(m.agentEmail) WHERE m.id=? AND lower(m.agentEmail)=?").bind(Number(input.id),owner).first();
-    if (!meeting) return trpcError("Reunião não encontrada", "NOT_FOUND", 404);
-    try { const token = await decryptSmtpPassword(String(meeting.encryptedToken),env.JWT_SECRET); await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(calendlyUuid(meeting.eventUri))}/cancellation`, { method:'POST', body:JSON.stringify({ reason:String(input.reason || 'Cancelado pelo agente') }) }); await env.DB.prepare("UPDATE calendlyMeetings SET status='canceled',updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(Number(input.id)).run(); return trpcResult({success:true}); } catch(error) { return trpcError(String(error?.message || error)); }
+    if (String(input.confirmation || "").trim().toUpperCase() !== "CANCELAR") return trpcError("Confirma\xE7\xE3o de seguran\xE7a necess\xE1ria para cancelar a reuni\xE3o");
+    const owner = adminEmail.toLowerCase(), meeting = await env.DB.prepare("SELECT m.*,c.encryptedToken FROM calendlyMeetings m JOIN agentCalendlyConnections c ON lower(c.agentEmail)=lower(m.agentEmail) WHERE m.id=? AND lower(m.agentEmail)=?").bind(Number(input.id), owner).first();
+    if (!meeting) return trpcError("Reuni\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
+    try {
+      const token = await decryptSmtpPassword(String(meeting.encryptedToken), env.JWT_SECRET);
+      await calendlyRequest(token, `/scheduled_events/${encodeURIComponent(calendlyUuid(meeting.eventUri))}/cancellation`, { method: "POST", body: JSON.stringify({ reason: String(input.reason || "Cancelado pelo agente") }) });
+      await env.DB.prepare("UPDATE calendlyMeetings SET status='canceled',updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(Number(input.id)).run();
+      return trpcResult({ success: true });
+    } catch (error) {
+      return trpcError(String(error?.message || error));
+    }
   }
   if (name === "agent.markCalendlyAttendance") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), id = Number(input.id || 0), status = input.status === "completed" ? "completed" : "no_show";
     const meeting = await env.DB.prepare("SELECT id FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
-    if (!meeting) return trpcError("Reunião não encontrada", "NOT_FOUND", 404);
+    if (!meeting) return trpcError("Reuni\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
     await env.DB.prepare("UPDATE calendlyMeetings SET status=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(status, id, owner).run();
     return trpcResult({ success: true });
   }
@@ -56631,7 +57741,7 @@ Affinity Financial Consulting`,
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase();
     try {
-      const text = (value, limit = 4000) => String(value || "").trim().slice(0, limit) || null;
+      const text = /* @__PURE__ */ __name((value, limit = 4e3) => String(value || "").trim().slice(0, limit) || null, "text");
       const account = await env.DB.prepare("SELECT name FROM adminAccounts WHERE lower(email)=?").bind(owner).first();
       const current = await env.DB.prepare("SELECT slug FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
       const parts = String(account?.name || owner.split("@")[0]).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[a-z0-9]+/g) || ["consultor"];
@@ -56642,9 +57752,11 @@ Affinity Financial Consulting`,
         let suffix = 1;
         while (await env.DB.prepare("SELECT 1 FROM agentPublicProfiles WHERE slug=? AND lower(agentEmail)<>?").bind(slug, owner).first()) slug = `${base}-${++suffix}`;
       }
-      await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET slug=excluded.slug,headline=excluded.headline,bio=excluded.bio,sinceYear=excluded.sinceYear,photoUrl=excluded.photoUrl,calendlyUrl=excluded.calendlyUrl,jobTitle=excluded.jobTitle,companies=excluded.companies,specialties=excluded.specialties,professionalHistory=excluded.professionalHistory,education=excluded.education,licenses=excluded.licenses,languages=excluded.languages,achievements=excluded.achievements,website=excluded.website,linkedInUrl=excluded.linkedInUrl,instagramUrl=excluded.instagramUrl,facebookUrl=excluded.facebookUrl,additionalInfo=excluded.additionalInfo,isPublished=excluded.isPublished,updatedAt=CURRENT_TIMESTAMP").bind(owner, slug, text(input.headline, 180) || "Consultor financeiro", text(input.bio), Number(input.sinceYear || 0) || null, text(input.photoUrl, 500000), text(input.calendlyUrl, 1000), text(input.jobTitle, 180), text(input.companies, 2000), text(input.specialties, 2000), text(input.professionalHistory, 6000), text(input.education, 3000), text(input.licenses, 3000), text(input.languages, 1000), text(input.achievements, 3000), text(input.website, 1000), text(input.linkedInUrl, 1000), text(input.instagramUrl, 1000), text(input.facebookUrl, 1000), text(input.additionalInfo, 6000), input.isPublished === false ? 0 : 1).run();
+      await env.DB.prepare("INSERT INTO agentPublicProfiles (agentEmail,slug,headline,bio,sinceYear,photoUrl,calendlyUrl,jobTitle,companies,specialties,professionalHistory,education,licenses,languages,achievements,website,linkedInUrl,instagramUrl,facebookUrl,additionalInfo,isPublished,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail) DO UPDATE SET slug=excluded.slug,headline=excluded.headline,bio=excluded.bio,sinceYear=excluded.sinceYear,photoUrl=excluded.photoUrl,calendlyUrl=excluded.calendlyUrl,jobTitle=excluded.jobTitle,companies=excluded.companies,specialties=excluded.specialties,professionalHistory=excluded.professionalHistory,education=excluded.education,licenses=excluded.licenses,languages=excluded.languages,achievements=excluded.achievements,website=excluded.website,linkedInUrl=excluded.linkedInUrl,instagramUrl=excluded.instagramUrl,facebookUrl=excluded.facebookUrl,additionalInfo=excluded.additionalInfo,isPublished=excluded.isPublished,updatedAt=CURRENT_TIMESTAMP").bind(owner, slug, text(input.headline, 180) || "Consultor financeiro", text(input.bio), Number(input.sinceYear || 0) || null, text(input.photoUrl, 5e5), text(input.calendlyUrl, 1e3), text(input.jobTitle, 180), text(input.companies, 2e3), text(input.specialties, 2e3), text(input.professionalHistory, 6e3), text(input.education, 3e3), text(input.licenses, 3e3), text(input.languages, 1e3), text(input.achievements, 3e3), text(input.website, 1e3), text(input.linkedInUrl, 1e3), text(input.instagramUrl, 1e3), text(input.facebookUrl, 1e3), text(input.additionalInfo, 6e3), input.isPublished === false ? 0 : 1).run();
       return trpcResult({ success: true, url: `https://www.affinityfc.org/consultor/${slug}` });
-    } catch(error) { return trpcError(String(error).includes('UNIQUE')?'Este endereço já está sendo usado por outro agente':'Não foi possível salvar o perfil'); }
+    } catch (error) {
+      return trpcError(String(error).includes("UNIQUE") ? "Este endere\xE7o j\xE1 est\xE1 sendo usado por outro agente" : "N\xE3o foi poss\xEDvel salvar o perfil");
+    }
   }
   if (name === "agent.updateProfile") {
     await ensureAgentMessageSignatureColumn(env);
@@ -56665,7 +57777,7 @@ Affinity Financial Consulting`,
       adminEmail.toLowerCase()
     ).run();
     if (Object.prototype.hasOwnProperty.call(input, "photoUrl")) {
-      const photoUrl = String(input.photoUrl || "").trim().slice(0, 500000) || null;
+      const photoUrl = String(input.photoUrl || "").trim().slice(0, 5e5) || null;
       const current = await env.DB.prepare("SELECT slug FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(adminEmail.toLowerCase()).first();
       if (current)
         await env.DB.prepare("UPDATE agentPublicProfiles SET photoUrl=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(photoUrl, adminEmail.toLowerCase()).run();
@@ -57329,10 +58441,7 @@ Affinity Financial Consulting`,
       await env.DB.prepare("SELECT id,agentEmail,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies").all(),
       { results: [] }
     ];
-    const matchesClient = (record, client) => Number(record.clientId || 0) === Number(client.id) ||
-      (sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email)) ||
-      (sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp)) ||
-      (sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name));
+    const matchesClient = /* @__PURE__ */ __name((record, client) => Number(record.clientId || 0) === Number(client.id) || sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email) || sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp) || sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name), "matchesClient");
     return trpcResult(
       rows.results.map((row) => {
         const policies = (policyStages.results || []).filter((record) => matchesClient(record, row));
@@ -57341,7 +58450,7 @@ Affinity Financial Consulting`,
           ...row,
           id: Number(row.id),
           hasPolicy: policies.length > 0,
-          hasInforcePolicy: (policyStages.results || []).some((record) => policyBelongsToCrmClient(record,row) && isActiveClientPolicy(record)),
+          hasInforcePolicy: (policyStages.results || []).some((record) => policyBelongsToCrmClient(record, row) && isActiveClientPolicy(record)),
           hasDraftApplication: applications.some((record) => record.status === "draft"),
           hasCompletedApplication: applications.some((record) => record.status === "submitted")
         };
@@ -57374,20 +58483,17 @@ Affinity Financial Consulting`,
       ).bind(owner).all(),
       env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,status,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(owner).all()
     ]);
-    const matches = (record, client) => Number(record.clientId || 0) === Number(client.id) ||
-      (sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email)) ||
-      (sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp)) ||
-      (sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name));
-    const portfolioClients = clients.results.map(row => {
-      const linkedPolicies = policies.results.filter(record => matches(record, row));
-      const linkedApplications = applications.results.filter(record => !record.matchedPolicyId && matches(record, row));
+    const matches = /* @__PURE__ */ __name((record, client) => Number(record.clientId || 0) === Number(client.id) || sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email) || sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp) || sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name), "matches");
+    const portfolioClients = clients.results.map((row) => {
+      const linkedPolicies = policies.results.filter((record) => matches(record, row));
+      const linkedApplications = applications.results.filter((record) => !record.matchedPolicyId && matches(record, row));
       const attended = Boolean(row.lastMeetingAt) || ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(row.status);
       const sector = linkedPolicies.length ? "inforce" : linkedApplications.length ? "applications" : attended ? "followup" : "leads";
-      return { ...row, id: Number(row.id), sector, hasCompletedApplication: linkedApplications.some(application => application.status === "submitted"), applicationCount: linkedApplications.length, policyCount: linkedPolicies.length };
+      return { ...row, id: Number(row.id), sector, hasCompletedApplication: linkedApplications.some((application) => application.status === "submitted"), applicationCount: linkedApplications.length, policyCount: linkedPolicies.length };
     });
     return trpcResult({
       clients: portfolioClients,
-      sectorCounts: Object.fromEntries(["leads", "followup", "applications", "inforce"].map(sector => [sector, portfolioClients.filter(client => client.sector === sector).length])),
+      sectorCounts: Object.fromEntries(["leads", "followup", "applications", "inforce"].map((sector) => [sector, portfolioClients.filter((client) => client.sector === sector).length])),
       policies: policies.results.map((row) => ({
         ...row,
         id: Number(row.id),
@@ -57409,9 +58515,9 @@ Affinity Financial Consulting`,
     ).all(), env.DB.prepare("SELECT r.*,a.name agentName FROM applicationDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC").all(), env.DB.prepare("SELECT r.*,a.name agentName FROM policyDeletionRequests r LEFT JOIN adminAccounts a ON lower(a.email)=lower(r.agentEmail) ORDER BY CASE r.status WHEN 'pending' THEN 0 ELSE 1 END,r.requestedAt DESC").all()]);
     return trpcResult([
       ...rows.results.map((row) => ({ ...row, id: Number(row.id), clientId: Number(row.clientId) })),
-      ...applications.results.map((row) => ({ ...row, id: `application-${row.id}`, clientId: Number(row.applicationId), clientName: `Aplicação: ${row.applicationName}`, entityType: "application" })),
-      ...policies.results.map((row) => ({ ...row, id: `policy-${row.id}`, clientId: Number(row.clientId || 0), clientName: `Apólice ${row.policyNumber || "sem número"} · ${row.clientName || "Cliente"}`, entityType: "policy" }))
-    ].sort((a,b)=>(a.status==="pending"?-1:1)-(b.status==="pending"?-1:1) || String(b.requestedAt).localeCompare(String(a.requestedAt))));
+      ...applications.results.map((row) => ({ ...row, id: `application-${row.id}`, clientId: Number(row.applicationId), clientName: `Aplica\xE7\xE3o: ${row.applicationName}`, entityType: "application" })),
+      ...policies.results.map((row) => ({ ...row, id: `policy-${row.id}`, clientId: Number(row.clientId || 0), clientName: `Ap\xF3lice ${row.policyNumber || "sem n\xFAmero"} \xB7 ${row.clientName || "Cliente"}`, entityType: "policy" }))
+    ].sort((a, b) => (a.status === "pending" ? -1 : 1) - (b.status === "pending" ? -1 : 1) || String(b.requestedAt).localeCompare(String(a.requestedAt))));
   }
   if (name === "crm.reviewClientDeletionRequest") {
     if (!["admin", "both"].includes(accountType))
@@ -57420,20 +58526,20 @@ Affinity Financial Consulting`,
     if (!id || !["approved", "rejected"].includes(decision))
       return trpcError("Decis\xE3o inv\xE1lida");
     if (isApplication) {
-      const requestRow = await env.DB.prepare("SELECT * FROM applicationDeletionRequests WHERE id=? AND status='pending'").bind(id).first();
-      if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
-      if (decision === "approved") await env.DB.prepare("DELETE FROM agentApplications WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.applicationId),String(requestRow.agentEmail)).run();
-      await env.DB.prepare("UPDATE applicationDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision,adminEmail.toLowerCase(),String(input.adminNote||"").trim()||null,id).run();
+      const requestRow2 = await env.DB.prepare("SELECT * FROM applicationDeletionRequests WHERE id=? AND status='pending'").bind(id).first();
+      if (!requestRow2) return trpcError("Solicita\xE7\xE3o n\xE3o encontrada ou j\xE1 analisada", "NOT_FOUND", 404);
+      if (decision === "approved") await env.DB.prepare("DELETE FROM agentApplications WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow2.applicationId), String(requestRow2.agentEmail)).run();
+      await env.DB.prepare("UPDATE applicationDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision, adminEmail.toLowerCase(), String(input.adminNote || "").trim() || null, id).run();
       return trpcResult({ success: true });
     }
     if (isPolicy) {
-      const requestRow = await env.DB.prepare("SELECT * FROM policyDeletionRequests WHERE id=? AND status='pending'").bind(id).first();
-      if (!requestRow) return trpcError("Solicitação não encontrada ou já analisada", "NOT_FOUND", 404);
+      const requestRow2 = await env.DB.prepare("SELECT * FROM policyDeletionRequests WHERE id=? AND status='pending'").bind(id).first();
+      if (!requestRow2) return trpcError("Solicita\xE7\xE3o n\xE3o encontrada ou j\xE1 analisada", "NOT_FOUND", 404);
       if (decision === "approved") await env.DB.batch([
-        env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=NULL WHERE matchedPolicyId=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.policyId),String(requestRow.agentEmail)),
-        env.DB.prepare("DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow.policyId),String(requestRow.agentEmail))
+        env.DB.prepare("UPDATE agentApplications SET matchedPolicyId=NULL WHERE matchedPolicyId=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow2.policyId), String(requestRow2.agentEmail)),
+        env.DB.prepare("DELETE FROM agentPolicies WHERE id=? AND lower(agentEmail)=lower(?)").bind(Number(requestRow2.policyId), String(requestRow2.agentEmail))
       ]);
-      await env.DB.prepare("UPDATE policyDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision,adminEmail.toLowerCase(),String(input.adminNote||"").trim()||null,id).run();
+      await env.DB.prepare("UPDATE policyDeletionRequests SET status=?,reviewedAt=CURRENT_TIMESTAMP,reviewedBy=?,adminNote=? WHERE id=?").bind(decision, adminEmail.toLowerCase(), String(input.adminNote || "").trim() || null, id).run();
       return trpcResult({ success: true });
     }
     const requestRow = await env.DB.prepare(
@@ -57703,9 +58809,9 @@ Affinity Financial Consulting`,
     }
     if (status === "client") {
       const existing = await env.DB.prepare("SELECT id,email,phone,whatsapp,assignedAdminEmail FROM crmClients WHERE id=?").bind(id).first();
-      if (!existing) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
-      const candidates = await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(String(existing.assignedAdminEmail||'').toLowerCase()).all();
-      if (!(candidates.results || []).some(policy => policyBelongsToCrmClient(policy,existing) && isActiveClientPolicy(policy))) return trpcError("A etapa Cliente é destinada a quem possui uma apólice ativa vinculada. Use Fechado ou Follow-up enquanto a apólice não estiver ativa.");
+      if (!existing) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
+      const candidates = await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(String(existing.assignedAdminEmail || "").toLowerCase()).all();
+      if (!(candidates.results || []).some((policy) => policyBelongsToCrmClient(policy, existing) && isActiveClientPolicy(policy))) return trpcError("A etapa Cliente \xE9 destinada a quem possui uma ap\xF3lice ativa vinculada. Use Fechado ou Follow-up enquanto a ap\xF3lice n\xE3o estiver ativa.");
     }
     await env.DB.prepare(
       "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
@@ -57948,21 +59054,16 @@ Affinity Financial Consulting`,
   );
 }
 __name(runProcedure, "runProcedure");
+__name2(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async fetch(request, env) {
-    const preferenceResponse=await preferenceRoute(request,env);
-    if(preferenceResponse)return preferenceResponse;
-    const whatsappResponse = await whatsappRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
-    if (whatsappResponse) return secureResponse(whatsappResponse, {privateData:true});
-    const branding = await siteBrandingRoute(request, env, {email:getAdminEmail, access:getAdminAccess});
+    const preferenceResponse = await preferenceRoute(request, env);
+    if (preferenceResponse) return preferenceResponse;
+    const whatsappResponse = await whatsappRoute(request, env, { email: getAdminEmail, access: getAdminAccess });
+    if (whatsappResponse) return secureResponse(whatsappResponse, { privateData: true });
+    const branding = await siteBrandingRoute(request, env, { email: getAdminEmail, access: getAdminAccess });
     if (branding) return secureResponse(branding);
-    // The payment helpers come from a lazily initialized module in this
-    // recovered bundle. Initialize it for every request before any route can
-    // call normalizePolicyNumber/extractPolicyNumbers on a cold Worker.
     init_paymentNotice();
-    // The dedicated payment-case endpoint also formats the prepared message.
-    // Initialize the email module so personalizeTemplate is always available
-    // on a cold Worker, regardless of whether an inbox sync ran beforehand.
     init_icloud_email();
     const url = new URL(request.url);
     if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
@@ -57976,9 +59077,6 @@ var cloudflare_staging_default = {
       url.hostname = "www.affinityfc.org";
       return secureResponse(Response.redirect(url.toString(), 301));
     }
-    // Older policy screens still request the original hashed PDF.js chunk.
-    // Serve the current bundled reader at that stable compatibility path so
-    // cached screens can parse PC Sheets instead of receiving the SPA HTML.
     if (request.method === "GET" && url.pathname === "/assets/pdf-D4EPeiVb.js") {
       url.pathname = "/vendor/pdf.mjs";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
@@ -57989,11 +59087,11 @@ var cloudflare_staging_default = {
     if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
       try {
         const email = await getAdminEmail(request, env);
-        if (!email) return secureResponse(jsonResponse({ error: "Sessão expirada" }, 401), { privateData: true });
+        if (!email) return secureResponse(jsonResponse({ error: "Sess\xE3o expirada" }, 401), { privateData: true });
         const owner = email.toLowerCase();
         const taskId = Number(url.searchParams.get("taskId") || 0);
         const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
-        if (!task) return secureResponse(jsonResponse({ error: "Pendência de pagamento não encontrada" }, 404), { privateData: true });
+        if (!task) return secureResponse(jsonResponse({ error: "Pend\xEAncia de pagamento n\xE3o encontrada" }, 404), { privateData: true });
         const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
         const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
         const extracted = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
@@ -58015,7 +59113,7 @@ var cloudflare_staging_default = {
         const paymentAmount = extractPaymentAmount(String(mailbox?.subject || ""), String(mailbox?.body || ""));
         if (policy && paymentAmount > 0) {
           const annualTarget = Math.round(paymentAmount * 12 * 100) / 100;
-          await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount,annualTarget,Math.round(annualTarget),Number(policy.id),owner).run();
+          await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount, annualTarget, Math.round(annualTarget), Number(policy.id), owner).run();
           policy = { ...policy, premiumAmount: Number(policy.premiumAmount || 0) > 0 ? policy.premiumAmount : paymentAmount, premiumFrequency: policy.premiumFrequency || "monthly", targetPremium: Number(policy.targetPremium || 0) > 0 ? policy.targetPremium : annualTarget, points: Number(policy.points || 0) > 0 ? policy.points : Math.round(annualTarget) };
         }
         const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
@@ -58044,7 +59142,7 @@ var cloudflare_staging_default = {
         return secureResponse(jsonResponse({ error: `Falha ao carregar o caso: ${String(error?.message || error)}` }, 500), { privateData: true });
       }
     }
-    const logoutEntryPaths = new Set(["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"]);
+    const logoutEntryPaths = /* @__PURE__ */ new Set(["/", "/admin/login", "/agentes", "/agentes/login", "/afiliados", "/afiliados/login", "/afiliados/registrar"]);
     if (request.method === "GET" && logoutEntryPaths.has(url.pathname)) {
       return clearPortalSessions(secureResponse(await env.ASSETS.fetch(request)));
     }
@@ -58118,14 +59216,11 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-applications.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
-    // Never let an API URL fall through to the SPA's index.html. Returning
-    // HTML here is what produces `Unexpected token '<'` in every form that
-    // expects JSON.
     if (url.pathname === "/api/trpc" || url.pathname === "/api/trpc/") {
-      return secureResponse(jsonResponse({ error: "Procedimento da API não informado" }, 400), { privateData: true });
+      return secureResponse(jsonResponse({ error: "Procedimento da API n\xE3o informado" }, 400), { privateData: true });
     }
     if (url.pathname.startsWith("/api/") && !url.pathname.startsWith("/api/trpc/")) {
-      return secureResponse(jsonResponse({ error: "Endpoint da API não encontrado" }, 404), { privateData: true });
+      return secureResponse(jsonResponse({ error: "Endpoint da API n\xE3o encontrado" }, 404), { privateData: true });
     }
     if (!url.pathname.startsWith("/api/trpc/")) {
       const privateShell = /^\/(admin|agentes|afiliados)(\/|$)/.test(
@@ -58176,9 +59271,7 @@ var cloudflare_staging_default = {
       );
       return secureResponse(
         jsonResponse(
-          [trpcError(/daily row write limit/i.test(String(error?.message || error))
-            ? "O banco atingiu o limite diário de gravações do Cloudflare. Esta operação não pôde ser concluída. O administrador precisa liberar o plano Workers/D1 ou aguardar a renovação às 00:00 UTC."
-            : "Erro interno do portal", "INTERNAL_SERVER_ERROR", 500)],
+          [trpcError(/daily row write limit/i.test(String(error?.message || error)) ? "O banco atingiu o limite di\xE1rio de grava\xE7\xF5es do Cloudflare. Esta opera\xE7\xE3o n\xE3o p\xF4de ser conclu\xEDda. O administrador precisa liberar o plano Workers/D1 ou aguardar a renova\xE7\xE3o \xE0s 00:00 UTC." : "Erro interno do portal", "INTERNAL_SERVER_ERROR", 500)],
           500
         ),
         { privateData: true }
@@ -58225,14 +59318,17 @@ async function runFiveRingsSyncAsAgent(env, agentEmail) {
   return result;
 }
 __name(runFiveRingsSyncAsAgent, "runFiveRingsSyncAsAgent");
+__name2(runFiveRingsSyncAsAgent, "runFiveRingsSyncAsAgent");
 function extractFiveRingsEmailCode(subject, body) {
-  const text = `${subject || ""}\n${body || ""}`.replace(/\s+/g, " ");
+  const text = `${subject || ""}
+${body || ""}`.replace(/\s+/g, " ");
   const contextual = text.match(/(?:verification|security|one[- ]time|login|access|confirmation|c[oó]digo|code|otp)[^0-9]{0,60}([0-9]{4,10})/i);
   if (contextual) return contextual[1];
   const standalone = text.match(/(?:^|\D)([0-9]{6})(?:\D|$)/);
   return standalone?.[1] || "";
 }
 __name(extractFiveRingsEmailCode, "extractFiveRingsEmailCode");
+__name2(extractFiveRingsEmailCode, "extractFiveRingsEmailCode");
 async function newestFiveRingsEmailCode(env, agentEmail, since) {
   const messages = await env.DB.prepare(
     "SELECT id,subject,body,sentAt FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND datetime(sentAt)>=datetime(?,'-2 minutes') AND (lower(coalesce(fromEmail,'')) LIKE '%fiverings%' OR lower(coalesce(fromEmail,''))='notifications@mga360.com' OR lower(coalesce(subject,'')) LIKE '%five rings%' OR lower(coalesce(subject,'')) LIKE '%2-step verification code%' OR lower(coalesce(body,'')) LIKE '%five rings%') ORDER BY datetime(sentAt) DESC,id DESC LIMIT 10"
@@ -58244,6 +59340,7 @@ async function newestFiveRingsEmailCode(env, agentEmail, since) {
   return "";
 }
 __name(newestFiveRingsEmailCode, "newestFiveRingsEmailCode");
+__name2(newestFiveRingsEmailCode, "newestFiveRingsEmailCode");
 async function acceptFiveRingsEmailCode(env, agentEmail, challenge, since) {
   await syncIcloudInbox(env, agentEmail);
   const code = await newestFiveRingsEmailCode(env, agentEmail, since);
@@ -58256,8 +59353,9 @@ async function acceptFiveRingsEmailCode(env, agentEmail, challenge, since) {
   return true;
 }
 __name(acceptFiveRingsEmailCode, "acceptFiveRingsEmailCode");
+__name2(acceptFiveRingsEmailCode, "acceptFiveRingsEmailCode");
 async function waitForFiveRingsEmailCode(env, agentEmail, challenge) {
-  const startedAt = new Date().toISOString();
+  const startedAt = (/* @__PURE__ */ new Date()).toISOString();
   for (let attempt = 0; attempt < 12; attempt += 1) {
     if (attempt) await new Promise((resolve) => setTimeout(resolve, 5e3));
     try {
@@ -58274,6 +59372,7 @@ async function waitForFiveRingsEmailCode(env, agentEmail, challenge) {
   return false;
 }
 __name(waitForFiveRingsEmailCode, "waitForFiveRingsEmailCode");
+__name2(waitForFiveRingsEmailCode, "waitForFiveRingsEmailCode");
 async function syncPendingFiveRingsCodes(env) {
   const pending = await env.DB.prepare(
     "SELECT lower(agentEmail) AS agentEmail,encryptedChallenge,updatedAt FROM agentFiveRingsConnections WHERE status='pending' AND encryptedChallenge IS NOT NULL"
@@ -58295,6 +59394,7 @@ async function syncPendingFiveRingsCodes(env) {
   }
 }
 __name(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
+__name2(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
 async function syncAllFiveRingsConnections(env) {
   const connections = await env.DB.prepare(
     "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE status='connected' AND encryptedSession IS NOT NULL"
@@ -58314,65 +59414,80 @@ async function syncAllFiveRingsConnections(env) {
   }
 }
 __name(syncAllFiveRingsConnections, "syncAllFiveRingsConnections");
+__name2(syncAllFiveRingsConnections, "syncAllFiveRingsConnections");
 function escapeAutomationHtml(value) {
   return String(value || "").replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#039;");
 }
 __name(escapeAutomationHtml, "escapeAutomationHtml");
-var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nLicense Agent\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n📱 {agente_whatsapp}\n✉️ {agente_email}\n🌐 www.affinityfc.org";
-var DEFAULT_MONDAY_SUBJECT = "Uma ótima segunda-feira para você, {nome}! ☀️";
-var DEFAULT_MONDAY_MESSAGE = "Olá, {nome}! ☀️\n\nBom dia e uma excelente segunda-feira!\n\nA cada semana, o sistema prepara uma mensagem diferente, motivadora e acolhedora para começar a segunda-feira com energia e confiança.\n\nQue sua semana seja leve, produtiva e cheia de boas notícias. Sempre que precisar, conte conosco.";
+__name2(escapeAutomationHtml, "escapeAutomationHtml");
+var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nLicense Agent\nAffinity Financial Consulting Inc.\n\u{1F4DE} {agente_telefone}\n\u{1F4F1} {agente_whatsapp}\n\u2709\uFE0F {agente_email}\n\u{1F310} www.affinityfc.org";
+var DEFAULT_MONDAY_SUBJECT = "Uma \xF3tima segunda-feira para voc\xEA, {nome}! \u2600\uFE0F";
+var DEFAULT_MONDAY_MESSAGE = "Ol\xE1, {nome}! \u2600\uFE0F\n\nBom dia e uma excelente segunda-feira!\n\nA cada semana, o sistema prepara uma mensagem diferente, motivadora e acolhedora para come\xE7ar a segunda-feira com energia e confian\xE7a.\n\nQue sua semana seja leve, produtiva e cheia de boas not\xEDcias. Sempre que precisar, conte conosco.";
 function mondayMessageVariation(year, month, day) {
   const seed = Math.floor(Date.UTC(Number(year), Number(month) - 1, Number(day)) / 6048e5);
   const openings = [
-    "Uma nova semana começa trazendo novas oportunidades para avançar com tranquilidade e confiança.",
-    "Que esta segunda-feira renove sua energia e abra espaço para uma semana cheia de boas possibilidades.",
-    "Começar a semana é também uma nova chance de cuidar dos planos, dos sonhos e de quem mais importa.",
-    "Que a manhã de hoje traga clareza, disposição e bons motivos para acreditar em uma ótima semana.",
-    "Toda segunda-feira é um convite para recomeçar com esperança, coragem e pensamentos positivos.",
-    "Uma nova semana está diante de nós: que ela venha com leveza, progresso e momentos especiais.",
+    "Uma nova semana come\xE7a trazendo novas oportunidades para avan\xE7ar com tranquilidade e confian\xE7a.",
+    "Que esta segunda-feira renove sua energia e abra espa\xE7o para uma semana cheia de boas possibilidades.",
+    "Come\xE7ar a semana \xE9 tamb\xE9m uma nova chance de cuidar dos planos, dos sonhos e de quem mais importa.",
+    "Que a manh\xE3 de hoje traga clareza, disposi\xE7\xE3o e bons motivos para acreditar em uma \xF3tima semana.",
+    "Toda segunda-feira \xE9 um convite para recome\xE7ar com esperan\xE7a, coragem e pensamentos positivos.",
+    "Uma nova semana est\xE1 diante de n\xF3s: que ela venha com leveza, progresso e momentos especiais.",
     "Que esta segunda-feira seja o primeiro passo de uma semana produtiva, serena e cheia de conquistas.",
-    "Hoje começa mais uma oportunidade de transformar pequenos passos em grandes resultados.",
-    "Que sua semana comece com paz no coração, foco nos objetivos e confiança no caminho.",
-    "Segunda-feira chegou, trazendo uma página nova para construir uma semana muito especial.",
-    "Que o início desta semana venha acompanhado de boas ideias, energia renovada e tranquilidade.",
-    "Mais uma semana começa, e desejamos que cada dia traga motivos para sorrir e seguir em frente."
+    "Hoje come\xE7a mais uma oportunidade de transformar pequenos passos em grandes resultados.",
+    "Que sua semana comece com paz no cora\xE7\xE3o, foco nos objetivos e confian\xE7a no caminho.",
+    "Segunda-feira chegou, trazendo uma p\xE1gina nova para construir uma semana muito especial.",
+    "Que o in\xEDcio desta semana venha acompanhado de boas ideias, energia renovada e tranquilidade.",
+    "Mais uma semana come\xE7a, e desejamos que cada dia traga motivos para sorrir e seguir em frente."
   ];
   const encouragements = [
-    "Siga no seu ritmo: constância e boas escolhas constroem resultados duradouros.",
-    "Não é preciso fazer tudo de uma vez; cada passo dado com propósito já é uma conquista.",
-    "Confie no processo, valorize o que já conquistou e continue construindo o futuro que deseja.",
-    "Que você encontre equilíbrio para cuidar das prioridades e aproveitar os bons momentos.",
-    "Grandes planos começam com decisões simples e consistentes tomadas ao longo do caminho.",
-    "Leve para esta semana a certeza de que dedicação, paciência e planejamento fazem diferença.",
+    "Siga no seu ritmo: const\xE2ncia e boas escolhas constroem resultados duradouros.",
+    "N\xE3o \xE9 preciso fazer tudo de uma vez; cada passo dado com prop\xF3sito j\xE1 \xE9 uma conquista.",
+    "Confie no processo, valorize o que j\xE1 conquistou e continue construindo o futuro que deseja.",
+    "Que voc\xEA encontre equil\xEDbrio para cuidar das prioridades e aproveitar os bons momentos.",
+    "Grandes planos come\xE7am com decis\xF5es simples e consistentes tomadas ao longo do caminho.",
+    "Leve para esta semana a certeza de que dedica\xE7\xE3o, paci\xEAncia e planejamento fazem diferen\xE7a.",
     "Que os desafios se transformem em aprendizado e as oportunidades em belas conquistas.",
-    "Reserve também um momento para respirar, agradecer e reconhecer tudo o que já avançou.",
-    "Que não faltem coragem para começar, sabedoria para decidir e serenidade para continuar.",
-    "Uma semana bem vivida começa com intenção, cuidado e espaço para aquilo que realmente importa.",
+    "Reserve tamb\xE9m um momento para respirar, agradecer e reconhecer tudo o que j\xE1 avan\xE7ou.",
+    "Que n\xE3o faltem coragem para come\xE7ar, sabedoria para decidir e serenidade para continuar.",
+    "Uma semana bem vivida come\xE7a com inten\xE7\xE3o, cuidado e espa\xE7o para aquilo que realmente importa.",
     "Acredite nas possibilidades desta semana e celebre cada progresso, mesmo os menores.",
-    "Que seus objetivos ganhem força e que você encontre apoio sempre que precisar."
+    "Que seus objetivos ganhem for\xE7a e que voc\xEA encontre apoio sempre que precisar."
   ];
   const closings = [
-    "Desejamos uma semana leve, produtiva e repleta de boas notícias.",
-    "Que seja uma semana de paz, saúde, prosperidade e bons encontros.",
-    "Desejamos dias positivos, decisões tranquilas e muitos motivos para comemorar.",
-    "Que esta semana traga equilíbrio, segurança e novas realizações para você e sua família.",
-    "Esperamos que os próximos dias sejam acolhedores, produtivos e cheios de coisas boas.",
+    "Desejamos uma semana leve, produtiva e repleta de boas not\xEDcias.",
+    "Que seja uma semana de paz, sa\xFAde, prosperidade e bons encontros.",
+    "Desejamos dias positivos, decis\xF5es tranquilas e muitos motivos para comemorar.",
+    "Que esta semana traga equil\xEDbrio, seguran\xE7a e novas realiza\xE7\xF5es para voc\xEA e sua fam\xEDlia.",
+    "Esperamos que os pr\xF3ximos dias sejam acolhedores, produtivos e cheios de coisas boas.",
     "Que sua semana seja iluminada, organizada e cercada de pessoas que fazem bem.",
     "Desejamos uma semana de crescimento, serenidade e conquistas especiais.",
-    "Que cada dia desta semana aproxime você dos seus planos e sonhos."
+    "Que cada dia desta semana aproxime voc\xEA dos seus planos e sonhos."
   ];
-  return `Olá, {nome}! ☀️\n\nBom dia e uma excelente segunda-feira!\n\n${openings[seed % openings.length]}\n\n${encouragements[Math.floor(seed / openings.length) % encouragements.length]}\n\n${closings[Math.floor(seed / (openings.length * encouragements.length)) % closings.length]}\n\nSempre que precisar de orientação ou quiser conversar sobre seus planos, estamos à disposição.`;
+  return `Ol\xE1, {nome}! \u2600\uFE0F
+
+Bom dia e uma excelente segunda-feira!
+
+${openings[seed % openings.length]}
+
+${encouragements[Math.floor(seed / openings.length) % encouragements.length]}
+
+${closings[Math.floor(seed / (openings.length * encouragements.length)) % closings.length]}
+
+Sempre que precisar de orienta\xE7\xE3o ou quiser conversar sobre seus planos, estamos \xE0 disposi\xE7\xE3o.`;
 }
 __name(mondayMessageVariation, "mondayMessageVariation");
+__name2(mondayMessageVariation, "mondayMessageVariation");
 async function ensureAgentMessageSignatureColumn(env) {
   const columns = await env.DB.prepare("PRAGMA table_info(adminAccounts)").all();
   if (!(columns.results || []).some((column) => String(column.name) === "messageSignature")) {
     try {
       await env.DB.prepare("ALTER TABLE adminAccounts ADD COLUMN messageSignature TEXT").run();
-    } catch {}
+    } catch {
+    }
   }
 }
 __name(ensureAgentMessageSignatureColumn, "ensureAgentMessageSignatureColumn");
+__name2(ensureAgentMessageSignatureColumn, "ensureAgentMessageSignatureColumn");
 async function runMessageAutomations(env) {
   await ensureAgentMessageSignatureColumn(env);
   const now = /* @__PURE__ */ new Date();
@@ -58442,8 +59557,8 @@ async function runMessageAutomations(env) {
       agentProfile?.contactEmail || agentProfile?.email || automation.agentEmail
     );
     const agentWhatsapp = escapeAutomationHtml(agentProfile?.whatsapp || agentProfile?.phone || agentPhone);
-    const personalizeAgent = /* @__PURE__ */ __name((value) => escapeAutomationHtml(value).replaceAll("{agente_nome}", agentName).replaceAll("{agente_telefone}", agentPhone).replaceAll("{agente_whatsapp}", agentWhatsapp).replaceAll("{agente_email}", agentEmail).replaceAll("{agente}", agentName).replaceAll("{telefone do agente}", agentPhone).replaceAll("{email do agente}", agentEmail), "personalizeAgent");
-    const addPersonalSignature = /* @__PURE__ */ __name((value) => {
+    const personalizeAgent = /* @__PURE__ */ __name2((value) => escapeAutomationHtml(value).replaceAll("{agente_nome}", agentName).replaceAll("{agente_telefone}", agentPhone).replaceAll("{agente_whatsapp}", agentWhatsapp).replaceAll("{agente_email}", agentEmail).replaceAll("{agente}", agentName).replaceAll("{telefone do agente}", agentPhone).replaceAll("{email do agente}", agentEmail), "personalizeAgent");
+    const addPersonalSignature = /* @__PURE__ */ __name2((value) => {
       const message = personalizeAgent(value);
       const normalizedAgentName = agentName.replaceAll("**", "").trim().toLowerCase();
       const normalizedPhone = agentPhone.replace(/\D/g, "");
@@ -58462,7 +59577,9 @@ async function runMessageAutomations(env) {
         return true;
       });
       while (bodyLines.length && !bodyLines[bodyLines.length - 1].trim()) bodyLines.pop();
-      return `${bodyLines.join("\n").trim()}\n\n${signatureLines.join("\n")}`.trim();
+      return `${bodyLines.join("\n").trim()}
+
+${signatureLines.join("\n")}`.trim();
     }, "addPersonalSignature");
     if (occasion !== "custom" && !isMorningRun) continue;
     if (occasion === "policy_anniversary") {
@@ -58489,9 +59606,11 @@ async function runMessageAutomations(env) {
       for (const policy of policies.results) {
         if (deliveryBudget <= 0) return;
         try {
-          const preference=await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=? AND occasion='policy_anniversary'").bind(String(automation.agentEmail).toLowerCase(),Number(policy.clientId)).first();
-          if(preference && Number(preference.isActive)===0)continue;
-        } catch(error){if(!String(error).includes('no such table: crmAutomationSubscriptions'))throw error;}
+          const preference = await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE agentEmail=? AND clientId=? AND occasion='policy_anniversary'").bind(String(automation.agentEmail).toLowerCase(), Number(policy.clientId)).first();
+          if (preference && Number(preference.isActive) === 0) continue;
+        } catch (error) {
+          if (!String(error).includes("no such table: crmAutomationSubscriptions")) throw error;
+        }
         const reviewDates = flexLifeReviewDates(String(policy.issuedAt));
         if (!reviewDates) continue;
         const noticeDay = reviewDates.noticeAt.toISOString().slice(0, 10);
@@ -58533,7 +59652,7 @@ async function runMessageAutomations(env) {
           const sentMail = await sendAgentEmail(env, String(automation.agentEmail), {
             to: String(policy.email),
             subject,
-            html: await automationFooter(env,automation,policy,clientEmailHtml(
+            html: await automationFooter(env, automation, policy, clientEmailHtml(
               `<p>${body.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replaceAll("\n", "<br>")}</p>`
             ))
           });
@@ -58554,7 +59673,7 @@ async function runMessageAutomations(env) {
               String(automation.agentEmail).toLowerCase(),
               Number(policy.clientId),
               String(sentMail.messageId || "") || null,
-              `Automático · ${subject}`,
+              `Autom\xE1tico \xB7 ${subject}`,
               historyBody,
               String(automation.agentEmail).toLowerCase(),
               String(policy.email)
@@ -58605,10 +59724,12 @@ async function runMessageAutomations(env) {
     for (const client of clients.results) {
       if (deliveryBudget <= 0) return;
       try {
-        const scope=occasion==='monthly'?`monthly:${automation.monthNumber}`:occasion==='custom'?`custom:${automation.id}`:occasion;
-        const unsub = await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE lower(agentEmail)=? AND clientId=? AND occasion=? LIMIT 1").bind(String(automation.agentEmail).toLowerCase(),Number(client.id),scope).first();
-        if (unsub && Number(unsub.isActive)===0) continue;
-      } catch(error) { if(!String(error).includes('no such table: crmAutomationSubscriptions'))throw error; }
+        const scope = occasion === "monthly" ? `monthly:${automation.monthNumber}` : occasion === "custom" ? `custom:${automation.id}` : occasion;
+        const unsub = await env.DB.prepare("SELECT isActive FROM crmAutomationSubscriptions WHERE lower(agentEmail)=? AND clientId=? AND occasion=? LIMIT 1").bind(String(automation.agentEmail).toLowerCase(), Number(client.id), scope).first();
+        if (unsub && Number(unsub.isActive) === 0) continue;
+      } catch (error) {
+        if (!String(error).includes("no such table: crmAutomationSubscriptions")) throw error;
+      }
       if (occasion === "birthday" && !automation.clientId) {
         const customized = await env.DB.prepare(
           "SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND clientId=? AND isActive=1 LIMIT 1"
@@ -58620,7 +59741,7 @@ async function runMessageAutomations(env) {
         "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
       ).bind(Number(automation.id), Number(client.id), sentKey).first();
       if (sent) continue;
-      const personalize = /* @__PURE__ */ __name((value) => personalizeAgent(value).replaceAll(
+      const personalize = /* @__PURE__ */ __name2((value) => personalizeAgent(value).replaceAll(
         "{nome}",
         escapeAutomationHtml(client.name)
       ), "personalize");
@@ -58637,7 +59758,7 @@ async function runMessageAutomations(env) {
           {
             to: String(client.email),
             subject: personalize(automation.subject || automation.title),
-            html: await automationFooter(env,automation,client,clientEmailHtml(
+            html: await automationFooter(env, automation, client, clientEmailHtml(
               `<p>${personalizedMessage.replaceAll("\n", "<br>")}</p>`
             ))
           }
@@ -58661,7 +59782,7 @@ async function runMessageAutomations(env) {
             String(automation.agentEmail).toLowerCase(),
             Number(client.id),
             String(sentMail.messageId || "") || null,
-            `Automático · ${personalize(automation.subject || automation.title)}`,
+            `Autom\xE1tico \xB7 ${personalize(automation.subject || automation.title)}`,
             personalizedMessage.replaceAll("**", ""),
             String(automation.agentEmail).toLowerCase(),
             String(client.email)
@@ -58681,16 +59802,71 @@ async function runMessageAutomations(env) {
   }
 }
 __name(runMessageAutomations, "runMessageAutomations");
-import { siteBrandingRoute, applySiteBranding } from './site-branding.js';
-import { whatsappRoute } from './whatsapp.js';
-import { parseMailAttachments } from './mail-attachments.js';
-import {ensurePreferences,automationFooter,preferenceRoute} from './automation-preferences.js';
-import {cachedFiveRingsCredits,refreshFiveRingsCredits} from './five-rings-credits.js';
-import { isActiveClientPolicy, policyBelongsToCrmClient } from './crm-stage.js';
-export { cloudflare_staging_default as default };
+__name2(runMessageAutomations, "runMessageAutomations");
+const whatsappSettingsPanelScript = String.raw`<script>(function(){
+  if (document.getElementById('affinity-whatsapp-settings-panel')) return;
+  const api = async (action, options) => {
+    const response = await fetch('/api/agent/whatsapp/' + action, Object.assign({ credentials: 'same-origin' }, options || {}));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'Não foi possível concluir a ação.');
+    return data;
+  };
+  const mount = () => {
+    const heading = Array.from(document.querySelectorAll('h1,h2,h3')).find((node) => /meu whatsapp/i.test(node.textContent || ''));
+    if (!heading) return false;
+    const host = heading.closest('#whatsapp') || heading.closest('section,article') || heading.parentElement && heading.parentElement.parentElement || heading.parentElement;
+    if (!host || host.querySelector('#affinity-whatsapp-settings-panel')) return true;
+    const panel = document.createElement('div');
+    panel.id = 'affinity-whatsapp-settings-panel';
+    panel.style.cssText = 'margin-top:20px;padding-top:20px;border-top:1px solid rgba(148,163,184,.24);font:inherit;color:inherit';
+    panel.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><strong style="font-size:16px">Conexão do WhatsApp</strong><div id="awp-status" style="margin-top:5px;opacity:.74;font-size:13px">Verificando conexão…</div></div><button type="button" id="awp-refresh" style="border:1px solid rgba(148,163,184,.42);background:transparent;border-radius:8px;padding:9px 12px;color:inherit;cursor:pointer">Atualizar</button></div><div id="awp-qr" style="margin:16px 0"></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button type="button" id="awp-connect" style="border:0;border-radius:8px;padding:10px 14px;background:#25d366;color:#102018;font-weight:700;cursor:pointer">Conectar número</button><button type="button" id="awp-disconnect" style="border:1px solid rgba(148,163,184,.42);border-radius:8px;padding:10px 14px;background:transparent;color:inherit;font-weight:700;cursor:pointer">Desconectar</button><a href="/agentes/whatsapp" style="padding:10px 2px;color:#25d366;font-weight:700;text-decoration:none">Abrir conversas →</a></div><div id="awp-error" style="margin-top:12px;color:#fca5a5;font-size:13px"></div><p style="margin:14px 0 0;opacity:.7;font-size:12px;line-height:1.55">Conecte o seu número, abra WhatsApp → Aparelhos conectados → Conectar aparelho e leia o QR code. Esta conexão é exclusiva do seu perfil.</p>';
+    host.appendChild(panel);
+    const status = panel.querySelector('#awp-status');
+    const qr = panel.querySelector('#awp-qr');
+    const error = panel.querySelector('#awp-error');
+    const update = async () => {
+      try {
+        error.textContent = '';
+        const info = await api('status');
+        const connected = info.state === 'connected';
+        status.textContent = connected ? 'Conectado' + (info.number ? ' · +' + info.number : '') : 'Não conectado';
+        qr.innerHTML = !connected && info.qr ? '<img alt="QR code do WhatsApp" src="' + String(info.qr).replace(/&/g, '&amp;').replace(/\"/g, '&quot;') + '" style="display:block;width:min(260px,100%);padding:8px;background:#fff;border-radius:8px">' : '';
+        panel.querySelector('#awp-connect').style.display = connected ? 'none' : '';
+        panel.querySelector('#awp-disconnect').style.display = connected ? '' : 'none';
+      } catch (cause) {
+        status.textContent = 'Conexão indisponível';
+        error.textContent = cause.message || 'Não foi possível verificar o WhatsApp.';
+      }
+    };
+    panel.querySelector('#awp-refresh').onclick = update;
+    panel.querySelector('#awp-connect').onclick = async () => { try { error.textContent = ''; await api('connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); await update(); } catch (cause) { error.textContent = cause.message; } };
+    panel.querySelector('#awp-disconnect').onclick = async () => { try { error.textContent = ''; await api('disconnect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }); await update(); } catch (cause) { error.textContent = cause.message; } };
+    update();
+    window.setInterval(update, 5000);
+    return true;
+  };
+  if (!mount()) { const retry = window.setInterval(() => { if (mount()) window.clearInterval(retry); }, 300); window.setTimeout(() => window.clearInterval(retry), 12000); }
+})();</script>`;
+const originalPortalFetch = cloudflare_staging_default.fetch.bind(cloudflare_staging_default);
+cloudflare_staging_default.fetch = async (request, env, context) => {
+  const response = await originalPortalFetch(request, env, context);
+  const url = new URL(request.url);
+  const contentType = response.headers.get('content-type') || '';
+  if (request.method !== 'GET' || url.pathname !== '/agentes/configuracoes' || !contentType.includes('text/html')) return response;
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  headers.set('cache-control', 'no-store');
+  const html = await response.text();
+  const marker = html.lastIndexOf('</body>');
+  const output = marker >= 0 ? html.slice(0, marker) + whatsappSettingsPanelScript + html.slice(marker) : html + whatsappSettingsPanelScript;
+  return new Response(output, { status: response.status, statusText: response.statusText, headers });
+};
+export {
+  cloudflare_staging_default as default
+};
 /*! Bundled license information:
 
 he/he.js:
   (*! https://mths.be/he v1.2.0 by @mathias | MIT license *)
 */
-//# sourceMappingURL=cloudflare-staging.js.map
+//# sourceMappingURL=current-worker.js.map

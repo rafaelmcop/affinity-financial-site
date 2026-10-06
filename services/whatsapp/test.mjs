@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHmac} from 'node:crypto';
 import {verifyTicket} from './auth.mjs';
-import {sendText,sendErrorCode} from './send.mjs';
+import {sendText,sendMedia,sendErrorCode} from './send.mjs';
 import {normalizeMessage} from './message.mjs';
 import {phoneNumber,matchContact} from '../../recovered-live/public/whatsapp-phone.mjs';
 test('Country prefix defaults to USA without doubling codes; ambiguous contacts stay unlinked',()=>{
@@ -69,6 +69,21 @@ test('Sending resolves recipient and does not depend on read receipts',async()=>
  await assert.rejects(sendText(client,'123456789@c.us','test'),/NO_SEND_CONFIRMATION/);
  assert.equal(sendErrorCode(Error('private phone body getChat')),'web_client_incompatible');
 });
+test('Image, voice, PDF and video media preserve type, caption and confirmation',async()=>{
+ class Media{constructor(mime,data,filename){Object.assign(this,{mime,data,filename});}}
+ let sent;
+ const client={getNumberId:async()=>({_serialized:'123456789@c.us'}),sendMessage:async(chat,media,options)=>{sent={chat,media,options};return {id:{_serialized:'media-id'},fromMe:true,to:chat};}};
+ const image=await sendMedia(client,'123456789@c.us',{mime:'image/png',data:'AA==',filename:'foto.png',caption:'Legenda'},Media);
+ assert.equal(image.id._serialized,'media-id');assert.equal(sent.media.mime,'image/png');assert.equal(sent.options.caption,'Legenda');assert.equal(sent.options.sendAudioAsVoice,false);
+ await sendMedia(client,'123456789@c.us',{mime:'audio/ogg;codecs=opus',data:'AA==',voice:true},Media);
+ assert.equal(sent.options.sendAudioAsVoice,true);assert.equal(sent.options.sendSeen,false);
+ await sendMedia(client,'123456789@c.us',{mime:'audio/webm;codecs=opus',data:'AA==',filename:'voz.webm',voice:true},Media);
+ assert.equal(sent.options.sendAudioAsVoice,false);assert.equal(sent.media.mime,'audio/webm;codecs=opus');
+ await sendMedia(client,'123456789@c.us',{mime:'application/pdf',data:'AA==',filename:'documento.pdf'},Media);
+ assert.equal(sent.media.mime,'application/pdf');assert.equal(sent.media.filename,'documento.pdf');assert.equal(sent.options.sendAudioAsVoice,false);
+ await sendMedia(client,'123456789@c.us',{mime:'video/mp4',data:'AA==',filename:'clip.mp4'},Media);
+ assert.equal(sent.media.mime,'video/mp4');assert.equal(sent.media.filename,'clip.mp4');
+});
 import {whatsappRoute} from '../../recovered-live/worker/whatsapp.js';
 const secret='test-only-secret-not-used-in-production';
 function ticket(owner,exp=1060){const payload=Buffer.from(JSON.stringify({owner,exp,aud:'affinity-whatsapp'})).toString('base64url');return payload+'.'+createHmac('sha256',secret).update(payload).digest('base64url');}
@@ -97,4 +112,13 @@ test('Portal derives the agent from the session, not a caller supplied identity'
     const r=await whatsappRoute(new Request('https://portal.test/api/agent/whatsapp/status?owner=other@example.test'),{WHATSAPP_BRIDGE_URL:'https://bridge.test',WHATSAPP_BRIDGE_SECRET:secret},auth);
     assert.equal(r.status,200);assert.equal(verified,'one@example.test');
   }finally{globalThis.fetch=original;}
+});
+test('Portal proxies authenticated media without converting it to JSON',async()=>{
+ const original=globalThis.fetch;let target,upstreamRange;
+ globalThis.fetch=async(url,options)=>{target=String(url);upstreamRange=options.headers.range;return new Response(new Uint8Array([2,3]),{status:206,headers:{'content-type':'video/mp4','content-disposition':'inline','accept-ranges':'bytes','content-range':'bytes 1-2/3','content-length':'2'}});};
+ try{
+  const auth={email:async()=> 'one@example.test',access:async()=>({account:active})};
+  const r=await whatsappRoute(new Request('https://portal.test/api/agent/whatsapp/media?id=message-id',{headers:{range:'bytes=1-2'}}),{WHATSAPP_BRIDGE_URL:'https://bridge.test',WHATSAPP_BRIDGE_SECRET:secret},auth);
+  assert.equal(r.status,206);assert.equal(r.headers.get('content-type'),'video/mp4');assert.equal(r.headers.get('content-range'),'bytes 1-2/3');assert.equal(upstreamRange,'bytes=1-2');assert.match(target,/\/media\?id=message-id$/);assert.deepEqual([...new Uint8Array(await r.arrayBuffer())],[2,3]);
+ }finally{globalThis.fetch=original;}
 });
