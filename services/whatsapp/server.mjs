@@ -9,6 +9,7 @@ import {verifyTicket} from './auth.mjs';
 import {sendText,sendMedia,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
 import {mediaUpsert} from './media-record.mjs';
+import {mediaResponse} from './media-response.mjs';
 import {retainingAuth,installAuthTimeoutGuard} from './session-retention.mjs';
 import {installKeyCompatibility} from './compat.mjs';
 import {closeClient} from './close-client.mjs';
@@ -139,7 +140,7 @@ const server=http.createServer(async(req,res)=>{
         }
       }
       const ids=contactIds(db,owner,chat);
-      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(item=>({...item,mediaUrl:item.mediaState==='ready'||(!item.mediaState&&item.mediaKind)?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
+      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(item=>mediaResponse(item,key=>existsSync(path.join(mediaDir,key)))));
     }
     if(action==='/send'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
