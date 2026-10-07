@@ -16,6 +16,7 @@ import {closeClient} from './close-client.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 import {resolveContacts} from './contact-resolver.mjs';
 import {recoverMedia} from './media-recovery.mjs';
+import {initializeReadState,rememberHistoricalRead,synchronizeUnread,markRead} from './read-state.mjs';
 
 const {Client,LocalAuth}=whatsapp;
 const RetainedLocalAuth=retainingAuth(LocalAuth);
@@ -35,6 +36,7 @@ installAuthTimeoutGuard(process,sessions);
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
 initializeContacts(db);
+initializeReadState(db);
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
 const mediaKind=mime=>mime?.startsWith('image/')?'image':mime?.startsWith('audio/')?'audio':mime?.startsWith('video/')?'video':mime==='application/pdf'?'document':['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel'].includes(mime)?'spreadsheet':'file';
@@ -58,6 +60,7 @@ async function save(owner,m,providedMedia=null){
   }
   const label=kind==='image'?'Imagem':kind==='audio'?'Áudio':kind==='video'?'Vídeo':filename?'Arquivo: '+filename:'Anexo',fallback=m.hasMedia?'['+label+(state==='too_large'?' maior que 8 MB':state==='download_failed'?' não pôde ser baixado':state!=='ready'?' não disponível':'')+']':'';
   db.prepare(mediaUpsert).run(owner,m.id._serialized,chat,String(m.body||fallback).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0,key,mime,filename,kind,size,state);
+  rememberHistoricalRead(db,owner,m.id._serialized,Number(m.timestamp)||Math.floor(Date.now()/1000),m.fromMe?'sent':'received');
 }
 async function connect(owner){
   if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
@@ -78,6 +81,7 @@ async function connect(owner){
     s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
     const ids=db.prepare('SELECT DISTINCT chat FROM messages WHERE owner=?').all(owner).map(row=>row.chat);
     try{for(const pair of await client.pupPage.evaluate(resolveContacts,ids))rememberContact(db,owner,pair);}catch{console.error('whatsapp_contact_reconciliation_pending');}
+    try{for(const chat of await client.getChats()){const id=serializedKey(chat.id);if(safeChat(id))synchronizeUnread(db,owner,contactIds(db,owner,id),Number(chat.unreadCount));}}catch{console.error('whatsapp_unread_reconciliation_pending');}
   }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
   client.on('message_create',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
   client.on('message',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
@@ -114,22 +118,17 @@ const server=http.createServer(async(req,res)=>{
       }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
     }
     if(action==='/chats'&&req.method==='GET')return reply(listContacts(db,owner));
+    if(action==='/read'&&req.method==='POST'){
+      const input=await body(req);
+      if(!Array.isArray(input.ids)||input.ids.length>100)return reply({error:'Selecione até 100 mensagens.'},400);
+      return reply({read:markRead(db,owner,input.ids)});
+    }
     if(action==='/recover-media'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
       const input=await body(req),id=String(input.id||'');
-      const stored=db.prepare('SELECT id,chat FROM messages WHERE owner=? AND id=?').get(owner,id);
-      if(!stored)return reply({error:'Mensagem não encontrada.'},404);
+      if(!db.prepare('SELECT id FROM messages WHERE owner=? AND id=?').get(owner,id))return reply({error:'Mensagem não encontrada.'},404);
       try{
-        let message=await s.client.getMessageById(id);
-        if(!message){
-          s.historyLoads ||= new Map();
-          if(!s.historyLoads.has(stored.chat)){
-            const load=(async()=>{const conversation=await s.client.getChatById(stored.chat);conversation.id={...conversation.id,_serialized:serializedKey(conversation.id)||stored.chat};await conversation.fetchMessages({limit:1500});})();
-            s.historyLoads.set(stored.chat,load);load.catch(()=>{});
-          }
-          await s.historyLoads.get(stored.chat);
-          message=await s.client.getMessageById(id);
-        }
+        const message=await s.client.getMessageById(id);
         if(!message)return reply({state:'unavailable',reason:'message_not_found'});
         normalizeMessage(message);
         const media=await recoverMedia(message);
@@ -159,6 +158,7 @@ const server=http.createServer(async(req,res)=>{
             conversation.id={...conversation.id,_serialized:serializedKey(conversation.id)||chat};
             const items=await conversation.fetchMessages({limit:100});
             for(const item of items)await save(owner,item);
+            synchronizeUnread(db,owner,contactIds(db,owner,chat),Number(conversation.unreadCount));
             console.log(JSON.stringify({event:'whatsapp_history_reconciled',count:items.length}));
           }catch(error){
             const reason=String(error?.message||'');
@@ -168,7 +168,7 @@ const server=http.createServer(async(req,res)=>{
         }
       }
       const ids=contactIds(db,owner,chat);
-      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 5000').all(owner,...ids).reverse().map(item=>mediaResponse(item,key=>existsSync(path.join(mediaDir,key)))));
+      return reply(db.prepare('SELECT m.id,m.body,m.direction,m.stamp,m.ack,m.mediaKey,m.mediaKind,m.mime,m.filename,m.mediaSize,m.mediaState,(m.direction=\'received\' AND r.id IS NULL) unread FROM messages m LEFT JOIN messageReads r ON r.owner=m.owner AND r.id=m.id WHERE m.owner=? AND m.chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY m.stamp DESC LIMIT 5000').all(owner,...ids).reverse().map(item=>mediaResponse(item,key=>existsSync(path.join(mediaDir,key)))));
     }
     if(action==='/send'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);

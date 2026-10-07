@@ -21,7 +21,7 @@ export async function whatsappRoute(request,env,auth){
       if(!c)return json({error:'Cliente não encontrado.'},404);
       return json({id:c.id,name:c.name,phone:c.phone||c.whatsapp||''});
     }
-    if(!(['status','chats','messages','media'].includes(action)&&method==='GET')&&!(['connect','disconnect','send'].includes(action)&&method==='POST'))return json({error:'Ação inválida.'},405);
+    if(!(['status','chats','messages','media'].includes(action)&&method==='GET')&&!(['connect','disconnect','send','read'].includes(action)&&method==='POST'))return json({error:'Ação inválida.'},405);
     if(method==='POST'&&(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json')))return json({error:'Solicitação inválida.'},403);
     if(!env.WHATSAPP_BRIDGE_URL||!env.WHATSAPP_BRIDGE_SECRET)return json({state:'setup_required',error:'A conexão de teste ainda precisa ser ativada pelo administrador.'},503);
     const base=new URL(env.WHATSAPP_BRIDGE_URL);

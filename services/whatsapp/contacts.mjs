@@ -12,12 +12,12 @@ export function contactIds(db,owner,chat){
  return [...new Set([chat,phone,...db.prepare('SELECT lid FROM contactAliases WHERE owner=? AND phone=?').all(owner,phone).map(r=>r.lid)])];
 }
 export function listContacts(db,owner){
- const rows=db.prepare('SELECT chat,MAX(stamp) stamp,COUNT(*) count FROM messages WHERE owner=? GROUP BY chat ORDER BY stamp DESC LIMIT 100').all(owner);
+ const rows=db.prepare('SELECT m.chat,MAX(m.stamp) stamp,COUNT(*) count,SUM(CASE WHEN m.direction=\'received\' AND r.id IS NULL THEN 1 ELSE 0 END) unread FROM messages m LEFT JOIN messageReads r ON r.owner=m.owner AND r.id=m.id WHERE m.owner=? GROUP BY m.chat ORDER BY stamp DESC LIMIT 1000').all(owner);
  const merged=new Map();
  for(const row of rows){
   const phone=db.prepare('SELECT phone FROM contactAliases WHERE owner=? AND lid=?').get(owner,row.chat)?.phone;
   const chat=phone||row.chat,prior=merged.get(chat);
-  if(prior){prior.count+=row.count;prior.stamp=Math.max(prior.stamp,row.stamp);}else merged.set(chat,{...row,chat,label:chat.endsWith('@c.us')?'+'+chat.split('@')[0]:'Contato WhatsApp · '+chat.split('@')[0].slice(-4)});
+  if(prior){prior.count+=row.count;prior.unread+=row.unread;prior.stamp=Math.max(prior.stamp,row.stamp);}else merged.set(chat,{...row,chat,label:chat.endsWith('@c.us')?'+'+chat.split('@')[0]:'Contato WhatsApp · '+chat.split('@')[0].slice(-4)});
  }
  return [...merged.values()].sort((a,b)=>b.stamp-a.stamp);
 }
