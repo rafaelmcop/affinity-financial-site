@@ -17,7 +17,7 @@ import {initializeContacts,rememberContact,contactIds,listContacts} from './cont
 
 const {Client,LocalAuth}=whatsapp;
 const RetainedLocalAuth=retainingAuth(LocalAuth);
-const bridgeVersion='2026-09-28.1';
+const bridgeVersion='2026-09-28.2';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
 const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');
@@ -166,3 +166,4 @@ server.requestTimeout=65000;
 server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port})));
 async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
 process.on('SIGTERM',()=>{void stop();});process.on('SIGINT',()=>{void stop();});
+
