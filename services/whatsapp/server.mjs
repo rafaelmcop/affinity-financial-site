@@ -117,9 +117,19 @@ const server=http.createServer(async(req,res)=>{
     if(action==='/recover-media'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
       const input=await body(req),id=String(input.id||'');
-      if(!db.prepare('SELECT id FROM messages WHERE owner=? AND id=?').get(owner,id))return reply({error:'Mensagem não encontrada.'},404);
+      const stored=db.prepare('SELECT id,chat FROM messages WHERE owner=? AND id=?').get(owner,id);
+      if(!stored)return reply({error:'Mensagem não encontrada.'},404);
       try{
-        const message=await s.client.getMessageById(id);
+        let message=await s.client.getMessageById(id);
+        if(!message){
+          s.historyLoads ||= new Map();
+          if(!s.historyLoads.has(stored.chat)){
+            const load=(async()=>{const conversation=await s.client.getChatById(stored.chat);conversation.id={...conversation.id,_serialized:serializedKey(conversation.id)||stored.chat};await conversation.fetchMessages({limit:1500});})();
+            s.historyLoads.set(stored.chat,load);load.catch(()=>{});
+          }
+          await s.historyLoads.get(stored.chat);
+          message=await s.client.getMessageById(id);
+        }
         if(!message)return reply({state:'unavailable',reason:'message_not_found'});
         normalizeMessage(message);
         const media=await recoverMedia(message);
