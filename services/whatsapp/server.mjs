@@ -77,7 +77,7 @@ async function connect(owner){
     if(!compatibility.wid||!compatibility.message)throw Error('Key compatibility unavailable');
     s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
     const ids=db.prepare('SELECT DISTINCT chat FROM messages WHERE owner=?').all(owner).map(row=>row.chat);
-    for(const pair of await client.pupPage.evaluate(resolveContacts,ids))rememberContact(db,owner,pair);
+    try{for(const pair of await client.pupPage.evaluate(resolveContacts,ids))rememberContact(db,owner,pair);}catch{console.error('whatsapp_contact_reconciliation_pending');}
   }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
   client.on('message_create',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
   client.on('message',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
