@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mediaResponse} from './media-response.mjs';
+import {mediaResponse,mediaFilename} from './media-response.mjs';
+
+test('downloads carry an extension matching the actual media format',()=>{
+ assert.equal(mediaFilename(null,'image/jpeg'),'arquivo.jpg');
+ assert.equal(mediaFilename(null,'audio/ogg; codecs=opus'),'arquivo.ogg');
+ assert.equal(mediaFilename('teste.png','image/jpeg'),'teste.jpg');
+ assert.equal(mediaFilename('exame.pdf','application/pdf'),'exame.pdf');
+ assert.equal(mediaFilename('arquivo.json','image/webp'),'arquivo.webp');
+});
 test('plain text with legacy file kind never gets an attachment link',()=>{
   const output=mediaResponse({id:'text',mediaKey:null,mediaKind:'file',mime:null,filename:null,mediaState:null},()=>{throw Error('No file key to check');});
   assert.equal(output.mediaUrl,null);assert.equal(output.mediaKind,null);assert.equal('mediaKey' in output,false);

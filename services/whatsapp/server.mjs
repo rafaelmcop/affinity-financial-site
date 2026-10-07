@@ -9,7 +9,7 @@ import {verifyTicket} from './auth.mjs';
 import {sendText,sendMedia,sendErrorCode} from './send.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
 import {mediaUpsert} from './media-record.mjs';
-import {mediaResponse} from './media-response.mjs';
+import {mediaResponse,mediaFilename} from './media-response.mjs';
 import {retainingAuth,installAuthTimeoutGuard} from './session-retention.mjs';
 import {installKeyCompatibility} from './compat.mjs';
 import {closeClient} from './close-client.mjs';
@@ -131,7 +131,7 @@ const server=http.createServer(async(req,res)=>{
     if(action==='/media'&&req.method==='GET'){
       const id=url.searchParams.get('id')||'',row=db.prepare('SELECT mediaKey,mime,filename FROM messages WHERE owner=? AND id=?').get(owner,id);
       if(!row?.mediaKey||!existsSync(path.join(mediaDir,row.mediaKey)))return reply({error:'Mídia não encontrada.'},404);
-      const bytes=readFileSync(path.join(mediaDir,row.mediaKey)),inline=/^(image|audio|video)\//.test(String(row.mime||''))||row.mime==='application/pdf',base={'content-type':row.mime||'application/octet-stream','cache-control':'private, max-age=3600','x-content-type-options':'nosniff','accept-ranges':'bytes','content-disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(row.filename||'arquivo')}`},range=req.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
+      const bytes=readFileSync(path.join(mediaDir,row.mediaKey)),inline=/^(image|audio|video)\//.test(String(row.mime||''))||row.mime==='application/pdf',base={'content-type':row.mime||'application/octet-stream','cache-control':'private, max-age=3600','x-content-type-options':'nosniff','accept-ranges':'bytes','content-disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(mediaFilename(row.filename,row.mime))}`},range=req.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
       if(range){const start=range[1]?Number(range[1]):0,end=range[2]?Math.min(Number(range[2]),bytes.length-1):bytes.length-1;if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||start>end||start>=bytes.length){res.writeHead(416,{...base,'content-range':`bytes */${bytes.length}`});return res.end();}const part=bytes.subarray(start,end+1);res.writeHead(206,{...base,'content-range':`bytes ${start}-${end}/${bytes.length}`,'content-length':String(part.length)});return res.end(part);}
       res.writeHead(200,{...base,'content-length':String(bytes.length)});return res.end(bytes);
     }
