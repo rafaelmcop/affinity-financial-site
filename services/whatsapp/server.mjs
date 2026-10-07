@@ -15,6 +15,7 @@ import {installKeyCompatibility} from './compat.mjs';
 import {closeClient} from './close-client.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 import {resolveContacts} from './contact-resolver.mjs';
+import {recoverMedia} from './media-recovery.mjs';
 
 const {Client,LocalAuth}=whatsapp;
 const RetainedLocalAuth=retainingAuth(LocalAuth);
@@ -47,7 +48,7 @@ async function save(owner,m,providedMedia=null){
   if(previous?.mediaKey){({mediaKey:key,mime,filename,mediaKind:kind,mediaSize:size,mediaState:state}=previous);state=state||'ready';}
   else if(m.hasMedia||providedMedia){
     try{
-      const media=providedMedia||await m.downloadMedia();
+      const media=providedMedia||await recoverMedia(m);
       mime=String(media?.mimetype||mime||'application/octet-stream').slice(0,100);filename=String(media?.filename||filename||'').slice(0,240)||null;kind=mediaKind(mime);
       if(media?.data&&media.data.length<=11200000){
         const bytes=Buffer.from(media.data,'base64');
@@ -75,6 +76,8 @@ async function connect(owner){
     const compatibility=await client.pupPage.evaluate(installKeyCompatibility);
     if(!compatibility.wid||!compatibility.message)throw Error('Key compatibility unavailable');
     s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
+    const ids=db.prepare('SELECT DISTINCT chat FROM messages WHERE owner=?').all(owner).map(row=>row.chat);
+    for(const pair of await client.pupPage.evaluate(resolveContacts,ids))rememberContact(db,owner,pair);
   }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
   client.on('message_create',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
   client.on('message',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
@@ -119,7 +122,7 @@ const server=http.createServer(async(req,res)=>{
         const message=await s.client.getMessageById(id);
         if(!message)return reply({state:'unavailable',reason:'message_not_found'});
         normalizeMessage(message);
-        const media=await message.downloadMedia();
+        const media=await recoverMedia(message);
         if(!media?.data)return reply({state:'unavailable',reason:'no_media_data'});
         await save(owner,message,media);
         return reply({state:'ready',bytes:Buffer.from(media.data,'base64').length,mime:media.mimetype});
@@ -155,7 +158,7 @@ const server=http.createServer(async(req,res)=>{
         }
       }
       const ids=contactIds(db,owner,chat);
-      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 1000').all(owner,...ids).reverse().map(item=>mediaResponse(item,key=>existsSync(path.join(mediaDir,key)))));
+      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 5000').all(owner,...ids).reverse().map(item=>mediaResponse(item,key=>existsSync(path.join(mediaDir,key)))));
     }
     if(action==='/send'&&req.method==='POST'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
