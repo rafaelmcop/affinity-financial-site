@@ -409,7 +409,7 @@ function se() {
                 e.jsxs("h2", {
                   className:
                     "flex items-center gap-2 text-xl font-bold text-sky-300",
-                  children: [e.jsx(A, {}), "Portal Five Rings"],
+                  id: "five-rings", children: [e.jsx(A, {}), "Portal Five Rings"],
                 }),
                 e.jsx("div", {
                   className:

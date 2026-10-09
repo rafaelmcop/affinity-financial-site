@@ -1,3 +1,4 @@
+import {fiveRingsRequirement,postponeFiveRings} from './five-rings-onboarding.js';
 import {reserveFairLead} from './queue-fairness.js';
 import {listObligations,reportPayment} from './marketing-obligations.js';
 import {classifySale,ratesSchema} from './affiliate-rates.js';
@@ -117,7 +118,8 @@ export async function leadFlowRoute(request,env,auth){
  if(path.includes('/marketing/')&&kind==='agent'){try{if(action==='list'&&request.method==='GET')return json({obligations:await listObligations(env,email)});if(action==='report-payment'&&request.method==='POST')return json(await reportPayment(env,input,email));return json({error:'Ação indisponível.'},405);}catch(e){return json({error:e.message},400);}}
  if(path.includes('/onboarding/')){
  const profile=await env.DB.prepare('SELECT * FROM staffOnboarding WHERE owner=?').bind(owner).first();
- if(action==='status'&&request.method==='GET'){const completed=await configuredAccess(env,identity),fresh=await env.DB.prepare('SELECT * FROM staffOnboarding WHERE owner=?').bind(owner).first(),account=await env.DB.prepare('SELECT passwordHash FROM '+(kind==='affiliate'?'affiliates':'adminAccounts')+' WHERE lower(email)=?').bind(email).first(),job=await env.DB.prepare('SELECT state FROM staffContactImports WHERE owner=?').bind(owner).first();return json({kind,name:identity.name,email,phone:fresh?.phone||identity.phone||'',avatar:fresh?.avatar||await existingAvatar(env,identity),profileSaved:!!fresh?.profileSaved,passwordSet:!!account?.passwordHash,completed,needsImport:completed&&job?.state!=='done',...(kind==='agent'?await registrationStatus(env,owner):{})});}
+ if(action==='status'&&request.method==='GET'){const completed=await configuredAccess(env,identity),fresh=await env.DB.prepare('SELECT * FROM staffOnboarding WHERE owner=?').bind(owner).first(),account=await env.DB.prepare('SELECT passwordHash FROM '+(kind==='affiliate'?'affiliates':'adminAccounts')+' WHERE lower(email)=?').bind(email).first(),job=await env.DB.prepare('SELECT state FROM staffContactImports WHERE owner=?').bind(owner).first();return json({kind,name:identity.name,email,phone:fresh?.phone||identity.phone||'',avatar:fresh?.avatar||await existingAvatar(env,identity),profileSaved:!!fresh?.profileSaved,passwordSet:!!account?.passwordHash,completed,needsImport:completed&&job?.state!=='done',...(kind==='agent'?{...await registrationStatus(env,owner),...await fiveRingsRequirement(env,email)}:{})});}
+ if(action==='five-rings-postpone'&&request.method==='POST'&&kind==='agent')return json(await postponeFiveRings(env,email));
  if(action==='agent-number'&&request.method==='POST'&&kind==='agent'){try{await saveRegistration(env,owner,input);return json({ok:true});}catch(e){return json({error:e.message},400);}}
  if(action==='profile'&&request.method==='POST'){
  const phone='+'+String(input.phone||'').replace(/\D/g,'');if(!/^\+\d{8,15}$/.test(phone))return json({error:'Informe seu telefone com código do país.'},400);

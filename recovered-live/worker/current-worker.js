@@ -1,3 +1,5 @@
+import {adminFiveRingsRequirements,fiveRingsRequirement,markPortalFiveRingsSync} from './five-rings-onboarding.js';
+import {syncPolicyLeadLinks,policyLinkReviews} from './policy-lead-links.js';
 import {listObligations,selectBeneficiary,confirmPayment,numberDefaults,applicationAgentDetails,applicationReferralDetails} from './marketing-obligations.js';
 import {portfolioRows} from './agent-portfolio.js';
 import {readRates,saveRates,affiliateSourceSales} from './affiliate-rates.js';
@@ -56075,6 +56077,7 @@ ${message}`, owner).run();
   if (name === "agent.listPolicies") {
     const owner = adminEmail.toLowerCase();
     await mergePaddedPolicyDuplicates(env, owner);
+    await syncPolicyLeadLinks(env,owner);
     const [rows, applications] = await env.DB.batch([
       env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY createdAt DESC").bind(owner),
       env.DB.prepare("SELECT id,matchedPolicyId,clientName,clientEmail,clientPhone,state,beneficiaryName,applicationData FROM agentApplications WHERE lower(agentEmail)=?").bind(owner)
@@ -56134,7 +56137,7 @@ ${message}`, owner).run();
       Number(input.id),
       adminEmail.toLowerCase()
     ).run();
-    return trpcResult({ success: true });
+    await syncPolicyLeadLinks(env,adminEmail.toLowerCase());return trpcResult({ success: true });
   }
   if (name === "agent.requestPolicyDeletion") {
     const owner = adminEmail.toLowerCase(), policyId = Number(input.id || 0), reason = String(input.reason || "").trim();
@@ -57281,6 +57284,7 @@ Affinity Financial Consulting`,
         }
         const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(activeSession), env.JWT_SECRET);
         await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
+        if(input.portalEntry===true)await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
         return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2 });
       }
       if (!login) throw new Error("N\xE3o foi poss\xEDvel iniciar a sess\xE3o");
@@ -57344,6 +57348,7 @@ Affinity Financial Consulting`,
       await env.DB.prepare(
         "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
       ).bind(encryptedSession, owner).run();
+      if(input.portalEntry===true)await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
       return trpcResult({ success: true, requiresCode: false, found: records.length, importedClients, importedPolicies, updatedPolicies });
     } catch (error) {
       const message = error instanceof Error ? error.message : "N\xE3o foi poss\xEDvel sincronizar o Five Rings";
@@ -58018,6 +58023,8 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if(name==='agent.applicationAgentDetails'){await leadSchema(env);return trpcResult(await applicationAgentDetails(env,adminEmail.toLowerCase()));}
+  if(name==='admin.fiveRingsRequirements'){try{return trpcResult(await adminFiveRingsRequirements(env,request.method==='POST'?input:null,adminEmail));}catch(e){return trpcError(e.message);}}
+  if(name==='admin.policyLeadReviews'){await syncPolicyLeadLinks(env);return trpcResult(await policyLinkReviews(env));}
   if (name === 'admin.marketingObligations') {return trpcResult(await listObligations(env));}
   if (name === 'admin.marketingBeneficiary'||name==='admin.marketingConfirmPayment'||name==='admin.agentNumberDefault'){try{if(name!=='admin.agentNumberDefault'&&request.method!=='POST')return trpcError('Use POST');return trpcResult(name==='admin.marketingBeneficiary'?await selectBeneficiary(env,input,adminEmail):name==='admin.marketingConfirmPayment'?await confirmPayment(env,input,adminEmail):await numberDefaults(env,request.method==='POST'?input:null,adminEmail));}catch(e){return trpcError(e.message);}}
   if (name === 'admin.affiliateReferenceRates') {
@@ -59302,6 +59309,7 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    ctx.waitUntil(syncPolicyLeadLinks(env));
     if (controller.cron === "calendly-phone-backfill") {
       ctx.waitUntil(syncAllCalendlyConnections(env));
       return;
@@ -59888,12 +59896,13 @@ const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
- if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);}}
+ if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
+ if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
  const response=await canonicalMenuFetchSource.call(this,request,env,ctx);
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/admin-unified-menu.js?v=1" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-number-lock-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-number-lock-1');}}).transform(response);
+  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
  }
  return response;
 };
