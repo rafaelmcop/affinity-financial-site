@@ -65,6 +65,7 @@ import { E as A } from "./external-link-CEjUwZyT.js";
           icon: x,
           badge: "pendingUsers",
         },
+        { label: "Central e distribuição de leads", href: "/admin/central-leads", icon: x },
         { label: "Contatos WhatsApp dos afiliados", href: "/admin/contatos-whatsapp-afiliados", icon: x },
         { label: "CRM de clientes", href: "/admin/crm", icon: k },
         {
@@ -140,7 +141,7 @@ function H({ onLogout: o }) {
       );
     }, [i]));
   const r = t => {
-    if(t==="/admin/contatos-whatsapp-afiliados"){window.location.assign(t);return;}
+    if(t==="/admin/contatos-whatsapp-afiliados"||t==="/admin/central-leads"){window.location.assign(t);return;}
     (g(t), n(!1));
   };
   return e.jsxs(e.Fragment, {

@@ -1,3 +1,4 @@
+import {leadFlowRoute,leadSchema,staffIdentity,protectInternalContacts,configuredAccess} from './lead-flow.js';
 import {affiliateWhatsappRoute} from './affiliate-whatsapp.js';
 import {whatsappLeadsRoute} from './whatsapp-leads.js';
 var __defProp = Object.defineProperty;
@@ -56162,7 +56163,7 @@ ${message}`, owner).run();
     const clientName = String(input.name ?? "").trim();
     const email = String(input.email ?? "").trim().toLowerCase();
     const status = String(input.status ?? "client");
-    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "first_meeting", "followup_documents", "followup_service", "followup_application", "followup_review", "completed", "client", "closed"].includes(
+    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "first_meeting", "followup_documents", "followup_service", "followup_application", "followup_review", "completed", "client", "closed", "agent"].includes(
       status
     ))
       return trpcError("Revise os dados do cliente");
@@ -58434,6 +58435,9 @@ Affinity Financial Consulting`,
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
     const agentView = accountType === "agent" || Boolean(input.agentMode);
+    await leadSchema(env);await protectInternalContacts(env);
+    const globalBlocked=await env.DB.prepare('SELECT phone FROM centralLeads WHERE suppressed=1 OR isUS=0').all();
+    const blockedPhones=new Set(globalBlocked.results.map(r=>sourcePhone(r.phone)));
     const [rows, policyStages, applicationStages] = agentView ? await Promise.all([
       env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").bind(crmOwner).all(),
       env.DB.prepare("SELECT id,agentEmail,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(crmOwner).all(),
@@ -58445,7 +58449,7 @@ Affinity Financial Consulting`,
     ];
     const matchesClient = /* @__PURE__ */ __name((record, client) => Number(record.clientId || 0) === Number(client.id) || sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email) || sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp) || sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name), "matchesClient");
     return trpcResult(
-      rows.results.map((row) => {
+      rows.results.filter(row=>!agentView||["client","completed","active","agent"].includes(row.status)||!blockedPhones.has(sourcePhone(row.phone||row.whatsapp))).map((row) => {
         const policies = (policyStages.results || []).filter((record) => matchesClient(record, row));
         const applications = (applicationStages.results || []).filter((record) => !record.matchedPolicyId && matchesClient(record, row));
         return {
@@ -58778,7 +58782,7 @@ Affinity Financial Consulting`,
     const clientName = String(input.name ?? "").trim();
     const email = String(input.email ?? "").trim().toLowerCase();
     const status = String(input.status ?? "new");
-    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "client", "closed"].includes(
+    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "client", "closed", "agent"].includes(
       status
     ))
       return trpcError("Revise os dados do cliente");
@@ -59061,6 +59065,8 @@ var cloudflare_staging_default = {
   async fetch(request, env) {
     const preferenceResponse = await preferenceRoute(request, env);
     if (preferenceResponse) return preferenceResponse;
+    const staffFlowResponse=await leadFlowRoute(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId,hash:(p,c)=>bcryptjs_default.hash(p,c),compare:(p,h)=>bcryptjs_default.compare(p,h)});
+    if(staffFlowResponse)return secureResponse(staffFlowResponse,{privateData:true});
     const affiliateWhatsAppResponse=await affiliateWhatsappRoute(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId});
     if(affiliateWhatsAppResponse)return secureResponse(affiliateWhatsAppResponse,{privateData:true});
     const leadsResponse = await whatsappLeadsRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
@@ -59869,9 +59875,13 @@ cloudflare_staging_default.fetch = async (request, env, context) => {
 };
 const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
- const response=await canonicalMenuFetchSource.call(this,request,env,ctx),url=new URL(request.url);
+ const url=new URL(request.url);
+ const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard','/afiliados/whatsapp'].includes(url.pathname));
+ if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);}}
+ const response=await canonicalMenuFetchSource.call(this,request,env,ctx);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-1" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-1');}}).transform(response);
+  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-2" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-2');}}).transform(response);
  }
  return response;
 };

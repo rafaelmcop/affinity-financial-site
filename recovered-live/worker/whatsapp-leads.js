@@ -1,3 +1,4 @@
+import {leadSchema,storeCentralContacts,protectInternalContacts} from './lead-flow.js';
 import {whatsappRoute} from './whatsapp.js';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'cache-control':'no-store'}});
 export async function whatsappLeadsRoute(request,env,auth){
@@ -6,6 +7,7 @@ export async function whatsappLeadsRoute(request,env,auth){
  const email=await auth.email(request,env);if(!email)return page?Response.redirect(new URL('/agentes/login',url),302):json({error:'Entre no portal.'},401);
  const {account}=await auth.access(email,env);if(!account||!Number(account.isActive)||account.status!=='approved'||!['agent','both'].includes(account.accountType))return json({error:'Acesso restrito ao agente.'},403);
  if(page)return env.ASSETS.fetch(new Request(new URL('/agent-whatsapp-leads.html',url),request));
+ await leadSchema(env);
  const owner=email.toLowerCase(),action=url.pathname.split('/').at(-1);
  if(request.method==='POST'&&(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json')))return json({error:'Solicitação inválida.'},403);
  await env.DB.prepare("CREATE TABLE IF NOT EXISTS whatsappLeads (id INTEGER PRIMARY KEY AUTOINCREMENT,owner TEXT NOT NULL,name TEXT NOT NULL,phone TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'whatsapp',stage TEXT NOT NULL DEFAULT 'Importados',createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(owner,phone))").run();
@@ -13,7 +15,8 @@ export async function whatsappLeadsRoute(request,env,auth){
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS whatsappLeadStages (owner TEXT PRIMARY KEY,stages TEXT NOT NULL)').run();
  const row=await env.DB.prepare('SELECT stages FROM whatsappLeadStages WHERE owner=?').bind(owner).first();const stages=row?JSON.parse(row.stages):['Importados',"1ª chamada","2ª chamada",'Interesse','Reunião agendada','Follow-up','Aplicação','Aplicado','Emitida','Recusada','Sem interesse','Já tem seguro'];
  if(action==='list'&&request.method==='GET'){
-  const rows=await env.DB.prepare('SELECT id,name,phone,source,stage,createdAt,updatedAt FROM whatsappLeads WHERE owner=? ORDER BY id DESC').bind(owner).all();
+  await protectInternalContacts(env);
+  const rows=await env.DB.prepare('SELECT id,name,phone,source,stage,createdAt,updatedAt FROM whatsappLeads l WHERE owner=? AND NOT EXISTS(SELECT 1 FROM centralLeads c WHERE c.phone=l.phone AND (c.suppressed=1 OR c.isUS=0)) ORDER BY id DESC').bind(owner).all();
   const groups=await env.DB.prepare('SELECT leadId,groupId,groupName FROM whatsappLeadGroups WHERE owner=?').bind(owner).all();
   return json({stages,leads:(rows.results||[]).map(l=>({...l,groups:(groups.results||[]).filter(g=>g.leadId===l.id)}))});
  }
@@ -28,6 +31,9 @@ export async function whatsappLeadsRoute(request,env,auth){
  }
  if(action==='stage'){
   if(!Number.isInteger(input.id)||!stages.includes(input.stage))return json({error:'Etapa ou lead inválido.'},400);
+  const queueLead=await env.DB.prepare('SELECT c.phone FROM centralLeads c JOIN whatsappLeads l ON l.phone=c.phone WHERE l.id=? AND l.owner=?').bind(input.id,owner).first();if(queueLead)return json({error:'Registre o resultado na fila de atendimento para alterar a etapa.'},409);
+  const legacyLead=await env.DB.prepare('SELECT phone FROM whatsappLeads WHERE id=? AND owner=?').bind(input.id,owner).first();
+  if(legacyLead&&['Recusada','Sem interesse','Já tem seguro'].includes(input.stage))await env.DB.prepare('UPDATE centralLeads SET stage=?,suppressed=1,leaseOwner=NULL,leaseUntil=0 WHERE phone=?').bind(input.stage,legacyLead.phone).run();
   const updated=await env.DB.prepare('UPDATE whatsappLeads SET stage=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND owner=?').bind(input.stage,input.id,owner).run();return updated.meta?.changes?json({ok:true}):json({error:'Lead não encontrado.'},404);
  }
  if(['import','export-group'].includes(action)){
@@ -37,6 +43,7 @@ export async function whatsappLeadsRoute(request,env,auth){
   const current=await env.DB.prepare('SELECT phone FROM whatsappLeads WHERE owner=?').bind(owner).all();const seen=new Set((current.results||[]).map(x=>x.phone));
   const contacts=data.contacts.filter(c=>/^\+\d{8,15}$/.test(c.phone));
   for(const contact of contacts){if(seen.has(contact.phone))existing++;else{added++;seen.add(contact.phone);}}
+  await storeCentralContacts(env,{owner:'agent:'+owner,kind:'agent',name:account.name,email:owner},contacts.map(c=>({...c,groups:[{id:data.groupId,name:data.groupName}]})));
   for(let i=0;i<contacts.length;i+=20){
    const chunk=contacts.slice(i,i+20);
    await env.DB.batch([

@@ -14,15 +14,17 @@
       meeting: 'Reunião',
       proposal: 'Fechamento',
       client: 'Fechado',
-      closed: 'Fechado'
+      closed: 'Fechado',
+      agent: 'Agente'
     };
     document.querySelectorAll('select').forEach((select) => {
       const options = [...select.options];
       if (!options.some((option) => Object.hasOwn(stageLabels, option.value))) return;
+      if(!options.some(o=>o.value==='agent')){const option=document.createElement('option');option.value='agent';option.textContent='Agente';select.appendChild(option);}
       options.forEach((option) => {
         if (!Object.hasOwn(stageLabels, option.value)) return;
         if(option.textContent!==stageLabels[option.value])option.textContent = stageLabels[option.value];
-        if (option.value === 'closed' && select.value !== 'closed') option.hidden = true;
+        if (option.value === 'closed' && select.value !== 'closed' && !option.hidden) option.hidden = true;
       });
       const desiredOrder = ['new', 'meeting', 'proposal', 'contacted', 'client', 'closed'];
       const currentOrder = options.filter((option) => desiredOrder.includes(option.value)).map((option) => option.value);

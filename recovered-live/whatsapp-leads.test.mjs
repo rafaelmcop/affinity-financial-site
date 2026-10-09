@@ -11,8 +11,8 @@ test('group leads keep agent isolation, stages, origin and idempotent group memb
   const list=await(await call('list')).json();assert.equal(list.leads.length,1);assert.equal(list.leads[0].name,'Pessoa');assert.equal(list.leads[0].groups.length,1);assert.equal(list.leads[0].stage,'Importados');assert.equal(list.leads[0].source,'whatsapp');assert.equal(list.stages.length,12);
   assert.equal((await(await call('list',null,'two@example.test')).json()).leads.length,0);
   assert.equal((await call('stage',{id:list.leads[0].id,stage:'Interesse'},'two@example.test')).status,404);
-  assert.equal((await call('stage',{id:list.leads[0].id,stage:'Interesse'})).status,200);
-  assert.equal((await call('stages',{stages:['Importados']})).status,409);
+  assert.equal((await call('stage',{id:list.leads[0].id,stage:'Interesse'})).status,409);
+  assert.equal((await call('stages',{stages:['Other']})).status,409);
   assert.equal((await call('import',{group:'bad'})).status,400);const exported=await(await call('export-group',{group:'123456789@g.us'})).json();assert.equal(exported.contacts[0].name,'Pessoa');assert.equal((await(await call('list')).json()).leads.length,1);
  }finally{globalThis.fetch=original;db.close();}
 });

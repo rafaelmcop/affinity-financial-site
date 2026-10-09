@@ -43,6 +43,7 @@ const D = {
     notes: "",
   },
   I = [
+    {value:"agent",label:"Agente",color:"bg-slate-500/15 text-slate-300"},
     {
       value: "new",
       label: "Cliente novo",
@@ -227,7 +228,7 @@ function Le({ agentMode: a = !1 }) {
             hasPastMeeting = meetingTime > 0 && meetingTime <= Date.now(),
             manuallyFollowedUp = ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(l.status),
             wasAttended = hasPastMeeting || manuallyFollowedUp,
-            belongs = b === "leads" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && !wasAttended
+            belongs = b === "leads" ? !["agent","client","completed","active"].includes(l.status) && !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && !wasAttended
               : b === "inforce" ? l.hasInforcePolicy
               : b === "new_business" ? !l.hasPolicy && l.hasCompletedApplication
               : b === "followup" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && wasAttended
