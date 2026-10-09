@@ -38,6 +38,9 @@ test('fresh bridge blocks sends, isolates attachments and preserves SQLite acros
     assert.equal((await request(base,'/media?id=synthetic-media','two@example.test')).status,404);
     const range=await request(base,'/media?id=synthetic-media',undefined,{headers:{range:'bytes=1-2'}});
     assert.equal(range.status,206);assert.deepEqual([...new Uint8Array(await range.arrayBuffer())],[2,3]);
+    const suffix=await request(base,'/media?id=synthetic-media',undefined,{headers:{range:'bytes=-2'}});
+    assert.equal(suffix.status,206);assert.equal(suffix.headers.get('content-range'),'bytes 2-3/4');assert.deepEqual([...new Uint8Array(await suffix.arrayBuffer())],[3,4]);
+    for(const value of ['bytes=-0','bytes=9-10','bytes=','bytes=0-1,2-3'])assert.equal((await request(base,'/media?id=synthetic-media',undefined,{headers:{range:value}})).status,416);
     await stop();base=await start();
     assert.deepEqual([...new Uint8Array(await(await request(base,'/media?id=synthetic-media')).arrayBuffer())],[1,2,3,4]);
     assert.equal((await request(base,'/send',undefined,{method:'POST',body:'{}'})).status,403);

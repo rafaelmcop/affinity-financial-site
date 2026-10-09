@@ -47,6 +47,20 @@ sintéticos e não comprovam entrega de mensagens reais.
 
 ## Verificação e operação
 
+Downloads usam um caminho compatível com o tipo MIME exigido pelo WhatsApp
+atual. O fallback preserva áudios Ogg/Opus, imagens, stickers, vídeos e PDFs.
+Recebidos são armazenados até 64 MB por padrão (configurável por
+`WHATSAPP_MAX_MEDIA_BYTES`, com teto de 128 MB). A seleção para envio continua
+limitada a 8 MB. O portal oferece download para imagens, áudio, vídeo e PDF;
+a API transmite arquivos em stream e aceita ranges inclusive por sufixo.
+Emojis permanecem como Unicode, sem transformar texto em HTML.
+
+`npm run test:browser` verifica o portal real em Chrome contra um bridge e
+banco isolados: reprodução de WAV e MP4, PNG, PDF e downloads com SHA-256,
+Unicode, gravação de microfone sintético e seleção de vídeo WebM. Não envia
+mensagens pelo WhatsApp. Opcionalmente, `WHATSAPP_TEST_LIVE_DATA_DIR` permite
+validar um áudio Ogg já recebido, sem registrar seu conteúdo no resultado.
+
 Executar `npm ci` e `npm test` nesta pasta. O teste de runtime verifica banco
 vazio, bloqueio de envio, isolamento de anexos, ranges de áudio e persistência
 após reiniciar o processo, sem abrir WhatsApp Web.
