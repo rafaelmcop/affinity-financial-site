@@ -20,6 +20,10 @@ export async function leadSchema(env){
  'CREATE INDEX IF NOT EXISTS centralLeadLease ON centralLeads(leaseOwner,leaseUntil)',
  'CREATE TABLE IF NOT EXISTS centralLeadMigrations (version TEXT PRIMARY KEY,completedAt TEXT DEFAULT CURRENT_TIMESTAMP)'
  ])await env.DB.prepare(sql).run();
+ if(!await env.DB.prepare('SELECT version FROM centralLeadMigrations WHERE version=?').bind('importer-access-v1').first()){
+ await env.DB.prepare("INSERT OR IGNORE INTO centralLeadAssignments(phone,agent,assignedBy) SELECT s.phone,lower(s.sourceEmail),lower(s.sourceEmail) FROM centralLeadSources s JOIN centralLeads l ON l.phone=s.phone JOIN adminAccounts a ON lower(a.email)=lower(s.sourceEmail) WHERE s.kind='agent' AND s.owner='agent:'||lower(s.sourceEmail) AND l.isUS=1 AND l.suppressed=0 AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").run();
+ await env.DB.prepare('INSERT OR IGNORE INTO centralLeadMigrations(version) VALUES(?)').bind('importer-access-v1').run();
+ }
 }
 export async function storeCentralContacts(env,source,contacts){
  await leadSchema(env);
@@ -27,7 +31,9 @@ export async function storeCentralContacts(env,source,contacts){
  await env.DB.batch([
  env.DB.prepare('INSERT INTO centralLeads(phone,name,isUS) VALUES '+chunk.map(()=>'(?,?,?)').join(',')+" ON CONFLICT(phone) DO UPDATE SET name=CASE WHEN centralLeads.name=centralLeads.phone AND excluded.name<>excluded.phone THEN excluded.name ELSE centralLeads.name END").bind(...chunk.flatMap(c=>[c.phone,String(c.name||c.phone).slice(0,200),isUSPhone(c.phone)?1:0])),
  env.DB.prepare('INSERT INTO centralLeadSources(phone,owner,kind,sourceName,sourceEmail,groupsJson) VALUES '+chunk.map(()=>'(?,?,?,?,?,?)').join(',')+' ON CONFLICT(phone,owner) DO UPDATE SET sourceName=excluded.sourceName,sourceEmail=excluded.sourceEmail,groupsJson=(SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(centralLeadSources.groupsJson) UNION SELECT value FROM json_each(excluded.groupsJson)))').bind(...chunk.flatMap(c=>[c.phone,source.owner,source.kind,source.name||source.email,source.email,JSON.stringify(c.groups||[])]))
- ]);}
+ ]);
+ if(source.kind==='agent')await env.DB.prepare('INSERT OR IGNORE INTO centralLeadAssignments(phone,agent,assignedBy) SELECT phone,?,? FROM centralLeads WHERE isUS=1 AND suppressed=0 AND phone IN ('+chunk.map(()=>'?').join(',')+')').bind(source.email.toLowerCase(),source.email.toLowerCase(),...chunk.map(c=>c.phone)).run();
+ }
 }
 export async function staffIdentity(request,env,auth,kind){
  if(kind==='affiliate'){const id=await auth.affiliate(request,env);if(!id)return null;const a=await env.DB.prepare('SELECT id,name,email,phone,status,isActive FROM affiliates WHERE id=?').bind(id).first();return a&&Number(a.isActive)&&a.status==='approved'?{...a,owner:'affiliate:'+id,kind}:null;}

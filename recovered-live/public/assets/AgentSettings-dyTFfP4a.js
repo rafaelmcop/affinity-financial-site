@@ -5,7 +5,7 @@ import {
   C as v,
   B as d,
   b as r,
-} from "./index-BIU-6RMI.js?v=20260901-13";
+} from "./index-BIU-6RMI.js?v=20261009-setup-1";
 import { A as F } from "./AgentSidebar-BffvVO7a.js?v=20260907-menu2";
 import { I as i } from "./input-maK0rC7f.js";
 import { S as M } from "./switch-DFk453nH.js";

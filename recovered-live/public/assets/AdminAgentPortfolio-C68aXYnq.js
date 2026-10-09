@@ -5,7 +5,7 @@ import {
   C as m,
   B as i,
   b as o,
-} from "./index-BIU-6RMI.js?v=20260901-13";
+} from "./index-BIU-6RMI.js?v=20261009-setup-1";
 import { A as E, U as P } from "./AdminSidebar-CB3x3HMt.js";
 import { I as l } from "./input-maK0rC7f.js";
 import { X as D } from "./x-BKidgWlG.js";

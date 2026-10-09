@@ -4,7 +4,7 @@ import {
   r as c,
   t as j,
   j as e,
-} from "./index-BIU-6RMI.js?v=20260901-13";
+} from "./index-BIU-6RMI.js?v=20261009-setup-1";
 import {
   u as v,
   C as w,

@@ -6,7 +6,7 @@ import {
   T as x,
   j as e,
   C as m,
-} from "./index-BIU-6RMI.js?v=20260901-13";
+} from "./index-BIU-6RMI.js?v=20261009-setup-1";
 import { A as C } from "./AgentSidebar-BffvVO7a.js?v=20260907-menu2";
 import { u as A } from "./FloatingInternalChat-C-mZ1jql.js?v=20260903-2";
 import { M as P } from "./mail-DTOVvRc8.js";
