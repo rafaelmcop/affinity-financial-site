@@ -1,3 +1,4 @@
+import {sendAllowed} from './send-permission.mjs';
 import {pruneMedia,mediaExpired} from './media-retention.mjs';
 import {chatDirectory,groupContacts,groupId,allContacts} from './directory.mjs';
 import http from 'node:http';
@@ -179,9 +180,10 @@ const server=http.createServer(async(req,res)=>{
       return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(({mediaKey,...item})=>({...item,mediaKind:mediaKey||item.mediaState?item.mediaKind:null,mediaUrl:mediaKey?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
     }
     if(action==='/send'&&req.method==='POST'){
-      if(process.env.WHATSAPP_SEND_ENABLED!=='true')return reply({error:'Envios bloqueados até confirmação do responsável.',code:'sending_disabled'},403);
+      const input=await body(req,11500000);
+      if(!sendAllowed(process.env,input))return reply({error:'Envios bloqueados até confirmação do responsável.',code:'sending_disabled'},403);
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
-      const input=await body(req,11500000),chat=String(input.chat||''),text=String(input.text||'').trim(),requestId=String(input.requestId||''),media=input.media;
+      const chat=String(input.chat||''),text=String(input.text||'').trim(),requestId=String(input.requestId||''),media=input.media;
       const validDocument=media?.kind==='file'&&((media.mime==='application/pdf'&&/\.pdf$/i.test(String(media.filename||'')))||(media.mime==='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'&&/\.xlsx$/i.test(String(media.filename||'')))||(media.mime==='application/vnd.ms-excel'&&/\.xls$/i.test(String(media.filename||''))));
       const validMedia=media&&['image','audio','video','file'].includes(media.kind)&&typeof media.data==='string'&&media.data.length<=11200000&&((media.kind==='image'&&/^image\/(jpeg|png|webp|gif)$/.test(media.mime))||(media.kind==='audio'&&/^audio\/(ogg|webm|mpeg|mp4|wav)(;.*)?$/.test(media.mime))||(media.kind==='video'&&/^video\/(mp4|webm)$/.test(media.mime))||validDocument);
       if(!safeChat(chat)||(!text&&!validMedia)||text.length>4000||!/^[-a-f0-9]{36}$/.test(requestId))return reply({error:'Revise o telefone, a mensagem e o arquivo.'},400);

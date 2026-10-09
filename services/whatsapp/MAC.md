@@ -72,3 +72,5 @@ Não reiniciar com outro processo manual simultâneo na mesma porta/banco.
 Backups futuros devem incluir o banco de forma consistente (SQLite backup
 ou bridge parado), anexos e credenciais, em destino protegido. A instalação
 local não garante disponibilidade durante falhas de internet ou energia.
+
+Envios manuais autorizados usam WHATSAPP_MANUAL_SEND_ENABLED=true e manual:true no pedido autenticado do portal. WHATSAPP_SEND_ENABLED continua false, mantendo pedidos automáticos bloqueados. Enter envia; Shift+Enter insere quebra de linha.

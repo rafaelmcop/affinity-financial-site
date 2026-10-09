@@ -77,3 +77,15 @@ assert.equal((await fiveRingsRequirement(env,email,at('2026-11-04'))).fiveRingsS
 await adminFiveRingsRequirements(env,{email,exempt:true},'admin@example.test');
 assert.equal((await fiveRingsRequirement(env,email,at('2026-12-02'))).fiveRingsSyncDue,false);db.close();
 });
+test('agent theme defaults to light, persists per account and rejects invalid values',async()=>{
+const {db,call}=fixture();
+assert.equal((await(await call('agent','onboarding/theme')).json()).theme,'light');
+assert.equal((await call('agent','onboarding/theme',{theme:'dark'})).status,200);
+assert.equal((await(await call('agent','onboarding/theme')).json()).theme,'dark');
+assert.equal((await(await call('agent','onboarding/theme',null,'agent2@example.test')).json()).theme,'light');
+assert.equal((await call('agent','onboarding/theme',{theme:'automatic'})).status,400);
+assert.equal((await(await call('agent','onboarding/theme')).json()).theme,'dark');
+assert.equal((await call('agent','onboarding/theme',{theme:'light'})).status,200);
+assert.equal((await(await call('agent','onboarding/theme')).json()).theme,'light');
+db.close();
+});

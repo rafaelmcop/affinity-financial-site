@@ -432,8 +432,8 @@ function se() {
                   ],
                 }),
                 e.jsxs("label", { className: "flex items-center gap-3 rounded-lg border border-sky-400/20 bg-black/20 p-3 text-sm text-sky-100", children: [
-                  e.jsx("input", { type: "checkbox", checked: g.trustDevice !== !1, onChange: a => h({ ...g, trustDevice: a.target.checked }) }),
-                  "Confiar neste dispositivo para reduzir novos pedidos de código"
+                  e.jsx("input", { type: "checkbox", checked: true, disabled: true }),
+                  "Lembrar deste navegador — sempre ativado para reduzir pedidos de código"
                 ] }),
                 e.jsxs("label", {
                   className: "block text-sm text-gray-300",

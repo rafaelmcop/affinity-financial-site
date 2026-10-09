@@ -1,3 +1,6 @@
+import {fiveRingsLoginBody} from './five-rings-login.js';
+import {agentAppearance} from './agent-appearance.js';
+import {isOverduePaymentNotice,paymentTasks,dismissEmailNotification} from './payment-attention.js';
 import {adminFiveRingsRequirements,fiveRingsRequirement,markPortalFiveRingsSync} from './five-rings-onboarding.js';
 import {syncPolicyLeadLinks,policyLinkReviews} from './policy-lead-links.js';
 import {listObligations,selectBeneficiary,confirmPayment,numberDefaults,applicationAgentDetails,applicationReferralDetails} from './marketing-obligations.js';
@@ -169,7 +172,7 @@ async function refreshChats(){try{const status=await api('status');$('#bridgeSta
 $('#newChat').onclick=()=>{showDialog('#newDialog',true);renderContacts()};$('#closeNew').onclick=()=>showDialog('#newDialog',false);$('#countryButton').onclick=()=>showDialog('#countryDialog',true);$('#closeCountry').onclick=()=>showDialog('#countryDialog',false);$('#chatSearch').oninput=e=>renderContacts(e.target.value);$('#contactSearch').oninput=e=>renderContacts(e.target.value);
 $('#openNumber').onclick=()=>{const n=normalize($('#manualNumber').value);if(n.length<7)return alert('Digite um telefone válido.');openChat(n);showDialog('#newDialog',false)};
 $('#countries').innerHTML=countries.map((c,i)=>'<button data-country="'+i+'">'+c[2]+' '+c[3]+' (+'+c[1]+')</button>').join('');document.querySelectorAll('[data-country]').forEach(b=>b.onclick=()=>{country=countries[Number(b.dataset.country)];$('#countryButton').textContent=country[2];$('#manualNumber').placeholder='Telefone (+'+country[1]+')';showDialog('#countryDialog',false)});
-$('#mobileList').onclick=()=>$('#shell').classList.add('show-list');$('#composer').onsubmit=async e=>{e.preventDefault();const text=$('#messageText').value.trim();if(!text||!chat)return;$('#send').disabled=true;try{await api('send',{method:'POST',body:JSON.stringify({chat,text,requestId:crypto.randomUUID()})});$('#messageText').value='';await loadMessages()}catch(e){alert(e.message)}finally{$('#send').disabled=false}};
+$('#mobileList').onclick=()=>$('#shell').classList.add('show-list');$('#composer').onsubmit=async e=>{e.preventDefault();const text=$('#messageText').value.trim();if(!text||!chat)return;$('#send').disabled=true;try{await api('send',{method:'POST',body:JSON.stringify({chat,text,manual:true,requestId:crypto.randomUUID()})});$('#messageText').value='';await loadMessages()}catch(e){alert(e.message)}finally{$('#send').disabled=false}};
 $('#messageText').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#composer').requestSubmit()}};contacts=await api('contacts').catch(()=>[]);refreshChats();setInterval(refreshChats,30000);
 </script></body></html>`;
 }
@@ -367,7 +370,8 @@ async function cachedFiveRingsCredits(db, owner) {
 }
 __name(cachedFiveRingsCredits, "cachedFiveRingsCredits");
 async function refreshFiveRingsCredits(env, owner, session, fetchPortal) {
-  const response = await fetchPortal("https://portal.fiveringsfinancial.com/account/dashboard", { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
+  const portalUrl=new URL(session.url||"https://portal.fiveringsfinancial.com/account", "https://portal.fiveringsfinancial.com");if(portalUrl.origin!=="https://portal.fiveringsfinancial.com")throw Error("Sessão inválida.");
+  const response = await fetchPortal(portalUrl, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
   if (!response.ok) throw Error("N\xE3o foi poss\xEDvel consultar os cr\xE9ditos no Five Rings.");
   const values = parseFiveRingsCredits(await response.text());
   await env.DB.prepare(SCHEMA2).run();
@@ -50808,7 +50812,7 @@ ${body}`.toLowerCase();
     return null;
   if (!/(policy|premium|national life|\bnlg\b|five rings|mga360|life insurance|ap[oó]lice|insured|underwriting)/i.test(text))
     return null;
-  if (/(return(?:ed)?|declin(?:e|ed)|fail(?:ed|ure)?|insufficient|nsf|revers(?:ed|al)|unable to process|past due|não processado|nao processado|recusado|devolvido)/i.test(text))
+  if (isOverduePaymentNotice(subject,body))
     return "attention";
   if (/(received|successful|processed|paid|posted|thank you for your payment|confirmado|recebido|processado)/i.test(text))
     return "confirmed";
@@ -53455,7 +53459,7 @@ __name(submitNationalLifeCode, "submitNationalLifeCode");
 __name2(submitNationalLifeCode, "submitNationalLifeCode");
 function fiveRingsCookies(headers) {
   const values = typeof headers.getSetCookie === "function" ? headers.getSetCookie() : [headers.get("set-cookie") || ""];
-  return values.map((value) => value.split(";", 1)[0]).filter(Boolean).join("; ");
+  return values.flatMap(value=>value.split(/,(?=\s*[^;,=\s]+=)/)).map((value) => value.trim().split(";", 1)[0]).filter(Boolean).join("; ");
 }
 __name(fiveRingsCookies, "fiveRingsCookies");
 __name2(fiveRingsCookies, "fiveRingsCookies");
@@ -53518,10 +53522,10 @@ async function requestFiveRingsEmailCode(html, pageUrl, cookies) {
     },
     body
   });
-  const nextCookies = mergeFiveRingsCookies(cookies, response.headers);
+  let nextCookies = mergeFiveRingsCookies(cookies, response.headers);
   const nextUrl = new URL(response.headers.get("location") || pageUrl, base);
-  const next = await fiveRingsFetch(nextUrl, { headers: { cookie: nextCookies }, redirect: "follow" });
-  return { html: await next.text(), url: next.url, cookies: nextCookies };
+  const next = await fiveRingsFollow(nextUrl,nextCookies);
+  return { html: next.html, url: next.url, cookies: next.cookies };
 }
 __name(requestFiveRingsEmailCode, "requestFiveRingsEmailCode");
 __name2(requestFiveRingsEmailCode, "requestFiveRingsEmailCode");
@@ -53538,6 +53542,11 @@ function fiveRingsSections(html, base) {
 }
 __name(fiveRingsSections, "fiveRingsSections");
 __name2(fiveRingsSections, "fiveRingsSections");
+async function fiveRingsFollow(url,cookies=""){
+const base="https://portal.fiveringsfinancial.com";let current=new URL(url,base),jar=cookies;
+for(let i=0;i<8;i++){if(current.origin!==base)throw Error("O portal retornou um endereço inesperado");const response=await fiveRingsFetch(current,{headers:{cookie:jar},redirect:"manual"});jar=mergeFiveRingsCookies(jar,response.headers);const location=response.headers.get("location");if(location&&response.status>=300&&response.status<400){current=new URL(location,current);continue;}return {ok:response.ok,status:response.status,url:current.toString(),html:await response.text(),cookies:jar};}
+throw Error("O Five Rings não concluiu o redirecionamento de acesso.");
+}
 async function verifyFiveRingsLogin(portalEmail, password) {
   const base = "https://portal.fiveringsfinancial.com";
   const loginPage = await fiveRingsFetch(`${base}/`, { redirect: "manual" });
@@ -53554,7 +53563,7 @@ async function verifyFiveRingsLogin(portalEmail, password) {
       origin: base,
       referer: `${base}/`
     },
-    body: new URLSearchParams({ _token: token, email: portalEmail, password })
+    body: fiveRingsLoginBody(html,portalEmail,password,token)
   });
   cookies = mergeFiveRingsCookies(cookies, response.headers);
   const location = response.headers.get("location") || "";
@@ -53562,11 +53571,15 @@ async function verifyFiveRingsLogin(portalEmail, password) {
     throw new Error("E-mail ou senha recusados pelo portal Five Rings");
   const destination = new URL(location, base);
   if (destination.origin !== base) throw new Error("O portal retornou um endere\xE7o inesperado");
-  const dashboard = await fiveRingsFetch(destination, { headers: { cookie: cookies }, redirect: "follow" });
-  let dashboardHtml = await dashboard.text();
+  const dashboard = await fiveRingsFollow(destination,cookies);
+  cookies=dashboard.cookies;
+  let dashboardHtml = dashboard.html;
   let dashboardUrl = dashboard.url;
-  if (!dashboard.ok || /name=["']password["']/i.test(dashboardHtml))
-    throw new Error("O portal n\xE3o manteve a sess\xE3o de leitura");
+  if (!dashboard.ok || /name=["']password["']/i.test(dashboardHtml)) {
+    if(/name=["']g-recaptcha-response["']/i.test(dashboardHtml))throw Error("O Five Rings exige verificação reCAPTCHA no próprio navegador. O acesso automático está bloqueado; é necessário reconectar com autenticação interativa.");
+    throw new Error("O Five Rings recusou a sessão. Confira seu acesso nas configurações.");
+
+  }
   const emailRequest = await requestFiveRingsEmailCode(dashboardHtml, dashboardUrl, cookies);
   if (emailRequest) {
     dashboardHtml = emailRequest.html;
@@ -53914,19 +53927,30 @@ async function resumeFiveRingsSession(session) {
   const base = "https://portal.fiveringsfinancial.com";
   const url = new URL(session.url, base);
   if (url.origin !== base) throw new Error("Sess\xE3o inv\xE1lida");
-  const response = await fiveRingsFetch(url, {
-    headers: { cookie: session.cookies },
-    redirect: "follow"
-  });
-  const html = await response.text();
+  const response = await fiveRingsFollow(url,session.cookies);
+  const html = response.html;
   if (!response.ok || /name=["']password["']/i.test(html) || fiveRingsCodeField(html))
     throw new Error("Sess\xE3o expirada");
   return {
-    cookies: mergeFiveRingsCookies(session.cookies, response.headers),
+    cookies: response.cookies,
     url: response.url,
     html,
     sections: fiveRingsSections(html, base)
   };
+}
+async function freshFiveRingsSession(env,owner){
+const row=await env.DB.prepare("SELECT portalEmail,encryptedPassword,encryptedSession,encryptedChallenge,status FROM agentFiveRingsConnections WHERE lower(agentEmail)=?").bind(owner).first();
+if(!row?.encryptedPassword)throw Error("Cadastre seu acesso Five Rings nas configurações.");
+if(row.status==='pending'&&row.encryptedChallenge)return null;
+let session=null;
+if(row.encryptedSession){try{session=await resumeFiveRingsSession(JSON.parse(await decryptSmtpPassword(row.encryptedSession,env.JWT_SECRET)));}catch{}}
+if(!session){
+let result;try{result=await verifyFiveRingsLogin(row.portalEmail,await decryptSmtpPassword(row.encryptedPassword,env.JWT_SECRET));}catch(error){await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error.message||"Não foi possível autenticar no Five Rings.").slice(0,500),owner).run();throw error;}
+if(result.requiresCode){await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='pending',encryptedChallenge=?,encryptedSession=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(await encryptSmtpPassword(JSON.stringify(result.challenge),env.JWT_SECRET),owner).run();return null;}
+session=result.session;
+}
+await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedSession=?,encryptedChallenge=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(await encryptSmtpPassword(JSON.stringify(session),env.JWT_SECRET),owner).run();
+return session;
 }
 __name(resumeFiveRingsSession, "resumeFiveRingsSession");
 __name2(resumeFiveRingsSession, "resumeFiveRingsSession");
@@ -55898,7 +55922,7 @@ ${message}`, owner).run();
       ).bind(owner, today.start, today.end)
     ]);
     const policies = policiesQuery.results || [];
-    const tasks = tasksQuery.results || [];
+    const tasks = await paymentTasks(env,owner,true);
     const clients = clientsQuery.results || [];
     const notifications = notificationsQuery.results || [];
     const unread = unreadQuery.results?.[0];
@@ -56067,7 +56091,7 @@ ${message}`, owner).run();
       pendingReviews: Number(reviewsQuery.results?.[0]?.total || 0),
       unreadInternal: Number(internalQuery.results?.[0]?.total || 0),
       newMessages: Number(messagesQuery.results?.[0]?.total || 0),
-      followUps: Number(tasksQuery.results?.[0]?.total || 0),
+      followUps: (await paymentTasks(env,owner,true)).filter(r=>r.dueAt).length,
       policyCount: policies.length,
       activePolicyCount: activePolicies.length,
       score: activePolicies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0),
@@ -56790,15 +56814,8 @@ ${message}`, owner).run();
     }
     return trpcResult({ success: true, createdClients, updatedClients, createdPolicies, updatedPolicies });
   }
-  if (name === "agent.listTasks") {
-    const owner = adminEmail.toLowerCase();
-    const rows = await env.DB.prepare(
-      "SELECT * FROM agentTasks WHERE lower(agentEmail)=? AND title NOT LIKE '%Revis\xE3o de ap\xF3lice%Flex Life%' AND title NOT LIKE 'Revisar a ap\xF3lice %' ORDER BY status,dueAt"
-    ).bind(owner).all();
-    return trpcResult(
-      rows.results.map((row) => ({ ...row, id: Number(row.id) }))
-    );
-  }
+  if (name === "agent.listTasks")return trpcResult(await paymentTasks(env,adminEmail.toLowerCase()));
+  if (name === "agent.markClientEmailRead"||name==="agent.dismissEmailNotification"){try{return trpcResult(await dismissEmailNotification(env,adminEmail.toLowerCase(),Number(input.id)));}catch(e){return trpcError(e.message);}}
   if (name === "agent.createTask") {
     await env.DB.prepare(
       "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt) VALUES (?,?,?,?)"
@@ -57150,7 +57167,7 @@ Affinity Financial Consulting`,
       lastSyncAt: row.lastSyncAt,
       lastError: row.lastError,
       requiresCode: Boolean(row.encryptedChallenge),
-      trustDevice: Number(row.trustDevice) !== 0,
+      trustDevice: true,
       passwordConfigured: true
     } : null);
   }
@@ -57166,7 +57183,7 @@ Affinity Financial Consulting`,
       return trpcError("Informe o e-mail e a senha do portal Five Rings");
     await env.DB.prepare(
       "INSERT INTO agentFiveRingsConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?,'pending',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='pending',lastError=NULL,updatedAt=CURRENT_TIMESTAMP"
-    ).bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
+    ).bind(owner, String(input.portalEmail).toLowerCase(), encryptedPassword, 1).run();
     return trpcResult({ success: true });
   }
   if (name === "agent.verifyFiveRingsConnection") {
@@ -57220,16 +57237,13 @@ Affinity Financial Consulting`,
     }
   }
   if (name === "agent.fiveRingsCredits") {
-    const owner = adminEmail.toLowerCase(), cached = await cachedFiveRingsCredits(env.DB, owner);
-    if (cached && !input.refresh) return trpcResult({ ...cached, error: null });
-    const connection = await env.DB.prepare("SELECT encryptedSession FROM agentFiveRingsConnections WHERE lower(agentEmail)=?").bind(owner).first();
-    if (!connection?.encryptedSession) return trpcResult({ ...cached, error: "Conecte ou sincronize o Five Rings nas configura\xE7\xF5es." });
-    try {
-      const session = JSON.parse(await decryptSmtpPassword(String(connection.encryptedSession), env.JWT_SECRET));
-      return trpcResult({ ...await refreshFiveRingsCredits(env, owner, session, fiveRingsFetch), error: null });
-    } catch (error) {
-      return trpcResult({ ...cached, error: String(error.message || "N\xE3o foi poss\xEDvel atualizar os cr\xE9ditos.") });
-    }
+    const owner=adminEmail.toLowerCase(),cached=await cachedFiveRingsCredits(env.DB,owner);
+    if(!input.refresh){const state=await env.DB.prepare('SELECT status,lastError,encryptedChallenge FROM agentFiveRingsConnections WHERE lower(agentEmail)=?').bind(owner).first();if(cached||state?.lastError||state?.encryptedChallenge)return trpcResult({...cached,error:state?.lastError||(state?.encryptedChallenge?'Confirme o código Five Rings nas configurações.':null),requiresCode:!!state?.encryptedChallenge});}
+    try{
+      const session=await freshFiveRingsSession(env,owner);
+      if(!session)return trpcResult({...cached,requiresCode:true,error:"Five Rings pediu um novo código. Confirme-o em Configurações → Portal Five Rings."});
+      return trpcResult({...await refreshFiveRingsCredits(env,owner,session,fiveRingsFetch),error:null});
+    }catch(error){return trpcResult({...cached,error:String(error.message||"Não foi possível atualizar os créditos.")});}
   }
   if (name === "agent.syncFiveRings") {
     const owner = adminEmail.toLowerCase();
@@ -57251,8 +57265,7 @@ Affinity Financial Consulting`,
       const login = activeSession ? null : await verifyFiveRingsLogin(String(row.portalEmail), password);
       if (activeSession) {
         const records2 = await readFiveRingsRecords(activeSession, activeSession.sections);
-        await refreshFiveRingsCredits(env, owner, activeSession, fiveRingsFetch).catch(() => {
-        });
+        await refreshFiveRingsCredits(env, owner, activeSession, fiveRingsFetch);
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
         const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
         for (const record of records2) {
@@ -57284,7 +57297,7 @@ Affinity Financial Consulting`,
         }
         const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(activeSession), env.JWT_SECRET);
         await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
-        if(input.portalEntry===true)await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
+        await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
         return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2 });
       }
       if (!login) throw new Error("N\xE3o foi poss\xEDvel iniciar a sess\xE3o");
@@ -57296,8 +57309,7 @@ Affinity Financial Consulting`,
         return trpcResult({ success: false, requiresCode: true, importedClients: 0, importedPolicies: 0, updatedPolicies: 0, message: "C\xF3digo solicitado. Informe-o para continuar sem recarregar a p\xE1gina." });
       }
       const records = await readFiveRingsRecords(login.session, login.sections);
-      await refreshFiveRingsCredits(env, owner, login.session, fiveRingsFetch).catch(() => {
-      });
+      await refreshFiveRingsCredits(env, owner, login.session, fiveRingsFetch);
       let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
       const knownPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
       for (const record of records) {
@@ -57348,7 +57360,7 @@ Affinity Financial Consulting`,
       await env.DB.prepare(
         "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
       ).bind(encryptedSession, owner).run();
-      if(input.portalEntry===true)await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
+      await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
       return trpcResult({ success: true, requiresCode: false, found: records.length, importedClients, importedPolicies, updatedPolicies });
     } catch (error) {
       const message = error instanceof Error ? error.message : "N\xE3o foi poss\xEDvel sincronizar o Five Rings";
@@ -57388,7 +57400,7 @@ Affinity Financial Consulting`,
     const clear = String(input.password || "");
     const encryptedPassword = clear ? await encryptSmtpPassword(clear, env.JWT_SECRET) : String(current?.encryptedPassword || "");
     if (String(input.portalEmail || "").trim().length < 2 || !encryptedPassword.startsWith("v1.")) return trpcError("Informe o nome de usu\xE1rio e a senha do portal National Life Group");
-    await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).trim(), encryptedPassword, input.trustDevice === false ? 0 : 1).run();
+    await env.DB.prepare("INSERT INTO agentNationalLifeConnections (agentEmail,portalEmail,encryptedPassword,trustDevice,status,lastError) VALUES (?,?,?,?, 'configured',NULL) ON CONFLICT(agentEmail) DO UPDATE SET portalEmail=excluded.portalEmail,encryptedPassword=excluded.encryptedPassword,trustDevice=excluded.trustDevice,status='configured',lastError=NULL,updatedAt=CURRENT_TIMESTAMP").bind(owner, String(input.portalEmail).trim(), encryptedPassword, 1).run();
     return trpcResult({ success: true, status: "configured" });
   }
   if (name === "agent.verifyNationalLifeConnection") {
@@ -59344,7 +59356,7 @@ async function runFiveRingsSyncAsAgent(env, agentEmail) {
     },
     body: JSON.stringify({ json: {} })
   });
-  const result = await runProcedure("agent.syncFiveRings", {}, request, env);
+  const result = await runProcedure("agent.syncFiveRings", {portalEntry:true}, request, env);
   await mergeClientSourcesForAgent(env, agentEmail);
   return result;
 }
@@ -59428,16 +59440,16 @@ __name(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
 __name2(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
 async function syncAllFiveRingsConnections(env) {
   const connections = await env.DB.prepare(
-    "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE status='connected' AND encryptedSession IS NOT NULL"
+    "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE encryptedPassword IS NOT NULL AND encryptedChallenge IS NULL AND status<>'error'"
   ).all();
   for (const connection of connections.results || []) {
     const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
-    if (!agentEmail) continue;
+    if (!agentEmail||!(await fiveRingsRequirement(env,agentEmail)).fiveRingsSyncDue) continue;
     try {
       await runFiveRingsSyncAsAgent(env, agentEmail);
     } catch (error) {
       console.error(JSON.stringify({
-        event: "five_rings_daily_sync_error",
+        event: "five_rings_biweekly_sync_error",
         agentEmail,
         message: error instanceof Error ? error.message : String(error)
       }));
@@ -59902,7 +59914,8 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
+  const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=3"><script src="/agent-theme.js?v=2"></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
  }
  return response;
 };

@@ -35,7 +35,7 @@ test('fresh bridge blocks sends, isolates attachments and preserves SQLite acros
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM messages').get().n,0);
       assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
       const key='a'.repeat(64);mkdirSync(path.join(directory,'media'),{recursive:true});writeFileSync(path.join(directory,'media',key),Buffer.from([1,2,3,4]));
-      db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKey,mime,filename,mediaKind,mediaState) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run('one@example.test','synthetic-media','123456789@c.us','','received',1,key,'audio/ogg',null,'audio','ready');
+      db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKey,mime,filename,mediaKind,mediaState) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run('one@example.test','synthetic-media','123456789@c.us','','received',Math.floor(Date.now()/1000),key,'audio/ogg',null,'audio','ready');
       db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKind) VALUES(?,?,?,?,?,?,?)').run('one@example.test','legacy-text','123456789@c.us','Texto simples','received',2,'file');
     }finally{db.close();}
     assert.equal((await request(base,'/media?id=synthetic-media','two@example.test')).status,404);

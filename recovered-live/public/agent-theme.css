@@ -1,0 +1,37 @@
+@media screen {
+html[data-agent-theme]{--agent-bg:#f3f6f8;--agent-surface:#fff;--agent-inset:#eaf0f5;--agent-text:#172b3a;--agent-muted:#526779;--agent-border:#cbd7e1;--agent-accent:#805e08;--agent-sent:#dcf4e7;color-scheme:light;--background:210 30% 97%;--foreground:208 40% 16%;--card:0 0% 100%;--card-foreground:208 40% 16%;--popover:0 0% 100%;--popover-foreground:208 40% 16%;--muted:210 30% 93%;--muted-foreground:208 20% 38%;--border:210 25% 82%;--input:210 25% 82%}
+html[data-agent-theme=dark]{--agent-bg:#08121f;--agent-surface:#102238;--agent-inset:#162d45;--agent-text:#eef4fa;--agent-muted:#b1c0cf;--agent-border:#40566d;--agent-accent:#eccb60;--agent-sent:#153f35;color-scheme:dark;--background:214 58% 8%;--foreground:210 55% 96%;--card:214 55% 14%;--card-foreground:210 55% 96%;--popover:214 55% 14%;--popover-foreground:210 55% 96%;--muted:214 45% 20%;--muted-foreground:210 25% 75%;--border:214 30% 34%;--input:214 30% 34%}
+html[data-agent-theme]{--bg:var(--agent-bg);--panel:var(--agent-surface);--soft:var(--agent-inset);--text:var(--agent-text);--sent:var(--agent-sent);--line:var(--agent-border)}
+html[data-agent-theme],html[data-agent-theme] body{background:var(--agent-bg)!important;color:var(--agent-text)!important}
+html[data-agent-theme] :is(main,.main,.layout,.chat,.app,[class*="min-h-screen"]){background:var(--agent-bg)!important;color:var(--agent-text)!important}
+html[data-agent-theme] :is(section,article,.card,.hero,.field,.item,.panel,.dialog,.provider,.sidebar,.conversations,.agent-unified-side,.agent-account-popover,[role=dialog],[role=menu],[class*="bg-black"],[class*="bg-white"],[class*="bg-[#"],[data-agent-surface]){background:var(--agent-surface)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(header,nav,.head,.chathead,.compose,.search,.number,.flag,.chat-header,.toolbar,.agent-account-trigger,[data-agent-inset]){background:var(--agent-inset)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(p,small,label,.muted,.empty,.loading,[class*="text-gray"],[class*="text-slate"],[class*="text-white"]){color:var(--agent-text)!important}
+html[data-agent-theme] :is(small,.muted,.meta,.note,.status,[class*="text-gray-4"],[class*="text-gray-5"],[class*="text-slate-4"],[class*="text-slate-5"]){color:var(--agent-muted)!important}
+html[data-agent-theme] :is(h1,h2,h3,h4,td,th,summary,strong){color:var(--agent-text)}
+html[data-agent-theme] :is(input,textarea,select){background:var(--agent-surface)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important;caret-color:var(--agent-text)!important}
+html[data-agent-theme] :is(input,textarea)::placeholder{color:var(--agent-muted)!important;opacity:1}
+html[data-agent-theme] :is(table,td,th,hr,[class*="border-"]){border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(a,.agent-brand,.agent-account-name,[class*="text-gold"],#notice){color:var(--agent-accent)!important}
+html[data-agent-theme] :is(button,.button,[role=button]){background:var(--agent-inset)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(button[type=submit],.primary,.affinity-number-save,#agent-number-reminder button,#profile-form button,#agent-theme-save,[class*="bg-gold"],.agent-unified-nav a.active){background:#dfb934!important;color:#142238!important;border-color:#b28c12!important;font-weight:700}
+html[data-agent-theme] .agent-unified-nav :is(a,summary),html[data-agent-theme] .agent-account-popover :is(a,button){color:var(--agent-text)!important}
+html[data-agent-theme] .agent-unified-nav :is(a,summary):hover,html[data-agent-theme] .agent-account-popover :is(a,button):hover{background:var(--agent-inset)!important}
+html[data-agent-theme] .messages{background:var(--agent-bg)!important}
+html[data-agent-theme] .bubble{background:var(--agent-inset)!important;color:var(--agent-text)!important}
+html[data-agent-theme] .message.mine{background:var(--agent-sent)!important;color:var(--agent-text)!important}
+html[data-agent-theme] .day,html[data-agent-theme] .chat-row.active,html[data-agent-theme] .chat-row:hover{background:var(--agent-inset)!important;color:var(--agent-text)!important}
+html[data-agent-theme] .connection{color:var(--agent-muted)!important}
+html[data-agent-theme] .bubble.out{background:var(--agent-sent)!important}
+html[data-agent-theme] #messages :is(article,.message),html[data-agent-theme] .message{background:var(--agent-inset)!important;color:var(--agent-text)!important}
+html[data-agent-theme] #messages .sent,html[data-agent-theme] .message.sent{background:var(--agent-sent)!important}
+html[data-agent-theme] #chats button{background:var(--agent-surface)!important;color:var(--agent-text)!important}
+html[data-agent-theme] :is([role=alert],#error,.error){color:var(--agent-text)!important;border-left-color:#d64c4c!important}
+html[data-agent-theme] #agent-appearance{background:var(--agent-surface)!important;color:var(--agent-text)!important;display:block!important;padding:24px;border:1px solid var(--agent-border);border-radius:14px;margin:20px 0}
+#agent-appearance .theme-options{display:flex;gap:20px;flex-wrap:wrap;margin:18px 0}
+#agent-appearance label{display:flex;align-items:center;gap:9px;cursor:pointer}
+#agent-appearance input{width:auto!important;accent-color:#b18b10}
+#agent-theme-save{padding:12px 24px;border:1px solid;border-radius:9px;cursor:pointer}
+html[data-agent-theme] :is(#agent-number,#my-agent-number,#agent-number-reminder input[name=number]){background:var(--agent-surface)!important;color:var(--agent-text)!important}
+html[data-agent-theme] :focus-visible{outline:3px solid #3984cc!important;outline-offset:3px}
+}

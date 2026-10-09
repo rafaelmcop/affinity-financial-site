@@ -148,7 +148,7 @@ function H() {
                       children: a ?? (l.isError && r.isError ? "Erro" : "…"),
                     }),
                     t.startsWith('Leadership') && e.jsxs('div',{className:'mt-3 text-sm text-gray-300',children:[e.jsx('p',{children:'Meta: '+(credits?.leadershipGoal?.toLocaleString('pt-BR')??'—')}),e.jsx('p',{children:'Faltam: '+(credits?.leadershipRemaining?.toLocaleString('pt-BR')??'—')})]}),
-                    t.startsWith('Total Credits') && e.jsxs('div',{className:'mt-3 text-xs text-gray-400',children:[e.jsx('p',{children:credits?.updatedAt?'Atualizado em '+new Date(credits.updatedAt.replace(' ','T')+'Z').toLocaleString('pt-BR'):'Valores oficiais da Five Rings'}),credits?.error&&e.jsx('p',{children:credits.error}),e.jsx('button',{type:'button',disabled:creditLoading,onClick:()=>updateCredits(true),className:'mt-2 text-gold underline',children:creditLoading?'Atualizando…':'Atualizar créditos'})]}),
+                    t.startsWith('Total Credits') && e.jsxs('div',{className:'mt-3 text-xs text-gray-400',children:[e.jsx('p',{children:credits?.updatedAt?'Atualizado em '+new Date(credits.updatedAt.replace(' ','T')+'Z').toLocaleString('pt-BR'):'Valores oficiais da Five Rings'}),credits?.error&&e.jsxs('div',{children:[e.jsx('p',{role:'alert',children:credits.error}),e.jsx('a',{href:'/agentes/configuracoes#five-rings',className:'inline-block mt-2 font-bold underline',children:'Resolver acesso Five Rings'})]}),e.jsx('button',{type:'button',disabled:creditLoading,onClick:()=>updateCredits(true),className:'mt-2 text-gold underline',children:creditLoading?'Atualizando…':'Atualizar créditos'})]}),
                   ],
                 },
                 t
@@ -247,7 +247,7 @@ function H() {
                                         e.jsx("span", {
                                           className:
                                             "mt-1 block truncate text-sm text-gray-200",
-                                          children: t.body,
+                                          children: String(t.body||"").split(/Em .{0,100}escreveu:|On .{0,100}wrote:/i)[0].trim(),
                                         }),
                                         e.jsx("span", {
                                           className:
@@ -281,7 +281,7 @@ function H() {
                                           },
                                           className:
                                             "ml-auto rounded-full border border-white/15 px-3 py-1 text-xs font-semibold text-gray-200 transition hover:border-white/40 hover:bg-white/10 disabled:opacity-50",
-                                          children: "Marcar como lida",
+                                          children: "Excluir notificação",
                                         }),
                                       ],
                                     }),
@@ -313,7 +313,7 @@ function H() {
                                       "mt-1 flex items-center gap-2 font-bold text-white",
                                     children: [
                                       e.jsx(f, { size: 18 }),
-                                      " Tarefas e pagamentos",
+                                      " Pagamentos atrasados",
                                     ],
                                   }),
                                 ],
