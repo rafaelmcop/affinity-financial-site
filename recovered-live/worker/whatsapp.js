@@ -21,7 +21,7 @@ export async function whatsappRoute(request,env,auth){
       if(!c)return json({error:'Cliente não encontrado.'},404);
       return json({id:c.id,name:c.name,phone:c.phone||c.whatsapp||''});
     }
-    if(!(['status','chats','messages','media'].includes(action)&&method==='GET')&&!(['connect','disconnect','send'].includes(action)&&method==='POST'))return json({error:'Ação inválida.'},405);
+    if(!(['status','chats','messages','media','group-contacts'].includes(action)&&method==='GET')&&!(['connect','disconnect','send'].includes(action)&&method==='POST'))return json({error:'Ação inválida.'},405);
     if(method==='POST'&&(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json')))return json({error:'Solicitação inválida.'},403);
     if(!env.WHATSAPP_BRIDGE_URL||!env.WHATSAPP_BRIDGE_SECRET)return json({state:'setup_required',error:'A conexão de teste ainda precisa ser ativada pelo administrador.'},503);
     const base=new URL(env.WHATSAPP_BRIDGE_URL);
@@ -35,9 +35,9 @@ export async function whatsappRoute(request,env,auth){
     const encoder=new TextEncoder(),payload=encode(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner:email.toLowerCase(),exp:Math.floor(Date.now()/1000)+60})));
     const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);
     const signature=encode(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));
-    const target=new URL('/'+action,base);if(action==='messages')target.searchParams.set('chat',url.searchParams.get('chat')||'');if(action==='media')target.searchParams.set('id',url.searchParams.get('id')||'');
+    const target=new URL('/'+action,base);if(action==='group-contacts')target.searchParams.set('group',url.searchParams.get('group')||'');if(action==='messages')target.searchParams.set('chat',url.searchParams.get('chat')||'');if(action==='media')target.searchParams.set('id',url.searchParams.get('id')||'');
     const upstreamHeaders={authorization:'Bearer '+payload+'.'+signature,'content-type':'application/json'};if(action==='media'&&request.headers.get('range'))upstreamHeaders.range=request.headers.get('range');
-    const response=await fetch(target,{method,headers:upstreamHeaders,...(method==='POST'?{body:body||'{}'}:{}),redirect:'error',signal:AbortSignal.timeout(['send','media'].includes(action)?60000:20000)});
+    const response=await fetch(target,{method,headers:upstreamHeaders,...(method==='POST'?{body:body||'{}'}:{}),redirect:'error',signal:AbortSignal.timeout(action==='group-contacts'?120000:['send','media'].includes(action)?60000:20000)});
     if(action==='media'&&response.ok){const headers={'content-type':response.headers.get('content-type')||'application/octet-stream','content-disposition':response.headers.get('content-disposition')||'inline','cache-control':'private, max-age=3600','x-content-type-options':'nosniff'};for(const name of ['accept-ranges','content-range','content-length'])if(response.headers.get(name))headers[name]=response.headers.get(name);return new Response(response.body,{status:response.status,headers});}
     if(!response.headers.get('content-type')?.includes('application/json')){console.error('whatsapp_bridge_non_json',JSON.stringify({action,status:response.status,type:response.headers.get('content-type')||'',length:response.headers.get('content-length')||''}));return json({error:'O serviço de WhatsApp não respondeu corretamente.'},502);}
     return new Response(response.body,{status:response.status,headers:{'content-type':'application/json','cache-control':'no-store'}});

@@ -1,3 +1,4 @@
+import {whatsappLeadsRoute} from './whatsapp-leads.js';
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -191,7 +192,7 @@ async function whatsappRoute(request, env, auth) {
       if (!c) return json2({ error: "Cliente n\xE3o encontrado." }, 404);
       return json2({ id: c.id, name: c.name, phone: c.phone || c.whatsapp || "" });
     }
-    if (!(["status", "chats", "messages", "media"].includes(action) && method === "GET") && !(["connect", "disconnect", "send"].includes(action) && method === "POST")) return json2({ error: "A\xE7\xE3o inv\xE1lida." }, 405);
+    if (!(["status", "chats", "messages", "media", "group-contacts"].includes(action) && method === "GET") && !(["connect", "disconnect", "send"].includes(action) && method === "POST")) return json2({ error: "A\xE7\xE3o inv\xE1lida." }, 405);
     if (method === "POST" && (request.headers.get("origin") !== url.origin || !request.headers.get("content-type")?.startsWith("application/json"))) return json2({ error: "Solicita\xE7\xE3o inv\xE1lida." }, 403);
     if (!env.WHATSAPP_BRIDGE_URL || !env.WHATSAPP_BRIDGE_SECRET) return json2({ state: "setup_required", error: "A conex\xE3o de teste ainda precisa ser ativada pelo administrador." }, 503);
     const base = new URL(env.WHATSAPP_BRIDGE_URL);
@@ -220,7 +221,7 @@ async function whatsappRoute(request, env, auth) {
     const encoder = new TextEncoder(), payload = encode(encoder.encode(JSON.stringify({ aud: "affinity-whatsapp", owner: email.toLowerCase(), exp: Math.floor(Date.now() / 1e3) + 60 })));
     const key2 = await crypto.subtle.importKey("raw", encoder.encode(env.WHATSAPP_BRIDGE_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const signature = encode(new Uint8Array(await crypto.subtle.sign("HMAC", key2, encoder.encode(payload))));
-    const target = new URL("/" + action, base);
+    const target = new URL("/" + action, base);if(action==='group-contacts')target.searchParams.set('group',url.searchParams.get('group')||'');
     if (action === "messages") target.searchParams.set("chat", url.searchParams.get("chat") || "");
     if (action === "media") target.searchParams.set("id", url.searchParams.get("id") || "");
     const upstreamHeaders = { authorization: "Bearer " + payload + "." + signature, "content-type": "application/json" };
@@ -59059,6 +59060,8 @@ var cloudflare_staging_default = {
   async fetch(request, env) {
     const preferenceResponse = await preferenceRoute(request, env);
     if (preferenceResponse) return preferenceResponse;
+    const leadsResponse = await whatsappLeadsRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
+    if(leadsResponse)return secureResponse(leadsResponse,{privateData:true});
     const whatsappResponse = await whatsappRoute(request, env, { email: getAdminEmail, access: getAdminAccess });
     if (whatsappResponse) return secureResponse(whatsappResponse, { privateData: true });
     const branding = await siteBrandingRoute(request, env, { email: getAdminEmail, access: getAdminAccess });

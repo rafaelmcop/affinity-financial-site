@@ -7,6 +7,7 @@ import test from 'node:test';
 const source = readFileSync(new URL('./worker/current-worker.js', import.meta.url), 'utf8');
 const security = source.slice(source.indexOf('var contentSecurityPolicy ='), source.indexOf('__name(secureResponse,'));
 const context = vm.createContext({ Response, Uint8Array, crypto: webcrypto,
+  applySiteBranding: response => response,
   toBase64Url: bytes => Buffer.from(bytes).toString('base64url'),
   HTMLRewriter: class {
     on(selector, handler) { this.handler = handler; return this; }

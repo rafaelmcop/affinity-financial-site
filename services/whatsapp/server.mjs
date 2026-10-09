@@ -1,3 +1,4 @@
+import {chatDirectory,groupContacts,groupId} from './directory.mjs';
 import http from 'node:http';
 import {createHash} from 'node:crypto';
 import {mkdirSync,existsSync,renameSync,writeFileSync,statSync,createReadStream} from 'node:fs';
@@ -33,7 +34,7 @@ const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mod
 initializeContacts(db);
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const maxMediaBytes=Math.min(128000000,Math.max(8000000,Number(process.env.WHATSAPP_MAX_MEDIA_BYTES)||64000000));
-const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
+const safeChat=value=>groupId(value)||/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
 const mediaKind=mime=>mime?.startsWith('image/')?'image':mime?.startsWith('audio/')?'audio':mime?.startsWith('video/')?'video':mime==='application/pdf'?'document':['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel'].includes(mime)?'spreadsheet':'file';
 const mediaFilename=(filename,mime)=>filename||'arquivo'+({'audio/ogg':'.ogg','audio/mpeg':'.mp3','audio/mp4':'.m4a','audio/wav':'.wav','image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp','image/gif':'.gif','video/mp4':'.mp4','video/webm':'.webm','application/pdf':'.pdf'}[String(mime||'').split(';')[0]]||'');
 const mediaKey=(owner,id)=>createHash('sha256').update(owner+'\0'+id).digest('hex');
@@ -111,7 +112,25 @@ const server=http.createServer(async(req,res)=>{
         return reply({ok:true,warning:revoked?null:'Conexão local removida. Confira Aparelhos conectados no celular e remova a sessão antiga, se ela ainda aparecer.'});
       }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
     }
-    if(action==='/chats'&&req.method==='GET')return reply(listContacts(db,owner));
+    if(action==='/chats'&&req.method==='GET'){
+      if(s?.state!=='ready')return reply(listContacts(db,owner));
+      if(!s.directory||Date.now()-s.directory.at>30000){
+        if(!s.directoryPromise)s.directoryPromise=chatDirectory(s.client).then(rows=>{s.directory={rows,at:Date.now()};return rows;}).finally(()=>s.directoryPromise=null);
+        await s.directoryPromise;
+      }
+      return reply(s.directory.rows);
+    }
+    if(action==='/group-contacts'&&req.method==='GET'){
+      if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
+      const id=url.searchParams.get('group')||'';if(!groupId(id))return reply({error:'Grupo inválido.'},400);
+      const jobs=s.groupExports||(s.groupExports=new Map());let job=jobs.get(id);
+      if(!job||Date.now()-job.at>300000){
+        job={at:Date.now(),result:null,error:false};jobs.set(id,job);
+        void groupContacts(s.client,id).then(result=>job.result=result).catch(()=>job.error=true);
+      }
+      if(job.error)return reply({error:'Não foi possível ler os participantes. Tente novamente em alguns minutos.'},503);
+      return job.result?reply(job.result):reply({pending:true},202);
+    }
     if(action==='/media'&&req.method==='GET'){
       const id=url.searchParams.get('id')||'',row=db.prepare('SELECT mediaKey,mime,filename FROM messages WHERE owner=? AND id=?').get(owner,id);
       if(!row?.mediaKey||!existsSync(path.join(mediaDir,row.mediaKey)))return reply({error:'Mídia não encontrada.'},404);

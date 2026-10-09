@@ -144,6 +144,7 @@ function E() {
                   id: "agent-crm-menu",
                   className: "mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3",
                   children: [
+                    e.jsx("button", {onClick:()=>window.location.assign("/agentes/crm/whatsapp"),className:"flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-gray-400 hover:bg-white/5 hover:text-white",children:"Leads do WhatsApp"}),
                     e.jsxs("button", {
                       onClick: () => window.location.assign("/agentes/crm?setor=clients"),
                       className: `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs ${t === "/agentes/crm" ? "bg-white/10 text-gold" : "text-gray-400 hover:bg-white/5 hover:text-white"}`,
