@@ -1,3 +1,4 @@
+import {filterDeliveries} from './message-list-utils.js?v=1';
 import {
   c as I,
   j as e,
@@ -271,8 +272,6 @@ function Q({
           }),
         ],
       }),
-      x,
-      s === "all" && e.jsx(N,{className:"border-gold/30 bg-[#0b1524] p-5",children:e.jsxs("div",{children:[e.jsx("span",{className:"rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300",children:"Automática"}),e.jsx("h2",{className:"mt-3 text-lg font-bold text-gold",children:"Boas-vindas às novas apólices"}),e.jsx("p",{className:"mt-2 text-sm text-gray-300",children:"Enviada automaticamente após a inclusão de uma nova apólice. Consulte os destinatários e as datas no histórico de envios."})]})}),
       t &&
         e.jsxs(N, {
           ref: C,
@@ -663,11 +662,12 @@ function Q({
         }),
       e.jsx("div", {
         className: "grid gap-4 md:grid-cols-2",
-        children: P.map(a =>
+        children: [...(s === "all" ? [{title:"Boas-vindas às novas apólices",node:e.jsx(B,{welcome:true})}] : []),...(x?[{title:"Pagamento devolvido",node:x}]:[]),...P.map(a => ({title:a.title||S[a.occasion],node:
           e.jsxs(
             N,
             {
-              className: "border-gold/20 bg-[#0b1524] p-5",
+              className: "border-gold/20 bg-[#0b1524] p-3",
+              style:{gap:0},
               children: [
                 e.jsxs("div", {
                   className: "flex justify-between gap-3",
@@ -679,7 +679,7 @@ function Q({
                           children: a.isActive ? "Ativa" : "Pausada",
                         }),
                         e.jsx("h3", {
-                          className: "mt-3 text-lg font-bold text-gold",
+                          className: "mt-1 text-base font-bold text-gold",
                           children: a.title || S[a.occasion],
                         }),
                       ],
@@ -690,6 +690,7 @@ function Q({
                         e.jsx(m, {
                           size: "icon",
                           variant: "outline",
+                          "aria-label": "Editar "+(a.title||S[a.occasion]),
                           onClick: () => R(a),
                           children: e.jsx(E, { size: 16 }),
                         }),
@@ -742,14 +743,14 @@ function Q({
                 }),
                 a.occasion==='birthday'&&a.clientId&&e.jsx('p',{className:'mt-2 text-sm',children:'Envio no aniversário: '+birthdayLabel((o.data||[]).find(client=>client.id===a.clientId)?.birthDate)+' · 8:30 AM (Nova York)'}),
                 e.jsx("p", {
-                  className: "mt-2 whitespace-pre-wrap text-sm text-gray-300",
+                  className: "mt-2 line-clamp-2 whitespace-pre-wrap text-xs text-gray-300",
                   children: w(a.message),
                 }),
               ],
             },
             a.id
           )
-        ),
+        }))].sort((a,b)=>a.title.localeCompare(b.title,"pt-BR",{sensitivity:"base"})).map((card,index)=>e.jsx("div",{children:card.node},card.title+"-"+index)),
       }),
       s === "all" && showHistory && e.jsx(J, {}),
     ],
@@ -758,18 +759,31 @@ function Q({
 function isPolicyWelcome(message){return message.occasion==='custom'&&message.title==='Boas-vindas à Affinity';}
 function recipientLink(name,id){return id?e.jsx('a',{href:'/agentes/cliente?clientId='+Number(id),className:'font-semibold underline underline-offset-2',onClick:event=>event.stopPropagation(),children:name}):name;}
 function birthdayLabel(value){const raw=String(value||'').trim();const iso=raw.match(/^\d{4}-(\d{2})-(\d{2})/),american=raw.match(/^(\d{1,2})\/(\d{1,2})/);if(iso)return iso[2]+'/'+iso[1];if(american)return american[2].padStart(2,'0')+'/'+american[1].padStart(2,'0');return 'não informado';}
-function B() {
-  const s = p.agent.getPaymentReturnTemplate.useQuery(),
-    u = p.agent.savePaymentReturnTemplate.useMutation(),
-    [x, g] = v.useState(k),
-    [o, b] = v.useState(M),
+const welcomeSubject="Bem-vindo(a) à Affinity Financial Consulting",welcomeMessage=`Ol\xE1, {nome}! \u{1F499}
+
+Seja muito bem-vindo(a) \xE0 Affinity Financial Consulting. \xC9 uma satisfa\xE7\xE3o ter voc\xEA conosco.
+
+Sua ap\xF3lice n\xBA {apolice numero} j\xE1 consta em nosso acompanhamento. A partir de agora, estaremos \xE0 disposi\xE7\xE3o para ajudar com d\xFAvidas, atualiza\xE7\xF5es e revis\xF5es sempre que precisar.
+
+Salve nosso contato e conte comigo durante toda a sua jornada de prote\xE7\xE3o e planejamento financeiro.
+
+{agente_nome}
+\u{1F4DE} {agente_telefone}
+Affinity Financial Consulting
+\u{1F310} www.affinityfc.org`;;
+function B({welcome=false}={}) {
+  const s = p.agent[welcome?"getWelcomeTemplate":"getPaymentReturnTemplate"].useQuery(),
+    u = p.agent[welcome?"saveWelcomeTemplate":"savePaymentReturnTemplate"].useMutation(),
+    [x, g] = v.useState(welcome?welcomeSubject:k),
+    [o, b] = v.useState(welcome?welcomeMessage:M),
     [i, c] = v.useState(!1);
   return (
     v.useEffect(() => {
       s.data && (g(s.data.subject), b(s.data.message));
     }, [s.data]),
     e.jsxs(N, {
-      className: "border-gold/30 bg-[#0b1524] p-5",
+      className: "border-gold/30 bg-[#0b1524] p-3",
+      style:{gap:0},
       children: [
         e.jsxs("div", {
           className: "flex items-start justify-between gap-4",
@@ -782,13 +796,13 @@ function B() {
                   children: "Ativa",
                 }),
                 e.jsx("h2", {
-                  className: "mt-3 text-lg font-bold text-gold",
-                  children: "Pagamento devolvido",
+                  className: "mt-1 text-base font-bold text-gold",
+                  children: welcome?"Boas-vindas às novas apólices":"Pagamento devolvido",
                 }),
                 e.jsx("p", {
                   className:
                     "mt-2 text-xs uppercase tracking-wider text-gray-500",
-                  children: "Modelo automático · E-mail individual",
+                  children: welcome?"Envio automático · Novas apólices":"Modelo automático · E-mail individual",
                 }),
                 e.jsx("p", {
                   className: "mt-3 text-sm font-semibold text-white",
@@ -797,7 +811,7 @@ function B() {
                 !i &&
                   e.jsx("p", {
                     className:
-                      "mt-2 line-clamp-3 whitespace-pre-wrap text-sm text-gray-300",
+                      "mt-2 line-clamp-2 whitespace-pre-wrap text-xs text-gray-300",
                     children: o,
                   }),
               ],
@@ -805,7 +819,7 @@ function B() {
             e.jsx(m, {
               size: "icon",
               variant: "outline",
-              "aria-label": "Editar modelo de pagamento devolvido",
+              "aria-label": welcome?"Editar boas-vindas":"Editar modelo de pagamento devolvido",
               onClick: () => c(r => !r),
               children: e.jsx(E, { size: 16 }),
             }),
@@ -817,7 +831,7 @@ function B() {
             children: [
               e.jsxs("p", {
                 className: "text-sm text-gray-400",
-                children: [
+                children: welcome?"Enviada após incluir uma nova apólice. Use {nome}, {apolice numero}, {agente_nome} e {agente_telefone} para preencher os dados automaticamente.":[
                   "Este texto é enviado quando o sistema identifica com segurança o cliente e a apólice. Use ",
                   e.jsx("b", { children: "{cliente}" }),
                   ", ",
@@ -861,7 +875,7 @@ function B() {
                         (await u.mutateAsync({ subject: x, message: o }),
                           await s.refetch(),
                           c(!1),
-                          h.success("Modelo de pagamento devolvido salvo"));
+                          h.success(welcome?"Modelo de boas-vindas salvo":"Modelo de pagamento devolvido salvo"));
                       } catch (r) {
                         h.error(
                           r instanceof Error
@@ -875,7 +889,7 @@ function B() {
                   e.jsx(m, {
                     variant: "outline",
                     onClick: () => {
-                      (g(k), b(M));
+                      (g(welcome?welcomeSubject:k), b(welcome?welcomeMessage:M));
                     },
                     children: "Restaurar padrão",
                   }),
@@ -899,19 +913,9 @@ function J() {
     [expandedId, setExpandedId] = v.useState(null),
     [folder, setFolder] = v.useState("all"),
     [period, setPeriod] = v.useState("all"),
-    folders = [...new Set(u.map(i => String(i.title || i.subject || "Outras mensagens")))].sort((a,b) => a.localeCompare(b,"pt-BR")),
-    o = u.filter(i => {
-      if (x !== "all" && i.status !== x) return false;
-      if (folder !== "all" && String(i.title || i.subject || "Outras mensagens") !== folder) return false;
-      if (period === "all") return true;
-      const raw = String(i.date || ""), date = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw) ? raw.replace(" ","T")+"Z" : raw).getTime();
-      if (!Number.isFinite(date)) return false;
-      const now = Date.now(), cutoff = new Date(now);
-      if (period === "months6") cutoff.setMonth(cutoff.getMonth()-6);
-      else if (period === "year") cutoff.setFullYear(cutoff.getFullYear()-1);
-      else cutoff.setTime(now-Number(period)*86400000);
-      return date >= cutoff.getTime() && date <= now;
-    }),
+    periodRows=filterDeliveries(u,{status:x,period}),
+    folders = [...new Set(periodRows.map(i => String(i.title || i.subject || "Outras mensagens")))].sort((a,b) => a.localeCompare(b,"pt-BR")),
+    o = periodRows.filter(i=>folder==='all'||String(i.title||i.subject||'Outras mensagens')===folder).sort((a,b)=>String(a.title||a.subject||'').localeCompare(String(b.title||b.subject||''),'pt-BR',{sensitivity:'base'})||String(b.date||'').localeCompare(String(a.date||''))),
     b = i => {
       if (!i) return "Horário automático";
       const raw = String(i),
@@ -983,7 +987,7 @@ function J() {
       }),
       e.jsxs("div", {className:"mt-4 flex flex-wrap gap-3", children:[
         e.jsxs("label", {children:["Pasta ", e.jsx("select", {className:"rounded border border-white/20 bg-black p-2", value:folder, onChange:event=>setFolder(event.target.value), children:[e.jsx("option",{value:"all",children:"Todas as pastas"}),...folders.map(value=>e.jsx("option",{value,children:value},value))]})]}),
-        e.jsxs("label", {children:["Enviadas em ",e.jsx("select",{className:"rounded border border-white/20 bg-black p-2",value:period,onChange:event=>{setPeriod(event.target.value);if(event.target.value!=="all")g("sent")},children:[["all","Todo o histórico"],["1","Último dia"],["7","Últimos 7 dias"],["30","Últimos 30 dias"],["months6","Últimos 6 meses"],["year","Último ano"]].map(([value,label])=>e.jsx("option",{value,children:label},value))})]})
+        e.jsxs("label", {children:["Enviadas em ",e.jsx("select",{className:"rounded border border-white/20 bg-black p-2",value:period,onChange:event=>{setPeriod(event.target.value);setFolder("all");if(event.target.value!=="all")g("sent")},children:[["all","Todo o histórico"],["1","Último dia"],["7","Últimos 7 dias"],["30","Últimos 30 dias"],["months6","Últimos 6 meses"],["year","Último ano"]].map(([value,label])=>e.jsx("option",{value,children:label},value))})]})
       ]}),
       e.jsxs("div", {
         className: "mt-5 max-h-[34rem] space-y-3 overflow-y-auto pr-1",
@@ -999,7 +1003,7 @@ function J() {
             return e.jsx(
               "div",
               {
-                className: `rounded-xl border border-white/10 bg-black/25 p-4 ${i.status === "sent" ? "cursor-pointer hover:border-gold/40" : ""}`,
+                className: `rounded-xl border border-white/10 bg-black/25 p-3 ${i.status === "sent" ? "cursor-pointer hover:border-gold/40" : ""}`,
                 onClick: () =>
                   i.status === "sent" &&
                   setExpandedId(current => (current === i.id ? null : i.id)),

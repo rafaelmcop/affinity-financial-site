@@ -1,3 +1,4 @@
+import {welcomeTemplate,saveWelcomeTemplate} from './welcome-template.js';
 import {automationCycle,completeAutomationCycle} from './automation-cycles.js';
 import {weeklyMeetings,ownMeeting} from './weekly-calendar.js';
 import {claimDailyCalendarSync} from './calendar-daily-sync.js';
@@ -54728,19 +54729,9 @@ __name2(easternTodayBoundsISOString, "easternTodayBoundsISOString");
 async function schedulePolicyWelcome(env, agentEmail, clientId, clientName, policyNumber) {
   const existing = await env.DB.prepare("SELECT id FROM scheduledMessages WHERE lower(agentEmail)=? AND clientId=? AND occasion='custom' AND title='Boas-vindas \xE0 Affinity' LIMIT 1").bind(String(agentEmail).toLowerCase(), Number(clientId)).first();
   if (existing) return false;
-  const message = `Ol\xE1, {nome}! \u{1F499}
-
-Seja muito bem-vindo(a) \xE0 Affinity Financial Consulting. \xC9 uma satisfa\xE7\xE3o ter voc\xEA conosco.
-
-Sua ap\xF3lice n\xBA ${String(policyNumber || "").trim() || "\u2014"} j\xE1 consta em nosso acompanhamento. A partir de agora, estaremos \xE0 disposi\xE7\xE3o para ajudar com d\xFAvidas, atualiza\xE7\xF5es e revis\xF5es sempre que precisar.
-
-Salve nosso contato e conte comigo durante toda a sua jornada de prote\xE7\xE3o e planejamento financeiro.
-
-{agente_nome}
-\u{1F4DE} {agente_telefone}
-Affinity Financial Consulting
-\u{1F310} www.affinityfc.org`;
-  await env.DB.prepare("INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,message,scheduledAt,isActive) VALUES (?,?,'custom','email','Boas-vindas \xE0 Affinity','Bem-vindo(a) \xE0 Affinity Financial Consulting','individual',?,?,1)").bind(String(agentEmail).toLowerCase(), Number(clientId), message, nextEastern830ISOString()).run();
+  const template=await welcomeTemplate(env.DB,agentEmail);
+  const message=template.message.replaceAll('{apolice numero}',String(policyNumber||'').trim()||'—');
+  await env.DB.prepare("INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,message,scheduledAt,isActive) VALUES (?,?,'custom','email','Boas-vindas \xE0 Affinity',?,'individual',?,?,1)").bind(String(agentEmail).toLowerCase(), Number(clientId), template.subject, message, nextEastern830ISOString()).run();
   await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'status',?,?)").bind(Number(clientId), `Mensagem de boas-vindas programada para ${String(clientName || "Cliente")}, ap\xF3s a inclus\xE3o da ap\xF3lice ${String(policyNumber || "")}.`, String(agentEmail).toLowerCase()).run();
   return true;
 }
@@ -57486,6 +57477,12 @@ Affinity Financial Consulting`,
       await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(message.slice(0, 500), owner).run();
       return trpcError(message);
     }
+  }
+  if(name==='agent.getWelcomeTemplate')return trpcResult(await welcomeTemplate(env.DB,adminEmail));
+  if(name==='agent.saveWelcomeTemplate'){
+    const subject=String(input.subject||'').trim(),message=String(input.message||'').trim();
+    if(!subject||subject.length>500||!message||message.length>10000)return trpcError('Revise o assunto e a mensagem');
+    await saveWelcomeTemplate(env.DB,adminEmail,subject,message);return trpcResult({success:true});
   }
   if (name === "agent.getPaymentReturnTemplate") {
     const row = await env.DB.prepare(

@@ -42,7 +42,7 @@ export function procedureFeature(name){
  if(/Review|review|ServiceFeedback|PublicProfile/.test(op))return 'reviews';
  if(/Task|Tasks/.test(op))return 'tasks';
  if(/Policy|Policies|Application|Applications|PcSheet|Spreadsheet|NationalLife/.test(op))return 'policies';
- if(/Email|Mailbox|mailbox|Inbox|Delivery|delivery|ScheduledMessage|scheduleMessage|Automation|automation|Payment/.test(op))return 'email';
+ if(/Email|Mailbox|mailbox|Inbox|Delivery|delivery|ScheduledMessage|scheduleMessage|Automation|automation|Payment|Welcome/.test(op))return 'email';
  if(/Client|Clients/.test(op))return 'crm';
  return 'messages';
 }
