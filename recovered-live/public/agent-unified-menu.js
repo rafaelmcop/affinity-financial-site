@@ -5,7 +5,7 @@
   if(!path.startsWith("/agentes/")&&!path.startsWith("/agent-")&&!(path==="/candidaturas.html"&&query.get("portal")==="agent"))return;
   if(["/agentes/login","/agentes/registrar"].includes(path))return;
   const contrast=document.createElement('link');contrast.rel='stylesheet';contrast.href='/agent-number-contrast.css?v=1';document.head.appendChild(contrast);
-  const setup=document.createElement('script');setup.src='/staff-setup-check.js?v=20261009-marketing-1';setup.defer=true;document.head.appendChild(setup);
+  const setup=document.createElement('script');setup.src='/staff-setup-check.js?v=20261009-number-lock-1';setup.defer=true;document.head.appendChild(setup);
   const matches = (...items) => items.some(item => path === item || path.startsWith(`${item}/`));
   const trpc = async name => {
     const input = encodeURIComponent(JSON.stringify({ json: {} }));
