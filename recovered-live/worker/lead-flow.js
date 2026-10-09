@@ -13,7 +13,12 @@ export async function leadSchema(env){
  "CREATE TABLE IF NOT EXISTS centralLeadOutcomes (id INTEGER PRIMARY KEY AUTOINCREMENT,phone TEXT NOT NULL,agent TEXT NOT NULL,response TEXT NOT NULL,attempts INTEGER NOT NULL,stage TEXT NOT NULL,note TEXT NOT NULL,appointment TEXT,createdAt TEXT DEFAULT CURRENT_TIMESTAMP)",
  "CREATE TABLE IF NOT EXISTS centralExcludedGroups (groupId TEXT PRIMARY KEY,name TEXT NOT NULL,excludedBy TEXT NOT NULL,createdAt TEXT DEFAULT CURRENT_TIMESTAMP)",
  'CREATE INDEX IF NOT EXISTS centralLeadQueue ON centralLeadAssignments(agent,nextAt)',
- 'CREATE INDEX IF NOT EXISTS centralLeadSourceOwner ON centralLeadSources(owner,phone)'
+ 'CREATE INDEX IF NOT EXISTS centralLeadSourceOwner ON centralLeadSources(owner,phone)',
+ 'CREATE INDEX IF NOT EXISTS centralLeadOutcomePhone ON centralLeadOutcomes(phone,id)',
+ 'CREATE INDEX IF NOT EXISTS centralLeadCategory ON centralLeads(isUS,suppressed,createdAt,phone)',
+ 'CREATE INDEX IF NOT EXISTS centralLeadStage ON centralLeads(stage,suppressed)',
+ 'CREATE INDEX IF NOT EXISTS centralLeadLease ON centralLeads(leaseOwner,leaseUntil)',
+ 'CREATE TABLE IF NOT EXISTS centralLeadMigrations (version TEXT PRIMARY KEY,completedAt TEXT DEFAULT CURRENT_TIMESTAMP)'
  ])await env.DB.prepare(sql).run();
 }
 export async function storeCentralContacts(env,source,contacts){
@@ -43,17 +48,20 @@ export async function configuredAccess(env,staff){
 async function adminIdentity(request,env,auth){const email=await auth.email(request,env);if(!email)return null;const a=await auth.access(email,env);return a.isMaster||(a.account&&Number(a.account.isActive)&&a.account.status==='approved'&&['admin','both'].includes(a.account.accountType))?email.toLowerCase():null;}
 async function inputJSON(request,url,max=600000){if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))throw Object.assign(Error('Solicitação inválida.'),{status:403});const s=await request.text();if(s.length>max)throw Object.assign(Error('Solicitação muito grande.'),{status:413});try{return JSON.parse(s)}catch{throw Object.assign(Error('Dados inválidos.'),{status:400})}}
 async function backfill(env){
+ if(await env.DB.prepare('SELECT version FROM centralLeadMigrations WHERE version=?').bind('legacy-central-v1').first())return;
  // Legacy imports remain intact; central records are deduplicated and sources preserved.
  const exists=async name=>!!await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").bind(name).first();
  if(await exists('affiliateWhatsappLeads')){
  await env.DB.prepare("INSERT OR IGNORE INTO centralLeads(phone,name,isUS) SELECT phone,name,0 FROM affiliateWhatsappLeads").run();
  await env.DB.prepare("INSERT INTO centralLeadSources(phone,owner,kind,sourceName,sourceEmail,groupsJson) SELECT phone,'affiliate:'||affiliateId,'affiliate',affiliateName,affiliateEmail,groupsJson FROM affiliateWhatsappLeads WHERE 1 ON CONFLICT(phone,owner) DO UPDATE SET groupsJson=excluded.groupsJson").run();}
  if(await exists('whatsappLeads')){
+ await env.DB.prepare('CREATE INDEX IF NOT EXISTS whatsappLeadPhoneStage ON whatsappLeads(phone,stage,updatedAt)').run();
  await env.DB.prepare("INSERT OR IGNORE INTO centralLeads(phone,name,isUS,stage,suppressed) SELECT phone,name,0,stage,CASE WHEN stage IN ('Recusada','Sem interesse','Já tem seguro') THEN 1 ELSE 0 END FROM whatsappLeads ORDER BY id").run();
  await env.DB.prepare("INSERT OR IGNORE INTO centralLeadSources(phone,owner,kind,sourceName,sourceEmail,groupsJson) SELECT l.phone,'agent:'||l.owner,'agent',coalesce(a.name,l.owner),l.owner,coalesce((SELECT json_group_array(json_object('id',g.groupId,'name',g.groupName)) FROM whatsappLeadGroups g WHERE g.owner=l.owner AND g.leadId=l.id),'[]') FROM whatsappLeads l LEFT JOIN adminAccounts a ON lower(a.email)=l.owner").run();
  await env.DB.prepare("UPDATE centralLeads SET suppressed=1,stage=(SELECT l.stage FROM whatsappLeads l WHERE l.phone=centralLeads.phone AND l.stage IN ('Recusada','Sem interesse','Já tem seguro') ORDER BY l.updatedAt DESC LIMIT 1) WHERE suppressed=0 AND EXISTS(SELECT 1 FROM whatsappLeads l WHERE l.phone=centralLeads.phone AND l.stage IN ('Recusada','Sem interesse','Já tem seguro'))").run();}
  // Conservative US classification: unknown/shared +1 prefixes remain admin-only.
  await env.DB.prepare("UPDATE centralLeads SET isUS=CASE WHEN length(phone)=12 AND substr(phone,1,2)='+1' AND substr(phone,6,1) BETWEEN '2' AND '9' AND substr(phone,3,3) IN ("+[...codes].map(c=>"'"+c+"'").join(',')+") THEN 1 ELSE 0 END").run();
+ await env.DB.prepare('INSERT OR IGNORE INTO centralLeadMigrations(version) VALUES(?)').bind('legacy-central-v1').run();
 }
 export async function protectInternalContacts(env){
  const exists=async name=>!!await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").bind(name).first();
@@ -62,6 +70,7 @@ export async function protectInternalContacts(env){
  if(await exists('crmClients')){const rows=await env.DB.prepare("SELECT phone,whatsapp,lower(trim(status)) AS status FROM crmClients WHERE lower(trim(status)) IN ('client','completed','active','agent')").all();await block(rows.results.filter(c=>c.status==='agent').flatMap(c=>[c.phone,c.whatsapp]),'Agente');await block(rows.results.filter(c=>c.status!=='agent').flatMap(c=>[c.phone,c.whatsapp]),'Cliente ativo');}
  if(await exists('agentPolicies')){const rows=await env.DB.prepare("SELECT p.clientPhone,c.phone,c.whatsapp FROM agentPolicies p LEFT JOIN crmClients c ON c.id=p.clientId WHERE lower(replace(replace(replace(trim(p.status),'_',''),'-',''),' ','')) IN ('active','ativa','ativo','inforce','issued')").all();await block(rows.results.flatMap(c=>[c.clientPhone,c.phone,c.whatsapp]),'Cliente ativo');}
  if(await exists('adminAccounts')){const staff=await env.DB.prepare("SELECT phone FROM adminAccounts WHERE isActive=1 AND status='approved' AND accountType IN ('agent','both')").all();await block(staff.results.map(c=>c.phone),'Agente');}
+ if(!await env.DB.prepare('SELECT groupId FROM centralExcludedGroups LIMIT 1').first()&&!await env.DB.prepare("SELECT phone FROM centralLeads WHERE stage='Grupo excluído' LIMIT 1").first())return;
  await env.DB.prepare("UPDATE centralLeads SET suppressed=0,stage='Importados' WHERE stage='Grupo excluído' AND NOT EXISTS(SELECT 1 FROM centralLeadSources s,json_each(s.groupsJson) g JOIN centralExcludedGroups e ON e.groupId=json_extract(g.value,'$.id') WHERE s.phone=centralLeads.phone)").run();
  await env.DB.prepare("UPDATE centralLeads SET suppressed=1,stage='Grupo excluído',leaseOwner=NULL,leaseUntil=0 WHERE suppressed=0 AND EXISTS(SELECT 1 FROM centralLeadSources s,json_each(s.groupsJson) g JOIN centralExcludedGroups e ON e.groupId=json_extract(g.value,'$.id') WHERE s.phone=centralLeads.phone)").run();
 }

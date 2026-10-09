@@ -59281,10 +59281,11 @@ var cloudflare_staging_default = {
           message: error instanceof Error ? error.message : String(error)
         })
       );
+      const quotaExceeded = /daily row (?:read|write) limit/i.test(String(error?.message || error));
       return secureResponse(
         jsonResponse(
-          [trpcError(/daily row write limit/i.test(String(error?.message || error)) ? "O banco atingiu o limite di\xE1rio de grava\xE7\xF5es do Cloudflare. Esta opera\xE7\xE3o n\xE3o p\xF4de ser conclu\xEDda. O administrador precisa liberar o plano Workers/D1 ou aguardar a renova\xE7\xE3o \xE0s 00:00 UTC." : "Erro interno do portal", "INTERNAL_SERVER_ERROR", 500)],
-          500
+          [trpcError(quotaExceeded ? "O banco do portal atingiu o limite diário da Cloudflare. O acesso depende da liberação do plano ou da renovação do limite às 00:00 UTC (20h em Nova York)." : "Erro interno do portal", quotaExceeded ? "SERVICE_UNAVAILABLE" : "INTERNAL_SERVER_ERROR", quotaExceeded ? 503 : 500)],
+          quotaExceeded ? 503 : 500
         ),
         { privateData: true }
       );
