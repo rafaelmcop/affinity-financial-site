@@ -137,7 +137,7 @@ function Q({
               !(g.data || []).some(
                 l => l.clientId === u && l.occasion === a.occasion
               ))
-          : !0
+          : !isPolicyWelcome(a)
     ),
     T = () =>
       n({
@@ -272,6 +272,7 @@ function Q({
         ],
       }),
       x,
+      s === "all" && e.jsx(N,{className:"border-gold/30 bg-[#0b1524] p-5",children:e.jsxs("div",{children:[e.jsx("span",{className:"rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-300",children:"Automática"}),e.jsx("h2",{className:"mt-3 text-lg font-bold text-gold",children:"Boas-vindas às novas apólices"}),e.jsx("p",{className:"mt-2 text-sm text-gray-300",children:"Enviada automaticamente após a inclusão de uma nova apólice. Consulte os destinatários e as datas no histórico de envios."})]})}),
       t &&
         e.jsxs(N, {
           ref: C,
@@ -731,8 +732,7 @@ function Q({
                     "Para:",
                     " ",
                     a.audience === "individual"
-                      ? (o.data || []).find(l => l.id === a.clientId)?.name ||
-                        "1 cliente"
+                      ? recipientLink((o.data || []).find(l => l.id === a.clientId)?.name || "1 cliente",a.clientId)
                       : a.audience === "all" && a.occasion !== "custom"
                         ? "Todos os contatos atuais e futuros"
                         : a.selectedClientIds
@@ -740,6 +740,7 @@ function Q({
                         : `Grupo ${a.recipientGroup || "selecionado"}`,
                   ],
                 }),
+                a.occasion==='birthday'&&a.clientId&&e.jsx('p',{className:'mt-2 text-sm',children:'Envio no aniversário: '+birthdayLabel((o.data||[]).find(client=>client.id===a.clientId)?.birthDate)+' · 8:30 AM (Nova York)'}),
                 e.jsx("p", {
                   className: "mt-2 whitespace-pre-wrap text-sm text-gray-300",
                   children: w(a.message),
@@ -754,6 +755,9 @@ function Q({
     ],
   });
 }
+function isPolicyWelcome(message){return message.occasion==='custom'&&message.title==='Boas-vindas à Affinity';}
+function recipientLink(name,id){return id?e.jsx('a',{href:'/agentes/cliente?clientId='+Number(id),className:'font-semibold underline underline-offset-2',onClick:event=>event.stopPropagation(),children:name}):name;}
+function birthdayLabel(value){const raw=String(value||'').trim();const iso=raw.match(/^\d{4}-(\d{2})-(\d{2})/),american=raw.match(/^(\d{1,2})\/(\d{1,2})/);if(iso)return iso[2]+'/'+iso[1];if(american)return american[2].padStart(2,'0')+'/'+american[1].padStart(2,'0');return 'não informado';}
 function B() {
   const s = p.agent.getPaymentReturnTemplate.useQuery(),
     u = p.agent.savePaymentReturnTemplate.useMutation(),
@@ -1028,14 +1032,13 @@ function J() {
                         e.jsxs("p", {
                           className: "mt-1 text-sm text-gray-300",
                           children: [
-                            i.clientName ||
-                              "Destinatários definidos pela automação",
+                            recipientLink(i.clientName || "Destinatários definidos pela automação",i.clientId),
                             i.recipientEmail ? ` · ${i.recipientEmail}` : "",
                           ],
                         }),
                         e.jsx("p", {
                           className: "mt-1 text-xs text-gray-500",
-                          children: b(i.date),
+                          children: i.occasion==='birthday'&&i.clientId?'Envio no aniversário: '+birthdayLabel(i.birthDate)+' · 8:30 AM (Nova York)':b(i.date),
                         }),
                         i.status === "sent" &&
                           e.jsx("p", {
@@ -1061,8 +1064,10 @@ function J() {
                                     children: [
                                       e.jsx("p", {
                                         className: "font-semibold text-white",
-                                        children: recipient.name,
+                                        children: recipientLink(recipient.name,recipient.clientId),
                                       }),
+                                      e.jsx('p',{className:'mt-1 text-gray-400',children:'Enviado em '+b(recipient.sentAt)}),
+                                      recipient.birthDate&&e.jsx('p',{className:'mt-1 text-gray-400',children:'Aniversário: '+birthdayLabel(recipient.birthDate)}),
                                       recipient.email &&
                                         e.jsx("p", {
                                           className: "mt-0.5 text-gray-400",

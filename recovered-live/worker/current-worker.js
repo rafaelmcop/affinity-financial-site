@@ -1,3 +1,4 @@
+import {automationCycle,completeAutomationCycle} from './automation-cycles.js';
 import {weeklyMeetings,ownMeeting} from './weekly-calendar.js';
 import {claimDailyCalendarSync} from './calendar-daily-sync.js';
 import {addressBookRoute} from './address-book.js';
@@ -57058,9 +57059,9 @@ Affinity Financial Consulting`,
   if (name === "agent.deliveryLog") {
     const owner = adminEmail.toLowerCase();
     const [future, deliveries, failures] = await env.DB.batch([
-      env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
-      env.DB.prepare("SELECT MIN(d.id) AS id,m.id AS messageId,m.title,m.subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt,group_concat(coalesce(c.name,'') || char(31) || coalesce(c.email,''),char(30)) AS recipients FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? GROUP BY m.id,m.title,m.subject,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
-      env.DB.prepare("SELECT id,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' ORDER BY attemptedAt DESC LIMIT 100").bind(owner)
+      env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail,c.birthDate FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
+      env.DB.prepare("SELECT MIN(d.id) AS id,m.id AS messageId,m.title,m.subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt,json_group_array(json_object('clientId',d.clientId,'name',coalesce(c.name,''),'email',c.email,'sentAt',d.sentAt,'birthDate',c.birthDate)) AS recipients FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? GROUP BY m.id,m.title,m.subject,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
+      env.DB.prepare("SELECT id,clientId,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' ORDER BY attemptedAt DESC LIMIT 100").bind(owner)
     ]);
     const upcoming = (future.results || []).map((row) => {
       let recipientCount = row.clientId ? 1 : null;
@@ -57072,17 +57073,14 @@ Affinity Financial Consulting`,
       const monthNames = ["", "janeiro", "fevereiro", "mar\xE7o", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
       const monthlyDate = Number(row.monthNumber) >= 1 && Number(row.monthNumber) <= 12 ? `Todo dia 1\xBA de ${monthNames[Number(row.monthNumber)]}, 8:30 AM` : "M\xEAs de refer\xEAncia pendente";
       const recurring = { birthday: "Em cada anivers\xE1rio, 8:30 AM", thanksgiving: "No Dia de A\xE7\xE3o de Gra\xE7as, 8:30 AM", christmas: "Em 25 de dezembro, 8:30 AM", new_year: "Em 1\xBA de janeiro, 8:30 AM", policy_anniversary: "15 dias antes da revis\xE3o Flex Life, 8:30 AM", monthly: monthlyDate };
-      return { id: `scheduled-${row.id}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : recipientCount ? `${recipientCount} destinat\xE1rio(s)` : String(row.audience) === "all" ? "Todos os clientes eleg\xEDveis" : "Grupo selecionado", recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "scheduled", date: row.scheduledAt || recurring[String(row.occasion)] || "Programa\xE7\xE3o autom\xE1tica", errorMessage: null };
+      return { id: `scheduled-${row.id}`, clientId:Number(row.clientId)||null,birthDate:row.birthDate||null,occasion:row.occasion, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : recipientCount ? `${recipientCount} destinat\xE1rio(s)` : String(row.audience) === "all" ? "Todos os clientes eleg\xEDveis" : "Grupo selecionado", recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "scheduled", date: row.scheduledAt || recurring[String(row.occasion)] || "Programa\xE7\xE3o autom\xE1tica", errorMessage: null };
     });
     const sentAutomation = (deliveries.results || []).map((row) => {
       const count = Number(row.recipientCount || 0);
-      const recipients = String(row.recipients || "").split(String.fromCharCode(30)).filter(Boolean).map((entry) => {
-        const [name2, email] = entry.split(String.fromCharCode(31));
-        return { name: name2 || "Contato", email: email || null };
-      });
+      let recipients=[];try{recipients=JSON.parse(row.recipients||'[]').map(recipient=>({...recipient,name:recipient.name||'Contato'}));}catch{}
       return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, recipients, status: "sent", date: row.sentAt, firstSentAt: row.firstSentAt, errorMessage: null };
     });
-    const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "failed", date: row.attemptedAt, errorMessage: row.errorMessage ? String(row.errorMessage) : "Falha n\xE3o identificada" }));
+    const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, clientId:Number(row.clientId)||null,title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "failed", date: row.attemptedAt, errorMessage: row.errorMessage ? String(row.errorMessage) : "Falha n\xE3o identificada" }));
     return trpcResult([...upcoming, ...failed, ...sentAutomation]);
   }
   if (name === "agent.scheduleMessage") {
@@ -59594,7 +59592,8 @@ async function runMessageAutomations(env) {
   for (const automation of automations.results) {
     const occasion = String(automation.occasion);
     const dueToday = occasion === "birthday" || occasion === "weekly_monday" && isMonday || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
-    if (occasion !== "policy_anniversary" && !dueToday) continue;
+    const cycle=await automationCycle(env,automation,`${year}-${eastern.month}-${eastern.day}`,dueToday&&isMorningRun);
+    if (occasion !== "policy_anniversary" && !dueToday && !cycle) continue;
     const agentProfile = await env.DB.prepare(
       "SELECT email,name,phone,whatsapp,contactEmail,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1"
     ).bind(String(automation.agentEmail).toLowerCase()).first();
@@ -59771,7 +59770,16 @@ ${signatureLines.join("\n")}`.trim();
       sql += " AND id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))";
       binds.push(JSON.stringify(selected));
     }
+    const batchSentKey = cycle?.sentKey || (occasion === "custom" ? "once" : occasion === "monthly" ? `monthly-${year}-${month}` : occasion === "weekly_monday" ? `weekly-monday-${year}-${eastern.month}-${eastern.day}` : `${occasion}-${year}`);
+    const scope=occasion==='monthly'?`monthly:${automation.monthNumber}`:occasion==='custom'?`custom:${automation.id}`:occasion;
+    sql += " AND NOT EXISTS(SELECT 1 FROM crmAutomationSubscriptions s WHERE lower(s.agentEmail)=? AND s.clientId=crmClients.id AND s.occasion=? AND s.isActive=0)";
+    binds.push(String(automation.agentEmail).toLowerCase(),scope);
+    sql += " AND NOT EXISTS(SELECT 1 FROM automationDeliveries d WHERE d.messageId=? AND d.clientId=crmClients.id AND d.sentKey=?)";
+    binds.push(Number(automation.id),batchSentKey);
+    sql += " ORDER BY coalesce((SELECT max(l.attemptedAt) FROM crmDeliveryLogs l WHERE l.messageId=? AND l.clientId=crmClients.id),'1970-01-01'),id";
+    binds.push(Number(automation.id));
     const clients = await env.DB.prepare(sql).bind(...binds).all();
+    if(cycle&&!clients.results.length)await completeAutomationCycle(env,automation.id,cycle.sentKey);
     for (const client of clients.results) {
       if (deliveryBudget <= 0) return;
       try {
@@ -59787,7 +59795,7 @@ ${signatureLines.join("\n")}`.trim();
         ).bind(String(automation.agentEmail).toLowerCase(), Number(client.id)).first();
         if (customized) continue;
       }
-      const sentKey = occasion === "custom" ? "once" : occasion === "monthly" ? `monthly-${year}-${month}` : occasion === "weekly_monday" ? `weekly-monday-${year}-${eastern.month}-${eastern.day}` : `${occasion}-${year}`;
+      const sentKey = batchSentKey;
       const sent = await env.DB.prepare(
         "SELECT id FROM automationDeliveries WHERE messageId=? AND clientId=? AND sentKey=?"
       ).bind(Number(automation.id), Number(client.id), sentKey).first();
@@ -59796,7 +59804,8 @@ ${signatureLines.join("\n")}`.trim();
         "{nome}",
         escapeAutomationHtml(client.name)
       ), "personalize");
-      const automationMessage = occasion === "weekly_monday" ? mondayMessageVariation(year, month, day) : automation.message;
+      const cycleDate=(cycle?.originDay||`${year}-${eastern.month}-${eastern.day}`).split('-').map(Number);
+      const automationMessage = occasion === "weekly_monday" ? mondayMessageVariation(cycleDate[0],cycleDate[1],cycleDate[2]) : automation.message;
       const personalizedMessage = addPersonalSignature(automationMessage).replaceAll(
         "{nome}",
         escapeAutomationHtml(client.name)
