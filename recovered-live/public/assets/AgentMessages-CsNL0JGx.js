@@ -973,6 +973,7 @@ function J() {
           ["scheduled", "Programados"],
           ["sent", "Enviados"],
           ["failed", "Falhas"],
+          ["review", "Pendente de revisão"],
         ].map(([i, c]) =>
           e.jsx(
             "button",
@@ -1029,7 +1030,7 @@ function J() {
                                   ? "Enviada"
                                   : i.status === "failed"
                                     ? "Falhou"
-                                    : "Programada",
+                                    : i.status === "review" ? "Não enviada · Revisar" : "Programada",
                             }),
                           ],
                         }),
@@ -1068,9 +1069,8 @@ function J() {
                                     children: [
                                       e.jsx("p", {
                                         className: "font-semibold text-white",
-                                        children: recipientLink(recipient.name,recipient.clientId),
+                                        children: e.jsxs(e.Fragment,{children:[e.jsx("span",{className:"mr-2 text-xs text-gray-400",children:b(recipient.sentAt)}),recipientLink(recipient.name,recipient.clientId)]}),
                                       }),
-                                      e.jsx('p',{className:'mt-1 text-gray-400',children:'Enviado em '+b(recipient.sentAt)}),
                                       recipient.birthDate&&e.jsx('p',{className:'mt-1 text-gray-400',children:'Aniversário: '+birthdayLabel(recipient.birthDate)}),
                                       recipient.email &&
                                         e.jsx("p", {
