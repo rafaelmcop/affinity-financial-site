@@ -25,7 +25,7 @@ npm test
 npm run export:native
 ```
 
-Para testar em um aparelho, usar Expo Go compatível com SDK 57 e o QR do servidor de desenvolvimento, na mesma rede do Mac. Se a versão do Expo Go instalada não suportar SDK 57, usar um development build compatível. Abrir o app e autenticar os três perfis autorizados, ligar para um número de teste, revisar rascunhos e registrar o resultado. Não executar chamadas ou mensagens reais sem autorização.
+Para testar em um aparelho, usar Expo Go compatível com SDK 57 e o QR do servidor de desenvolvimento, na mesma rede do Mac. No iPhone físico, SDK 57 exige login na mesma conta Expo no CLI do Mac e no Expo Go: executar `npx expo login --browser` no Mac e entrar nessa mesma conta pelo ícone de perfil do Expo Go. Sem isso o QR pode mostrar “There was a problem running the requested project”. Se a versão do Expo Go instalada não suportar SDK 57, usar um development build compatível. Abrir o app e autenticar os três perfis autorizados, ligar para um número de teste, revisar rascunhos e registrar o resultado. Não executar chamadas ou mensagens reais sem autorização.
 
 A exportação Metro comprova empacotamento JavaScript para as duas plataformas; não é um IPA/APK assinado nem validação em aparelho físico.
 
