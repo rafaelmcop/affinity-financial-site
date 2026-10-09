@@ -1,3 +1,4 @@
+import {pruneMedia,mediaExpired} from './media-retention.mjs';
 import {chatDirectory,groupContacts,groupId,allContacts} from './directory.mjs';
 import http from 'node:http';
 import {createHash} from 'node:crypto';
@@ -32,6 +33,8 @@ const sessions=new Map();
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
 initializeContacts(db);
+const cleanupMedia=()=>{try{const result=pruneMedia(db,mediaDir);if(result.removed)console.log(JSON.stringify({event:'whatsapp_media_retention',...result}));}catch{console.error('whatsapp_media_retention_failed');}};
+cleanupMedia();const mediaCleanup=setInterval(cleanupMedia,60000);mediaCleanup.unref();
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const maxMediaBytes=Math.min(128000000,Math.max(8000000,Number(process.env.WHATSAPP_MAX_MEDIA_BYTES)||64000000));
 const safeChat=value=>groupId(value)||/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
@@ -44,7 +47,8 @@ async function save(owner,m,providedMedia=null){
   if(!safeChat(chat)||!m.id?._serialized){console.error(JSON.stringify({event:'whatsapp_message_shape',keys:Object.keys(m||{}),idKeys:Object.keys(m?.id||{}),rawKeys:Object.keys(m?._data||{}),hasChat:safeChat(chat),hasId:!!m?.id?._serialized}));return;}
   let key=null,mime=String(providedMedia?.mimetype||m?._data?.mimetype||m?.mimetype||'').slice(0,100)||null,filename=String(providedMedia?.filename||m?._data?.filename||m?.filename||'').slice(0,240)||null,kind=m.hasMedia||providedMedia||mime?mediaKind(mime):null,size=Number(m?._data?.size)||null,state=m.hasMedia||providedMedia?'unavailable':null;
   const previous=db.prepare('SELECT mediaKey,mime,filename,mediaKind,mediaSize,mediaState FROM messages WHERE owner=? AND id=?').get(owner,m.id._serialized);
-  if(previous?.mediaKey){({mediaKey:key,mime,filename,mediaKind:kind,mediaSize:size,mediaState:state}=previous);state=state||'ready';}
+  if((m.hasMedia||providedMedia||previous?.mediaState)&&mediaExpired(m.timestamp)){state='expired';key=null;mime=previous?.mime||mime;filename=previous?.filename||filename;kind=previous?.mediaKind||kind;}
+  else if(previous?.mediaKey){({mediaKey:key,mime,filename,mediaKind:kind,mediaSize:size,mediaState:state}=previous);state=state||'ready';}
   else if(m.hasMedia||providedMedia){
     try{
       const media=providedMedia||await downloadMedia(m);

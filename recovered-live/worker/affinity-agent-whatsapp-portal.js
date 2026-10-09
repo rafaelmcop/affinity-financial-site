@@ -37,7 +37,7 @@ function renderMedia(m){
  }
  if(!u.startsWith('/api/agent/whatsapp/media?')){
    if(!state&&!mime&&!name&&!/^\[(Anexo|Vídeo|Áudio|Imagem|Arquivo)/i.test(String(m.body||'')))return '';
-   const label=state==='too_large'?'Arquivo excede o limite do serviço; abra no celular':state==='download_failed'?'O arquivo não pôde ser baixado do WhatsApp':state==='unavailable'?'Arquivo ainda não disponível; aguardando o WhatsApp':'Arquivo não foi armazenado por esta versão do serviço';
+   const label=state==='expired'?'Anexo removido do servidor após 3 dias; consulte no WhatsApp do celular':state==='too_large'?'Arquivo excede o limite do serviço; abra no celular':state==='download_failed'?'O arquivo não pôde ser baixado do WhatsApp':state==='unavailable'?'Arquivo ainda não disponível; aguardando o WhatsApp':'Arquivo não foi armazenado por esta versão do serviço';
    return '<span class="document">⚠ '+escape(label)+'</span>';
  }
  const extensions={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif','audio/ogg':'ogg','audio/webm':'webm','audio/mpeg':'mp3','audio/mp4':'m4a','audio/wav':'wav','video/mp4':'mp4','video/webm':'webm','application/pdf':'pdf'};
