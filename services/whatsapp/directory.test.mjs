@@ -9,6 +9,6 @@ test('group export deduplicates resolved phones and reports unavailable numbers'
 });
 test('group export reads cached identities and names without bulk business-profile requests',async()=>{
  const previous=globalThis.window;const person={name:'Pessoa'};
- globalThis.window={require:key=>({'WAWebWidFactory':{createWid:id=>({_serialized:id,server:id.split('@')[1]})},'WAWebApiContact':{getPhoneNumber:()=>({_serialized:'123456789@c.us'})},'WAWebCollections':{Contact:{get:()=>person}},'WAWebContactGetters':{getName:c=>c.name,getPushname:()=>'',getShortName:()=>''}}[key])};
+ globalThis.window={require:key=>({'WAWebWidFactory':{createWid:id=>({_serialized:id,server:id.split('@')[1]})},'WAWebApiContact':{getPhoneNumber:()=>({_serialized:'123456789@c.us'})},'WAWebCollections':{Contact:{get:()=>person}},'WAWebContactGetters':{getName:()=>{throw Error('Missing getter');},getPushname:c=>c.name,getShortName:()=>''}}[key])};
  try{const client={getChatById:async()=>({isGroup:true,name:'Grupo',participants:[{id:{_serialized:'111111111@lid'}}]}),pupPage:{evaluate:async(fn,arg)=>fn(arg)},getContactLidAndPhone:()=>{throw Error('Cached mapping must avoid identity queries');},getContacts:()=>{throw Error('Must avoid bulk profiles');}};const result=await groupContacts(client,'123456789@g.us');assert.equal(result.contacts[0].phone,'+123456789');assert.equal(result.contacts[0].name,'Pessoa');}finally{globalThis.window=previous;}
 });

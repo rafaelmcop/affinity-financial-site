@@ -30,17 +30,17 @@ export async function whatsappLeadsRoute(request,env,auth){
   if(!Number.isInteger(input.id)||!stages.includes(input.stage))return json({error:'Etapa ou lead inválido.'},400);
   const updated=await env.DB.prepare('UPDATE whatsappLeads SET stage=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND owner=?').bind(input.stage,input.id,owner).run();return updated.meta?.changes?json({ok:true}):json({error:'Lead não encontrado.'},404);
  }
- if(action==='import'){
+ if(['import','export-group'].includes(action)){
   if(!/^\d{5,25}(?:-\d{5,25})?@g\.us$/.test(input.group||''))return json({error:'Grupo inválido.'},400);
   const upstream=await whatsappRoute(new Request(new URL('/api/agent/whatsapp/group-contacts?group='+encodeURIComponent(input.group),url),{method:'GET',headers:request.headers}),env,auth);
-  if(!upstream.ok)return upstream;const data=await upstream.json();if(data.pending)return json({pending:true},202);let added=0,existing=0;
+  if(!upstream.ok)return upstream;const data=await upstream.json();if(data.pending)return json({pending:true},202);if(action==='export-group')return json(data);let added=0,existing=0;
   const current=await env.DB.prepare('SELECT phone FROM whatsappLeads WHERE owner=?').bind(owner).all();const seen=new Set((current.results||[]).map(x=>x.phone));
   const contacts=data.contacts.filter(c=>/^\+\d{8,15}$/.test(c.phone));
   for(const contact of contacts){if(seen.has(contact.phone))existing++;else{added++;seen.add(contact.phone);}}
   for(let i=0;i<contacts.length;i+=20){
    const chunk=contacts.slice(i,i+20);
    await env.DB.batch([
-    env.DB.prepare('INSERT OR IGNORE INTO whatsappLeads(owner,name,phone,stage) VALUES '+chunk.map(()=>'(?,?,?,?)').join(',')).bind(...chunk.flatMap(c=>[owner,c.name,c.phone,stages[0]])),
+    env.DB.prepare('INSERT INTO whatsappLeads(owner,name,phone,stage) VALUES '+chunk.map(()=>'(?,?,?,?)').join(',')+" ON CONFLICT(owner,phone) DO UPDATE SET name=CASE WHEN (whatsappLeads.name=whatsappLeads.phone OR trim(whatsappLeads.name)='') AND excluded.name<>excluded.phone THEN excluded.name ELSE whatsappLeads.name END").bind(...chunk.flatMap(c=>[owner,c.name,c.phone,stages[0]])),
     env.DB.prepare('INSERT INTO whatsappLeadGroups(owner,leadId,groupId,groupName) SELECT ?,id,?,? FROM whatsappLeads WHERE owner=? AND phone IN ('+chunk.map(()=>'?').join(',')+') ON CONFLICT(owner,leadId,groupId) DO UPDATE SET groupName=excluded.groupName').bind(owner,data.groupId,data.groupName,owner,...chunk.map(c=>c.phone))
    ]);
   }
