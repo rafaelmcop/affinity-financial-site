@@ -1,0 +1,29 @@
+/* Focused queue presentation inside the authenticated mobile app only. */
+body.affinity-mobile{background:#eef3f5;color:#12344b}
+.affinity-mobile nav{display:none!important}
+.affinity-mobile main{margin:0 auto;padding:18px 16px 26px;max-width:640px}
+.affinity-mobile main>h1{font-size:24px;margin:0 0 8px;letter-spacing:-.5px}
+.affinity-mobile main>p{font-size:13px;line-height:1.5;color:#546b7b}
+.affinity-mobile section{padding:18px;border:0;border-radius:18px;margin:16px 0;box-shadow:0 3px 14px #12344b08}
+.affinity-mobile section:first-of-type .toolbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}
+.affinity-mobile section:first-of-type label{margin:0;font-size:12px;color:#546b7b}
+.affinity-mobile #filter{width:100%;margin-top:6px}
+.affinity-mobile #refresh{font-size:12px;min-height:44px;background:#e6edf1;color:#12344b}
+.affinity-mobile #status{font-size:12px;line-height:1.5;color:#546b7b;margin-bottom:0}
+.affinity-mobile #name{font-size:28px;line-height:1.2;letter-spacing:-.6px;margin:0 0 12px;overflow-wrap:anywhere}
+.affinity-mobile #phone{font-size:20px;color:#546b7b;text-decoration:none}
+.affinity-mobile #lead>.toolbar{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0 14px}
+.affinity-mobile .contact-action{min-height:56px;padding:14px;font-size:16px;border-radius:14px}
+.affinity-mobile #stage{display:inline-block;padding:6px 10px;border-radius:20px;background:#e2f4e9;color:#126448;font-size:12px;margin:0 0 14px}
+.affinity-mobile details{border-top:1px solid #e5edf1;padding:16px 0;font-size:13px;line-height:1.5}
+.affinity-mobile summary{font-weight:650;cursor:pointer;font-size:15px}
+.affinity-mobile #after-call{border:0;border-top:1px solid #e5edf1;border-bottom:1px solid #e5edf1;border-radius:0;margin:0 0 20px;padding:18px 0}
+.affinity-mobile label{font-size:14px;font-weight:550;margin:16px 0;color:#18384b}
+.affinity-mobile input,.affinity-mobile select,.affinity-mobile textarea{font-size:16px;background:#f7fafb;border-color:#dbe4e9;min-height:48px;margin-top:7px;width:100%;max-width:none}
+.affinity-mobile #note{min-height:96px}
+.affinity-mobile #result h3{font-size:18px;margin:0 0 12px}
+.affinity-mobile #result>p{padding:8px 0;margin:12px 0 0;background:#fff}
+.affinity-mobile #advance{width:100%;min-height:56px;border-radius:14px;font-size:16px;font-weight:650}
+.affinity-mobile #lead+section{display:none}
+.affinity-mobile #error:empty{display:none}
+.affinity-mobile #open-message{width:100%}

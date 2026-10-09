@@ -43,7 +43,7 @@ export default function Portal() {
   return <SafeAreaView style={styles.safe}>
     <View style={styles.header}>
       <Pressable accessibilityRole="button" onPress={() => canBack ? ref.current?.goBack() : router.back()} style={styles.back}><Text style={styles.white}>‹ Voltar</Text></Pressable>
-      <Text style={styles.title}>Affinity · {portal.title}</Text>
+      <Text style={styles.title}>Affinity · {portal.title}</Text><Pressable accessibilityRole="button" accessibilityLabel="Atualizar tela" onPress={() => ref.current?.reload()} style={styles.back}><Text style={styles.white}>↻</Text></Pressable>
     </View>
     <View style={styles.body}>
       <WebView ref={ref} source={{ uri }} style={styles.web}
@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#12344b' },
   header: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 16 },
   back: { paddingVertical: 8 }, white: { color: '#fff', fontWeight: '600' },
-  title: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  title: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700' },
   body: { flex: 1, backgroundColor: '#f3f6f8' }, web: { flex: 1 },
   loading: { position: 'absolute', top: 0, left: 0, right: 0, padding: 10, gap: 8, flexDirection: 'row', justifyContent: 'center', backgroundColor: '#f3f6f8' },
   failure: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#f3f6f8', padding: 28, justifyContent: 'center', gap: 16 },
