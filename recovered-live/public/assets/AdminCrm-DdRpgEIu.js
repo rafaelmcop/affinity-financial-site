@@ -160,7 +160,7 @@ function Le({ agentMode: a = !1 }) {
     [w, X] = p.useState(""),
     [sortMode, setSortMode] = p.useState("name_asc"),
     [b, M] = p.useState(() =>
-      ["leads", "followup", "new_business", "inforce"].includes(
+      ["clients", "leads", "followup", "new_business", "inforce"].includes(
         new URLSearchParams(location.search).get("setor")
       )
         ? new URLSearchParams(location.search).get("setor")
@@ -230,6 +230,7 @@ function Le({ agentMode: a = !1 }) {
             manuallyFollowedUp = ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(l.status),
             wasAttended = hasPastMeeting || manuallyFollowedUp,
             belongs = b === "leads" ? !["agent","client","completed","active"].includes(l.status) && !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && !wasAttended
+              : b === "clients" ? l.hasPolicy || ["client","completed","active"].includes(l.status)
               : b === "inforce" ? l.hasInforcePolicy
               : b === "new_business" ? !l.hasPolicy && l.hasCompletedApplication
               : b === "followup" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && wasAttended
@@ -600,6 +601,7 @@ function Le({ agentMode: a = !1 }) {
                 ["leads", "Leads"],
                 ["followup", "Follow-up"],
                 ["new_business", "New Business"],
+                ["clients", "Clientes"],
                 ["inforce", "INFORCE"],
               ].map(([s, l]) =>
                 e.jsx(
@@ -616,7 +618,7 @@ function Le({ agentMode: a = !1 }) {
             }),
           e.jsxs("div", {
             className:
-              a && !["leads", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
+              a && !["clients", "leads", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
             children: [
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",
