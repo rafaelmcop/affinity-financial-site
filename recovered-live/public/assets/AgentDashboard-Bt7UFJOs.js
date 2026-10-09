@@ -13,6 +13,7 @@ import { M as P } from "./mail-DTOVvRc8.js";
 import { C as f, M as I } from "./message-square-Bd585pvl.js";
 import { S as M } from "./shield-check-CQZEKJwS.js";
 import { T as S } from "./trash-2-DP0NeSJV.js";
+import { R as AgendaRefresh } from "./refresh-cw-DKCd_O_1.js";
 import "./LanguageSelector-DkTXTche.js";
 import "./x-BKidgWlG.js";
 import "./chevron-right-DepQZrYR.js";
@@ -29,6 +30,9 @@ import "./send-u-E2Isyn.js";
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }],
 ]);
 function H() {
+  const [calendarAllowed,setCalendarAllowed]=k.useState(false),[agendaStatus,setAgendaStatus]=k.useState(''),[agendaError,setAgendaError]=k.useState(false);
+  k.useEffect(()=>{let active=true;fetch('/api/agent/access',{credentials:'same-origin',cache:'no-store'}).then(res=>res.ok?res.json():null).then(data=>{if(active)setCalendarAllowed(!!data?.features?.includes('calendar'));}).catch(()=>{});return()=>{active=false;};},[]);
+
   const [credits,setCredits]=k.useState(null),[creditLoading,setCreditLoading]=k.useState(true);
   async function updateCredits(refresh=false){setCreditLoading(true);try{const response=await fetch('/api/trpc/agent.fiveRingsCredits?input='+encodeURIComponent(JSON.stringify({json:{refresh}})),{credentials:'include',cache:'no-store'});const data=await response.json();if(data.error)throw Error(data.error.json?.message||'Não foi possível consultar os créditos');setCredits(data.result.data.json);}catch(error){setCredits(previous=>({...previous,error:error.message}));}finally{setCreditLoading(false);}}
   k.useEffect(()=>{void updateCredits();},[]);
@@ -155,7 +159,7 @@ function H() {
               )
             ),
           }),
-          d > 0 &&
+          (d > 0 || calendarAllowed) &&
             e.jsxs(m, {
               className: "border-gold/30 bg-[#0b1524] p-6",
               children: [
@@ -429,7 +433,7 @@ function H() {
                           }),
                         ],
                       }),
-                    (s?.todayMeetings?.length || 0) > 0 &&
+                    calendarAllowed &&
                       e.jsxs("section", {
                         className:
                           "rounded-2xl border border-sky-400/25 bg-sky-400/5 p-4",
@@ -454,13 +458,14 @@ function H() {
                                   }),
                                 ],
                               }),
-                              e.jsx("span", {
-                                className:
-                                  "rounded-full bg-sky-300 px-2.5 py-1 text-xs font-bold text-black",
-                                children: s?.todayMeetings?.length || 0,
-                              }),
+                              e.jsxs("div", {className:"flex items-center gap-2",children:[
+                                e.jsx("span", {className:"rounded-full bg-sky-300 px-2.5 py-1 text-xs font-bold text-black",children:s?.todayMeetings?.length || 0}),
+                                e.jsx("button", {type:"button",title:"Sincronizar agenda", "aria-label":"Sincronizar agenda",disabled:q.isPending,"aria-busy":q.isPending,className:"inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-sky-400/50 text-sky-300 hover:bg-sky-400/10 disabled:opacity-50",onClick:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar a agenda. Tente novamente.');}},children:e.jsx(AgendaRefresh,{size:18,className:q.isPending?'animate-spin':''})})
+                              ]}),
                             ],
                           }),
+                          agendaStatus && e.jsx("p", {role:agendaError?'alert':'status',className:"mt-3 text-sm",children:agendaStatus}),
+                          !(s?.todayMeetings?.length) && e.jsx("p", {className:"mt-4 text-sm text-gray-400",children:"Nenhum compromisso para hoje. Use o ícone de atualização para sincronizar sua agenda."}),
                           e.jsx("div", {
                             className:
                               "mt-4 max-h-96 space-y-3 overflow-y-auto pr-1",
