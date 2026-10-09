@@ -1,9 +1,10 @@
-export const accessFeatures=[['crm','CRM e clientes'],['queue','Fila de atendimento e leads'],['whatsapp','Conversas e mensagens do WhatsApp'],['policies','Apólices e aplicações'],['tasks','Tarefas'],['calendar','Agenda e Calendly'],['messages','Mensagens e contato direto'],['email','E-mail e automações'],['five_rings','Integração Five Rings'],['marketing','Obrigações de marketing'],['reviews','Avaliações e página pública'],['referrals','Indicações de afiliados']];
+export const accessFeatures=[['crm','CRM e clientes'],['queue','Fila de atendimento'],['whatsapp_leads','Leads do WhatsApp'],['whatsapp','Conversas e mensagens do WhatsApp'],['policies','Apólices e aplicações'],['tasks','Tarefas'],['calendar','Agenda e Calendly'],['messages','Mensagens e contato direto'],['email','E-mail e automações'],['five_rings','Integração Five Rings'],['marketing','Obrigações de marketing'],['reviews','Avaliações e página pública'],['referrals','Indicações de afiliados']];
 const keys=accessFeatures.map(([key])=>key),all=JSON.stringify(keys);
 export async function accessSchema(env){
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalFeatureAccess(email TEXT PRIMARY KEY,featuresJson TEXT NOT NULL,updatedBy TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalFeatureAccessMeta(version TEXT PRIMARY KEY)').run();
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalFeatureAccessAudit(id INTEGER PRIMARY KEY AUTOINCREMENT,email TEXT NOT NULL,featuresJson TEXT NOT NULL,updatedBy TEXT NOT NULL,createdAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
+ await env.DB.batch([env.DB.prepare("UPDATE portalFeatureAccess SET featuresJson=json_insert(featuresJson,'$[#]','whatsapp_leads') WHERE EXISTS(SELECT 1 FROM json_each(featuresJson) WHERE value='crm') AND EXISTS(SELECT 1 FROM json_each(featuresJson) WHERE value='queue') AND NOT EXISTS(SELECT 1 FROM json_each(featuresJson) WHERE value='whatsapp_leads') AND NOT EXISTS(SELECT 1 FROM portalFeatureAccessMeta WHERE version='separate-leads-v1')"),env.DB.prepare("INSERT OR IGNORE INTO portalFeatureAccessMeta(version) VALUES('separate-leads-v1')")]);
  if(await env.DB.prepare("SELECT version FROM portalFeatureAccessMeta WHERE version='rollout-v1'").first())return;
  // Snapshot once; subsequent registrations start with core profile/settings only.
  await env.DB.batch([
@@ -15,7 +16,8 @@ export async function accessSchema(env){
 export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];try{features=JSON.parse(row?.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}return {features,available:accessFeatures.map(([key,label])=>({key,label})),updatedAt:row?.updatedAt||null};}
 export async function hasFeature(env,email,feature){const features=(await userAccess(env,email)).features;return !feature||(feature==='contacts'?features.includes('whatsapp')||features.includes('queue'):features.includes(feature));}
 export function pageFeature(path,query=new URLSearchParams()){
- if(path==='/agentes/crm/whatsapp'||path==='/agentes/fila-leads')return 'queue';
+ if(path==='/agentes/crm/whatsapp')return 'whatsapp_leads';
+ if(path==='/agentes/fila-leads')return 'queue';
  if(path.startsWith('/agentes/crm'))return 'crm';
  // Pairing and automatic import are mandatory and independent of chat permissions.
  if(path.includes('/contact-import/')||path==='/afiliados/whatsapp'||/^\/api\/affiliate\/whatsapp\//.test(path)||/^\/api\/agent\/whatsapp\/(status|connect|disconnect)$/.test(path))return null;

@@ -1,3 +1,4 @@
+import {AddressBookPanel} from './AddressBookPanel.js?v=1';
 import {
   c as L,
   a as C,
@@ -242,6 +243,7 @@ function V() {
               ],
             }),
           }),
+          e.jsx(AddressBookPanel, {}),
           e.jsxs(i, {
             className: "bg-black border-gold/20 p-6 mb-8",
             children: [
