@@ -35,6 +35,7 @@ const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const maxMediaBytes=Math.min(128000000,Math.max(8000000,Number(process.env.WHATSAPP_MAX_MEDIA_BYTES)||64000000));
 const safeChat=value=>/^\d{8,15}@c\.us$/.test(value)||/^\d{8,20}@lid$/.test(value);
 const mediaKind=mime=>mime?.startsWith('image/')?'image':mime?.startsWith('audio/')?'audio':mime?.startsWith('video/')?'video':mime==='application/pdf'?'document':['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/vnd.ms-excel'].includes(mime)?'spreadsheet':'file';
+const mediaFilename=(filename,mime)=>filename||'arquivo'+({'audio/ogg':'.ogg','audio/mpeg':'.mp3','audio/mp4':'.m4a','audio/wav':'.wav','image/jpeg':'.jpg','image/png':'.png','image/webp':'.webp','image/gif':'.gif','video/mp4':'.mp4','video/webm':'.webm','application/pdf':'.pdf'}[String(mime||'').split(';')[0]]||'');
 const mediaKey=(owner,id)=>createHash('sha256').update(owner+'\0'+id).digest('hex');
 async function save(owner,m,providedMedia=null){
   normalizeMessage(m);
@@ -114,7 +115,7 @@ const server=http.createServer(async(req,res)=>{
     if(action==='/media'&&req.method==='GET'){
       const id=url.searchParams.get('id')||'',row=db.prepare('SELECT mediaKey,mime,filename FROM messages WHERE owner=? AND id=?').get(owner,id);
       if(!row?.mediaKey||!existsSync(path.join(mediaDir,row.mediaKey)))return reply({error:'Mídia não encontrada.'},404);
-      const file=path.join(mediaDir,row.mediaKey),length=statSync(file).size,inline=/^(?:image\/(?:jpeg|png|webp|gif|avif)|audio\/[^;]+|video\/[^;]+)(?:;.*)?$/.test(String(row.mime||''))||row.mime==='application/pdf',base={'content-type':row.mime||'application/octet-stream','cache-control':'private, max-age=3600','x-content-type-options':'nosniff','accept-ranges':'bytes','content-disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(row.filename||'arquivo')}`};
+      const file=path.join(mediaDir,row.mediaKey),length=statSync(file).size,inline=/^(?:image\/(?:jpeg|png|webp|gif|avif)|audio\/[^;]+|video\/[^;]+)(?:;.*)?$/.test(String(row.mime||''))||row.mime==='application/pdf',base={'content-type':row.mime||'application/octet-stream','cache-control':'private, max-age=3600','x-content-type-options':'nosniff','accept-ranges':'bytes','content-disposition':`${inline?'inline':'attachment'}; filename*=UTF-8''${encodeURIComponent(mediaFilename(row.filename,row.mime))}`};
       if(!length){res.writeHead(req.headers.range?416:200,{...base,'content-length':'0',...(req.headers.range?{'content-range':'bytes */0'}:{})});return res.end();}
       let start=0,end=length-1;
       if(req.headers.range){const range=req.headers.range.match(/^bytes=(\d*)-(\d*)$/);if(!range||(!range[1]&&!range[2])){res.writeHead(416,{...base,'content-range':`bytes */${length}`});return res.end();}start=range[1]?Number(range[1]):Math.max(0,length-Number(range[2]));end=range[1]&&range[2]?Math.min(Number(range[2]),length-1):length-1;if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>end||start>=length||(!range[1]&&Number(range[2])===0)){res.writeHead(416,{...base,'content-range':`bytes */${length}`});return res.end();}}
@@ -144,7 +145,7 @@ const server=http.createServer(async(req,res)=>{
         }
       }
       const ids=contactIds(db,owner,chat);
-      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(item=>({...item,mediaUrl:item.mediaState==='ready'||(!item.mediaState&&item.mediaKind)?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
+      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(({mediaKey,...item})=>({...item,mediaKind:mediaKey||item.mediaState?item.mediaKind:null,mediaUrl:mediaKey?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
     }
     if(action==='/send'&&req.method==='POST'){
       if(process.env.WHATSAPP_SEND_ENABLED!=='true')return reply({error:'Envios bloqueados até confirmação do responsável.',code:'sending_disabled'},403);

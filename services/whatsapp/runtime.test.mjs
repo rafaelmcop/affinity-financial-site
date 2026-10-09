@@ -33,10 +33,15 @@ test('fresh bridge blocks sends, isolates attachments and preserves SQLite acros
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM messages').get().n,0);
       assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
       const key='a'.repeat(64);mkdirSync(path.join(directory,'media'),{recursive:true});writeFileSync(path.join(directory,'media',key),Buffer.from([1,2,3,4]));
-      db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKey,mime,filename,mediaKind,mediaState) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run('one@example.test','synthetic-media','123456789@c.us','','received',1,key,'audio/ogg','voice.ogg','audio','ready');
+      db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKey,mime,filename,mediaKind,mediaState) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run('one@example.test','synthetic-media','123456789@c.us','','received',1,key,'audio/ogg',null,'audio','ready');
+      db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKind) VALUES(?,?,?,?,?,?,?)').run('one@example.test','legacy-text','123456789@c.us','Texto simples','received',2,'file');
     }finally{db.close();}
     assert.equal((await request(base,'/media?id=synthetic-media','two@example.test')).status,404);
     const range=await request(base,'/media?id=synthetic-media',undefined,{headers:{range:'bytes=1-2'}});
+    assert.match(range.headers.get('content-disposition'),/arquivo\.ogg/);
+    const messages=await (await request(base,'/messages?chat=123456789%40c.us')).json();
+    assert.equal(messages.find(x=>x.id==='legacy-text').mediaUrl,null);assert.equal(messages.find(x=>x.id==='legacy-text').mediaKind,null);
+    assert.ok(messages.find(x=>x.id==='synthetic-media').mediaUrl);assert.equal('mediaKey' in messages[0],false);
     assert.equal(range.status,206);assert.deepEqual([...new Uint8Array(await range.arrayBuffer())],[2,3]);
     const suffix=await request(base,'/media?id=synthetic-media',undefined,{headers:{range:'bytes=-2'}});
     assert.equal(suffix.status,206);assert.equal(suffix.headers.get('content-range'),'bytes 2-3/4');assert.deepEqual([...new Uint8Array(await suffix.arrayBuffer())],[3,4]);
