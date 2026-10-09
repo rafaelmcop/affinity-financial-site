@@ -1,3 +1,4 @@
+import {claimDailyCalendarSync} from './calendar-daily-sync.js';
 import {addressBookRoute} from './address-book.js';
 import {accessSchema,userAccess,hasFeature,pageFeature,procedureFeature,accessRoute} from './user-access.js';
 import {fiveRingsLoginBody} from './five-rings-login.js';
@@ -57613,6 +57614,7 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.syncCalendly") {
     try {
+      if(input.daily===true&&!await claimDailyCalendarSync(env,adminEmail))return trpcResult({success:true,skipped:true});
       return trpcResult({ success: true, ...await syncCalendlyForAgent(env, adminEmail.toLowerCase(), { backfill: input.quick !== true }) });
     } catch (error) {
       return trpcError(String(error?.message || error));
@@ -59341,10 +59343,8 @@ var cloudflare_staging_default = {
       ctx.waitUntil(emailSync.then(() => syncPendingFiveRingsCodes(env)));
       return;
     }
-    if (controller.cron === "*/15 * * * *") {
-      ctx.waitUntil(syncAllCalendlyConnections(env));
-      return;
-    }
+    // Calendar sync runs at first daily dashboard access or on manual request.
+    if (controller.cron === "*/15 * * * *") return;
     if (controller.cron === "15 11 * * *") {
       ctx.waitUntil(syncAllFiveRingsConnections(env));
     }

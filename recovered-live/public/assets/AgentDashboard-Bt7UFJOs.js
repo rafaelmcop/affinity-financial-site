@@ -68,18 +68,13 @@ function H() {
       localStorage.setItem("affinity-agent-counts", JSON.stringify(l.data));
   }, [l.data]);
   k.useEffect(() => {
-    const t = "affinity-calendly-dashboard-sync",
-      a = Number(sessionStorage.getItem(t) || 0);
-    if (Date.now() - a < 12e4) return;
-    sessionStorage.setItem(t, String(Date.now()));
-    let n = !0;
-    q.mutateAsync({ quick: !0 })
-      .then(() => n && Promise.all([r.refetch(), l.refetch()]))
-      .catch(() => {});
-    return () => {
-      n = !1;
-    };
-  }, []);
+    if (!calendarAllowed) return;
+    let active = true;
+    q.mutateAsync({ quick: true, daily: true })
+      .then(result => active && !result.skipped && Promise.all([r.refetch(), l.refetch()]))
+      .catch(error => {if(active){setAgendaError(true);setAgendaStatus(error instanceof Error ? error.message : "Não foi possível sincronizar. Use o ícone de atualização para tentar novamente.");}});
+    return () => { active = false; };
+  }, [calendarAllowed]);
   const s = r.data,
     g = (s?.policies || []).filter(
       t => String(t.status || "inactive") === "active"
