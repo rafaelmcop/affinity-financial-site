@@ -1,4 +1,4 @@
-import AdminMarketingObligations from './AdminMarketingObligations.js?v=2';
+import AdminMarketingObligations from './AdminMarketingObligations.js?v=3';
 import { r as React } from './index-BIU-6RMI.js?v=20261009-setup-1';
 const h = React.createElement;
 async function api(name, data) {

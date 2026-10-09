@@ -59893,7 +59893,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/admin-unified-menu.js?v=1" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-marketing-1" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-marketing-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-marketing-1');}}).transform(response);
+  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-contrast-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-contrast-1');}}).transform(response);
  }
  return response;
 };
