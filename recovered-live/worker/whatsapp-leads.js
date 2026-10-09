@@ -6,7 +6,7 @@ export async function whatsappLeadsRoute(request,env,auth){
  if(!page&&!url.pathname.startsWith('/api/agent/whatsapp-leads/'))return null;
  const email=await auth.email(request,env);if(!email)return page?Response.redirect(new URL('/agentes/login',url),302):json({error:'Entre no portal.'},401);
  const {account}=await auth.access(email,env);if(!account||!Number(account.isActive)||account.status!=='approved'||!['agent','both'].includes(account.accountType))return json({error:'Acesso restrito ao agente.'},403);
- if(page)return env.ASSETS.fetch(new Request(new URL('/agent-whatsapp-leads.html',url),request));
+ if(page)return Response.redirect(new URL('/agentes/inicio?configurar=1',url),302);
  await leadSchema(env);
  const owner=email.toLowerCase(),action=url.pathname.split('/').at(-1);
  if(request.method==='POST'&&(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json')))return json({error:'Solicitação inválida.'},403);
@@ -36,6 +36,7 @@ export async function whatsappLeadsRoute(request,env,auth){
   if(legacyLead&&['Recusada','Sem interesse','Já tem seguro'].includes(input.stage))await env.DB.prepare('UPDATE centralLeads SET stage=?,suppressed=1,leaseOwner=NULL,leaseUntil=0 WHERE phone=?').bind(input.stage,legacyLead.phone).run();
   const updated=await env.DB.prepare('UPDATE whatsappLeads SET stage=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND owner=?').bind(input.stage,input.id,owner).run();return updated.meta?.changes?json({ok:true}):json({error:'Lead não encontrado.'},404);
  }
+ if(action==='export-group'||action==='export-all')return json({error:'Exportação exclusiva dos administradores.'},403);
  if(['import','export-group'].includes(action)){
   if(!/^\d{5,25}(?:-\d{5,25})?@g\.us$/.test(input.group||''))return json({error:'Grupo inválido.'},400);
   const upstream=await whatsappRoute(new Request(new URL('/api/agent/whatsapp/group-contacts?group='+encodeURIComponent(input.group),url),{method:'GET',headers:request.headers}),env,auth);

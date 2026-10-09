@@ -229,6 +229,10 @@ async function whatsappRoute(request, env, auth) {
     const upstreamHeaders = { authorization: "Bearer " + payload + "." + signature, "content-type": "application/json" };
     if (action === "media" && request.headers.get("range")) upstreamHeaders.range = request.headers.get("range");
     const response = await fetch(target, { method, headers: upstreamHeaders, ...method === "POST" ? { body: body || "{}" } : {}, redirect: "manual", signal: AbortSignal.timeout(["send", "media"].includes(action) ? 60000 : 20000) });
+    if (action === "connect" && response.ok) {
+      await leadSchema(env);
+      await env.DB.prepare("INSERT INTO staffContactImports(owner) VALUES(?) ON CONFLICT(owner) DO UPDATE SET cursor=0,total=0,state='connecting',consentedAt=CURRENT_TIMESTAMP").bind('agent:'+email.toLowerCase()).run();
+    }
     if (action === "media" && response.ok) {
       const headers = {"content-type": response.headers.get("content-type") || "application/octet-stream", "content-disposition": response.headers.get("content-disposition") || "inline", "cache-control": "private, max-age=3600", "x-content-type-options": "nosniff"};
       for (const name of ["accept-ranges", "content-range", "content-length"]) if (response.headers.get(name)) headers[name] = response.headers.get(name);
@@ -59877,12 +59881,12 @@ cloudflare_staging_default.fetch = async (request, env, context) => {
 const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
- const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard','/afiliados/whatsapp'].includes(url.pathname));
+ const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
  if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);}}
  const response=await canonicalMenuFetchSource.call(this,request,env,ctx);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-1" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-contact-controls-2" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-2" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-2');}}).transform(response);
+  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-4" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-4');}}).transform(response);
  }
  return response;
 };

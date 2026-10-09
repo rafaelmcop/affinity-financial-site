@@ -1,7 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {webcrypto} from 'node:crypto';import {whatsappLeadsRoute} from './worker/whatsapp-leads.js';
 if(!globalThis.crypto)globalThis.crypto=webcrypto;
 test('group leads keep agent isolation, stages, origin and idempotent group memberships',async()=>{
- const db=new DatabaseSync(':memory:');const adapt=sql=>{let args=[];return {bind(...values){args=values;return this;},async run(){const r=db.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}};},async all(){return {results:db.prepare(sql).all(...args)};},async first(){return db.prepare(sql).get(...args);}}};
+ const db=new DatabaseSync(':memory:');db.exec("CREATE TABLE adminAccounts(email TEXT,name TEXT,phone TEXT,isActive INTEGER,status TEXT,accountType TEXT)");const adapt=sql=>{let args=[];return {bind(...values){args=values;return this;},async run(){const r=db.prepare(sql).run(...args);return {meta:{changes:Number(r.changes)}};},async all(){return {results:db.prepare(sql).all(...args)};},async first(){return db.prepare(sql).get(...args);}}};
  const env={DB:{prepare:adapt,batch:async xs=>Promise.all(xs.map(x=>x.run()))},WHATSAPP_BRIDGE_URL:'https://bridge.example.test',WHATSAPP_BRIDGE_SECRET:'a'.repeat(48)},auth={email:async r=>r.headers.get('x-test-owner'),access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}})};
  const original=globalThis.fetch;let pending=true,name='+12345678901';globalThis.fetch=async(_url,options)=>{assert.equal(options.redirect,'manual');if(pending){pending=false;return Response.json({pending:true},{status:202});}return Response.json({groupId:'123456789@g.us',groupName:'Grupo',contacts:[{name,phone:'+12345678901'}],unresolved:1,total:2});};
  const call=(action,input,owner='one@example.test')=>whatsappLeadsRoute(new Request('https://www.affinityfc.org/api/agent/whatsapp-leads/'+action,{headers:{'x-test-owner':owner,...(input?{origin:'https://www.affinityfc.org','content-type':'application/json'}:{})},...(input?{method:'POST',body:JSON.stringify(input)}:{})}),env,auth);
@@ -13,6 +13,6 @@ test('group leads keep agent isolation, stages, origin and idempotent group memb
   assert.equal((await call('stage',{id:list.leads[0].id,stage:'Interesse'},'two@example.test')).status,404);
   assert.equal((await call('stage',{id:list.leads[0].id,stage:'Interesse'})).status,409);
   assert.equal((await call('stages',{stages:['Other']})).status,409);
-  assert.equal((await call('import',{group:'bad'})).status,400);const exported=await(await call('export-group',{group:'123456789@g.us'})).json();assert.equal(exported.contacts[0].name,'Pessoa');assert.equal((await(await call('list')).json()).leads.length,1);
+  assert.equal((await call('import',{group:'bad'})).status,400);assert.equal((await call('export-group',{group:'123456789@g.us'})).status,403);assert.equal((await(await call('list')).json()).leads.length,1);
  }finally{globalThis.fetch=original;db.close();}
 });
