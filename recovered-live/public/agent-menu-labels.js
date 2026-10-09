@@ -21,12 +21,12 @@
       if (!options.some((option) => Object.hasOwn(stageLabels, option.value))) return;
       options.forEach((option) => {
         if (!Object.hasOwn(stageLabels, option.value)) return;
-        option.textContent = stageLabels[option.value];
+        if(option.textContent!==stageLabels[option.value])option.textContent = stageLabels[option.value];
         if (option.value === 'closed' && select.value !== 'closed') option.hidden = true;
       });
       const desiredOrder = ['new', 'meeting', 'proposal', 'contacted', 'client', 'closed'];
       const currentOrder = options.filter((option) => desiredOrder.includes(option.value)).map((option) => option.value);
-      if (currentOrder.join('|') !== desiredOrder.join('|')) desiredOrder.forEach((value) => {
+      if (currentOrder.join('|') !== desiredOrder.filter(value=>options.some(option=>option.value===value)).join('|')) desiredOrder.forEach((value) => {
           const option = options.find((item) => item.value === value);
           if (option) select.appendChild(option);
         });

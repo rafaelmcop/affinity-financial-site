@@ -65,6 +65,7 @@ import { E as A } from "./external-link-CEjUwZyT.js";
           icon: x,
           badge: "pendingUsers",
         },
+        { label: "Contatos WhatsApp dos afiliados", href: "/admin/contatos-whatsapp-afiliados", icon: x },
         { label: "CRM de clientes", href: "/admin/crm", icon: k },
         {
           label: "Carteiras dos agentes",
@@ -139,6 +140,7 @@ function H({ onLogout: o }) {
       );
     }, [i]));
   const r = t => {
+    if(t==="/admin/contatos-whatsapp-afiliados"){window.location.assign(t);return;}
     (g(t), n(!1));
   };
   return e.jsxs(e.Fragment, {

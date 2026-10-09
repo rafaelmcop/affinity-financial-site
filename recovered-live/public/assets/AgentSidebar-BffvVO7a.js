@@ -81,9 +81,13 @@ function E() {
     profileName = Q.data?.name || (() => { try { return JSON.parse(localStorage.getItem("agentSession") || "{}").name || "Agente"; } catch { return "Agente"; } })(),
     initials = profileName.split(/\s+/).filter(Boolean).slice(0, 1).concat(profileName.split(/\s+/).filter(Boolean).slice(-1)).map(r => r[0]).join("").slice(0, 2).toUpperCase(),
     logoutToHome = async () => { try { await p.mutateAsync(); } catch {} localStorage.removeItem("agentSession"); window.location.assign("/"); };
+  const [canonicalMenu,setCanonicalMenu]=f.useState(document.body.classList.contains("agent-unified-layout"));
+  f.useEffect(()=>{const ready=()=>setCanonicalMenu(true);document.addEventListener("affinity-agent-menu-ready",ready);return()=>document.removeEventListener("affinity-agent-menu-ready",ready);},[]);
+  if(canonicalMenu)return null;
   return e.jsxs(e.Fragment, {
     children: [
       e.jsxs("aside", {
+        "data-agent-legacy-menu":true,
         className:
           "w-full border-r border-gold/20 bg-[#0f1f36] text-white lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:overflow-y-auto",
         children: [

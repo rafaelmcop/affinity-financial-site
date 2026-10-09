@@ -106,6 +106,7 @@ function R({
           e.jsxs("div", {
             className: "flex items-center gap-3",
             children: [
+              n === "affiliate" && e.jsx("button",{type:"button",onClick:()=>window.location.assign("/afiliados/whatsapp"),className:"rounded-lg border border-gold/30 px-3 py-2 text-gold",children:"Contatos do WhatsApp"}),
               f &&
                 e.jsxs(o, {
                   onClick: u,

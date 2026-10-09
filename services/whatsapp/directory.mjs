@@ -30,3 +30,20 @@ export async function groupContacts(client,id){
  }
  return {groupId:id,groupName:String(chat.name||'Grupo WhatsApp').slice(0,200),contacts:result,unresolved,total:ids.length};
 }
+export async function allContacts(client,onProgress=()=>{}){
+ const rows=await chatDirectory(client),groups=rows.filter(c=>c.isGroup),merged=new Map();
+ const ids=await client.pupPage.evaluate(()=>window.require('WAWebCollections').Contact.getModelsArray().map(c=>c.id?._serialized).filter(id=>/^\d{8,20}@(c\.us|lid)$/.test(id||'')));
+ const directIds=[...new Set([...ids,...rows.filter(c=>!c.isGroup).map(c=>c.chat)])];
+ const direct=await cachedDirectoryContacts(client,directIds);
+ for(const c of direct.contacts)merged.set(c.phone,{...c,groups:[]});let unresolved=direct.unresolved;
+ for(let i=0;i<groups.length;i++){onProgress({group:i+1,totalGroups:groups.length});const result=await groupContacts(client,groups[i].chat);unresolved+=result.unresolved;for(const c of result.contacts){let item=merged.get(c.phone);if(!item){item={...c,groups:[]};merged.set(c.phone,item);}else if(item.name===item.phone&&c.name!==c.phone)item.name=c.name;item.groups.push({id:result.groupId,name:result.groupName});}}
+ return {contacts:[...merged.values()],unresolved,totalGroups:groups.length};
+}
+async function cachedDirectoryContacts(client,ids){
+ const contacts=[],cached=await client.pupPage.evaluate(cachedGroupContacts,ids),aliases=new Map();let unresolved=0;
+ const missing=cached.filter(c=>c.id.endsWith('@lid')&&!c.phone).map(c=>c.id);
+ for(let i=0;i<missing.length;i+=50)try{for(const pair of await client.getContactLidAndPhone(missing.slice(i,i+50)))if(pair.pn)aliases.set(pair.lid,pair.pn);}catch{}
+ const extra=await client.pupPage.evaluate(cachedGroupContacts,[...new Set(aliases.values())]),names=new Map(extra.map(c=>[c.id,c.name]));
+ for(const c of cached){const phone=c.phone||aliases.get(c.id);if(/^\d{8,15}@c\.us$/.test(phone||''))contacts.push({name:String(c.name||names.get(phone)||'+'+phone.split('@')[0]).slice(0,200),phone:'+'+phone.split('@')[0]});else unresolved++;}
+ return {contacts,unresolved};
+}

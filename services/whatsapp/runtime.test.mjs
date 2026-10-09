@@ -27,6 +27,8 @@ test('fresh bridge blocks sends, isolates attachments and preserves SQLite acros
   try{
     let base=await start();
     assert.equal((await fetch(base+'/status')).status,401);
+    assert.equal((await request(base,'/messages?chat=123456789%40c.us','affiliate-1@affinity-whatsapp.invalid')).status,403);
+    assert.equal((await request(base,'/send','affiliate-1@affinity-whatsapp.invalid',{method:'POST',body:'{}'})).status,403);
     assert.equal((await request(base,'/send',undefined,{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,403);
     const db=new DatabaseSync(path.join(directory,'history.sqlite'));
     try{

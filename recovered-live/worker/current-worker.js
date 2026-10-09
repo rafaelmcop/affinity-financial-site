@@ -1,3 +1,4 @@
+import {affiliateWhatsappRoute} from './affiliate-whatsapp.js';
 import {whatsappLeadsRoute} from './whatsapp-leads.js';
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
@@ -59060,6 +59061,8 @@ var cloudflare_staging_default = {
   async fetch(request, env) {
     const preferenceResponse = await preferenceRoute(request, env);
     if (preferenceResponse) return preferenceResponse;
+    const affiliateWhatsAppResponse=await affiliateWhatsappRoute(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId});
+    if(affiliateWhatsAppResponse)return secureResponse(affiliateWhatsAppResponse,{privateData:true});
     const leadsResponse = await whatsappLeadsRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
     if(leadsResponse)return secureResponse(leadsResponse,{privateData:true});
     const whatsappResponse = await whatsappRoute(request, env, { email: getAdminEmail, access: getAdminAccess });
@@ -59863,6 +59866,14 @@ cloudflare_staging_default.fetch = async (request, env, context) => {
   const marker = html.lastIndexOf('</body>');
   const output = marker >= 0 ? html.slice(0, marker) + whatsappSettingsPanelScript + html.slice(marker) : html + whatsappSettingsPanelScript;
   return new Response(output, { status: response.status, statusText: response.statusText, headers });
+};
+const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
+cloudflare_staging_default.fetch=async function(request,env,ctx){
+ const response=await canonicalMenuFetchSource.call(this,request,env,ctx),url=new URL(request.url);
+ if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
+  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-1');}}).transform(response);
+ }
+ return response;
 };
 export {
   cloudflare_staging_default as default

@@ -1,4 +1,4 @@
-import {chatDirectory,groupContacts,groupId} from './directory.mjs';
+import {chatDirectory,groupContacts,groupId,allContacts} from './directory.mjs';
 import http from 'node:http';
 import {createHash} from 'node:crypto';
 import {mkdirSync,existsSync,renameSync,writeFileSync,statSync,createReadStream} from 'node:fs';
@@ -58,6 +58,7 @@ async function save(owner,m,providedMedia=null){
   const label=kind==='image'?'Imagem':kind==='audio'?'Áudio':kind==='video'?'Vídeo':filename?'Arquivo: '+filename:'Anexo',fallback=m.hasMedia?'['+label+(state==='too_large'?' maior que o limite de armazenamento':state==='download_failed'?' não pôde ser baixado':state!=='ready'?' não disponível':'')+']':'';
   db.prepare(mediaUpsert).run(owner,m.id._serialized,chat,String(m.body||fallback).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0,key,mime,filename,kind,size,state);
 }
+const affiliateOwner=owner=>/^affiliate-\d+@affinity-whatsapp\.invalid$/.test(owner);
 async function connect(owner){
   if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
     const old=sessions.get(owner);
@@ -68,7 +69,7 @@ async function connect(owner){
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
   const key=createHash('sha256').update(owner).digest('hex');
   const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
-  const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
+  const s={client,lastSeen:Date.now(),state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
   db.prepare('INSERT OR IGNORE INTO session_owners(owner) VALUES(?)').run(owner);
   client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
@@ -77,8 +78,8 @@ async function connect(owner){
     if(!compatibility.wid||!compatibility.message)throw Error('Key compatibility unavailable');
     s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
   }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
-  client.on('message_create',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
-  client.on('message',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
+  if(!affiliateOwner(owner))client.on('message_create',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
+  if(!affiliateOwner(owner))client.on('message',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
   client.on('message_ack',(m,ack)=>{try{normalizeMessage(m);if(!m?.id?._serialized)return;db.prepare('UPDATE messages SET ack=MAX(ack,?) WHERE owner=? AND id=?').run(Number(ack),owner,m.id._serialized);}catch{console.error('whatsapp_ack_write_failed');}});
   client.on('auth_failure',()=>{s.state='auth_failure';s.qr=null;});
   client.on('disconnected',()=>{s.state='disconnected';s.qr=null;});
@@ -92,8 +93,9 @@ const server=http.createServer(async(req,res)=>{
   let owner;try{owner=verifyTicket(req.headers.authorization?.replace(/^Bearer /,''),secret);}catch{return reply({error:'Unauthorized'},401);}
   const url=new URL(req.url,'http://localhost'),action=url.pathname;
   try{
+    if(affiliateOwner(owner)&&!['/connect','/status','/all-contacts','/disconnect'].includes(action))return reply({error:'Ação indisponível para importação de afiliado.'},403);
     if(action==='/connect'&&req.method==='POST'){await connect(owner);return reply({ok:true});}
-    const s=sessions.get(owner);
+    const s=sessions.get(owner);if(s)s.lastSeen=Date.now();
     if(action==='/status'&&req.method==='GET')return reply({state:s?.state||'disconnected',number:s?.number||null,qr:s?.qr&&Date.now()-s.qrAt<45000?await QRCode.toDataURL(s.qr,{width:280,margin:2}):null});
     if(action==='/disconnect'&&req.method==='POST'){
       if(!s)return reply({ok:true});
@@ -111,6 +113,12 @@ const server=http.createServer(async(req,res)=>{
         db.prepare('DELETE FROM session_owners WHERE owner=?').run(owner);
         return reply({ok:true,warning:revoked?null:'Conexão local removida. Confira Aparelhos conectados no celular e remova a sessão antiga, se ela ainda aparecer.'});
       }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
+    }
+    if(action==='/all-contacts'&&req.method==='GET'){
+      if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
+      if(!s.allContactsJob){const job={result:null,error:false,progress:{}};s.allContactsJob=job;void allContacts(s.client,p=>job.progress=p).then(result=>job.result=result).catch(()=>job.error=true);}
+      const job=s.allContactsJob;if(job.error)return reply({error:'Não foi possível preparar os contatos.'},503);
+      return job.result?reply(job.result):reply({pending:true,...job.progress},202);
     }
     if(action==='/chats'&&req.method==='GET'){
       if(s?.state!=='ready')return reply(listContacts(db,owner));
@@ -190,7 +198,8 @@ const server=http.createServer(async(req,res)=>{
 server.requestTimeout=65000;
 server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>{
   console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port}));
-  for(const {owner} of db.prepare('SELECT owner FROM session_owners LIMIT ?').all(maxSessions))void connect(owner).catch(()=>console.error('whatsapp_session_restore_failed'));
+  for(const {owner} of db.prepare('SELECT owner FROM session_owners').all().filter(row=>!affiliateOwner(row.owner)).slice(0,maxSessions))void connect(owner).catch(()=>console.error('whatsapp_session_restore_failed'));
 });
+const affiliateCleanup=setInterval(()=>{for(const [owner,s] of sessions){if(!affiliateOwner(owner)||s.state==='disconnecting'||Date.now()-(s.lastSeen||0)<900000)continue;s.state='disconnecting';void (async()=>{try{await s.client.logout();}catch{}await closeClient(s.client);sessions.delete(owner);db.prepare('DELETE FROM session_owners WHERE owner=?').run(owner);})().catch(()=>console.error('affiliate_session_cleanup_failed'));}},60000);affiliateCleanup.unref();
 async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
 process.on('SIGTERM',()=>{void stop();});process.on('SIGINT',()=>{void stop();});
