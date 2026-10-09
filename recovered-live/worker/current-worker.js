@@ -1,3 +1,5 @@
+import {portfolioRows} from './agent-portfolio.js';
+import {readRates,saveRates,affiliateSourceSales} from './affiliate-rates.js';
 import {leadFlowRoute,leadSchema,staffIdentity,protectInternalContacts,configuredAccess} from './lead-flow.js';
 import {affiliateWhatsappRoute} from './affiliate-whatsapp.js';
 import {whatsappLeadsRoute} from './whatsapp-leads.js';
@@ -58014,6 +58016,14 @@ Affinity Financial Consulting`,
     await env.DB.prepare("DELETE FROM affiliates WHERE id=?").bind(id).run();
     return trpcResult({ success: true });
   }
+  if (name === 'admin.affiliateReferenceRates') {
+    try { return trpcResult(request.method==='POST'?await saveRates(env,input,adminEmail):await readRates(env)); }
+    catch(error){ return trpcError(error.message || 'Não foi possível salvar as referências.'); }
+  }
+  if (name === 'admin.affiliateWhatsappSources') {
+    await leadSchema(env);
+    return trpcResult(await affiliateSourceSales(env));
+  }
   if (name === "admin.listAffiliateLeads") {
     const rows = await env.DB.prepare(
       "SELECT r.*,a.name affiliateName,a.email affiliateEmail FROM affiliateReferrals r JOIN affiliates a ON a.id=r.affiliateId ORDER BY r.createdAt DESC"
@@ -58484,15 +58494,7 @@ Affinity Financial Consulting`,
       return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
     const owner = String(input.agentEmail || "").trim().toLowerCase();
     if (!validEmail(owner)) return trpcError("Selecione um agente");
-    const [clients, policies, applications] = await Promise.all([
-      env.DB.prepare(
-        "SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE"
-      ).bind(owner).all(),
-      env.DB.prepare(
-        "SELECT * FROM agentPolicies WHERE lower(agentEmail)=? ORDER BY clientName,policyNumber"
-      ).bind(owner).all(),
-      env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,status,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(owner).all()
-    ]);
+    const [clients, policies, applications] = await portfolioRows(env,owner);
     const matches = /* @__PURE__ */ __name((record, client) => Number(record.clientId || 0) === Number(client.id) || sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email) || sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp) || sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name), "matches");
     const portfolioClients = clients.results.map((row) => {
       const linkedPolicies = policies.results.filter((record) => matches(record, row));

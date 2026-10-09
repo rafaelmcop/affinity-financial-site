@@ -436,7 +436,7 @@ function H() {
               ],
             }),
           n && r.isLoading && e.jsx("p", { children: "Carregando carteira do agente…" }),
-          n && r.isError && e.jsx("p", { role: "alert", children: "Não foi possível carregar a carteira. Tente novamente." }),
+          n && r.isError && e.jsxs("div", { role: "alert", children: [e.jsx("p", {children: r.error?.message || "Não foi possível carregar a carteira."}), e.jsx(i, {onClick: () => r.refetch(), children: "Tentar carregar novamente"})] }),
           n && !r.isLoading && !r.isError && u !== "policies" && !(r.data?.clients || []).some(a => u === "clients" || a.sector === u) && e.jsx("p", { className: "text-gray-400", children: "Nenhum contato neste setor para o agente selecionado." }),
           n
             ? u !== "policies"

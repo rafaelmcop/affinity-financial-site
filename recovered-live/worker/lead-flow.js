@@ -1,3 +1,4 @@
+import {classifySale,ratesSchema} from './affiliate-rates.js';
 import {isUSPhone,codes} from './us-area-codes.js';
 import {contactBridge} from './affiliate-whatsapp.js';
 export const stages=['Importados','1ª chamada','2ª chamada','Interesse','Reunião agendada','Follow-up','Aplicação','Aplicado','Emitida','Recusada','Sem interesse','Já tem seguro','Agente'];
@@ -152,11 +153,12 @@ export async function leadFlowRoute(request,env,auth){
  const phone=String(input.phone||''),stage=String(input.stage||''),response=String(input.response||''),attempts=Number(input.attempts),note=String(input.note||'').trim(),appointment=String(input.appointment||'');if(!stages.includes(stage)||!['Respondeu','Sem resposta','Reunião marcada'].includes(response)||!Number.isInteger(attempts)||attempts<1||attempts>100||!note||note.length>2000)return json({error:'Preencha resultado, tentativas, etapa e observação.'},400);if((appointment||stage==='Reunião agendada'||response==='Reunião marcada')&&(!appointment||!Number.isFinite(Date.parse(appointment))||Date.parse(appointment)<=now))return json({error:'Informe uma data futura para a reunião.'},400);
  const lead=await env.DB.prepare('SELECT * FROM centralLeads WHERE phone=? AND leaseOwner=? AND leaseUntil>? AND suppressed=0 AND isUS=1').bind(phone,email,now).first();if(!lead)return json({error:'Este lead não está disponível. Atualize a fila.'},409);
  const next=appointment?Date.parse(appointment):now+86400000,storedStage=stage==='Emitida'?'Cliente ativo':stage;
- const results=await env.DB.batch([
+ let sale=null,reference=null;if(stage==='Emitida'){try{sale=classifySale(input.sale||{});}catch(error){return json({error:error.message},400);}await ratesSchema(env);reference=await env.DB.prepare('SELECT payoutCents FROM affiliateReferenceRates WHERE bandKey=?').bind(sale.band.key).first();}
+ const statements=[
  env.DB.prepare('INSERT INTO centralLeadOutcomes(phone,agent,response,attempts,stage,note,appointment) SELECT phone,?,?,?,?,?,? FROM centralLeads WHERE phone=? AND leaseOwner=? AND leaseUntil>? AND suppressed=0').bind(email,response,attempts,stage,note,appointment||null,phone,email,now),
  env.DB.prepare('UPDATE centralLeadAssignments SET nextAt=? WHERE phone=? AND EXISTS(SELECT 1 FROM centralLeads WHERE phone=? AND leaseOwner=? AND leaseUntil>? AND suppressed=0)').bind(next,phone,phone,email,now),
  env.DB.prepare('UPDATE centralLeads SET stage=?,suppressed=?,leaseOwner=NULL,leaseUntil=0,updatedAt=CURRENT_TIMESTAMP WHERE phone=? AND leaseOwner=? AND leaseUntil>? AND suppressed=0').bind(storedStage,terminal.has(storedStage)?1:0,phone,email,now)
- ]);return results[0].meta?.changes?json({ok:true,suppressed:terminal.has(storedStage)}):json({error:'O lead foi atualizado por outro usuário.'},409);}
+ ];if(sale)statements.splice(2,0,env.DB.prepare('INSERT INTO centralLeadClosures(phone,agent,product,monthlyPremiumCents,bandKey,referencePayoutCents) SELECT phone,?,?,?,?,? FROM centralLeads WHERE phone=? AND leaseOwner=? AND leaseUntil>? AND suppressed=0 ON CONFLICT(phone) DO UPDATE SET agent=excluded.agent,product=excluded.product,monthlyPremiumCents=excluded.monthlyPremiumCents,bandKey=excluded.bandKey,referencePayoutCents=excluded.referencePayoutCents,confirmedAt=CURRENT_TIMESTAMP').bind(email,sale.band.product,sale.cents,sale.band.key,reference?.payoutCents??null,phone,email,now));const results=await env.DB.batch(statements);return results[0].meta?.changes?json({ok:true,suppressed:terminal.has(storedStage)}):json({error:'O lead foi atualizado por outro usuário.'},409);}
  }
  return json({error:'Ação indisponível.'},405);
  }catch(e){console.error('lead_flow_failure',e?.name||'Error');return json({error:e.status?e.message:'Não foi possível concluir agora. Tente novamente.'},e.status||503);}

@@ -27,3 +27,5 @@ body.affinity-mobile{background:#eef3f5;color:#12344b}
 .affinity-mobile #lead+section{display:none}
 .affinity-mobile #error:empty{display:none}
 .affinity-mobile #open-message{width:100%}
+
+.affinity-mobile #closing-confirmation{border:1px solid #dbe4e9;border-radius:12px;padding:14px;margin-top:18px}.affinity-mobile #closing-confirmation legend{font-size:15px;font-weight:650}.affinity-mobile #closing-confirmed{width:18px!important;min-height:18px;vertical-align:middle;margin-right:8px}
