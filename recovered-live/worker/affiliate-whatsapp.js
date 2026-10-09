@@ -1,4 +1,5 @@
-import {storeCentralContacts,leadSchema,backfill,protectInternalContacts,visibleLeadSQL} from './lead-flow.js';
+import {sharedAgentImport} from './staff-whatsapp-reuse.js';
+import {storeCentralContacts,leadSchema,leadFlowRoute,backfill,protectInternalContacts,visibleLeadSQL} from './lead-flow.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
 const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function contactBridge(env,owner,action,method='GET'){
@@ -20,6 +21,12 @@ export async function affiliateWhatsappRoute(request,env,auth){
  }
  const id=await auth.affiliate(request,env);if(!id)return affiliatePage?Response.redirect(new URL('/afiliados/login',url),302):json({error:'Entre no portal de afiliados.'},401);
  const affiliate=await env.DB.prepare('SELECT id,name,email,isActive,status FROM affiliates WHERE id=?').bind(id).first();if(!affiliate||!Number(affiliate.isActive)||affiliate.status!=='approved')return json({error:'Acesso restrito ao afiliado aprovado.'},403);
+ await leadSchema(env);
+ const shared=await sharedAgentImport(env,{...affiliate,id,kind:'affiliate',owner:'affiliate:'+id});
+ if(shared){
+  if(affiliatePage)return Response.redirect(new URL('/afiliados/dashboard',url),302);
+  const action=url.pathname.split('/').at(-1);if(['connect','status','sync'].includes(action))return leadFlowRoute(new Request(new URL('/api/affiliate/contact-import/'+action,url),request),env,auth);
+ }
  if(affiliatePage)return env.ASSETS.fetch(new Request(new URL('/affiliate-whatsapp.html',url),request));
  const action=url.pathname.split('/').at(-1);if(action==='export')return json({error:'Exportação exclusiva dos administradores.'},403);if(!(['status','export'].includes(action)&&request.method==='GET')&&!(['connect','sync'].includes(action)&&request.method==='POST'))return json({error:'Esta função não permite alterar ou excluir leads.'},405);
  let input={};if(request.method==='POST'){if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return json({error:'Solicitação inválida.'},403);const text=await request.text();if(text.length>2000)return json({error:'Solicitação inválida.'},413);try{input=JSON.parse(text);}catch{return json({error:'Solicitação inválida.'},400);}}

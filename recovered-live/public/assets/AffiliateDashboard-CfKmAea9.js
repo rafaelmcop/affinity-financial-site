@@ -59,7 +59,7 @@ function R({
     },
     c = async () => { try { await onLogout?.(); } catch {} localStorage.removeItem("affiliateSession"); window.location.assign("/"); },
     initials = accountName.split(/\s+/).filter(Boolean).slice(0,1).concat(accountName.split(/\s+/).filter(Boolean).slice(-1)).map(x => x[0]).join("").slice(0,2).toUpperCase();
-  return e.jsx("header", {
+  return e.jsx("header", { "data-affiliate-navigation":true,
     className: "bg-black border-b border-gold/20 sticky top-0 z-40",
     children: e.jsx("div", {
       className: "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
@@ -140,7 +140,7 @@ function R({
                 }),
               e.jsxs("div", { className: "relative", children: [
                 e.jsx("button", { type: "button", onClick: () => setAccountOpen(x => !x), className: "flex h-11 w-11 items-center justify-center rounded-full border-2 border-gold bg-[#0f1f36] text-sm font-black text-gold", "aria-label": "Abrir menu da conta", children: initials }),
-                accountOpen && e.jsxs("div", { className: "absolute right-0 mt-2 w-60 rounded-xl border border-gold/30 bg-[#0f1f36] p-2 text-white shadow-2xl", children: [
+                accountOpen && e.jsxs("div", { "data-affiliate-account":true, className: "absolute right-0 mt-2 w-60 rounded-xl border border-gold/30 bg-[#0f1f36] p-2 text-white shadow-2xl", children: [
                   e.jsx("p", { className: "border-b border-white/10 px-3 py-3 font-bold text-gold", children: accountName }),
                   e.jsx("button", { type: "button", onClick: () => a("/afiliados/dashboard?conta=perfil"), className: "mt-2 w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Perfil" }),
                   e.jsx("button", { type: "button", onClick: () => a("/afiliados/dashboard?conta=configuracoes"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),

@@ -1,0 +1,5 @@
+/* Keep WhatsApp calls to action readable independently of public light-theme utility overrides. */
+.public-light button.whatsapp-solid,.public-light a[aria-label="Contact us on WhatsApp"]{background:#087f3c!important;color:#fff!important;border-color:#06612e!important;opacity:1!important}
+.public-light button.whatsapp-solid :is(svg,span){color:#fff!important}
+.public-light button.whatsapp-solid:hover,.public-light a[aria-label="Contact us on WhatsApp"]:hover{background:#06612e!important;color:#fff!important}
+.public-light button.whatsapp-solid:focus-visible,.public-light a[aria-label="Contact us on WhatsApp"]:focus-visible{outline:3px solid #fff!important;outline-offset:3px;box-shadow:0 0 0 6px #087f3c!important}

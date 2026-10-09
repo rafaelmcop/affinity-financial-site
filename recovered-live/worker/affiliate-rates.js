@@ -1,3 +1,4 @@
+import {marketingEligibility} from './marketing-eligibility.js';
 export const referenceBands = [
   { key: 'term30', product: 'Term', label: 'Menos de US$ 30', min: 1, max: 2999 },
   { key: 'term50', product: 'Term', label: 'US$ 30 a menos de US$ 50', min: 3000, max: 4999 },
@@ -43,6 +44,8 @@ export async function saveRates(env, input, actor) {
 }
 export async function affiliateSourceSales(env) {
   await ratesSchema(env);
+  await (await import('./policy-lead-links.js')).syncPolicyLeadLinks(env);
   const rows = await env.DB.prepare("SELECT l.phone,l.name,l.stage,s.sourceName,s.sourceEmail,s.owner,s.groupsJson,c.product,c.monthlyPremiumCents,c.bandKey,c.referencePayoutCents,c.agent,c.confirmedAt FROM centralLeadSources s JOIN centralLeads l ON l.phone=s.phone LEFT JOIN centralLeadClosures c ON c.phone=l.phone WHERE s.kind='affiliate' AND NOT EXISTS(SELECT 1 FROM centralLeadSources x,json_each(x.groupsJson) g JOIN centralExcludedGroups e ON e.groupId=json_extract(g.value,'$.id') WHERE x.phone=l.phone) ORDER BY c.confirmedAt DESC,s.sourceName,l.name LIMIT 500").all();
+  for(const row of rows.results)if(row.product){const result=await marketingEligibility(env,row.phone,row.agent);row.marketingEligible=result.eligible;row.marketingIneligibleReason=result.reason;if(!result.eligible)row.referencePayoutCents=null;}
   return rows.results;
 }

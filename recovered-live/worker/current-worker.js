@@ -1,3 +1,4 @@
+import {accessSchema,userAccess,hasFeature,pageFeature,procedureFeature,accessRoute} from './user-access.js';
 import {fiveRingsLoginBody} from './five-rings-login.js';
 import {agentAppearance} from './agent-appearance.js';
 import {isOverduePaymentNotice,paymentTasks,dismissEmailNotification} from './payment-attention.js';
@@ -54851,6 +54852,13 @@ async function syncAllCalendlyConnections(env) {
 __name(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 __name2(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 async function runProcedure(name, input, request, env) {
+  await accessSchema(env);
+  const feature=procedureFeature(name);
+  if(feature){let email;if(name.startsWith('affiliate.')){const id=await getAffiliateId(request,env);email=id?(await env.DB.prepare('SELECT email FROM affiliates WHERE id=?').bind(id).first())?.email:null;}else email=await getAdminEmail(request,env);
+   const access=email?await getAdminAccess(email,env):null,adminCRM=name.startsWith('crm.')&&(access?.isMaster||(access?.account?.isActive&&access.account.status==='approved'&&['admin','both'].includes(access.account.accountType)));
+   if(email&&!adminCRM&&!await hasFeature(env,email,feature))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
+  }
+
   if (name === "system.ping") return trpcResult("pong");
   if (name === "auth.me") {
     const email = await getAdminEmail(request, env);
@@ -55143,9 +55151,9 @@ async function runProcedure(name, input, request, env) {
       ).bind(affiliateId).first();
       if (!affiliate)
         return trpcError("Afiliado n\xE3o encontrado", "NOT_FOUND", 404);
-      const referrals = (await env.DB.prepare(
+      const referrals = await hasFeature(env,affiliate.email,"referrals")?(await env.DB.prepare(
         "SELECT * FROM affiliateReferrals WHERE affiliateId=? ORDER BY createdAt DESC"
-      ).bind(affiliateId).all()).results;
+      ).bind(affiliateId).all()).results:[];
       return trpcResult({
         affiliate: normalizeAffiliate(affiliate),
         referrals,
@@ -55914,13 +55922,14 @@ ${message}`, owner).run();
         "SELECT id,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,meetingUrl,clientId FROM calendlyMeetings WHERE lower(agentEmail)=? AND lower(coalesce(status,'active')) NOT IN ('canceled','cancelled') AND datetime(startTime)>=datetime(?) AND datetime(startTime)<datetime(?) ORDER BY datetime(startTime),id"
       ).bind(owner, today.start, today.end)
     ]);
-    const policies = policiesQuery.results || [];
-    const tasks = await paymentTasks(env,owner,true);
+    const granted=new Set((await userAccess(env,owner)).features);
+    const policies = granted.has('policies')?(policiesQuery.results || []):[];
+    const tasks = granted.has('tasks')?await paymentTasks(env,owner,true):[];
     const clients = clientsQuery.results || [];
-    const notifications = notificationsQuery.results || [];
-    const unread = unreadQuery.results?.[0];
-    const policyStats = policyStatsQuery.results?.[0];
-    const todayMeetings = meetingsQuery.results || [];
+    const notifications = granted.has('email')?(notificationsQuery.results || []):[];
+    const unread = granted.has('email')?unreadQuery.results?.[0]:null;
+    const policyStats = granted.has('policies')?policyStatsQuery.results?.[0]:null;
+    const todayMeetings = granted.has('calendar')?(meetingsQuery.results || []):[];
     return trpcResult({
       policies,
       policyCount: Number(policyStats?.total || 0),
@@ -56058,6 +56067,7 @@ ${message}`, owner).run();
   }
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
+    const permitted=new Set((await userAccess(env,owner)).features);
     const [clientsQuery, policiesQuery, reviewsQuery, internalQuery, messagesQuery, tasksQuery] = await env.DB.batch([
       env.DB.prepare("SELECT id,name,email,phone,birthDate FROM crmClients WHERE lower(assignedAdminEmail)=?").bind(owner),
       env.DB.prepare("SELECT clientId,status,policyNumber,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner),
@@ -56080,15 +56090,15 @@ ${message}`, owner).run();
     ).length;
     const activePolicies = policies.filter((policy) => String(policy.status || "").toLowerCase() === "active");
     return trpcResult({
-      incompleteProfiles,
-      pendingReviews: Number(reviewsQuery.results?.[0]?.total || 0),
-      unreadInternal: Number(internalQuery.results?.[0]?.total || 0),
-      newMessages: Number(messagesQuery.results?.[0]?.total || 0),
-      followUps: (await paymentTasks(env,owner,true)).filter(r=>r.dueAt).length,
-      policyCount: policies.length,
-      activePolicyCount: activePolicies.length,
-      score: activePolicies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0),
-      lifetimeScore: policies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0)
+      incompleteProfiles: permitted.has("crm")?incompleteProfiles:0,
+      pendingReviews: permitted.has("reviews")?(Number(reviewsQuery.results?.[0]?.total || 0)):0,
+      unreadInternal: permitted.has("messages")?(Number(internalQuery.results?.[0]?.total || 0)):0,
+      newMessages: permitted.has("email")?(Number(messagesQuery.results?.[0]?.total || 0)):0,
+      followUps: permitted.has("tasks")?((await paymentTasks(env,owner,true)).filter(r=>r.dueAt).length):0,
+      policyCount: permitted.has("policies")?(policies.length):0,
+      activePolicyCount: permitted.has("policies")?(activePolicies.length):0,
+      score: permitted.has("policies")?(activePolicies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0)):0,
+      lifetimeScore: permitted.has("policies")?(policies.reduce((total, policy) => total + Math.round(Number(policy.points || 0)), 0)):0
     });
   }
   if (name === "agent.listPolicies") {
@@ -59900,18 +59910,24 @@ cloudflare_staging_default.fetch = async (request, env, context) => {
 const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
+ if(!/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname))await accessSchema(env);
+ const featureAuth={email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId};
+ const accessResponse=await accessRoute(request,env,featureAuth);if(accessResponse)return accessResponse;
+ const needed=pageFeature(url.pathname,url.searchParams);
+ if(needed&&(url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/afiliados/')||url.pathname.startsWith('/agent-')||/^\/api\/(agent|affiliate)\//.test(url.pathname))){const staff=await staffIdentity(request,env,featureAuth,url.pathname.startsWith('/afiliados/')||url.pathname.startsWith('/api/affiliate/')?'affiliate':'agent');if(staff&&!await hasFeature(env,staff.email,needed)){if(url.pathname.startsWith('/api/'))return Response.json({error:'Esta função aguarda liberação pelo Admin.'},{status:403,headers:{'cache-control':'no-store'}});return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/staff-flow.css"><main><h1>Função aguardando liberação</h1><p>O Admin ainda não liberou esta função para seu cadastro.</p><a href="'+(staff.kind==='affiliate'?'/afiliados/dashboard':'/agentes/dashboard')+'">Voltar ao início</a></main></html>',{status:403,headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});}}
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
- if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
+ if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
  const response=await canonicalMenuFetchSource.call(this,request,env,ctx);
- const publicLoginPaths=new Set(['/admin/login','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
+ if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
+ const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=1">',{html:true});}}).transform(response);
 
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=4"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=4"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script><script src="/user-access-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=3"><script src="/agent-theme.js?v=2"></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=4"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/user-access-menu.js?v=2" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
  }
  return response;
 };

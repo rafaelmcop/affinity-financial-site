@@ -1,0 +1,19 @@
+/* Shared navigation colors follow the portal theme, including menu states and account popovers. */
+html[data-agent-theme] :is(#affinity-admin-menu,#affinity-admin-header,#affinity-admin-account>div,.agent-unified-side,.agent-account-popover){background:var(--agent-surface)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(#affinity-admin-menu nav,#affinity-admin-menu section,.agent-unified-nav,.agent-menu-head){background:transparent!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(#affinity-admin-menu a,#affinity-admin-menu a span,#affinity-admin-header a,#affinity-admin-account a,#affinity-admin-account div button,.agent-unified-nav a,.agent-unified-nav summary,.agent-account-popover a,.agent-account-popover button){color:var(--agent-text)!important;background:transparent!important}
+html[data-agent-theme] :is(#affinity-admin-menu h2,#affinity-admin-menu small,.agent-menu-head small){color:var(--agent-muted)!important}
+html[data-agent-theme] :is(#affinity-admin-menu .admin-menu-brand,.agent-brand,.agent-account-name){color:var(--agent-text)!important}
+html[data-agent-theme] :is(#affinity-admin-account>button,#affinity-admin-header button,.agent-account-trigger,.agent-menu-toggle){background:var(--agent-inset)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important;box-shadow:0 3px 12px #10223818}
+html[data-agent-theme] :is(#affinity-admin-menu a,#affinity-admin-account a,#affinity-admin-account div button,.agent-unified-nav a,.agent-unified-nav summary,.agent-account-popover a,.agent-account-popover button):hover{background:var(--agent-inset)!important;color:var(--agent-text)!important}
+html[data-agent-theme] :is(#affinity-admin-menu a[aria-current=page],.agent-unified-nav a.active){background:#dfb934!important;color:#142238!important;font-weight:800!important}
+html[data-agent-theme] :is(#affinity-admin-menu a[aria-current=page],.agent-unified-nav a.active) :is(span,svg){color:#142238!important}
+html[data-agent-theme] :is(#affinity-admin-menu b,.agent-menu-badge){background:#dfb934!important;color:#142238!important}
+html[data-agent-theme] :is(#affinity-admin-account>div strong,.agent-account-name){color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] :is(#admin-unified-logout,.agent-account-popover button){color:var(--agent-text)!important}
+html[data-agent-theme] [data-affiliate-account]{background:var(--agent-surface)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] [data-affiliate-account] :is(button,p,a){color:var(--agent-text)!important;background:transparent!important}
+html[data-agent-theme] [data-affiliate-account] button:hover{background:var(--agent-inset)!important}
+html[data-agent-theme] [data-affiliate-navigation] :is(button,a,span){color:var(--agent-text)!important}
+html[data-agent-theme=light]::-webkit-scrollbar-track{background:#edf2f7}
+html[data-agent-theme=light]::-webkit-scrollbar-thumb{background:#94a3b8}
