@@ -4,7 +4,7 @@
   if (path.startsWith("/admin/") || (path === "/candidaturas.html" && query.get("portal") !== "agent")) return;
   if(!path.startsWith("/agentes/")&&!path.startsWith("/agent-")&&!(path==="/candidaturas.html"&&query.get("portal")==="agent"))return;
   if(["/agentes/login","/agentes/registrar"].includes(path))return;
-  const setup=document.createElement('script');setup.src='/staff-setup-check.js?v=20261009-contact-controls-2';setup.defer=true;document.head.appendChild(setup);
+  const setup=document.createElement('script');setup.src='/staff-setup-check.js?v=20261009-marketing-1';setup.defer=true;document.head.appendChild(setup);
   const matches = (...items) => items.some(item => path === item || path.startsWith(`${item}/`));
   const trpc = async name => {
     const input = encodeURIComponent(JSON.stringify({ json: {} }));
@@ -25,7 +25,7 @@
   <a${active(matches("/agentes/dashboard"))} href="/agentes/dashboard">Início</a>
   <details ${matches("/agentes/crm", "/agentes/mensagens", "/agentes/contato-direto") ? "open" : ""}><summary>CRM <span>›</span></summary><div class="agent-sub"><a href="/agentes/fila-leads">Fila de atendimento</a><a${active(matches("/agentes/crm/whatsapp")||path==="/agentes/inicio")} href="/agentes/crm/whatsapp">Leads do WhatsApp</a><a${active(path === "/agentes/crm")} href="/agentes/crm?setor=clients">Clientes</a><a${active(matches("/agentes/mensagens"))} href="/agentes/mensagens">Mensagens e automações</a><a${active(matches("/agentes/contato-direto"))} href="/agentes/contato-direto">Contato direto</a></div></details>
   <details ${matches("/agent-applications", "/agentes/clientes") ? "open" : ""}><summary>Aplicações <span>›</span></summary><div class="agent-sub"><a${active(matches("/agent-applications"))} href="/agent-applications">Novas aplicações</a><a${active(matches("/agentes/clientes"))} href="/agentes/clientes">Aplicações concluídas <b id="unified-applications-badge" class="agent-menu-badge" hidden></b></a></div></details>
-  <a${active(matches("/agentes/apolices"))} href="/agentes/apolices">Apólices</a><a${active(matches("/agentes/tarefas"))} href="/agentes/tarefas">Tarefas</a>
+  <a${active(matches("/agentes/obrigacoes-marketing"))} href="/agentes/obrigacoes-marketing">Obrigações de marketing</a><a${active(matches("/agentes/apolices"))} href="/agentes/apolices">Apólices</a><a${active(matches("/agentes/tarefas"))} href="/agentes/tarefas">Tarefas</a>
   <a${active(matches("/agentes/agenda", "/agent-meeting-detail"))} href="/agentes/agenda">Agenda</a>
   <a${active(matches("/agentes/email"))} href="/agentes/email">E-mail <b id="unified-email-badge" class="agent-menu-badge" hidden></b></a>
   <a${active(matches("/agentes/whatsapp"))} href="/agentes/whatsapp">WhatsApp <small>Beta</small></a>

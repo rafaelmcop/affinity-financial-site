@@ -774,6 +774,8 @@
   async function edit(row = {}) {
     try {
       if (row.id) row = await api("agent.getApplication", { id: row.id });
+      const agentDetails=row.agentDetails||await api('agent.applicationAgentDetails');
+      $('application-agent-details').innerHTML='<h3>Agente responsável</h3><p>'+esc(agentDetails.name)+' · '+esc(agentDetails.email)+' · '+esc(agentDetails.phone)+'</p><p>Número de agente: '+esc(agentDetails.number||'Aguardando número do Admin Rafael')+(agentDetails.usingAdminNumber?' · número temporário do Admin Rafael':'')+'</p>';
       if (
         row.personalWeeklyExpenses == null &&
         row.personalMonthlyExpenses != null
@@ -891,6 +893,8 @@
       storedPdfPages = `<section class="document-page"><h2>Documento anexado</h2><p>O documento está salvo com segurança, mas não pôde ser convertido nesta tentativa: ${esc(error?.message || "erro desconhecido")}</p></section>`;
     }
     const html =
+      section("Agente responsável pela aplicação", [["Nome completo", row.agentDetails?.name],["E-mail",row.agentDetails?.email],["Telefone",row.agentDetails?.phone],["Número de agente",row.agentDetails?.number||"Aguardando número do Admin Rafael"],["Número utilizado",row.agentDetails?.usingAdminNumber?"Admin Rafael (temporário; agente responsável identificado acima)":"Número próprio"]]) +
+      (row.referralAgentDetails?section("Agente indicador · 10% do prêmio anual",[["Nome completo",row.referralAgentDetails.name],["E-mail",row.referralAgentDetails.email],["Telefone",row.referralAgentDetails.phone],["Número de agente",row.referralAgentDetails.number||"Pendente"]]):"") +
       section("1. Proposta e apólice", [
         ["Produto", row.productInterest],
         ["Cobertura pretendida", usd(row.coverageRequested)],
@@ -1096,6 +1100,8 @@
       return "Não informado";
     };
     const measurements = americanMeasurements(row);
+    sectionBlock("Agente responsável pela aplicação", [["Nome completo", row.agentDetails?.name],["E-mail",row.agentDetails?.email],["Telefone",row.agentDetails?.phone],["Número de agente",row.agentDetails?.number||"Aguardando número do Admin Rafael"],["Número utilizado",row.agentDetails?.usingAdminNumber?"Admin Rafael (temporário; agente responsável identificado acima)":"Número próprio"]]);
+    if(row.referralAgentDetails)sectionBlock("Agente indicador - 10% do prêmio anual",[["Nome completo",row.referralAgentDetails.name],["E-mail",row.referralAgentDetails.email],["Telefone",row.referralAgentDetails.phone],["Número de agente",row.referralAgentDetails.number||"Pendente"]]);
     sectionBlock("1. Produto e objetivo da aplicação", [
       ["Produto pretendido", row.productInterest],
       ["Premium mensal", usd(row.premiumBudget)],

@@ -14,11 +14,14 @@ export function classifySale(input) {
   if (Math.abs(value * 100 - cents) > 0.00001) throw Error('Informe o prêmio mensal com até duas casas decimais.');
   const band = referenceBands.find(b => (input.product === 'Term' ? b.product === 'Term' : b.key.startsWith('iul')) && cents >= b.min && (b.max === null || cents <= b.max));
   if (!band) throw Error('IUL tipo 1 exige prêmio mensal entre US$ 100 e US$ 200; tipo 2 exige mais de US$ 200.');
+  if(input.category!==undefined&&input.category!==band.key)throw Error('A categoria selecionada não corresponde ao prêmio mensal.');
   return { band, cents };
 }
 export async function ratesSchema(env) {
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS affiliateReferenceRates(bandKey TEXT PRIMARY KEY,payoutCents INTEGER,updatedBy TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS centralLeadClosures(phone TEXT PRIMARY KEY,agent TEXT NOT NULL,product TEXT NOT NULL,monthlyPremiumCents INTEGER NOT NULL,bandKey TEXT NOT NULL,referencePayoutCents INTEGER,confirmedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS marketingObligations(phone TEXT PRIMARY KEY,payer TEXT NOT NULL,beneficiaryOwner TEXT,beneficiaryName TEXT,beneficiaryEmail TEXT,beneficiaryKind TEXT,amountCents INTEGER,annualPremiumCents INTEGER NOT NULL,rule TEXT NOT NULL DEFAULT 'awaiting_admin',status TEXT NOT NULL DEFAULT 'awaiting_admin',decidedBy TEXT,decidedAt TEXT,paidAt TEXT,paymentReference TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)").run();
+  await env.DB.prepare('CREATE TABLE IF NOT EXISTS agentNumberDefaults(key TEXT PRIMARY KEY,number TEXT NOT NULL,updatedBy TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
   await env.DB.batch(referenceBands.map(b => env.DB.prepare('INSERT OR IGNORE INTO affiliateReferenceRates(bandKey) VALUES(?)').bind(b.key)));
 }
 export async function readRates(env) {
@@ -40,6 +43,6 @@ export async function saveRates(env, input, actor) {
 }
 export async function affiliateSourceSales(env) {
   await ratesSchema(env);
-  const rows = await env.DB.prepare("SELECT l.phone,l.name,l.stage,s.sourceName,s.sourceEmail,s.owner,s.groupsJson,c.product,c.monthlyPremiumCents,c.bandKey,c.referencePayoutCents,c.agent,c.confirmedAt FROM centralLeadSources s JOIN centralLeads l ON l.phone=s.phone LEFT JOIN centralLeadClosures c ON c.phone=l.phone WHERE s.kind='affiliate' ORDER BY c.confirmedAt DESC,s.sourceName,l.name LIMIT 500").all();
+  const rows = await env.DB.prepare("SELECT l.phone,l.name,l.stage,s.sourceName,s.sourceEmail,s.owner,s.groupsJson,c.product,c.monthlyPremiumCents,c.bandKey,c.referencePayoutCents,c.agent,c.confirmedAt FROM centralLeadSources s JOIN centralLeads l ON l.phone=s.phone LEFT JOIN centralLeadClosures c ON c.phone=l.phone WHERE s.kind='affiliate' AND NOT EXISTS(SELECT 1 FROM centralLeadSources x,json_each(x.groupsJson) g JOIN centralExcludedGroups e ON e.groupId=json_extract(g.value,'$.id') WHERE x.phone=l.phone) ORDER BY c.confirmedAt DESC,s.sourceName,l.name LIMIT 500").all();
   return rows.results;
 }

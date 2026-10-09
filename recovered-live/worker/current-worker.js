@@ -1,3 +1,4 @@
+import {listObligations,selectBeneficiary,confirmPayment,numberDefaults,applicationAgentDetails,applicationReferralDetails} from './marketing-obligations.js';
 import {portfolioRows} from './agent-portfolio.js';
 import {readRates,saveRates,affiliateSourceSales} from './affiliate-rates.js';
 import {leadFlowRoute,leadSchema,staffIdentity,protectInternalContacts,configuredAccess} from './lead-flow.js';
@@ -55775,7 +55776,7 @@ ${message}`, owner).run();
       }
       delete row.applicationData;
       delete row.sensitiveData;
-      return trpcResult({ ...row, ...extra, ...sensitive, id: Number(row.id) });
+      await leadSchema(env);return trpcResult({ ...row, ...extra, ...sensitive, agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
     }
     if (name === "agent.saveApplication") {
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
@@ -58016,6 +58017,9 @@ Affinity Financial Consulting`,
     await env.DB.prepare("DELETE FROM affiliates WHERE id=?").bind(id).run();
     return trpcResult({ success: true });
   }
+  if(name==='agent.applicationAgentDetails'){await leadSchema(env);return trpcResult(await applicationAgentDetails(env,adminEmail.toLowerCase()));}
+  if (name === 'admin.marketingObligations') {return trpcResult(await listObligations(env));}
+  if (name === 'admin.marketingBeneficiary'||name==='admin.marketingConfirmPayment'||name==='admin.agentNumberDefault'){try{if(name!=='admin.agentNumberDefault'&&request.method!=='POST')return trpcError('Use POST');return trpcResult(name==='admin.marketingBeneficiary'?await selectBeneficiary(env,input,adminEmail):name==='admin.marketingConfirmPayment'?await confirmPayment(env,input,adminEmail):await numberDefaults(env,request.method==='POST'?input:null,adminEmail));}catch(e){return trpcError(e.message);}}
   if (name === 'admin.affiliateReferenceRates') {
     try { return trpcResult(request.method==='POST'?await saveRates(env,input,adminEmail):await readRates(env)); }
     catch(error){ return trpcError(error.message || 'Não foi possível salvar as referências.'); }
@@ -59886,9 +59890,10 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
  if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);}}
  const response=await canonicalMenuFetchSource.call(this,request,env,ctx);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-contact-controls-2" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/admin-unified-menu.js?v=1" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<script src="/staff-setup-check.js?v=20261009-marketing-1" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-5" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-5');}}).transform(response);
+  return new HTMLRewriter().on('head',{element(el){el.append('<script src="/agent-unified-menu.js?v=20261009-marketing-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-marketing-1');}}).transform(response);
  }
  return response;
 };

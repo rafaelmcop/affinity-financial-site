@@ -1,4 +1,4 @@
-import {storeCentralContacts} from './lead-flow.js';
+import {storeCentralContacts,leadSchema,backfill,protectInternalContacts,visibleLeadSQL} from './lead-flow.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
 const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function contactBridge(env,owner,action,method='GET'){
@@ -16,7 +16,7 @@ export async function affiliateWhatsappRoute(request,env,auth){
   const access=await auth.access(email,env);if(!access.isMaster&&(!access.account||!Number(access.account.isActive)||access.account.status!=='approved'||!['admin','both'].includes(access.account.accountType)))return json({error:'Acesso exclusivo dos administradores.'},403);
   if(request.method!=='GET')return json({error:'A lista fixa não permite exclusões por esta interface.'},405);
   if(adminPage)return env.ASSETS.fetch(new Request(new URL('/admin-affiliate-whatsapp.html',url),request));await schema(env);
-  const rows=await env.DB.prepare('SELECT affiliateId,affiliateName,affiliateEmail,name,phone,groupsJson,source,createdAt FROM affiliateWhatsappLeads ORDER BY createdAt DESC,affiliateId,phone').all();return json({leads:rows.results||[]});
+  await leadSchema(env);await backfill(env);await protectInternalContacts(env);const rows=await env.DB.prepare("SELECT s.owner,s.kind,CASE WHEN s.kind='affiliate' THEN CAST(substr(s.owner,11) AS INTEGER) ELSE s.owner END AS affiliateId,s.sourceName AS affiliateName,s.sourceEmail AS affiliateEmail,l.name,l.phone,l.stage,s.groupsJson,s.kind AS source,s.createdAt FROM centralLeadSources s JOIN centralLeads l ON l.phone=s.phone WHERE "+visibleLeadSQL('l.phone')+" ORDER BY s.sourceName,l.name,l.phone").all();return json({leads:rows.results||[]});
  }
  const id=await auth.affiliate(request,env);if(!id)return affiliatePage?Response.redirect(new URL('/afiliados/login',url),302):json({error:'Entre no portal de afiliados.'},401);
  const affiliate=await env.DB.prepare('SELECT id,name,email,isActive,status FROM affiliates WHERE id=?').bind(id).first();if(!affiliate||!Number(affiliate.isActive)||affiliate.status!=='approved')return json({error:'Acesso restrito ao afiliado aprovado.'},403);

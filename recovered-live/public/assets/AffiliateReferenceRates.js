@@ -1,3 +1,4 @@
+import AdminMarketingObligations from './AdminMarketingObligations.js?v=2';
 import { r as React } from './index-BIU-6RMI.js?v=20261009-setup-1';
 const h = React.createElement;
 async function api(name, data) {
@@ -34,6 +35,7 @@ export default function AffiliateReferenceRates() {
     h('p', { style: { color: '#cbd5e1', marginTop: 8 } }, 'A origem de cada afiliado permanece identificada. A referência é registrada no fechamento confirmado pelo agente; nenhum pagamento é realizado automaticamente.'),
     h('label', { style: { display: 'block', marginTop: 14 } }, 'Filtrar afiliado', h('select', { value: filter, onChange: e => setFilter(e.target.value), style: { ...inputStyle, marginTop: 7 } }, h('option', { value: '' }, 'Todos os afiliados'), ...names.map(name => h('option', { key: name, value: name }, name)))),
     h('p', { style: { marginTop: 12 } }, sources.length ? 'Até 500 contatos de origem afiliada, com cada fonte preservada.' : 'Ainda não há contatos importados de afiliados. A tabela de referências acima já está disponível.'),
+    h(AdminMarketingObligations),
     ...sources.filter(s => !filter || s.sourceName === filter).map(s => h('article', { key: s.phone + s.owner, style: { borderTop: '1px solid #ffffff22', padding: '15px 0' } },
       h('strong', null, s.name), h('p', null, s.phone + ' · ' + s.stage), h('p', { style: { color: '#cbd5e1' } }, 'Origem: ' + s.sourceName + ' · ' + s.sourceEmail),
       s.product ? h('p', { style: { color: '#d4af37' } }, s.product + ' · Prêmio mensal ' + money(s.monthlyPremiumCents) + ' · Referência ' + money(s.referencePayoutCents) + ' · Confirmado por ' + s.agent) : h('p', { style: { color: '#94a3b8' } }, 'Aguardando confirmação do produto e prêmio mensal no fechamento.'))));
