@@ -24,6 +24,7 @@ const db=new DatabaseSync(path.join(dataDir,'history.sqlite'));
 db.exec(`PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,chat TEXT NOT NULL,body TEXT NOT NULL,direction TEXT NOT NULL,stamp INTEGER NOT NULL,ack INTEGER DEFAULT 0,mediaKey TEXT,mime TEXT,filename TEXT,mediaKind TEXT,mediaSize INTEGER,mediaState TEXT,PRIMARY KEY(owner,id));
 CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
+CREATE TABLE IF NOT EXISTS session_owners(owner TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
 const sessions=new Map();
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
@@ -64,6 +65,7 @@ async function connect(owner){
   const key=createHash('sha256').update(owner).digest('hex');
   const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
   const s={client,state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
+  db.prepare('INSERT OR IGNORE INTO session_owners(owner) VALUES(?)').run(owner);
   client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
   client.on('ready',()=>{void (async()=>{try{
@@ -102,6 +104,7 @@ const server=http.createServer(async(req,res)=>{
         const directory=s.client.authStrategy.userDataDir;
         if(directory&&existsSync(directory))renameSync(directory,directory+'.disconnected-'+Date.now());
         sessions.delete(owner);
+        db.prepare('DELETE FROM session_owners WHERE owner=?').run(owner);
         return reply({ok:true,warning:revoked?null:'Conexão local removida. Confira Aparelhos conectados no celular e remova a sessão antiga, se ela ainda aparecer.'});
       }catch{s.state='error';return reply({error:'Não foi possível encerrar a sessão. Tente desconectar novamente.'},503);}
     }
@@ -139,6 +142,7 @@ const server=http.createServer(async(req,res)=>{
       return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(item=>({...item,mediaUrl:item.mediaState==='ready'||(!item.mediaState&&item.mediaKind)?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
     }
     if(action==='/send'&&req.method==='POST'){
+      if(process.env.WHATSAPP_SEND_ENABLED!=='true')return reply({error:'Envios bloqueados até confirmação do responsável.',code:'sending_disabled'},403);
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
       const input=await body(req,11500000),chat=String(input.chat||''),text=String(input.text||'').trim(),requestId=String(input.requestId||''),media=input.media;
       const validDocument=media?.kind==='file'&&((media.mime==='application/pdf'&&/\.pdf$/i.test(String(media.filename||'')))||(media.mime==='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'&&/\.xlsx$/i.test(String(media.filename||'')))||(media.mime==='application/vnd.ms-excel'&&/\.xls$/i.test(String(media.filename||''))));
@@ -159,6 +163,9 @@ const server=http.createServer(async(req,res)=>{
   }catch{return reply({error:'A conexão não respondeu. Confira o status e tente novamente.'},503);}
 });
 server.requestTimeout=65000;
-server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port})));
+server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>{
+  console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port}));
+  for(const {owner} of db.prepare('SELECT owner FROM session_owners LIMIT ?').all(maxSessions))void connect(owner).catch(()=>console.error('whatsapp_session_restore_failed'));
+});
 async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
 process.on('SIGTERM',()=>{void stop();});process.on('SIGINT',()=>{void stop();});
