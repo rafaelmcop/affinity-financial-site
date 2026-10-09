@@ -29,13 +29,15 @@ import "./send-u-E2Isyn.js";
   ["path", { d: "M18 6 7 17l-5-5", key: "116fxf" }],
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }],
 ]);
+import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=1";
 function H() {
+  const [calendarVersion,setCalendarVersion]=k.useState(0);
   const [calendarAllowed,setCalendarAllowed]=k.useState(false),[agendaStatus,setAgendaStatus]=k.useState(''),[agendaError,setAgendaError]=k.useState(false);
   k.useEffect(()=>{let active=true;fetch('/api/agent/access',{credentials:'same-origin',cache:'no-store'}).then(res=>res.ok?res.json():null).then(data=>{if(active)setCalendarAllowed(!!data?.features?.includes('calendar'));}).catch(()=>{});return()=>{active=false;};},[]);
 
   const [credits,setCredits]=k.useState(null),[creditLoading,setCreditLoading]=k.useState(true);
   async function updateCredits(refresh=false){setCreditLoading(true);try{const response=await fetch('/api/trpc/agent.fiveRingsCredits?input='+encodeURIComponent(JSON.stringify({json:{refresh}})),{credentials:'include',cache:'no-store'});const data=await response.json();if(data.error)throw Error(data.error.json?.message||'Não foi possível consultar os créditos');setCredits(data.result.data.json);}catch(error){setCredits(previous=>({...previous,error:error.message}));}finally{setCreditLoading(false);}}
-  k.useEffect(()=>{void updateCredits();},[]);
+  // Production counters remain hidden until the integration is ready.
   const [, o] = w(),
     r = i.agent.dashboard.useQuery(void 0, {
       staleTime: 0,
@@ -71,7 +73,7 @@ function H() {
     if (!calendarAllowed) return;
     let active = true;
     q.mutateAsync({ quick: true, daily: true })
-      .then(result => active && !result.skipped && Promise.all([r.refetch(), l.refetch()]))
+      .then(result => {if(active&&!result.skipped){setCalendarVersion(v=>v+1);return Promise.all([r.refetch(), l.refetch()]);}})
       .catch(error => {if(active){setAgendaError(true);setAgendaStatus(error instanceof Error ? error.message : "Não foi possível sincronizar. Use o ícone de atualização para tentar novamente.");}});
     return () => { active = false; };
   }, [calendarAllowed]);
@@ -120,40 +122,16 @@ function H() {
               }),
               e.jsx("h1", {
                 className: "mt-2 text-3xl font-bold",
-                children: "Painel do Agente",
+                children: "Início",
               }),
               e.jsx("p", {
                 className: "mt-2 text-gray-400",
                 children:
-                  "Seus clientes, compromissos e resultados em um só lugar.",
+                  "Sua agenda semanal e os avisos que precisam da sua atenção.",
               }),
             ],
           }),
-          e.jsx("div", {
-            className: "grid gap-4 sm:grid-cols-2 lg:grid-cols-4",
-            children: N.map(([t, a, n]) =>
-              e.jsxs(
-                m,
-                {
-                  className: "border-gold/20 bg-[#0b1524] p-5",
-                  children: [
-                    e.jsx(n, { className: "text-gold" }),
-                    e.jsx("p", {
-                      className: "mt-4 text-sm text-gray-400",
-                      children: t,
-                    }),
-                    e.jsx("p", {
-                      className: "mt-1 text-3xl font-bold text-white",
-                      children: a ?? (l.isError && r.isError ? "Erro" : "…"),
-                    }),
-                    t.startsWith('Leadership') && e.jsxs('div',{className:'mt-3 text-sm text-gray-300',children:[e.jsx('p',{children:'Meta: '+(credits?.leadershipGoal?.toLocaleString('pt-BR')??'—')}),e.jsx('p',{children:'Faltam: '+(credits?.leadershipRemaining?.toLocaleString('pt-BR')??'—')})]}),
-                    t.startsWith('Total Credits') && e.jsxs('div',{className:'mt-3 text-xs text-gray-400',children:[e.jsx('p',{children:credits?.updatedAt?'Atualizado em '+new Date(credits.updatedAt.replace(' ','T')+'Z').toLocaleString('pt-BR'):'Valores oficiais da Five Rings'}),credits?.error&&e.jsxs('div',{children:[e.jsx('p',{role:'alert',children:credits.error}),e.jsx('a',{href:'/agentes/configuracoes#five-rings',className:'inline-block mt-2 font-bold underline',children:'Resolver acesso Five Rings'})]}),e.jsx('button',{type:'button',disabled:creditLoading,onClick:()=>updateCredits(true),className:'mt-2 text-gold underline',children:creditLoading?'Atualizando…':'Atualizar créditos'})]}),
-                  ],
-                },
-                t
-              )
-            ),
-          }),
+          calendarAllowed && e.jsx(WeeklyAgenda,{version:calendarVersion,syncing:q.isPending,onSync:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar.');}}}),
           (d > 0 || calendarAllowed) &&
             e.jsxs(m, {
               className: "border-gold/30 bg-[#0b1524] p-6",
@@ -455,7 +433,7 @@ function H() {
                               }),
                               e.jsxs("div", {className:"flex items-center gap-2",children:[
                                 e.jsx("span", {className:"rounded-full bg-sky-300 px-2.5 py-1 text-xs font-bold text-black",children:s?.todayMeetings?.length || 0}),
-                                e.jsx("button", {type:"button",title:"Sincronizar agenda", "aria-label":"Sincronizar agenda",disabled:q.isPending,"aria-busy":q.isPending,className:"inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-sky-400/50 text-sky-300 hover:bg-sky-400/10 disabled:opacity-50",onClick:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar a agenda. Tente novamente.');}},children:e.jsx(AgendaRefresh,{size:18,className:q.isPending?'animate-spin':''})})
+                                e.jsx("button", {type:"button",title:"Sincronizar agenda", "aria-label":"Sincronizar agenda",disabled:q.isPending,"aria-busy":q.isPending,className:"inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-sky-400/50 text-sky-300 hover:bg-sky-400/10 disabled:opacity-50",onClick:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar a agenda. Tente novamente.');}},children:e.jsx(AgendaRefresh,{size:18,className:q.isPending?'animate-spin':''})})
                               ]}),
                             ],
                           }),
@@ -498,28 +476,6 @@ function H() {
                 }),
               ],
             }),
-          e.jsxs(m, {
-            className: "border-gold/20 bg-[#0b1524] p-6",
-            children: [
-              e.jsx("h2", {
-                className: "text-xl font-bold text-gold",
-                children: "Suas apólices",
-              }),
-              e.jsx("p", {
-                className: "mt-4 text-5xl font-bold",
-                children:
-                  l.data?.activePolicyCount ??
-                  E.activePolicyCount ??
-                  s?.activePolicyCount ??
-                  (r.isLoading ? "…" : g.length),
-              }),
-              e.jsx("p", {
-                className: "mt-2 text-sm text-gray-400",
-                children:
-                  "A pontuação usa o target premium anual de cada apólice.",
-              }),
-            ],
-          }),
         ],
       }),
     ],

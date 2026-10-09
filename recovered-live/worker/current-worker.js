@@ -1,3 +1,4 @@
+import {weeklyMeetings,ownMeeting} from './weekly-calendar.js';
 import {claimDailyCalendarSync} from './calendar-daily-sync.js';
 import {addressBookRoute} from './address-book.js';
 import {accessSchema,userAccess,hasFeature,pageFeature,procedureFeature,accessRoute} from './user-access.js';
@@ -57620,6 +57621,9 @@ Affinity Financial Consulting`,
       return trpcError(String(error?.message || error));
     }
   }
+  if(name==='agent.weekMeetings'||name==='agent.meetingDetail'){
+    try{await ensureCalendlyTables(env);return trpcResult(name==='agent.weekMeetings'?await weeklyMeetings(env,adminEmail,input):await ownMeeting(env,adminEmail,input.id));}catch(error){return trpcError(error.message);}
+  }
   if (name === "agent.calendlyMeetings") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase();
@@ -59646,8 +59650,8 @@ ${signatureLines.join("\n")}`.trim();
           selected = [];
         }
         if (!selected.length) continue;
-        policySql += ` AND c.id IN (${selected.map(() => "?").join(",")})`;
-        policyBinds.push(...selected);
+        policySql += " AND c.id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))";
+        policyBinds.push(JSON.stringify(selected));
       }
       const policies = await env.DB.prepare(policySql).bind(...policyBinds).all();
       for (const policy of policies.results) {
@@ -59764,8 +59768,8 @@ ${signatureLines.join("\n")}`.trim();
         selected = [];
       }
       if (!selected.length) continue;
-      sql += ` AND id IN (${selected.map(() => "?").join(",")})`;
-      binds.push(...selected);
+      sql += " AND id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))";
+      binds.push(JSON.stringify(selected));
     }
     const clients = await env.DB.prepare(sql).bind(...binds).all();
     for (const client of clients.results) {

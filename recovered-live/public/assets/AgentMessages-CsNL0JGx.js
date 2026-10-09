@@ -176,7 +176,7 @@ function Q({
           n(null),
           h.success(
             t.occasion === "custom" && t.deliveryMode === "immediate"
-              ? "Mensagem enviada imediatamente"
+              ? "Envio iniciado. Todos os selecionados com e-mail serão processados em lotes; acompanhe o histórico."
               : "Automação salva"
           ));
       } catch (a) {
