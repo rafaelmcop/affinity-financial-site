@@ -100,7 +100,7 @@ const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost'),action=url.pathname;
   try{
     if(affiliateOwner(owner)&&!['/connect','/status','/all-contacts','/disconnect'].includes(action))return reply({error:'Ação indisponível para importação de afiliado.'},403);
-    if(action==='/audit'&&req.method==='GET')return reply(auditMessages(db,owner,url.searchParams.get('cursor')));
+    if(action==='/audit'&&req.method==='GET')return reply(auditMessages(db,owner,url.searchParams.get('cursor'),url.searchParams.get('phone')));
     if(action==='/connect'&&req.method==='POST'){await connect(owner);return reply({ok:true});}
     const s=sessions.get(owner);if(s)s.lastSeen=Date.now();
     if(action==='/status'&&req.method==='GET')return reply({state:s?.state||'disconnected',number:s?.number||null,qr:s?.qr&&Date.now()-s.qrAt<45000?await QRCode.toDataURL(s.qr,{width:280,margin:2}):null});

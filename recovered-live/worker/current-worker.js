@@ -58874,8 +58874,8 @@ Affinity Financial Consulting`,
       ).bind(Number(input.clientId), adminEmail.toLowerCase()).first();
       if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     }
-    const auditOwner=await env.DB.prepare('SELECT assignedAdminEmail FROM crmClients WHERE id=?').bind(Number(input.clientId)).first();
-    if(auditOwner?.assignedAdminEmail)try{await syncWhatsappAudit(env,String(auditOwner.assignedAdminEmail));}catch{console.error('whatsapp_client_audit_refresh_failed');}
+    const auditOwner=await env.DB.prepare('SELECT assignedAdminEmail,phone,whatsapp FROM crmClients WHERE id=?').bind(Number(input.clientId)).first();
+    if(auditOwner?.assignedAdminEmail)try{await syncWhatsappAudit(env,String(auditOwner.assignedAdminEmail),auditOwner);}catch{console.error('whatsapp_client_audit_refresh_failed');}
     await auditSchema(env.DB);
     const rows = await env.DB.prepare(
       "SELECT id,clientId,type,content,createdBy,createdAt FROM (SELECT id,clientId,type,substr(coalesce(content,''),1,5000) AS content,createdBy,createdAt FROM crmActivities WHERE clientId=? AND "+personalActivityPredicate+" UNION ALL SELECT -id,clientId,'whatsapp','WhatsApp · '||CASE WHEN direction='sent' THEN 'Enviado pelo agente' ELSE 'Recebido do cliente' END||' · '||phone||char(10)||body||CASE WHEN mediaKind IS NOT NULL THEN char(10)||'Anexo: '||coalesce(filename,mediaKind)||' · '||coalesce(mediaState,'') ELSE '' END,owner,sentAt FROM whatsappClientAudit WHERE clientId=?) ORDER BY datetime(createdAt) DESC,id DESC LIMIT 200"
