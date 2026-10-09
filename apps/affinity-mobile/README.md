@@ -2,13 +2,11 @@
 
 Aplicativo Expo/React Native para iPhone e Android. O protótipo usa o portal autenticado em uma WebView com navegação nativa, mantendo as permissões e o banco do CRM. Não é um novo backend nem uma cópia dos leads no aparelho.
 
-## Perfis
+## Escopo inicial: apenas agentes
 
-- Agente: fila, resultado obrigatório antes de avançar, contatos e configurações.
-- Admin: central de leads e portal administrativo, com distribuição existente.
-- Afiliado: portal, prioridades e integração com WhatsApp. Não recebe autorização de agente apenas por selecionar outro perfil.
+O aplicativo tem somente duas abas: Ligações e CRM. O CRM é uma consulta com busca e filtro de etapas, sem editar ou excluir clientes. O login utiliza a conta existente do agente. Admins e afiliados não possuem entradas no aplicativo; o portal web permanece com suas funções atuais.
 
-O usuário faz login com sua conta existente no portal. Senhas e cookies não são lidos pelo código nativo nem registrados em logs. A seleção de perfil é apenas navegação; o servidor valida cada acesso.
+Após o login, o aplicativo direciona para a fila, evitando o dashboard geral. Links internos de outras funções são bloqueados pela navegação do aplicativo. Configuração inicial e pareamento devem ser concluídos pelo portal antes de usar a fila. A autenticação e as permissões continuam sendo validadas no servidor.
 
 ## Chamadas e mensagens
 

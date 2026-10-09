@@ -7,7 +7,7 @@ import { destination, ORIGIN, parseRole, roles } from '../lib/portal';
 
 export default function Portal() {
   const params = useLocalSearchParams<{ role: string }>();
-  const role = parseRole(params.role);
+  const role = parseRole(params.role ?? 'agent');
   const portal = roles[role || 'agent'];
   const ref = useRef<WebView>(null);
   const [uri, setUri] = useState(ORIGIN + portal.login);
@@ -22,14 +22,19 @@ export default function Portal() {
     });
     return () => subscription.remove();
   }, [canBack]);
-  if (!role) return <SafeAreaView style={styles.safe}><Pressable onPress={() => router.replace('/')}><Text style={styles.white}>Voltar para os portais</Text></Pressable></SafeAreaView>;
+  if (!role) return <SafeAreaView style={styles.safe}><Pressable onPress={() => router.replace('/')}><Text style={styles.white}>Voltar ao acesso do agente</Text></Pressable></SafeAreaView>;
   function openExternal(url: string) {
     Linking.openURL(url).catch(() => Alert.alert('Não foi possível abrir', 'Confira se o aplicativo está instalado e tente novamente.'));
   }
   function navigate(raw: string) {
     const target = destination(raw);
     if (target.type === 'internal') return true;
-    if (target.type === 'call') {
+    if (target.type === 'queue') {
+      setUri(ORIGIN + '/agentes/fila-leads');
+      ref.current?.injectJavaScript("window.location.replace(" + JSON.stringify(ORIGIN + '/agentes/fila-leads') + ");true;");
+    } else if (target.type === 'setup') {
+      Alert.alert('Complete sua configuração no portal', 'Use o portal no computador para completar os dados e conectar o WhatsApp. Depois, volte ao aplicativo para acessar a fila.');
+    } else if (target.type === 'call') {
       Alert.alert('Ligar para o contato?', target.phone, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Ligar', onPress: () => openExternal('tel:' + target.phone) }]);
     } else if (target.type === 'whatsapp') {
       // A selected template is only a draft. Sending remains a manual action in WhatsApp.
@@ -51,7 +56,7 @@ export default function Portal() {
         onOpenWindow={event => { if (navigate(event.nativeEvent.targetUrl)) setUri(event.nativeEvent.targetUrl); }}
         javaScriptEnabled domStorageEnabled sharedCookiesEnabled thirdPartyCookiesEnabled={false}
         mixedContentMode="never" allowsBackForwardNavigationGestures
-        onNavigationStateChange={state => { setCanBack(state.canGoBack); setCurrentUrl(state.url); }}
+        onNavigationStateChange={state => { setCanBack(state.canGoBack); const target = destination(state.url); if (target.type === 'queue' || target.type === 'setup') { navigate(state.url); } else if (target.type === 'internal') setCurrentUrl(state.url); }}
         onLoadStart={() => { setLoading(true); setFailed(false); }} onLoadEnd={() => setLoading(false)}
         onError={() => { setFailed(true); setLoading(false); }}
         onHttpError={event => { if (event.nativeEvent.statusCode >= 500) { setFailed(true); setLoading(false); } }}

@@ -8,12 +8,12 @@ export default function Welcome() {
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.brand}>AFFINITY</Text>
       <Text style={styles.title}>Seu próximo atendimento começa aqui.</Text>
-      <Text style={styles.subtitle}>Escolha seu portal e entre com a conta que você já usa.</Text>
+      <Text style={styles.subtitle}>Entre com sua conta de agente para fazer ligações e acompanhar seus clientes.</Text>
       {(Object.keys(roles) as Role[]).map(role => <Pressable accessibilityRole="button" key={role} style={styles.card} onPress={() => router.push({ pathname: '/portal', params: { role } })}>
-        <View style={styles.row}><Text style={styles.cardTitle}>{roles[role].title}</Text><Text style={styles.arrow}>→</Text></View>
+        <View style={styles.row}><Text style={styles.cardTitle}>Entrar como agente</Text><Text style={styles.arrow}>→</Text></View>
         <Text style={styles.description}>{roles[role].description}</Text>
       </Pressable>)}
-      <Text style={styles.note}>Seu acesso é definido pela sua conta. Selecionar um portal não altera suas permissões.</Text>
+      <Text style={styles.note}>Exclusivo para agentes. Fila de ligações e consulta ao CRM.</Text>
       <Text style={styles.version}>Versão de teste · 0.1</Text>
     </ScrollView>
   </SafeAreaView>;

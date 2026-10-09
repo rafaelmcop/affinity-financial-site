@@ -89,7 +89,7 @@ export async function leadFlowRoute(request,env,auth){
  if(!admin&&!onboard&&!queue&&!/^\/api\/(agent|affiliate)\/(onboarding|contact-import|lead-queue)\//.test(path))return null;
  try{
  const identity=admin?await adminIdentity(request,env,auth):await staffIdentity(request,env,auth,kind);if(!identity)return json({error:'Entre com uma conta aprovada para acessar.'},401);
- if(request.method==='GET'&&(onboard||queue||path==='/admin/central-leads'))return env.ASSETS.fetch(new Request(new URL(admin?'/central-leads-admin.html':queue?'/central-leads-agent.html':'/staff-onboarding.html',url),request));
+ if(request.method==='GET'&&(onboard||queue||path==='/admin/central-leads'))return env.ASSETS.fetch(new Request(new URL(admin?'/central-leads-admin.html':queue?(url.searchParams.get('view')==='crm'?'/mobile-crm.html':'/central-leads-agent.html'):'/staff-onboarding.html',url),request));
  await leadSchema(env);const action=path.split('/').at(-1),input=request.method==='POST'?await inputJSON(request,url):{};
  if(!['GET','POST'].includes(request.method))return json({error:'Ação indisponível.'},405);
  if(admin){
