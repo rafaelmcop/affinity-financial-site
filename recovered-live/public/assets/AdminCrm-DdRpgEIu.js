@@ -1,3 +1,4 @@
+import {ClientAutomationStatus} from './ClientAutomationStatus.js?v=1';
 import {
   t as c,
   r as p,
@@ -12,7 +13,7 @@ import { I as h } from "./input-maK0rC7f.js";
 import {
   DeliveryHistory as be,
   ScheduledMessagesPanel as H,
-} from "./AgentMessages-CsNL0JGx.js?v=20260901-6";
+} from "./AgentMessages-CsNL0JGx.js?v=20261009-client-audit-4";
 import { P as ie } from "./plus-DKqFfTiU.js";
 import { S as ce } from "./save-BWWR3RtX.js";
 import { P as V } from "./pen-BtFcHMZL.js";
@@ -354,7 +355,7 @@ function Le({ agentMode: a = !1 }) {
       children: [
         a ? e.jsx(oe, {}) : e.jsx(ne, {}),
         e.jsxs("main", {
-          className: "mx-auto max-w-5xl px-4 py-8 sm:px-6",
+          className: "client-record mx-auto max-w-5xl px-4 py-8 sm:px-6",
           children: [
             e.jsxs(d, {
               type: "button",
@@ -478,6 +479,7 @@ function Le({ agentMode: a = !1 }) {
                     !Z.isLoading && scheduledForClient.length === 0 && e.jsx("p", { className: "mt-3 text-sm text-gray-400", children: "Nenhuma mensagem automática programada para este cliente." }),
                   ],
                 }),
+                e.jsx(ClientAutomationStatus,{clientId:x}),
                 e.jsxs("section", {
                   className: "mt-6 border-t border-white/10 pt-5",
                   children: [
@@ -1419,6 +1421,7 @@ function Le({ agentMode: a = !1 }) {
                                 }),
                               ],
                             }),
+                            e.jsx(ClientAutomationStatus,{clientId:x}),
                             e.jsxs("div", {
                               id: "crm-profile-history",
                               className: "mt-5 scroll-mt-16 space-y-3",

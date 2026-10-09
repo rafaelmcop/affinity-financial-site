@@ -57,3 +57,10 @@ html[data-agent-theme=light] :is(button:disabled,[aria-disabled=true]){opacity:.
 
 html[data-agent-theme="light"] body :is(#call-contact,#whatsapp-contact,#open-message).contact-action,html[data-agent-theme="light"] body :is(#call-contact,#whatsapp-contact,#open-message).contact-action:visited,html[data-agent-theme="light"] body :is(#call-contact,#whatsapp-contact,#open-message).contact-action:hover { color:#ffffff!important;background:#12344b!important;border:2px solid #12344b!important;font-weight:800!important;opacity:1!important; }
 html[data-agent-theme="light"] body :is(#call-contact,#whatsapp-contact,#open-message).contact-action.whatsapp { color:#ffffff!important;background:#126448!important;border-color:#126448!important; }
+
+/* Personal client record: consistent readable controls in the light theme. */
+html[data-agent-theme=light] :is(.client-record,#crm-client-profile,#client-conversation) :is(button,a[role=button],.actions a) {color:#172b42!important;background:#e8eef5!important;border-color:#7b8fa6!important;font-weight:700!important;opacity:1!important}
+html[data-agent-theme=light] :is(.client-record,#crm-client-profile,#client-conversation) :is(button,a[role=button],.actions a) :is(span,svg) {color:inherit!important}
+html[data-agent-theme=light] :is(.client-record,#crm-client-profile,#client-conversation) :is(button,a[role=button],.actions a)[class*=bg-gold] {background:#d5b52f!important;color:#17202e!important;border-color:#927712!important}
+
+html[data-agent-theme=light] .client-record button.primary {background:#d5b52f!important;color:#17202e!important;border-color:#927712!important}

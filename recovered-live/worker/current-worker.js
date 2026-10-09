@@ -1,3 +1,5 @@
+import {auditSchema,syncAllWhatsappAudit,syncWhatsappAudit} from './whatsapp-audit.js';
+import {personalEmailPredicate,personalActivityPredicate,clientAutomations} from './client-communication.js';
 import {welcomeTemplate,saveWelcomeTemplate} from './welcome-template.js';
 import {automationCycle,completeAutomationCycle} from './automation-cycles.js';
 import {weeklyMeetings,ownMeeting} from './weekly-calendar.js';
@@ -51019,10 +51021,10 @@ Ap\xF3lice n\xBA {apolice}`;
         "UPDATE clientEmails SET subject='Aviso de pagamento processado',body='Controle interno de processamento',visibility='central',sentAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=? AND externalId=?"
       ).bind(owner, externalId),
       env.DB.prepare(
-        "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')"
+        "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'automation')"
       ).bind(owner, Number(resolvedMatch.clientId), String(sent.messageId || `payment-sent:${owner}:${uid}`), subjectToClient, message, String(config.fromEmail || owner), String(resolvedMatch.email)),
       env.DB.prepare(
-        "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+        "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'automation',?,?)"
       ).bind(Number(resolvedMatch.clientId), `Aviso de pagamento encaminhado automaticamente para a ap\xF3lice ${clearPolicyNumber}. Refer\xEAncia: ${String(sent.messageId || externalId)}`, owner),
       env.DB.prepare(
         "UPDATE agentTasks SET status='completed' WHERE lower(agentEmail)=? AND title LIKE ? AND status='pending'"
@@ -56267,7 +56269,7 @@ ${message}`, owner).run();
     ).bind(clientId, adminEmail.toLowerCase()).first();
     if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     const rows = await env.DB.prepare(
-      "SELECT id,agentEmail,clientId,direction,externalId,subject,substr(coalesce(body,''),1,5000) AS body,fromEmail,toEmail,sentAt,readAt,visibility,CASE WHEN visibility='automation' THEN 1 ELSE 0 END AS isAutomatic FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client') IN ('client','automation') AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 50"
+      "SELECT id,agentEmail,clientId,direction,externalId,subject,substr(coalesce(body,''),1,5000) AS body,fromEmail,toEmail,sentAt,readAt,visibility,CASE WHEN visibility='automation' THEN 1 ELSE 0 END AS isAutomatic FROM clientEmails e WHERE clientId=? AND lower(agentEmail)=? AND "+personalEmailPredicate+" AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 50"
     ).bind(clientId, adminEmail.toLowerCase()).all();
     return trpcResult(
       rows.results.map((row) => ({
@@ -58858,6 +58860,13 @@ Affinity Financial Consulting`,
     ).bind(...values, id).run();
     return trpcResult({ success: true });
   }
+  if(name==='crm.clientAutomations'){
+    const clientId=Number(input.clientId);
+    const owned=await env.DB.prepare("SELECT assignedAdminEmail FROM crmClients WHERE id=?").bind(clientId).first();
+    if(!owned||(accountType==='agent'&&String(owned.assignedAdminEmail||'').toLowerCase()!==adminEmail.toLowerCase()))return trpcError('Cliente não encontrado','NOT_FOUND',404);
+    await ensurePreferences(env.DB);
+    return trpcResult(await clientAutomations(env.DB,clientId,String(owned.assignedAdminEmail||adminEmail).toLowerCase()));
+  }
   if (name === "crm.activities") {
     if (accountType === "agent") {
       const owned = await env.DB.prepare(
@@ -58865,9 +58874,12 @@ Affinity Financial Consulting`,
       ).bind(Number(input.clientId), adminEmail.toLowerCase()).first();
       if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     }
+    const auditOwner=await env.DB.prepare('SELECT assignedAdminEmail FROM crmClients WHERE id=?').bind(Number(input.clientId)).first();
+    if(auditOwner?.assignedAdminEmail)try{await syncWhatsappAudit(env,String(auditOwner.assignedAdminEmail));}catch{console.error('whatsapp_client_audit_refresh_failed');}
+    await auditSchema(env.DB);
     const rows = await env.DB.prepare(
-      "SELECT id,clientId,type,substr(coalesce(content,''),1,5000) AS content,createdBy,createdAt FROM crmActivities WHERE clientId=? ORDER BY createdAt DESC, id DESC LIMIT 100"
-    ).bind(Number(input.clientId)).all();
+      "SELECT id,clientId,type,content,createdBy,createdAt FROM (SELECT id,clientId,type,substr(coalesce(content,''),1,5000) AS content,createdBy,createdAt FROM crmActivities WHERE clientId=? AND "+personalActivityPredicate+" UNION ALL SELECT -id,clientId,'whatsapp','WhatsApp · '||CASE WHEN direction='sent' THEN 'Enviado pelo agente' ELSE 'Recebido do cliente' END||' · '||phone||char(10)||body||CASE WHEN mediaKind IS NOT NULL THEN char(10)||'Anexo: '||coalesce(filename,mediaKind)||' · '||coalesce(mediaState,'') ELSE '' END,owner,sentAt FROM whatsappClientAudit WHERE clientId=?) ORDER BY datetime(createdAt) DESC,id DESC LIMIT 200"
+    ).bind(Number(input.clientId),Number(input.clientId)).all();
     return trpcResult(
       rows.results.map((row) => ({
         ...row,
@@ -59333,6 +59345,7 @@ var cloudflare_staging_default = {
     }
     if (controller.cron === "*/5 * * * *") {
       ctx.waitUntil(runMessageAutomations(env));
+      ctx.waitUntil(syncAllWhatsappAudit(env));
       return;
     }
     if (controller.cron === "2,7,12,17,22,27,32,37,42,47,52,57 * * * *") {
@@ -59827,7 +59840,7 @@ ${signatureLines.join("\n")}`.trim();
         ];
         statements.push(
           env.DB.prepare(
-            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
+            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'automation',?,?)"
           ).bind(
             Number(client.id),
             `E-mail autom\xE1tico enviado: ${personalize(automation.title)}`,
@@ -59936,11 +59949,11 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=7"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=7"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=7"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261009-five-rings-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261009-five-rings-1');}}).transform(response);
  }
  return response;
 };
