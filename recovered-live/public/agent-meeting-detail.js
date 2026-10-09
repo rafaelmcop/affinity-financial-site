@@ -87,7 +87,9 @@
         .split(/\s+/)[0];
       const zoom = meeting.meetingUrl || "";
       const personalSignature = signature(profile);
-      const firstMessage = `Olá, ${firstName}!\n\nPassando para lembrar da nossa reunião de hoje, às ${time(meeting.startTime)} (horário de Nova York), com a Affinity Financial Consulting.${zoom ? `\n\nAcesse a reunião pelo Zoom:\n${zoom}` : ""}\n\nNos vemos em breve!\n\n${personalSignature}`;
+      const agentName = String(profile?.name || "").trim();
+      const meetingHost = agentName ? `${agentName} da Affinity Financial Consulting` : "a equipe da Affinity Financial Consulting";
+      const firstMessage = `Olá, ${firstName}!\n\nPassando para lembrar da nossa reunião de hoje, às ${time(meeting.startTime)} (horário de Nova York), com ${meetingHost}.${zoom ? `\n\nAcesse a reunião pelo Zoom:\n${zoom}` : ""}\n\nNos vemos em breve!\n\n${personalSignature}`;
       const scheduleLink = meeting.rescheduleUrl || profile?.calendlyUrl || "";
       const secondMessage = `Olá, ${firstName}! Tudo bem?\n\nGostaria de retomar nosso atendimento exatamente de onde paramos e dar continuidade ao que conversamos.\n\nQuando for conveniente, responda esta mensagem ou escolha um horário para continuarmos.${scheduleLink ? `\n\n📅 Escolha seu horário:\n${scheduleLink}` : ""}\n\nFico à disposição.\n\n${personalSignature}`;
       const noShowMessage = `Olá, ${firstName}! Tudo bem?\n\nNão conseguimos nos encontrar no horário marcado. Espero que esteja tudo bem.\n\nSe desejar, podemos reagendar nossa conversa para um momento mais conveniente.${scheduleLink ? `\n\n📅 Reagende aqui:\n${scheduleLink}` : ""}\n\nFico à disposição.\n\n${personalSignature}`;
