@@ -1,3 +1,4 @@
+import {deletePortalUser} from './user-deletion.js';
 import {auditSchema,syncAllWhatsappAudit,syncWhatsappAudit} from './whatsapp-audit.js';
 import {personalEmailPredicate,personalActivityPredicate,clientAutomations} from './client-communication.js';
 import {welcomeTemplate,saveWelcomeTemplate} from './welcome-template.js';
@@ -54132,7 +54133,10 @@ __name(getSession, "getSession");
 __name2(getSession, "getSession");
 async function getAdminEmail(request, env) {
   const session = await getSession(request, env, ADMIN_COOKIE);
-  return session?.type === "admin" && typeof session.email === "string" ? session.email : null;
+  if(session?.type!=="admin"||typeof session.email!=="string")return null;
+  const active=await env.DB.prepare("SELECT isActive,status FROM adminAccounts WHERE lower(email)=?").bind(session.email.toLowerCase()).first();
+  if(active&&(!Number(active.isActive)||active.status!=="approved"))return null;
+  return active||session.email.toLowerCase()===String(env.ADMIN_EMAIL).toLowerCase()?session.email:null;
 }
 __name(getAdminEmail, "getAdminEmail");
 __name2(getAdminEmail, "getAdminEmail");
@@ -54151,7 +54155,9 @@ __name(getAdminAccess, "getAdminAccess");
 __name2(getAdminAccess, "getAdminAccess");
 async function getAffiliateId(request, env) {
   const session = await getSession(request, env, AFFILIATE_COOKIE);
-  return session?.type === "affiliate" ? Number(session.affiliateId) : null;
+  if(session?.type!=="affiliate")return null;
+  const active=await env.DB.prepare("SELECT isActive,status FROM affiliates WHERE id=?").bind(Number(session.affiliateId)).first();
+  return active&&Number(active.isActive)&&active.status==='approved'?Number(session.affiliateId):null;
 }
 __name(getAffiliateId, "getAffiliateId");
 __name2(getAffiliateId, "getAffiliateId");
@@ -57857,7 +57863,7 @@ Affinity Financial Consulting`,
     "admin.getAllAffiliates",
     "admin.getPendingAffiliates"
   ].includes(name)) {
-    const where = name === "admin.getPendingAffiliates" ? " WHERE status='pending'" : "";
+    const where = name === "admin.getPendingAffiliates" ? " WHERE status='pending'" : " WHERE status<>'deleted'";
     const rows = await env.DB.prepare(
       `SELECT * FROM affiliates${where} ORDER BY createdAt DESC`
     ).all();
@@ -58080,9 +58086,13 @@ Affinity Financial Consulting`,
     ).bind(status, amount, String(input.notes ?? "").trim() || null, id).run();
     return trpcResult({ success: true });
   }
+  if (name === "admin.deletePortalUser") {
+    if(request.method!=="POST")return trpcError("Método inválido");
+    try{return trpcResult(await deletePortalUser(env,adminEmail,input,(p,h)=>bcryptjs_default.compare(p,h)));}catch(e){return trpcError(e.message);}
+  }
   if (name === "admin.listAdmins") {
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive,createdAt FROM adminAccounts ORDER BY createdAt DESC"
+      "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive,createdAt FROM adminAccounts WHERE status<>'deleted' ORDER BY createdAt DESC"
     ).all();
     return trpcResult({
       admins: rows.results.map((row) => ({
