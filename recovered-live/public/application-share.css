@@ -8,3 +8,10 @@ html[data-agent-theme=dark] body .application-share-overlay > .card{background:#
 html[data-agent-theme=dark] body .application-share-overlay :is(h2,p,.muted){color:#eef4fa!important}
 html[data-agent-theme=dark] body .application-share-overlay textarea{background:#08121f!important;color:#eef4fa!important;caret-color:#eef4fa!important;border-color:#718399!important}
 html[data-agent-theme=dark] body .application-share-overlay button:not(.primary){background:#223a53!important;color:#eef4fa!important;border-color:#718399!important}
+
+/* Application summaries must use the same theme as the surrounding portfolio. */
+html[data-agent-theme] body .application-summary > div{background:var(--agent-inset)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] body .application-summary strong{color:var(--agent-text)!important}
+html[data-agent-theme] body .application-summary small{color:var(--agent-muted)!important}
+html[data-agent-theme] body .application .pill{background:var(--agent-inset)!important;color:var(--agent-text)!important;border:1px solid var(--agent-border);font-weight:700}
+html[data-agent-theme] body .secure{background:var(--agent-sent)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
