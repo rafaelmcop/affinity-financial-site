@@ -1217,8 +1217,11 @@
       first = String(row.clientName || "cliente").split(/\s+/)[0],
       message = `Olá, ${first}! Para continuarmos sua aplicação com segurança, abra o link privado abaixo. Você poderá continuar de onde paramos.\n\n${link}\n\nSe tiver alguma dúvida, estou à disposição.`;
     const overlay = document.createElement("div");
+    overlay.className = "application-share-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
-      "position:fixed;inset:0;background:#000b;z-index:9999;display:grid;place-items:center;padding:20px";
+      "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
     overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Envie diretamente pelo WhatsApp ou pelo e-mail configurado no portal.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
@@ -1242,8 +1245,11 @@
     const first = String(row?.clientName || "cliente").split(/\s+/)[0],
       message = `Olá, ${first}! Agradecemos pela confiança em nosso atendimento. Sua opinião é muito importante para nós.\n\nDeixe sua avaliação pelo link privado abaixo:\n${invite.link}\n\nMuito obrigado por compartilhar sua experiência! 💙`;
     const overlay = document.createElement("div");
+    overlay.className = "application-share-overlay";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
-      "position:fixed;inset:0;background:#000b;z-index:9999;display:grid;place-items:center;padding:20px";
+      "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
     overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Envie diretamente pelo WhatsApp ou pelo e-mail configurado no portal.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();

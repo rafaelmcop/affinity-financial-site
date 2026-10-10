@@ -1,0 +1,10 @@
+/* Share dialogs use explicit surfaces because they are appended outside main. */
+html body .application-share-overlay > .card{background:#ffffff!important;color:#172b3a!important;border:1px solid #94a3b8!important;box-shadow:0 20px 70px #0004;max-height:calc(100dvh - 40px);overflow:auto;margin-top:0}
+html body .application-share-overlay :is(h2,p,.muted){color:#172b3a!important}
+html body .application-share-overlay textarea{background:#f8fafc!important;color:#172b3a!important;border:1px solid #64748b!important;caret-color:#172b3a!important;line-height:1.6;resize:vertical}
+html body .application-share-overlay button{background:#e8eef5!important;color:#172b3a!important;border:1px solid #64748b!important;font-weight:700;opacity:1}
+html body .application-share-overlay button.primary{background:#dfb934!important;color:#142238!important;border-color:#997718!important}
+html[data-agent-theme=dark] body .application-share-overlay > .card{background:#102238!important;color:#eef4fa!important;border-color:#718399!important}
+html[data-agent-theme=dark] body .application-share-overlay :is(h2,p,.muted){color:#eef4fa!important}
+html[data-agent-theme=dark] body .application-share-overlay textarea{background:#08121f!important;color:#eef4fa!important;caret-color:#eef4fa!important;border-color:#718399!important}
+html[data-agent-theme=dark] body .application-share-overlay button:not(.primary){background:#223a53!important;color:#eef4fa!important;border-color:#718399!important}
