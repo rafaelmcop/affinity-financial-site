@@ -1,0 +1,12 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /agentes/
+Disallow: /afiliados/
+Disallow: /api/
+Disallow: /agent-
+Disallow: /preencher-aplicacao
+Disallow: /avaliacao-convite
+Disallow: /feedback-atendimento
+
+Sitemap: https://www.affinityfc.org/sitemap.xml

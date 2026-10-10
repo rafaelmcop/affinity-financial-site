@@ -1,0 +1,27 @@
+/* Contact preferences: independent columns, with bounded lists and visible actions. */
+.contact-workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;align-items:start;margin-top:24px}
+.contact-workspace>section{min-width:0;margin:0;padding:22px}
+.contact-workspace h2{margin:0 0 12px;font-size:20px;line-height:1.35}
+.contact-workspace section>p{color:#546b7b;font-size:14px;line-height:1.55}
+.contact-workspace #own-groups{max-height:490px;overflow:auto;margin:18px 0;scrollbar-width:thin;scrollbar-color:#c8d7d0 transparent}
+.contact-workspace #own-groups label{display:flex;align-items:flex-start;gap:10px;margin:0;padding:14px 8px;border-bottom:1px solid #edf1f3;line-height:1.45;overflow-wrap:anywhere;cursor:pointer}
+.contact-workspace #own-groups input{flex-shrink:0;margin:4px 0 0;accent-color:#126448;width:17px;height:17px}
+.contact-workspace #save-groups{width:100%}
+.contact-workspace .toolbar{gap:8px}
+.contact-workspace button{font-size:14px}
+.contact-workspace .table-wrap{max-height:490px;overflow:auto;border:1px solid #e3eaf0;border-radius:10px;scrollbar-width:thin;scrollbar-color:#c8d7d0 transparent}
+.contact-workspace .table-wrap>label{margin:0;padding:14px;background:#f6f9fa;font-size:14px}
+.contact-workspace select{display:block;width:100%;margin-top:8px;min-width:0}
+.contact-workspace th{background:#f6f9fa;font-size:13px}
+.contact-workspace td{font-size:14px;overflow-wrap:anywhere}
+.contact-workspace td:last-child{white-space:nowrap}
+.contact-workspace input[type=checkbox]{accent-color:#126448}
+.contact-workspace #priority-status:empty,.contact-workspace #group-status:empty{display:none}
+.contact-workspace [role=status]{color:#126448;font-size:14px}
+@media(max-width:850px){.contact-workspace{grid-template-columns:1fr}.contact-workspace #own-groups{max-height:260px}.contact-workspace>section{padding:18px}.contact-workspace .table-wrap{max-height:450px}}
+
+/* Priority selection uses the entire portal content area. */
+main:has(.contact-workspace){max-width:none;width:100%;margin:24px auto;padding:0 24px}
+.contact-workspace #priority-panel{width:100%}
+.contact-workspace .table-wrap{max-height:max(450px,calc(100vh - 320px))}
+@media(max-width:600px){main:has(.contact-workspace){padding:0 12px}}

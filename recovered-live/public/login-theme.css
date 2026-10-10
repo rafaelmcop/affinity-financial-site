@@ -1,0 +1,23 @@
+/* Shared public sign-in appearance, matching the site's white, navy and gold palette. */
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])){color-scheme:light;--background:210 40% 98%;--foreground:214 40% 16%;--card:0 0% 100%;--card-foreground:214 40% 16%;--popover:0 0% 100%;--popover-foreground:214 40% 16%;--muted:210 30% 95%;--muted-foreground:215 18% 40%;--border:214 25% 83%;--input:214 25% 83%;--ring:207 55% 43%}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])),html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) body{background:#f8fafc!important;color:#172b3a!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) [class*="min-h-screen"]{background:linear-gradient(145deg,#f8fafc,#edf3f8)!important;color:#172b3a!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is(header,[class*="bg-black"],[class*="bg-card"],[role=dialog]){background:#fff!important;color:#172b3a!important;border-color:#d3dce5!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) header{box-shadow:0 1px 6px #1022380a}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is([class*="max-w-md"],[class*="max-w-lg"])[class*="border"]{border-radius:16px;box-shadow:0 16px 48px #1022380d}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is(h1,h2,h3,label,[class*="text-white"]){color:#172b3a!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is(p,[class*="text-gray"],small){color:#526779!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is([class*="text-gold"],a){color:#805e08!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is(input,textarea,select){background:#fff!important;color:#172b3a!important;border:1px solid #b6c5d3!important;caret-color:#172b3a}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) input::placeholder{color:#687b8b!important;opacity:1}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is(button,[role=button]){color:#805e08!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) button[class*="border"]{background:#fff!important;border-color:#b6c5d3!important;color:#172b3a!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :is(button[type=submit],button[class*="bg-gold"]){background:#d6ad2e!important;color:#142237!important;border-color:#b9901d!important;font-weight:700;box-shadow:0 3px 9px #a77f161f}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) button[type=submit]:hover{background:#c69d21!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) button:disabled{opacity:.6}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) [class*="border-gold"]{border-color:#d3dce5!important}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) .fixed.inset-0{background:#10223866!important;backdrop-filter:blur(3px)}
+html:is([data-login-theme=site]:not(:has(.public-light)),:has([data-public-login])) :focus-visible{outline:3px solid #3984cc!important;outline-offset:3px}
+
+html:has([data-public-login]) :is(label,h1,h2,h3){color:#111827!important}
+html:has([data-public-login]) :is(p,small,[class*="text-gray"]){color:#334155!important}
