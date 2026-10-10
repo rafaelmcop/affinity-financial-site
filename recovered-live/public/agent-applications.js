@@ -353,11 +353,14 @@
     const data = p.result?.data?.json;
     if (name === "agent.submitApplication" && data?.reviewInvite)
       setTimeout(
-        () =>
-          showReviewShare(
-            data.reviewInvite,
-            rows.find(x => x.id === Number(input.id))
-          ),
+        async () => {
+          try {
+            const current = await api("agent.getApplication", { id: Number(input.id) });
+            showReviewShare(data.reviewInvite, current);
+          } catch (error) {
+            notice("O link foi criado, mas não foi possível carregar a ficha para envio: " + error.message, true);
+          }
+        },
         0
       );
     return data;
@@ -1275,7 +1278,7 @@
         notice("Cadastre o telefone da cliente antes de enviar pelo WhatsApp.", true);
         return;
       }
-      location.href = `whatsapp://send?phone=${number}&text=${encodeURIComponent(area.value)}`;
+      window.open(`https://wa.me/${number}?text=${encodeURIComponent(area.value)}`, "_blank", "noopener,noreferrer");
     };
     email.onclick = async () => {
       const recipient = String(row.clientEmail || "").trim();
