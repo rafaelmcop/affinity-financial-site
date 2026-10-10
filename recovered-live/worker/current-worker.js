@@ -59242,7 +59242,7 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-calendar.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
-    if (url.pathname === "/agentes/compromisso") {
+    if (url.pathname === "/agentes/compromisso" || url.pathname === "/agent-meeting-detail") {
       url.pathname = "/agent-meeting-detail.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
