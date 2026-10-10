@@ -29,7 +29,7 @@ import "./send-u-E2Isyn.js";
   ["path", { d: "M18 6 7 17l-5-5", key: "116fxf" }],
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }],
 ]);
-import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=3";
+import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=4";
 function H() {
   const [calendarVersion,setCalendarVersion]=k.useState(0);
   const [calendarAllowed,setCalendarAllowed]=k.useState(false),[agendaStatus,setAgendaStatus]=k.useState(''),[agendaError,setAgendaError]=k.useState(false);
