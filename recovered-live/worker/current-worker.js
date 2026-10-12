@@ -1,3 +1,5 @@
+import {syncExcludedWorkGroups} from './excluded-work-groups.js';
+import {sendPaymentCase} from './payment-case-send.js';
 import {syncLogSchema,recordSyncLog,notifyImportantLog} from './system-sync-log.js';
 import {findPaymentClient,compactClientName,rawPaymentPolicies} from './payment-client-match.js';
 import {recordPortalInteraction,interactionSchema} from './portal-interactions.js';
@@ -55920,7 +55922,7 @@ ${message}`, owner).run();
         "SELECT id,name,email,phone,birthDate,address FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
       ).bind(owner),
       env.DB.prepare(
-        "SELECT e.id,e.clientId,e.subject,e.body,e.sentAt,c.name AS clientName FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='received' AND e.readAt IS NULL ORDER BY e.sentAt DESC LIMIT 10"
+        "SELECT e.id,e.clientId,e.subject,e.body,e.sentAt,c.name AS clientName FROM clientEmails e JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='received' AND e.readAt IS NULL AND NOT EXISTS(SELECT 1 FROM agentMailboxEmails notice JOIN agentTasks task ON lower(task.agentEmail)=lower(notice.agentEmail) AND task.title LIKE '[Pagamento '||CAST(notice.imapUid AS TEXT)||']%' WHERE lower(notice.agentEmail)=lower(e.agentEmail) AND notice.externalId=e.externalId AND notice.paymentStatus='attention') ORDER BY e.sentAt DESC LIMIT 10"
       ).bind(owner),
       env.DB.prepare("SELECT COUNT(*) AS total FROM clientEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner),
       env.DB.prepare(
@@ -55963,6 +55965,7 @@ ${message}`, owner).run();
       followUps: tasks.filter((row) => row.status === "pending" && row.dueAt).length
     });
   }
+  if(name==="agent.sendPaymentCaseEmail"){if(request.method!=="POST")return trpcError("Método inválido");try{return trpcResult(await sendPaymentCase(env,adminEmail.toLowerCase(),input,sendAgentEmail,body=>clientEmailHtml(`<p>${escapeAutomationHtml(body).replaceAll("\n","<br>")}</p>`)));}catch(e){return trpcError(e.message);}}
   if (name === "agent.paymentCase") {
     const owner = adminEmail.toLowerCase(), taskId = Number(input.taskId || 0);
     const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
@@ -55990,8 +55993,11 @@ ${message}`, owner).run();
     const candidatePhone = String(client?.phone || client?.whatsapp || policy?.clientPhone || "").trim();
     const preparedSubject = personalizeTemplate(settings?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
     const preparedMessage = personalizeTemplate(settings?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
-    const history = resolvedClientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(resolvedClientId, owner).all() : { results: [] };
+    const history = resolvedClientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND direction='sent' AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(resolvedClientId, owner).all() : { results: [] };
+    await auditSchema(env.DB);await interactionSchema(env.DB);
+    const interactions=resolvedClientId?(await env.DB.prepare("SELECT type,content,createdAt FROM crmActivities WHERE clientId=? AND lower(createdBy)=? AND type<>'email' UNION ALL SELECT 'whatsapp',body,sentAt FROM whatsappClientAudit WHERE clientId=? AND owner=? AND direction='sent' UNION ALL SELECT channel,'Preparada no portal · envio externo não confirmado'||char(10)||body,createdAt FROM portalContactInteractions WHERE clientId=? AND owner=? ORDER BY datetime(createdAt) DESC LIMIT 100").bind(resolvedClientId,owner,resolvedClientId,owner,resolvedClientId,owner).all()).results||[]:[];
     return trpcResult({
+      interactions,
       task: { ...task, id: Number(task.id), clientId: resolvedClientId || null },
       client: client ? { ...client, id: Number(client.id) } : null,
       policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId) } : null,
@@ -58511,7 +58517,7 @@ Affinity Financial Consulting`,
     const blockedPhones=new Set(globalBlocked.results.map(r=>sourcePhone(r.phone)));
     const [rows, policyStages, applicationStages] = agentView ? await Promise.all([
       env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c WHERE lower(c.assignedAdminEmail)=? ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").bind(crmOwner).all(),
-      env.DB.prepare("SELECT id,agentEmail,clientId,clientName,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(crmOwner).all(),
+      env.DB.prepare("SELECT id,agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,issuedAt,createdAt,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(crmOwner).all(),
       env.DB.prepare("SELECT id,clientName,clientEmail,clientPhone,status,matchedPolicyId FROM agentApplications WHERE lower(agentEmail)=?").bind(crmOwner).all()
     ]) : [
       await env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=lower(c.assignedAdminEmail) AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) AS lastMeetingAt FROM crmClients c ORDER BY c.name COLLATE NOCASE ASC,c.id ASC").all(),
@@ -58526,6 +58532,10 @@ Affinity Financial Consulting`,
         return {
           ...row,
           id: Number(row.id),
+          policyNumbers: policies.map(p=>p.policyNumber).filter(Boolean),
+          policyStatuses: policies.map(p=>p.status).filter(Boolean),
+          policyDates: policies.map(p=>p.issuedAt||p.createdAt).filter(Boolean),
+          hasPendingPolicy: policies.some(p=>['pending','submitted','new_business','approved','awaiting_issue'].includes(String(p.status||'').toLowerCase())),
           hasPolicy: policies.length > 0,
           hasInforcePolicy: (policyStages.results || []).some((record) => policyBelongsToCrmClient(record, row) && isActiveClientPolicy(record)),
           hasDraftApplication: applications.some((record) => record.status === "draft"),
@@ -59187,7 +59197,7 @@ var cloudflare_staging_default = {
         let client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
         if (!client) {
           const name = extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || ""));
-          if (name) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").bind(owner, name).first();
+          client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''));
           clientId = Number(client?.id || 0);
         }
         if (!policy && clientId) policy = policyRows.find((row) => Number(row.clientId) === clientId && candidates.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || policyRows.find((row) => Number(row.clientId) === clientId && String(row.status || "").toLowerCase() === "active") || null;
@@ -59209,8 +59219,11 @@ var cloudflare_staging_default = {
         const policyNumber = String(policy?.policyNumber || mailbox?.policyNumber || candidates[0] || "").trim();
         const agentName = String(agent?.name || "Seu agente Affinity");
         const agentPhone = String(agent?.phone || agent?.whatsapp || "(857) 421-8325");
-        const history = clientId ? (await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all()).results || [] : [];
+        const history = clientId ? (await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND direction='sent' AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all()).results || [] : [];
+        await auditSchema(env.DB);await interactionSchema(env.DB);
+        const interactions=clientId?(await env.DB.prepare("SELECT type,content,createdAt FROM crmActivities WHERE clientId=? AND lower(createdBy)=? AND type<>'email' UNION ALL SELECT 'whatsapp',body,sentAt FROM whatsappClientAudit WHERE clientId=? AND owner=? AND direction='sent' UNION ALL SELECT channel,'Preparada no portal · envio externo não confirmado'||char(10)||body,createdAt FROM portalContactInteractions WHERE clientId=? AND owner=? ORDER BY datetime(createdAt) DESC LIMIT 100").bind(clientId,owner,clientId,owner,clientId,owner).all()).results||[]:[];
         return secureResponse(jsonResponse({
+          interactions,
           task: { ...task, id: Number(task.id), clientId: clientId || null },
           client: client ? { ...client, id: Number(client.id) } : null,
           policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId || clientId || 0) || null } : null,
@@ -59367,6 +59380,7 @@ var cloudflare_staging_default = {
   },
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(syncPolicyLeadLinks(env));
+    if(["*/5 * * * *","2,7,12,17,22,27,32,37,42,47,52,57 * * * *"].includes(controller.cron))ctx.waitUntil(syncExcludedWorkGroups(env));
     if (controller.cron === "calendly-phone-backfill") {
       ctx.waitUntil(syncAllCalendlyConnections(env));
       return;
@@ -59977,11 +59991,11 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/admin-unified-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/staff-setup-check.js?v=20261012-silent-1" defer></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/admin-unified-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/staff-setup-check.js?v=20261012-silent-1" defer></script><script src="/user-access-menu.js?v=4" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-silent-2" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-silent-2');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=4" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-clients-3" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-clients-3');}}).transform(response);
  }
  return response;
 };

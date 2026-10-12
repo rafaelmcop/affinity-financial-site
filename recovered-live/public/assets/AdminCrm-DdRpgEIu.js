@@ -157,10 +157,11 @@ function Le({ agentMode: a = !1 }) {
       return Number(s.get("clientId") || s.get("cliente") || 0) || null;
     }),
     [y, Q] = p.useState(""),
-    [w, X] = p.useState(""),
+    [w, X] = p.useState(()=>new URLSearchParams(location.search).get("busca")||""),
     [sortMode, setSortMode] = p.useState("name_asc"),
+    [dateFrom,setDateFrom]=p.useState(""),[dateTo,setDateTo]=p.useState(""),[statusFilter,setStatusFilter]=p.useState(""),
     [b, M] = p.useState(() =>
-      ["clients", "leads", "followup", "new_business", "inforce"].includes(
+      ["all", "clients", "leads", "followup", "new_business", "inforce"].includes(
         new URLSearchParams(location.search).get("setor")
       )
         ? new URLSearchParams(location.search).get("setor")
@@ -232,12 +233,13 @@ function Le({ agentMode: a = !1 }) {
             belongs = b === "leads" ? !["agent","client","completed","active"].includes(l.status) && !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && !wasAttended
               : b === "clients" ? l.hasPolicy || ["client","completed","active"].includes(l.status)
               : b === "inforce" ? l.hasInforcePolicy
-              : b === "new_business" ? !l.hasPolicy && l.hasCompletedApplication
+              : b === "new_business" ? !l.hasInforcePolicy && (l.hasCompletedApplication||l.hasPendingPolicy)
               : b === "followup" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && wasAttended
               : true;
-          return belongs && ((l.name || "") + " " + (l.email || "") + " " + (l.phone || ""))
-            .toLowerCase()
-            .includes(w.toLowerCase());
+          const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+          const search=[l.name,l.email,l.phone,...(l.policyNumbers||[]),l.status,...(l.policyStatuses||[])].join(' ');
+          const dates=(l.policyDates?.length?l.policyDates:[l.lastMeetingAt||l.createdAt]).filter(Boolean).map(value=>String(value).slice(0,10));
+          return belongs && normalize(search).includes(normalize(w)) && (!statusFilter||l.status===statusFilter||(l.policyStatuses||[]).includes(statusFilter)) && ((!dateFrom&&!dateTo)||dates.some(value=>(!dateFrom||value>=dateFrom)&&(!dateTo||value<=dateTo)));
         }
       ).sort((l, o) => {
         if (sortMode.startsWith("date")) {
@@ -248,7 +250,7 @@ function Le({ agentMode: a = !1 }) {
         const result = String(l.name || "").localeCompare(String(o.name || ""), "pt-BR", { sensitivity: "base" });
         return sortMode === "name_desc" ? -result : result;
       });
-    }, [S, w, b, sortMode]),
+    }, [S, w, b, sortMode,dateFrom,dateTo,statusFilter]),
     totalPages = Math.max(1, Math.ceil(W.length / 10)),
     pageRows = W.slice((page - 1) * 10, page * 10),
     le = async s => {
@@ -572,7 +574,7 @@ function Le({ agentMode: a = !1 }) {
                   }),
                   e.jsx("h1", {
                     className: "mt-2 text-3xl font-bold",
-                    children: "CRM de clientes",
+                    children: a ? "Clientes" : "CRM de clientes",
                   }),
                   e.jsx("p", {
                     className: "mt-2 text-gray-400",
@@ -598,11 +600,12 @@ function Le({ agentMode: a = !1 }) {
               className:
                 "flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2",
               children: [
+                ["all", "Todos"],
                 ["leads", "Leads"],
                 ["followup", "Follow-up"],
-                ["new_business", "New Business"],
-                ["clients", "Clientes"],
-                ["inforce", "INFORCE"],
+                ["new_business", "New Business · aguardando emissão"],
+                
+                ["inforce", "InForce · emitidas"],
               ].map(([s, l]) =>
                 e.jsx(
                   d,
@@ -618,7 +621,7 @@ function Le({ agentMode: a = !1 }) {
             }),
           e.jsxs("div", {
             className:
-              a && !["clients", "leads", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
+              a && !["all", "clients", "leads", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
             children: [
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",
@@ -626,10 +629,13 @@ function Le({ agentMode: a = !1 }) {
                   className: "grid gap-3 sm:grid-cols-3",
                   children: [
                     e.jsx(h, {
-                      placeholder: "Buscar por nome, e-mail ou telefone",
+                      placeholder: "Buscar por nome, apólice, e-mail ou telefone",
                       value: w,
                       onChange: s => (X(s.target.value), setPage(1)),
                     }),
+                    e.jsxs("label",{children:["Data inicial (emissão; sem apólice, entrada/reunião)",e.jsx(h,{type:"date",value:dateFrom,onChange:event=>{setDateFrom(event.target.value);setPage(1);}})]}),
+                    e.jsxs("label",{children:["Data final",e.jsx(h,{type:"date",value:dateTo,onChange:event=>{setDateTo(event.target.value);setPage(1);}})]}),
+                    e.jsxs("select",{value:statusFilter,"aria-label":"Filtrar status",onChange:event=>{setStatusFilter(event.target.value);setPage(1);},children:[e.jsx("option",{value:"",children:"Todos os status"}),...[...new Set(S.flatMap(row=>[row.status,...(row.policyStatuses||[])])).values()].filter(Boolean).sort().map(value=>e.jsx("option",{value,children:I.find(item=>item.value===value)?.label||value},value))]}),
                     e.jsxs("select", {
                       value: sortMode,
                       onChange: s => (setSortMode(s.target.value), setPage(1)),
@@ -900,6 +906,7 @@ function Le({ agentMode: a = !1 }) {
                                   }),
                                 ],
                               }),
+                              s.policyNumbers?.length>0&&e.jsx("p",{className:"mt-2 text-sm",children:"Apólice: "+s.policyNumbers.join(', ')}),
                               e.jsx("span", {
                                 className: `mt-2 inline-flex rounded-full px-2.5 py-1 text-[11px] font-bold ${l.color}`,
                                 children: l.label,

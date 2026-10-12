@@ -20,3 +20,5 @@ html[data-agent-theme=light]::-webkit-scrollbar-thumb{background:#94a3b8}
 
 html[data-agent-theme=light] :is(.agent-brand-button,.admin-menu-brand,.affinity-company-mark){background-color:transparent!important;box-shadow:none!important;border-color:transparent!important}
 html[data-agent-theme=light] :is(.agent-brand-button,.admin-menu-brand) img{background:transparent!important;object-fit:contain}
+
+html[data-agent-theme=dark] .affinity-company-mark::before{background-color:#f7fafc!important;border-radius:8px;box-shadow:0 0 0 7px #f7fafc;margin:8px 7px!important}
