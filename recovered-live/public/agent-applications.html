@@ -251,7 +251,10 @@
       html[data-agent-theme] body #list a.application-nlg-link:focus-visible{outline:3px solid #4ade80;outline-offset:3px}
     </style>
   <link rel="stylesheet" href="/application-share.css?v=2">
-  </head>
+  <style>
+html.application-new-view #application-list-toolbar,html.application-new-view #list{display:none!important}
+</style><script>if(new URLSearchParams(location.search).get('nova')==='1'||new URLSearchParams(location.search).has('meetingId'))document.documentElement.classList.add('application-new-view');</script>
+</head>
   <body>
     <div class="layout">
       <aside class="side">
@@ -277,12 +280,12 @@
       </aside>
       <main class="main">
         <div class="eyebrow">Carteira em andamento</div>
-        <h1>Novas aplicações</h1>
+        <h1 id="applications-page-title">Em andamento</h1>
         <p class="muted">
           Formulário baseado na ficha cadastral e no PC Sheet. Salve, gere o PDF
           e acompanhe a emissão.
         </p>
-        <div class="card toolbar">
+        <div id="application-list-toolbar" class="card toolbar">
           <div class="tabs">
             <button data-tab="open" class="active">Em andamento</button
             ><button data-tab="completed">Concluídas</button>
@@ -642,7 +645,7 @@
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261012-new-application-5"></script>
+    <script src="/agent-applications.js?v=20261012-separate-views-6"></script>
     <script src="/address-autocomplete.js?v=20260825-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>

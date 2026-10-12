@@ -64,6 +64,18 @@
       .replaceAll("{agente_email}", email).replaceAll("{email do agente}", email)
       .split("\n").filter(line => line.trim() && !(line.includes("✉️") && !email)).join("\n");
   }
+  function zoomAppLink(value,userAgent=navigator.userAgent) {
+    try {
+      const url=new URL(value);
+      if(!['https:','http:'].includes(url.protocol)||!(url.hostname==='zoom.us'||url.hostname.endsWith('.zoom.us')))return value;
+      const id=url.pathname.match(/\/(?:j|s|wc\/join)\/(\d{9,11})(?:\/|$)/)?.[1]||url.searchParams.get('confno');
+      if(!/^\d{9,11}$/.test(id||''))return value;
+      const params=new URLSearchParams({action:'join',confno:id});
+      if(url.searchParams.has('pwd'))params.set('pwd',url.searchParams.get('pwd'));
+      const scheme=/iPhone|iPad|iPod|Android/i.test(userAgent)?'zoomus':'zoommtg';
+      return `${scheme}://zoom.us/join?${params}`;
+    } catch {return value;}
+  }
   async function load() {
     if (!meetingId) {
       content.innerHTML = "Compromisso não identificado.";
@@ -95,7 +107,7 @@
       const referralMessage = `Olá, ${firstName}! Tudo bem?\n\nFoi um prazer conversar com você. Se conhece alguém que também possa se beneficiar de uma orientação financeira cuidadosa e personalizada, ficarei muito feliz com a sua indicação.\n\nPode me enviar o nome e o telefone da pessoa por aqui. Entrarei em contato com todo cuidado e respeito.\n\nMuito obrigado pela confiança!\n\n${personalSignature}`;
       let selectedTemplate = "Primeira chamada";
       content.className = "card";
-      content.innerHTML = `<h2>${esc(meeting.inviteeName || meeting.eventName || "Compromisso")}</h2><p class="muted">${esc(meeting.eventName || "Reunião")}</p><div class="grid"><div class="field"><b>Data e horário</b>${esc(format(meeting.startTime))}</div><div class="field"><b>Término previsto</b>${esc(format(meeting.endTime))}</div><div class="field"><b>Telefone</b>${esc(phone || "Não informado")}</div><div class="field"><b>E-mail</b>${esc(email || "Não informado")}</div></div><div class="actions">${meeting.meetingUrl ? `<a class="primary" href="${esc(meeting.meetingUrl)}" target="_blank" rel="noopener">Entrar na reunião</a>` : ""}<button id="open-contact">Abrir ficha e histórico</button><a class="primary" href="/agent-applications?meetingId=${meetingId}">Iniciar nova aplicação</a><a href="/agentes/agenda">Voltar para a agenda</a></div>${(whatsapp || email) ? `<div class="card"><div class="eyebrow">Contato rápido</div><h2>Preparar mensagem</h2><div class="actions"><button id="template-first" class="primary">Primeira chamada</button><button id="template-second">Segunda chamada</button><button id="template-no-show">Não compareceu</button><button id="template-feedback">Pedir avaliação</button><button id="template-referral">Pedir indicação</button><button id="template-blank">Mensagem em branco</button></div><textarea id="meeting-message" style="width:100%;min-height:220px;margin-top:12px;border:1px solid #293b52;border-radius:10px;background:#050d18;color:#fff;padding:14px">${esc(firstMessage)}</textarea><div class="actions"><button id="send-email">Enviar por e-mail</button><button id="send-whatsapp" class="primary" style="border:1px solid #dfb934;border-radius:10px;background:#dfb934;color:#050505;padding:12px 16px;font-weight:800">Abrir direto no WhatsApp</button></div></div>` : ""}`;
+      content.innerHTML = `<h2>${esc(meeting.inviteeName || meeting.eventName || "Compromisso")}</h2><p class="muted">${esc(meeting.eventName || "Reunião")}</p><div class="grid"><div class="field"><b>Data e horário</b>${esc(format(meeting.startTime))}</div><div class="field"><b>Término previsto</b>${esc(format(meeting.endTime))}</div><div class="field"><b>Telefone</b>${esc(phone || "Não informado")}</div><div class="field"><b>E-mail</b>${esc(email || "Não informado")}</div></div><div class="actions">${meeting.meetingUrl ? `<a class="primary" href="${esc(zoomAppLink(meeting.meetingUrl))}">Entrar na reunião</a>` : ""}<button id="open-contact">Abrir ficha e histórico</button><a class="primary" href="/agent-applications?meetingId=${meetingId}">Iniciar nova aplicação</a><a href="/agentes/agenda">Voltar para a agenda</a></div>${(whatsapp || email) ? `<div class="card"><div class="eyebrow">Contato rápido</div><h2>Preparar mensagem</h2><div class="actions"><button id="template-first" class="primary">Primeira chamada</button><button id="template-second">Segunda chamada</button><button id="template-no-show">Não compareceu</button><button id="template-feedback">Pedir avaliação</button><button id="template-referral">Pedir indicação</button><button id="template-blank">Mensagem em branco</button></div><textarea id="meeting-message" style="width:100%;min-height:220px;margin-top:12px;border:1px solid #293b52;border-radius:10px;background:#050d18;color:#fff;padding:14px">${esc(firstMessage)}</textarea><div class="actions"><button id="send-email">Enviar por e-mail</button><button id="send-whatsapp" class="primary" style="border:1px solid #dfb934;border-radius:10px;background:#dfb934;color:#050505;padding:12px 16px;font-weight:800">Abrir direto no WhatsApp</button></div></div>` : ""}`;
       document.getElementById("open-contact").onclick = async function () {
         this.disabled = true;
         try {

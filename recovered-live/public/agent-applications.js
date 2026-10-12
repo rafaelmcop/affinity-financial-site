@@ -59,6 +59,8 @@
         "#form input:not([type=hidden]):not([type=file]),#form select:not(#documentCategory),#form textarea"
       ),
     ];
+  const newApplicationView = document.documentElement.classList.contains("application-new-view");
+  if(newApplicationView) { $("applications-page-title").textContent="Aplicação nova"; $("cancel").textContent="Voltar ao início"; }
   let originMeetingId = 0;
   let rows = [],
     tab = "open",
@@ -1448,6 +1450,7 @@
     );
   }
   async function load() {
+    if(newApplicationView) return;
     try {
       rows = await api("agent.listApplications");
       render();
@@ -1490,8 +1493,8 @@
       return false;
     }
   }
-  $("new").onclick = () => edit();
-  $("cancel").onclick = () => $("form-card").classList.add("hidden");
+  $("new").onclick = () => { location.href="/agent-applications?nova=1"; };
+  $("cancel").onclick = () => { if(newApplicationView) location.href="/agentes/dashboard"; else $("form-card").classList.add("hidden"); };
   inputs.forEach(el => {
     const clear = () => {
       el.closest("label")?.classList.remove("field-error");
@@ -1529,6 +1532,7 @@
       });
       await downloadApplicationPdf(completed);
       $("form-card").classList.add("hidden");
+      if(newApplicationView) $("applications-page-title").textContent="Aplicação concluída";
       await load();
       notice(
         "Aplicação concluída e PDF gerado. O link da avaliação também foi criado."
@@ -1556,14 +1560,14 @@
   async function openMeetingApplication() {
     const meetingId = Number(new URLSearchParams(location.search).get("meetingId") || 0);
     if (!Number.isSafeInteger(meetingId) || meetingId <= 0) {
-      if (new URLSearchParams(location.search).get("nova") === "1") { await edit(); history.replaceState(null,"",location.pathname); }
+      if (new URLSearchParams(location.search).get("nova") === "1") { await edit(); }
       return;
     }
     try {
       const meeting = await api("agent.meetingDetail", {id:meetingId});
       if (!meeting) throw Error("Compromisso não encontrado ou sem permissão de acesso.");
       await edit({...meetingApplicationPrefill(meeting),originMeetingId:meetingId});
-      history.replaceState(null,"",location.pathname);
+      // Keep the creation URL so the sidebar highlights the correct destination.
     } catch (error) { notice(error.message,true); }
   }
   showStep(0);
