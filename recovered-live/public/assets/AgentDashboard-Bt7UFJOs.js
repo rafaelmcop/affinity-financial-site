@@ -1,4 +1,4 @@
-import BirthdayAlerts from './AgentBirthdayAlerts.js?v=3';
+import BirthdayAlerts from './AgentBirthdayAlerts.js?v=4';
 import {
   c as v,
   a as w,

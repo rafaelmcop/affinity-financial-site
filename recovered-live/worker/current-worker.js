@@ -1,6 +1,9 @@
+import {syncLogSchema,recordSyncLog,notifyImportantLog} from './system-sync-log.js';
+import {findPaymentClient,compactClientName,rawPaymentPolicies} from './payment-client-match.js';
+import {recordPortalInteraction,interactionSchema} from './portal-interactions.js';
 import {birthdayAlerts} from './birthday-alerts.js';
 import {deletePortalUser} from './user-deletion.js';
-import {auditSchema,syncAllWhatsappAudit,syncWhatsappAudit} from './whatsapp-audit.js';
+import {auditSchema,syncAllWhatsappAudit,syncWhatsappAudit,matchedClient} from './whatsapp-audit.js';
 import {personalEmailPredicate,personalActivityPredicate,clientAutomations} from './client-communication.js';
 import {welcomeTemplate,saveWelcomeTemplate} from './welcome-template.js';
 import {automationCycle,completeAutomationCycle} from './automation-cycles.js';
@@ -240,6 +243,7 @@ async function whatsappRoute(request, env, auth) {
     const upstreamHeaders = { authorization: "Bearer " + payload + "." + signature, "content-type": "application/json" };
     if (action === "media" && request.headers.get("range")) upstreamHeaders.range = request.headers.get("range");
     const response = await fetch(target, { method, headers: upstreamHeaders, ...method === "POST" ? { body: body || "{}" } : {}, redirect: "manual", signal: AbortSignal.timeout(["send", "media"].includes(action) ? 60000 : 20000) });
+    if(action==="send"&&response.ok){try{const input=JSON.parse(body||'{}'),clients=(await env.DB.prepare('SELECT id,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(email.toLowerCase()).all()).results||[];const targetClient=String(input.chat||'').endsWith('@c.us')?matchedClient(clients,input.chat):null;await syncWhatsappAudit(env,email.toLowerCase(),targetClient);}catch{console.error("whatsapp_send_audit_pending");}}
     if (action === "connect" && response.ok) {
       await leadSchema(env);
       await env.DB.prepare("INSERT INTO staffContactImports(owner) VALUES(?) ON CONFLICT(owner) DO UPDATE SET cursor=0,total=0,state='connecting',consentedAt=CURRENT_TIMESTAMP").bind('agent:'+email.toLowerCase()).run();
@@ -50958,15 +50962,18 @@ ${rawBody}`.toLowerCase();
   const match = uniqueClients.size === 1 ? [...uniqueClients.values()][0] : null;
   const possibleClients = new Map(emailMatches.map((row) => [Number(row.clientId), row]));
   const nameMatches = policies.results.filter((row) => {
-    const name = String(row.name || "").trim().toLowerCase();
-    return name.length >= 5 && loweredNotice.includes(name);
+    const name = compactClientName(row.name);
+    return name.length >= 10 && compactClientName(loweredNotice).includes(name);
   });
   const possibleNameClients = new Map(nameMatches.map((row) => [Number(row.clientId), row]));
   const possibleMatch = possibleClients.size === 1 ? [...possibleClients.values()][0] : possibleNameClients.size === 1 ? [...possibleNameClients.values()][0] : null;
-  const resolvedMatch = match || (possibleMatch && [...mentionedPolicies].some((mentioned) => paymentPolicyNumbersMatch(possibleMatch.policyNumber, mentioned)) ? possibleMatch : null);
+  const ownerClients=(await env.DB.prepare('SELECT id,name,email FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[];
+  const namedClient=findPaymentClient(ownerClients,subject,rawBody);
+  const explicitPolicies=rawPaymentPolicies(subject,rawBody);
+  const resolvedMatch = match || (possibleMatch && [...mentionedPolicies].some((mentioned) => paymentPolicyNumbersMatch(possibleMatch.policyNumber, mentioned)) ? possibleMatch : null) || (namedClient&&explicitPolicies.length===1?{clientId:namedClient.id,name:namedClient.name,email:namedClient.email,policyNumber:explicitPolicies[0]}:null);
   const taskPrefix = `[Pagamento ${uid}]`;
   if (!resolvedMatch || !resolvedMatch.clientId || !resolvedMatch.email) {
-    const reason = !resolvedMatch ? possibleMatch ? "Confirmar n\xFAmero da ap\xF3lice" : "Identificar cliente e ap\xF3lice" : "Completar o e-mail do cliente";
+    const reason = !resolvedMatch ? (possibleMatch||namedClient) ? "Confirmar n\xFAmero da ap\xF3lice" : "Identificar cliente e ap\xF3lice" : "Completar o e-mail do cliente";
     const title = `${taskPrefix} ${reason} \u2014 ${subject}`.slice(0, 255);
     const existing = await env.DB.prepare(
       "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND title LIKE ? AND status='pending' LIMIT 1"
@@ -50974,8 +50981,9 @@ ${rawBody}`.toLowerCase();
     if (!existing)
       await env.DB.prepare(
         "INSERT INTO agentTasks (agentEmail,clientId,title,dueAt,status) VALUES (?,?,?,CURRENT_TIMESTAMP,'pending')"
-      ).bind(owner, resolvedMatch?.clientId ? Number(resolvedMatch.clientId) : possibleMatch?.clientId ? Number(possibleMatch.clientId) : null, title).run();
-    return { actionStatus: "needs_review", actionDetail: reason };
+      ).bind(owner, resolvedMatch?.clientId ? Number(resolvedMatch.clientId) : possibleMatch?.clientId ? Number(possibleMatch.clientId) : namedClient?Number(namedClient.id):null, title).run();
+    try{await recordSyncLog(env.DB,owner,{event:'email',state:'attention'});await notifyImportantLog(env,owner,{event:'email',state:'attention'},sendEmail);}catch{}
+    return {clientId:resolvedMatch?.clientId||namedClient?.id||possibleMatch?.clientId||null,policyNumber:resolvedMatch?.policyNumber||null,actionStatus:"needs_review",actionDetail:namedClient&&!resolvedMatch?"Cliente identificado; confirmar número da apólice":reason};
   }
   const paymentAmount = extractPaymentAmount(subject, rawBody);
   if (paymentAmount > 0 && resolvedMatch.policyId) {
@@ -55966,13 +55974,13 @@ ${message}`, owner).run();
     const extractedPolicies = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
     const candidatePolicies = [mailbox?.policyNumber, ...extractedPolicies].map(normalizePolicyNumber).filter(Boolean);
     let policy = policyRows.find((row) => candidatePolicies.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || null;
-    const policyNumber = normalizePolicyNumber(String(policy?.policyNumber || candidatePolicies[0] || ""));
+    const policyNumber = String(policy?.policyNumber || mailbox?.policyNumber || rawPaymentPolicies(String(mailbox?.subject||""),String(mailbox?.body||""))[0] || candidatePolicies[0] || "").trim();
     const clientId = Number(task.clientId || mailbox?.clientId || policy?.clientId || 0);
     if (!policy && clientId) policy = policyRows.find((row) => Number(row.clientId) === clientId) || null;
     let client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
     if (!client) {
       const extractedName = extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || ""));
-      if (extractedName) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(name))=lower(trim(?)) ORDER BY id LIMIT 1").bind(owner, extractedName).first();
+      client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''));
     }
     const resolvedClientId = Number(client?.id || clientId || policy?.clientId || 0);
     const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
@@ -56069,6 +56077,9 @@ ${message}`, owner).run();
       return trpcError(`A leitura visual n\xE3o foi conclu\xEDda: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
+  if(name==="agent.logSyncStatus"){if(request.method!=="POST")return trpcError("Método inválido");try{const result=await recordSyncLog(env.DB,adminEmail.toLowerCase(),input);await notifyImportantLog(env,adminEmail.toLowerCase(),input,sendEmail);return trpcResult(result);}catch(e){return trpcError(e.message);}}
+  if(name==="admin.systemSyncLogs"){await syncLogSchema(env.DB);return trpcResult((await env.DB.prepare('SELECT * FROM systemSyncLogs ORDER BY id DESC LIMIT 200').all()).results||[]);}
+  if(name==="agent.logPortalInteraction"){if(request.method!=="POST")return trpcError("Método inválido");try{return trpcResult(await recordPortalInteraction(env,adminEmail.toLowerCase(),input));}catch(e){return trpcError(e.message);}}
   if(name==="agent.birthdayAlerts"){try{const features=(await userAccess(env,adminEmail.toLowerCase())).features;if(!features.includes("crm")&&!features.includes("messages"))return trpcResult([]);return trpcResult(await birthdayAlerts(env,adminEmail.toLowerCase()));}catch(e){return trpcError(e.message);}}
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
@@ -58892,10 +58903,10 @@ Affinity Financial Consulting`,
     }
     const auditOwner=await env.DB.prepare('SELECT assignedAdminEmail,phone,whatsapp FROM crmClients WHERE id=?').bind(Number(input.clientId)).first();
     if(auditOwner?.assignedAdminEmail)try{await syncWhatsappAudit(env,String(auditOwner.assignedAdminEmail),auditOwner);}catch{console.error('whatsapp_client_audit_refresh_failed');}
-    await auditSchema(env.DB);
+    await auditSchema(env.DB);await interactionSchema(env.DB);
     const rows = await env.DB.prepare(
-      "SELECT id,clientId,type,content,createdBy,createdAt FROM (SELECT id,clientId,type,substr(coalesce(content,''),1,5000) AS content,createdBy,createdAt FROM crmActivities WHERE clientId=? AND "+personalActivityPredicate+" UNION ALL SELECT -id,clientId,'whatsapp','WhatsApp · '||CASE WHEN direction='sent' THEN 'Enviado pelo agente' ELSE 'Recebido do cliente' END||' · '||phone||char(10)||body||CASE WHEN mediaKind IS NOT NULL THEN char(10)||'Anexo: '||coalesce(filename,mediaKind)||' · '||coalesce(mediaState,'') ELSE '' END,owner,sentAt FROM whatsappClientAudit WHERE clientId=?) ORDER BY datetime(createdAt) DESC,id DESC LIMIT 200"
-    ).bind(Number(input.clientId),Number(input.clientId)).all();
+      "SELECT id,clientId,type,content,createdBy,createdAt FROM (SELECT id,clientId,type,substr(coalesce(content,''),1,5000) AS content,createdBy,createdAt FROM crmActivities WHERE clientId=? AND "+personalActivityPredicate+" UNION ALL SELECT -id,clientId,'whatsapp','WhatsApp · '||CASE WHEN direction='sent' THEN 'Enviado pelo agente' ELSE 'Recebido do cliente' END||' · '||phone||char(10)||body||CASE WHEN mediaKind IS NOT NULL THEN char(10)||'Anexo: '||coalesce(filename,mediaKind)||' · '||coalesce(mediaState,'') ELSE '' END,owner,sentAt FROM whatsappClientAudit WHERE clientId=? UNION ALL SELECT -1000000000-id,clientId,CASE WHEN channel='whatsapp' THEN 'whatsapp' ELSE 'note' END,CASE channel WHEN 'whatsapp' THEN 'WhatsApp preparado no portal · envio no aplicativo não confirmado' WHEN 'call' THEN 'Ligação iniciada no portal · resultado não confirmado' ELSE 'Mensagem preparada no portal · envio externo não confirmado' END||char(10)||body,owner,createdAt FROM portalContactInteractions WHERE clientId=?) ORDER BY datetime(createdAt) DESC,id DESC LIMIT 200"
+    ).bind(Number(input.clientId),Number(input.clientId),Number(input.clientId)).all();
     return trpcResult(
       rows.results.map((row) => ({
         ...row,
@@ -59250,6 +59261,7 @@ var cloudflare_staging_default = {
       url.pathname = "/schedule.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));
     }
+    if(url.pathname==='/admin/logs-sistema'){const email=await getAdminEmail(request,env);if(!email)return Response.redirect(new URL('/admin/login',url),302);const access=await getAdminAccess(email,env);if(!['admin','both'].includes(access.account?.accountType))return new Response('Acesso restrito ao Admin',{status:403});url.pathname='/admin-system-logs.html';return secureResponse(await env.ASSETS.fetch(new Request(url.toString(),request)),{privateData:true});}
     if (url.pathname === "/agentes/agenda") {
       url.pathname = "/agent-calendar.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
@@ -59959,16 +59971,17 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
  if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
- const response=await canonicalMenuFetchSource.call(this,request,env,ctx);
+ let response;try{response=await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error'});await notifyImportantLog(env,'server',{event:'service',state:'error'},sendEmail);}catch{}throw error;}
+ if(response.status>=500)ctx.waitUntil((async()=>{try{await recordSyncLog(env.DB,'server',{event:'service',state:'error'});await notifyImportantLog(env,'server',{event:'service',state:'error'},sendEmail);}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/admin-unified-menu.js?v=2" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/staff-setup-check.js?v=20261009-number-lock-1" defer></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/admin-unified-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/staff-setup-check.js?v=20261012-silent-1" defer></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/agent-theme.js?v=2"></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-prospecting-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-prospecting-1');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=2"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-silent-2" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-silent-2');}}).transform(response);
  }
  return response;
 };

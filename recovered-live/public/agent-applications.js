@@ -1278,13 +1278,13 @@
     const area = overlay.querySelector(options.textarea);
     const whatsapp = overlay.querySelector("[data-whatsapp]");
     const email = overlay.querySelector("[data-email]");
-    whatsapp.onclick = () => {
+    whatsapp.onclick = async () => {
       const number = whatsappNumber(row.clientPhone);
       if (!number) {
         notice("Cadastre o telefone da cliente antes de enviar pelo WhatsApp.", true);
         return;
       }
-      location.href = `whatsapp://send?phone=${number}&text=${encodeURIComponent(area.value)}`;
+      try { const {openWhatsApp}=await import("/portal-interactions.js?v=1");await openWhatsApp({applicationId:row.id,phone:number,text:area.value}); } catch(error){notice(error.message,true);}
     };
     email.onclick = async () => {
       const recipient = String(row.clientEmail || "").trim();

@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {findPaymentClient,rawPaymentPolicies} from './worker/payment-client-match.js';
+test('payment notices match full names despite accents, merged particles and spacing, never ambiguous names',()=>{const c={id:315,name:'Welida Nicolau De Oliveira'};assert.equal(findPaymentClient([c],'Payment Returned by Bank - WELIDA NICOLAU DEOLIVEIRA').id,315);assert.equal(findPaymentClient([c],'Aviso','Insured: Wélida Nicolau de Oliveira').id,315);assert.equal(findPaymentClient([c,{id:316,name:'Welida Nicolau Deoliveira'}],'WELIDA NICOLAU DEOLIVEIRA'),null);assert.equal(findPaymentClient([c],'Payment Returned by Bank - OUTRA PESSOA'),null);});
+
+test('policy reference retains all digits including ending zeros',()=>assert.deepEqual(rawPaymentPolicies('Payment returned','Policy Number: 788218600'),['788218600']));

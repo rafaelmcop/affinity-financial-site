@@ -100,13 +100,13 @@
       };
       document
         .getElementById("whatsapp-ready")
-        ?.addEventListener("click", () => {
-          location.href = `whatsapp://send?phone=${whatsapp}&text=${encodeURIComponent(message())}`;
+        ?.addEventListener("click", async () => {
+          try{const {openWhatsApp}=await import("/portal-interactions.js?v=1");await openWhatsApp({phone:whatsapp,text:message()});}catch(error){alert(error.message);}
         });
       document
         .getElementById("whatsapp-blank")
-        ?.addEventListener("click", () => {
-          location.href = `whatsapp://send?phone=${whatsapp}`;
+        ?.addEventListener("click", async () => {
+          try{const {openWhatsApp}=await import("/portal-interactions.js?v=1");await openWhatsApp({phone:whatsapp,text:""});}catch(error){alert(error.message);}
         });
       document.getElementById("email-ready")?.addEventListener("click", () => {
         location.href = `mailto:${encodeURIComponent(candidate.email)}?subject=${encodeURIComponent(subject())}&body=${encodeURIComponent(message())}`;
