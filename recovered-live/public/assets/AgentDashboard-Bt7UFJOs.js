@@ -1,3 +1,4 @@
+import BirthdayAlerts from './AgentBirthdayAlerts.js?v=1';
 import {
   c as v,
   a as w,
@@ -32,6 +33,7 @@ import "./send-u-E2Isyn.js";
 import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=5";
 function H() {
   const [calendarVersion,setCalendarVersion]=k.useState(0);
+  const birthdayNotices=i.agent.birthdayAlerts.useQuery(undefined,{refetchOnWindowFocus:true,staleTime:60000});
   const [calendarAllowed,setCalendarAllowed]=k.useState(false),[agendaStatus,setAgendaStatus]=k.useState(''),[agendaError,setAgendaError]=k.useState(false);
   k.useEffect(()=>{let active=true;fetch('/api/agent/access',{credentials:'same-origin',cache:'no-store'}).then(res=>res.ok?res.json():null).then(data=>{if(active)setCalendarAllowed(!!data?.features?.includes('calendar'));}).catch(()=>{});return()=>{active=false;};},[]);
 
@@ -94,6 +96,7 @@ function H() {
       }),
     d =
       (s?.notifications?.length || 0) +
+      (birthdayNotices.data?.length||0) +
       c.length +
       (s?.todayMeetings?.length || 0);
   A("portal", d, "affinity-agent-pending");
@@ -165,7 +168,7 @@ function H() {
                 }),
                 e.jsxs("div", {
                   className: "mt-5 grid gap-4 xl:grid-cols-3",
-                  children: [
+                  children: [e.jsx(BirthdayAlerts,{}),
                     (s?.notifications?.length || 0) > 0 &&
                       e.jsxs("section", {
                         className:

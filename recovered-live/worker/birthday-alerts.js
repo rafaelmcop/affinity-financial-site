@@ -1,0 +1,24 @@
+export function birthdayWhatsapp(client,agent,year){
+ const seed=Number(client.id)+Number(year),wishes=['Que seu dia seja cheio de alegria e bons momentos.','Desejo muita saúde e felicidade neste novo ano de vida.','Que este novo ciclo traga paz e muitas conquistas.','Aproveite seu dia com quem você ama.','Que não faltem motivos para sorrir hoje e sempre.'];
+ const closings=['Conte comigo sempre que precisar!','Estou por aqui. Conte comigo!','Conte comigo para o que precisar.','Um abraço, e conte comigo!','Seguimos juntos. Conte comigo!'];
+ const signature=String(agent.messageSignature||'{agente_nome} | Affinity Financial Consulting\n{agente_telefone}').replaceAll('{agente_nome}',agent.name||'Seu agente').replaceAll('{agente}',agent.name||'Seu agente').replaceAll('{agente_telefone}',agent.phone||agent.whatsapp||'').replaceAll('{agente_whatsapp}',agent.whatsapp||agent.phone||'').replaceAll('{agente_email}',agent.contactEmail||agent.email||'').replaceAll('{telefone do agente}',agent.phone||'').replaceAll('{email do agente}',agent.contactEmail||agent.email||'');
+ return `Feliz aniversário, ${client.name}! 🎉 ${wishes[seed%5]}\n\n${closings[Math.floor(seed/5)%5]}\n\n${signature}`;
+}
+export async function birthdayAlerts(env,owner,now=new Date()){
+ const parts=Object.fromEntries(new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now).map(p=>[p.type,p.value]));
+ const offsetLabel=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',timeZoneName:'shortOffset'}).formatToParts(now).find(p=>p.type==='timeZoneName').value;
+ const offset=(offsetLabel.match(/GMT([+-]\d+)/)?.[1]||'0')+' hours';
+ const clients=(await env.DB.prepare("SELECT id,name,email,phone,whatsapp,status FROM crmClients WHERE lower(assignedAdminEmail)=? AND (strftime('%m-%d',birthDate)=? OR substr(trim(birthDate),1,5)=?) ORDER BY name").bind(owner,parts.month+'-'+parts.day,parts.month+'/'+parts.day).all()).results||[];
+ const agent=await env.DB.prepare('SELECT name,email,phone,whatsapp,contactEmail,messageSignature FROM adminAccounts WHERE lower(email)=?').bind(owner).first()||{};
+ const messages=(await env.DB.prepare("SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND occasion='birthday' AND channel='email' AND isActive=1").bind(owner).all()).results||[];
+ const emailConfigured=await env.DB.prepare("SELECT 1 FROM agentEmailSettings WHERE lower(agentEmail)=? AND trim(coalesce(fromEmail,''))<>''").bind(owner).first();
+ const result=[];
+ for(const c of clients){
+ const sent=await env.DB.prepare("SELECT d.sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE lower(m.agentEmail)=? AND m.occasion='birthday' AND d.clientId=? AND d.sentKey=? ORDER BY d.sentAt DESC LIMIT 1").bind(owner,c.id,'birthday-'+parts.year).first();
+ const failed=await env.DB.prepare("SELECT l.errorMessage FROM crmDeliveryLogs l JOIN scheduledMessages m ON m.id=l.messageId WHERE lower(l.agentEmail)=? AND m.occasion='birthday' AND l.clientId=? AND l.status='failed' AND date(l.attemptedAt,?)=? ORDER BY l.attemptedAt DESC LIMIT 1").bind(owner,c.id,offset,parts.year+'-'+parts.month+'-'+parts.day).first();
+ const disabled=await env.DB.prepare("SELECT 1 FROM crmAutomationSubscriptions WHERE lower(agentEmail)=? AND clientId=? AND occasion='birthday' AND isActive=0").bind(owner,c.id).first();
+ const eligible=messages.some(m=>{if(m.clientId&&Number(m.clientId)!==Number(c.id))return false;if(m.selectedClientIds){try{if(!JSON.parse(m.selectedClientIds).map(Number).includes(Number(c.id)))return false;}catch{return false;}}if(m.audience==='group'&&m.recipientGroup&&!m.selectedClientIds)return m.recipientGroup==='leads'?['new','contacted','meeting','proposal','first_meeting','followup_documents','followup_service','followup_application','followup_review'].includes(c.status):m.recipientGroup===c.status;return true;});
+ result.push({id:c.id,name:c.name,phone:c.whatsapp||c.phone,emailStatus:sent?'sent':!emailConfigured?'not_configured':!c.email?'no_email':disabled?'disabled':failed?'failed':eligible?'scheduled':'not_scheduled',sentAt:sent?.sentAt||null,whatsappMessage:birthdayWhatsapp(c,agent,parts.year)});
+ }
+ return result;
+}
