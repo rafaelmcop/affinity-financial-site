@@ -51026,7 +51026,7 @@ Ap\xF3lice n\xBA {apolice}`;
         "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'automation')"
       ).bind(owner, Number(resolvedMatch.clientId), String(sent.messageId || `payment-sent:${owner}:${uid}`), subjectToClient, message, String(config.fromEmail || owner), String(resolvedMatch.email)),
       env.DB.prepare(
-        "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'automation',?,?)"
+        "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
       ).bind(Number(resolvedMatch.clientId), `Aviso de pagamento encaminhado automaticamente para a ap\xF3lice ${clearPolicyNumber}. Refer\xEAncia: ${String(sent.messageId || externalId)}`, owner),
       env.DB.prepare(
         "UPDATE agentTasks SET status='completed' WHERE lower(agentEmail)=? AND title LIKE ? AND status='pending'"
@@ -59849,14 +59849,11 @@ ${signatureLines.join("\n")}`.trim();
             ))
           }
         );
-        const statements = [
-          env.DB.prepare(
-            "INSERT INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)"
-          ).bind(Number(automation.id), Number(client.id), sentKey)
-        ];
+        await env.DB.prepare("INSERT OR IGNORE INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)").bind(Number(automation.id),Number(client.id),sentKey).run();
+        const statements = [];
         statements.push(
           env.DB.prepare(
-            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'automation',?,?)"
+            "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
           ).bind(
             Number(client.id),
             `E-mail autom\xE1tico enviado: ${personalize(automation.title)}`,

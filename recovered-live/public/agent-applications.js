@@ -1284,7 +1284,7 @@
         notice("Cadastre o telefone da cliente antes de enviar pelo WhatsApp.", true);
         return;
       }
-      window.open(`https://wa.me/${number}?text=${encodeURIComponent(area.value)}`, "_blank", "noopener,noreferrer");
+      location.href = `whatsapp://send?phone=${number}&text=${encodeURIComponent(area.value)}`;
     };
     email.onclick = async () => {
       const recipient = String(row.clientEmail || "").trim();
