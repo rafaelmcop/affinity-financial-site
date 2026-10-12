@@ -59,6 +59,7 @@
         "#form input:not([type=hidden]):not([type=file]),#form select:not(#documentCategory),#form textarea"
       ),
     ];
+  let originMeetingId = 0;
   let rows = [],
     tab = "open",
     step = 0,
@@ -585,7 +586,7 @@
     }
   };
   function collect() {
-    const d = { id: +$("id").value || 0 };
+    const d = { id: +$("id").value || 0, originMeetingId };
     for (const e of inputs)
       d[e.id] = currencyIds.has(e.id)
         ? e.value === ""
@@ -805,6 +806,7 @@
       $("form-title").textContent = row.id
         ? "Alterar aplicação"
         : "Nova aplicação";
+      originMeetingId = Number(row.originMeetingId || 0);
       $("id").value = row.id || "";
       inputs.forEach(e => (e.value = row[e.id] ?? (e.id === "ssn" ? "0" : "")));
       applyFieldFormats();
@@ -910,6 +912,7 @@
       ]) +
       section("2. Dados pessoais", [
         ["Nome", row.clientName],
+        ["Data do atendimento inicial", usDate(row.serviceDate)],
         ["Nascimento", usDate(row.birthDate)],
         ["Sexo", row.gender],
         ["Estado civil", row.maritalStatus],
@@ -1121,6 +1124,7 @@
     sectionBlock("3. Informações do cliente", [
       ["Nome completo", row.clientName],
       ["Data de nascimento", usDate(row.birthDate)],
+      ["Data do atendimento inicial", usDate(row.serviceDate)],
       ["Idade", ageFromBirthDate(row.birthDate)],
       ["Sexo", row.gender],
       ["Estado civil", row.maritalStatus],
@@ -1364,7 +1368,7 @@
       ? data
           .map(
             r =>
-              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div></div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
+              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
       : '<div class="empty">Nenhuma aplicação nesta categoria.</div>';
@@ -1541,6 +1545,23 @@
         render();
       })
   );
+  function meetingApplicationPrefill(meeting) {
+    const start = new Date(meeting.startTime);
+    const parts = Number.isNaN(start.getTime()) ? null : new Intl.DateTimeFormat("en-US", {timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(start);
+    const part = name => parts?.find(item => item.type === name)?.value;
+    return {clientName:meeting.inviteeName || "",clientEmail:meeting.inviteeEmail || "",clientPhone:meeting.inviteePhone || "",originMeetingId:Number(meeting.id || 0),serviceDate:parts ? `${part("year")}-${part("month")}-${part("day")}` : ""};
+  }
+  async function openMeetingApplication() {
+    const meetingId = Number(new URLSearchParams(location.search).get("meetingId") || 0);
+    if (!Number.isSafeInteger(meetingId) || meetingId <= 0) return;
+    try {
+      const meeting = await api("agent.meetingDetail", {id:meetingId});
+      if (!meeting) throw Error("Compromisso não encontrado ou sem permissão de acesso.");
+      await edit({...meetingApplicationPrefill(meeting),originMeetingId:meetingId});
+      history.replaceState(null,"",location.pathname);
+    } catch (error) { notice(error.message,true); }
+  }
   showStep(0);
   load();
+  void openMeetingApplication();
 })();
