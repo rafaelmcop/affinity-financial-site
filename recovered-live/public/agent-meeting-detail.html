@@ -117,7 +117,12 @@
         }
       }
     </style>
-  </head>
+  <style>
+.actions button{font:700 14px Lato,Arial,sans-serif;min-height:40px;border:1px solid var(--agent-border,#40566d);border-radius:9px;padding:10px 14px;cursor:pointer}
+#meeting-attachments{display:block;width:100%;max-width:600px;padding:10px;border:1px solid var(--agent-border,#40566d);border-radius:9px;margin:8px 0;font:14px Lato,Arial,sans-serif}
+#meeting-attachment-list li{margin:10px 0;overflow-wrap:anywhere}
+#meeting-attachment-list button{margin-left:10px;border-radius:7px;padding:7px 10px;cursor:pointer}
+</style></head>
   <body>
     <main class="main">
       <div class="eyebrow">Agenda de hoje</div>
@@ -125,7 +130,7 @@
       <p class="muted">Somente as informações da reunião escolhida.</p>
       <div id="content" class="card empty">Carregando compromisso…</div>
     </main>
-    <script src="/agent-meeting-detail.js?v=20261012-proposals-5" defer></script>
+    <script src="/agent-meeting-detail.js?v=20261012-proposals-6" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>
 </html>
