@@ -778,8 +778,6 @@
   async function edit(row = {}) {
     try {
       if (row.id) row = await api("agent.getApplication", { id: row.id });
-      const agentDetails=row.agentDetails||await api('agent.applicationAgentDetails');
-      $('application-agent-details').innerHTML='<h3>Agente responsável</h3><p>'+esc(agentDetails.name)+' · '+esc(agentDetails.email)+' · '+esc(agentDetails.phone)+'</p><p>Número de agente: '+esc(agentDetails.number||'Aguardando número do Admin Rafael')+(agentDetails.usingAdminNumber?' · número temporário do Admin Rafael':'')+'</p>';
       if (
         row.personalWeeklyExpenses == null &&
         row.personalMonthlyExpenses != null
@@ -809,6 +807,7 @@
       originMeetingId = Number(row.originMeetingId || 0);
       $("id").value = row.id || "";
       inputs.forEach(e => (e.value = row[e.id] ?? (e.id === "ssn" ? "0" : "")));
+      $("application-client-details").textContent = row.clientName || "Cliente: informe o nome abaixo";
       applyFieldFormats();
       beneficiaries = Array.isArray(row.beneficiaries)
         ? row.beneficiaries
@@ -1368,7 +1367,7 @@
       ? data
           .map(
             r =>
-              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
+              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-access-feature="application_create" data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button data-access-feature="application_create" class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
       : '<div class="empty">Nenhuma aplicação nesta categoria.</div>';
@@ -1501,6 +1500,9 @@
     el.addEventListener("input", clear);
     el.addEventListener("change", clear);
   });
+  $("clientName").addEventListener("input",()=>{
+    $("application-client-details").textContent = $("clientName").value.trim() || "Cliente: informe o nome abaixo";
+  });
   $("clientPhone").addEventListener(
     "input",
     e => (e.target.value = formatPhone(e.target.value))
@@ -1553,7 +1555,10 @@
   }
   async function openMeetingApplication() {
     const meetingId = Number(new URLSearchParams(location.search).get("meetingId") || 0);
-    if (!Number.isSafeInteger(meetingId) || meetingId <= 0) return;
+    if (!Number.isSafeInteger(meetingId) || meetingId <= 0) {
+      if (new URLSearchParams(location.search).get("nova") === "1") { await edit(); history.replaceState(null,"",location.pathname); }
+      return;
+    }
     try {
       const meeting = await api("agent.meetingDetail", {id:meetingId});
       if (!meeting) throw Error("Compromisso não encontrado ou sem permissão de acesso.");

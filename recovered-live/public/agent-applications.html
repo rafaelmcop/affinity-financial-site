@@ -287,7 +287,7 @@
             <button data-tab="open" class="active">Em andamento</button
             ><button data-tab="completed">Concluídas</button>
           </div>
-          <button id="new" class="primary">+ Nova aplicação</button>
+          <button id="new" data-access-feature="application_create" class="primary">+ Nova aplicação</button>
         </div>
         <div id="notice" class="notice"></div>
         <section id="form-card" class="card hidden">
@@ -303,7 +303,7 @@
             ao agente responsável.
           </div>
           <div class="steps" id="steps"></div>
-          <section id="application-agent-details" class="muted" aria-label="Agente responsável pela aplicação"></section>
+          <section id="application-client-details" aria-label="Cliente da aplicação" style="position:sticky;top:0;z-index:10;background:var(--agent-surface,#fff);color:var(--agent-text,#172b3a);padding:12px 16px;border:1px solid var(--agent-border,#cbd5e1);border-radius:10px;font-weight:800;margin-bottom:16px"></section>
           <form id="form">
             <input type="hidden" id="id" />
             <section class="section" data-step="Cliente">
@@ -642,7 +642,7 @@
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261012-meeting-prefill-4"></script>
+    <script src="/agent-applications.js?v=20261012-new-application-5"></script>
     <script src="/address-autocomplete.js?v=20260825-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>
