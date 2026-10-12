@@ -30,7 +30,7 @@ import "./send-u-E2Isyn.js";
   ["path", { d: "M18 6 7 17l-5-5", key: "116fxf" }],
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }],
 ]);
-import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=5";
+import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=6";
 function H() {
   const [calendarVersion,setCalendarVersion]=k.useState(0);
   const birthdayNotices=i.agent.birthdayAlerts.useQuery(undefined,{refetchOnWindowFocus:true,staleTime:60000});
@@ -97,8 +97,7 @@ function H() {
     d =
       (s?.notifications?.length || 0) +
       (birthdayNotices.data?.length||0) +
-      c.length +
-      (s?.todayMeetings?.length || 0);
+      c.length;
   A("portal", d, "affinity-agent-pending");
   const N = [
     ["Agenda de hoje", s?.todayMeetingCount ?? s?.todayMeetings?.length ?? 0, x],
@@ -135,7 +134,7 @@ function H() {
             ],
           }),
           calendarAllowed && e.jsx(WeeklyAgenda,{version:calendarVersion,syncing:q.isPending,onSync:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar.');}}}),
-          (d > 0 || calendarAllowed) &&
+          d > 0 &&
             e.jsxs(m, {
               className: "border-gold/30 bg-[#0b1524] p-6",
               children: [
@@ -404,72 +403,6 @@ function H() {
                                   ],
                                 },
                                 t.id
-                              )
-                            ),
-                          }),
-                        ],
-                      }),
-                    calendarAllowed &&
-                      e.jsxs("section", {
-                        className:
-                          "rounded-2xl border border-sky-400/25 bg-sky-400/5 p-4",
-                        children: [
-                          e.jsxs("div", {
-                            className: "flex items-start justify-between gap-3",
-                            children: [
-                              e.jsxs("div", {
-                                children: [
-                                  e.jsx("p", {
-                                    className:
-                                      "text-xs font-bold uppercase tracking-wider text-sky-300",
-                                    children: "3 · Agenda de hoje",
-                                  }),
-                                  e.jsxs("h3", {
-                                    className:
-                                      "mt-1 flex items-center gap-2 font-bold text-white",
-                                    children: [
-                                      e.jsx(x, { size: 18 }),
-                                      " Compromissos de hoje",
-                                    ],
-                                  }),
-                                ],
-                              }),
-                              e.jsxs("div", {className:"flex items-center gap-2",children:[
-                                e.jsx("span", {className:"rounded-full bg-sky-300 px-2.5 py-1 text-xs font-bold text-black",children:s?.todayMeetings?.length || 0}),
-                                e.jsx("button", {type:"button",title:"Sincronizar agenda", "aria-label":"Sincronizar agenda",disabled:q.isPending,"aria-busy":q.isPending,className:"inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-sky-400/50 text-sky-300 hover:bg-sky-400/10 disabled:opacity-50",onClick:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar a agenda. Tente novamente.');}},children:e.jsx(AgendaRefresh,{size:18,className:q.isPending?'animate-spin':''})})
-                              ]}),
-                            ],
-                          }),
-                          agendaStatus && e.jsx("p", {role:agendaError?'alert':'status',className:"mt-3 text-sm",children:agendaStatus}),
-                          !(s?.todayMeetings?.length) && e.jsx("p", {className:"mt-4 text-sm text-gray-400",children:"Nenhum compromisso para hoje. Use o ícone de atualização para sincronizar sua agenda."}),
-                          e.jsx("div", {
-                            className:
-                              "mt-4 max-h-96 space-y-3 overflow-y-auto pr-1",
-                            children: (s?.todayMeetings || []).map(t =>
-                              e.jsxs(
-                                "div",
-                                {
-                                  className:
-                                    "w-full rounded-xl border border-sky-300/20 bg-black/30 p-3 text-left",
-                                  children: [
-                                    e.jsx("span", {
-                                      className:
-                                        "block font-semibold text-white",
-                                      children: t.inviteeName || t.eventName || "Compromisso",
-                                    }),
-                                    e.jsxs("span", {
-                                      className:
-                                        "mt-1 block text-sm text-sky-100/80",
-                                      children: [
-                                        new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(t.startTime)),
-                                        " · ",
-                                        t.eventName || "Reunião",
-                                      ],
-                                    }),
-                                    e.jsx("button", { type: "button", onClick: () => window.location.assign(`/agentes/compromisso?meetingId=${t.id}`), className: "mt-2 block text-xs font-bold text-sky-300 hover:text-white", children: "Abrir cliente" }),
-                                  ],
-                                },
-                                `meeting-${t.id}`
                               )
                             ),
                           }),
