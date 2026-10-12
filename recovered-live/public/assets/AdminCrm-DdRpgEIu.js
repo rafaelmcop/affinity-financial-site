@@ -585,7 +585,7 @@ function Le({ agentMode: a = !1 }) {
               }),
               e.jsxs(d, {
                 onClick: () => {
-                  (n(D), N(!R));
+                  if(a) location.href="/agentes/novo-cliente"; else (n(D), N(!R));
                 },
                 className: "bg-gold text-black",
                 children: [

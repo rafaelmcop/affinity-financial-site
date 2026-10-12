@@ -3,7 +3,7 @@ export const featureCatalog = [
  ['application_create','Aplicação nova','Aplicações'],['applications','Em andamento','Aplicações'],
  ['email','E-mail','Comunicação'],['whatsapp','WhatsApp — conversas e mensagens','Comunicação'],
  ['messages','Mensagens e automações','CRM'],['direct_contacts','Contato direto','CRM'],['calendar','Agenda','CRM'],
- ['policies','Apólices','Cliente'],['tasks','Tarefas','Cliente'],['reviews','Avaliações','Avaliações'],
+ ['policies','Apólices','Cliente'],['tasks','Avisos de pagamentos atrasados','Notificações'],['reviews','Avaliações','Avaliações'],
  ['public_profile','Página pública do agente','Conta e integrações'],['five_rings','Integração Five Rings','Conta e integrações'],['referrals','Indicações de afiliados','Afiliados']
 ];
 export function pageFeature(path,query=new URLSearchParams()) {
@@ -12,6 +12,7 @@ export function pageFeature(path,query=new URLSearchParams()) {
  if(path==='/agentes/crm/whatsapp')return 'whatsapp_leads';
  if(path.includes('fila-leads')||path.includes('lead-queue'))return 'queue';
  if(path.includes('obrigacoes-marketing')||/\/marketing\//.test(path))return 'marketing';
+ if(path==='/agentes/novo-cliente'||path==='/agentes/pcsheet'||path==='/agentes/tarefas')return 'policies';
  if(path==='/agentes/clientes')return 'policies';
  if(path.startsWith('/agent-application')||path.startsWith('/api/agent/application'))return query.get('nova')==='1'||query.has('meetingId')?'application_create':'applications';
  if(path==='/agent-crm-client.html')return 'policies';

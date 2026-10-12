@@ -37,6 +37,7 @@ export function procedureFeature(name){
  if(['sendPaymentCaseEmail','paymentCase','resolvePaymentCase'].includes(op))return 'tasks';
  if(['listMessages','messageHistory','deliveryLog','scheduleMessage','updateMessage','deleteMessage','automationSubscriptions'].includes(op))return 'messages';
  if(['listApplications','getApplication','getApplicationDocument','applicationAgentDetails'].includes(op))return ['application_create','applications','policies'];
+ if(op==='savePcSheet')return 'policies';
  if(/Application|PcSheet/.test(op))return op==='requestApplicationDeletion'?['application_create','applications','policies']:'application_create';
  if(/Review|review|ServiceFeedback/.test(op))return 'reviews';
  if(/Task|Tasks/.test(op))return 'tasks';
