@@ -1343,6 +1343,15 @@
         }
       };
       actions.appendChild(button);
+      if (row.status !== "draft") {
+        const portal = document.createElement("a");
+        portal.className = "application-nlg-link";
+        portal.href = "https://www.nationallife.com/agent/";
+        portal.target = "_blank";
+        portal.rel = "noopener noreferrer";
+        portal.textContent = "Portal National Life";
+        actions.appendChild(portal);
+      }
     });
   }).observe($("list"), { childList: true, subtree: true });
   function render() {
@@ -1355,7 +1364,7 @@
       ? data
           .map(
             r =>
-              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div></div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status!=='draft'?'<a class="application-nlg-link" href="https://www.nationallife.com/agent/" target="_blank" rel="noopener noreferrer">Acessar portal NLG</a>':''}${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
+              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div></div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
       : '<div class="empty">Nenhuma aplicação nesta categoria.</div>';

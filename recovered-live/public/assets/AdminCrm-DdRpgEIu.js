@@ -387,7 +387,7 @@ function Le({ agentMode: a = !1 }) {
                     e.jsxs("p", { children: ["Telefone: ", e.jsx("strong", { children: t.phone || "Não informado" })] }),
                     e.jsxs("p", { children: ["WhatsApp: ", e.jsx("strong", { children: t.whatsapp || "Não informado" })] }),
                     e.jsxs("p", { children: ["Nascimento: ", e.jsx("strong", { children: U(t.birthDate) })] }),
-                    e.jsxs("p", { children: ["Etapa: ", e.jsx("strong", { children: I.find(s => s.value === t.status)?.label || t.status })] }),
+                    e.jsxs("p", { children: ["Etapa: ", e.jsx("strong", { children: t.hasInforcePolicy ? "InForce" : (I.find(s => s.value === t.status)?.label || t.status) })] }),
                     e.jsxs("p", { children: ["Próximo acompanhamento: ", e.jsx("strong", { children: j(t.nextFollowUpAt) })] }),
                   ],
                 }),
@@ -603,9 +603,9 @@ function Le({ agentMode: a = !1 }) {
                 ["all", "Todos"],
                 ["leads", "Leads"],
                 ["followup", "Follow-up"],
-                ["new_business", "New Business · aguardando emissão"],
+                ["new_business", "New Business"],
                 
-                ["inforce", "InForce · emitidas"],
+                ["inforce", "InForce"],
               ].map(([s, l]) =>
                 e.jsx(
                   d,
@@ -871,7 +871,7 @@ function Le({ agentMode: a = !1 }) {
                           children: "Nenhum cliente encontrado.",
                         }),
                       pageRows.map(s => {
-                        const l = I.find($ => $.value === s.status),
+                        const l = s.hasInforcePolicy ? {label:"InForce",color:"bg-green-500/15 text-green-300"} : (I.find($ => $.value === s.status)||{label:s.status,color:""}),
                           o =
                             s.nextFollowUpAt &&
                             new Date(String(s.nextFollowUpAt)).getTime() <
@@ -1067,8 +1067,8 @@ function Le({ agentMode: a = !1 }) {
                                     " ",
                                     e.jsx("strong", {
                                       children:
-                                        I.find(s => s.value === t.status)
-                                          ?.label || t.status,
+                                        t.hasInforcePolicy ? "InForce" : (I.find(s => s.value === t.status)
+                                          ?.label || t.status),
                                     }),
                                   ],
                                 }),
