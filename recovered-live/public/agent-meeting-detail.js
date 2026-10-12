@@ -105,9 +105,13 @@
       const secondMessage = `Olá, ${firstName}! Tudo bem?\n\nGostaria de retomar nosso atendimento exatamente de onde paramos e dar continuidade ao que conversamos.\n\nQuando for conveniente, responda esta mensagem ou escolha um horário para continuarmos.${scheduleLink ? `\n\n📅 Escolha seu horário:\n${scheduleLink}` : ""}\n\nFico à disposição.\n\n${personalSignature}`;
       const noShowMessage = `Olá, ${firstName}! Tudo bem?\n\nNão conseguimos nos encontrar no horário marcado. Espero que esteja tudo bem.\n\nSe desejar, podemos reagendar nossa conversa para um momento mais conveniente.${scheduleLink ? `\n\n📅 Reagende aqui:\n${scheduleLink}` : ""}\n\nFico à disposição.\n\n${personalSignature}`;
       const referralMessage = `Olá, ${firstName}! Tudo bem?\n\nFoi um prazer conversar com você. Se conhece alguém que também possa se beneficiar de uma orientação financeira cuidadosa e personalizada, ficarei muito feliz com a sua indicação.\n\nPode me enviar o nome e o telefone da pessoa por aqui. Entrarei em contato com todo cuidado e respeito.\n\nMuito obrigado pela confiança!\n\n${personalSignature}`;
-      let selectedTemplate = "Primeira chamada";
+      const proposalMessage=`Olá, ${firstName}!\n\nConforme conversamos na reunião, seguem as propostas de cobertura que analisamos. Confira os documentos anexos e me diga se ficou alguma dúvida ou se gostaria de ajustar alguma opção.\n\nConte comigo para ajudar na sua escolha.\n\n${personalSignature}`;
+      let selectedTemplate = "Primeira chamada",selectedFiles=[];
+      const requestIds=new Map();
+      const requestIdFor=(channel,message,files)=>{const key=JSON.stringify([channel,message,files.map(f=>[f.name,f.size,f.lastModified])]);if(!requestIds.has(key))requestIds.set(key,crypto.randomUUID());return requestIds.get(key);};
+      const encodeFiles=files=>Promise.all(files.map(file=>new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({filename:file.name,content:String(reader.result).split(',')[1]});reader.onerror=()=>reject(Error('Não foi possível ler '+file.name));reader.readAsDataURL(file);})));
       content.className = "card";
-      content.innerHTML = `<h2>${esc(meeting.inviteeName || meeting.eventName || "Compromisso")}</h2><p class="muted">${esc(meeting.eventName || "Reunião")}</p><div class="grid"><div class="field"><b>Data e horário</b>${esc(format(meeting.startTime))}</div><div class="field"><b>Término previsto</b>${esc(format(meeting.endTime))}</div><div class="field"><b>Telefone</b>${esc(phone || "Não informado")}</div><div class="field"><b>E-mail</b>${esc(email || "Não informado")}</div></div><div class="actions">${meeting.meetingUrl ? `<a class="primary" href="${esc(zoomAppLink(meeting.meetingUrl))}">Entrar na reunião</a>` : ""}<button id="open-contact">Abrir ficha e histórico</button><a class="primary" href="/agent-applications?meetingId=${meetingId}">Iniciar nova aplicação</a><a href="/agentes/agenda">Voltar para a agenda</a></div>${(whatsapp || email) ? `<div class="card"><div class="eyebrow">Contato rápido</div><h2>Preparar mensagem</h2><div class="actions"><button id="template-first" class="primary">Primeira chamada</button><button id="template-second">Segunda chamada</button><button id="template-no-show">Não compareceu</button><button id="template-feedback">Pedir avaliação</button><button id="template-referral">Pedir indicação</button><button id="template-blank">Mensagem em branco</button></div><textarea id="meeting-message" style="width:100%;min-height:220px;margin-top:12px;border:1px solid #293b52;border-radius:10px;background:#050d18;color:#fff;padding:14px">${esc(firstMessage)}</textarea><div class="actions"><button id="send-email">Enviar por e-mail</button><button id="send-whatsapp" class="primary" style="border:1px solid #dfb934;border-radius:10px;background:#dfb934;color:#050505;padding:12px 16px;font-weight:800">Abrir direto no WhatsApp</button></div></div>` : ""}`;
+      content.innerHTML = `<h2>${esc(meeting.inviteeName || meeting.eventName || "Compromisso")}</h2><p class="muted">${esc(meeting.eventName || "Reunião")}</p><div class="grid"><div class="field"><b>Data e horário</b>${esc(format(meeting.startTime))}</div><div class="field"><b>Término previsto</b>${esc(format(meeting.endTime))}</div><div class="field"><b>Telefone</b>${esc(phone || "Não informado")}</div><div class="field"><b>E-mail</b>${esc(email || "Não informado")}</div></div><div class="actions">${meeting.meetingUrl ? `<a class="primary" href="${esc(zoomAppLink(meeting.meetingUrl))}">Entrar na reunião</a>` : ""}<button id="open-contact">Abrir ficha e histórico</button><a class="primary" href="/agent-applications?meetingId=${meetingId}">Iniciar nova aplicação</a><a href="/agentes/agenda">Voltar para a agenda</a></div>${(whatsapp || email) ? `<div class="card"><div class="eyebrow">Contato rápido</div><h2>Preparar mensagem</h2><div class="actions"><button id="template-first" class="primary">Primeira chamada</button><button id="template-second">Segunda chamada</button><button id="template-no-show">Não compareceu</button><button id="template-feedback">Pedir avaliação</button><button id="template-referral">Pedir indicação</button><button id="template-proposals">Propostas de cobertura</button><button id="template-blank">Mensagem em branco</button></div><textarea id="meeting-message" style="width:100%;min-height:220px;margin-top:12px;border:1px solid #293b52;border-radius:10px;background:#050d18;color:#fff;padding:14px">${esc(firstMessage)}</textarea><div class="field" style="margin-top:14px"><label for="meeting-attachments">Anexar documentos</label><input id="meeting-attachments" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp,.gif,.xlsx,.xls"><small>Até 10 arquivos, somando 10 MB. Para WhatsApp, até 7 MB por arquivo.</small><ul id="meeting-attachment-list"></ul></div><div class="actions"><button data-access-feature="email" id="send-email">Enviar por e-mail</button><button data-access-feature="whatsapp" id="send-whatsapp" class="primary" style="border:1px solid #dfb934;border-radius:10px;background:#dfb934;color:#050505;padding:12px 16px;font-weight:800">Abrir direto no WhatsApp</button></div></div>` : ""}`;
       document.getElementById("open-contact").onclick = async function () {
         this.disabled = true;
         try {
@@ -117,6 +121,17 @@
         } catch (error) { alert(error.message); this.disabled = false; }
       };
       const area = document.getElementById("meeting-message");
+      const renderFiles=()=>{
+        const list=document.getElementById('meeting-attachment-list');list.innerHTML='';
+        selectedFiles.forEach((file,index)=>{const li=document.createElement('li');li.textContent=file.name+' · '+(file.size/1024).toFixed(0)+' KB ';const remove=document.createElement('button');remove.type='button';remove.textContent='Remover';remove.onclick=()=>{selectedFiles.splice(index,1);renderFiles();};li.append(remove);list.append(li);});
+        document.getElementById('send-whatsapp').textContent=selectedFiles.length?'Enviar pelo WhatsApp':'Abrir direto no WhatsApp';
+      };
+      document.getElementById('meeting-attachments').onchange=event=>{
+        const incoming=[...selectedFiles,...event.target.files];const seen=new Set(),files=incoming.filter(file=>{const key=JSON.stringify([file.name,file.size,file.lastModified]);if(seen.has(key))return false;seen.add(key);return true;});
+        if(files.length>10||files.reduce((total,file)=>total+file.size,0)>10*1024*1024)alert('Selecione até 10 anexos, somando no máximo 10 MB.');
+        else if(files.some(file=>!file.size||!/\.(pdf|jpe?g|png|webp|gif|xlsx|xls)$/i.test(file.name)))alert('Selecione PDF, imagens ou planilhas válidas.');
+        else{selectedFiles=files;renderFiles();}event.target.value='';
+      };
       const emailButton = document.getElementById("send-email");
       if (emailButton) {
         emailButton.disabled = !email;
@@ -124,12 +139,13 @@
         emailButton.addEventListener("click", async () => {
           const message = area.value.trim();
           if (!message) return alert("Escreva a mensagem antes de enviar.");
-          if (!confirm(`Enviar esta mensagem para ${meeting.inviteeName || "cliente"} (${email}) pelo seu e-mail configurado?`)) return;
+          const files=[...selectedFiles];
+          if (!confirm(`Enviar esta mensagem${files.length?" e "+files.length+" anexo(s)":""} para ${meeting.inviteeName || "cliente"} (${email}) pelo seu e-mail configurado?`)) return;
           emailButton.disabled = true;
           emailButton.textContent = "Enviando…";
-          const subjects = { "Primeira chamada": "Lembrete da nossa reunião", "Segunda chamada": "Vamos continuar nosso atendimento?", "Não compareceu": "Sentimos sua falta na reunião", "Avaliação": "Como foi seu atendimento?", "Pedido de indicação": "Conhece alguém que podemos ajudar?" };
+          const subjects = { "Primeira chamada": "Lembrete da nossa reunião", "Segunda chamada": "Vamos continuar nosso atendimento?", "Não compareceu": "Sentimos sua falta na reunião", "Avaliação": "Como foi seu atendimento?", "Pedido de indicação": "Conhece alguém que podemos ajudar?", "Propostas de cobertura":"Propostas de cobertura que analisamos" };
           try {
-            await api("agent.sendMeetingEmail", { meetingId, message, template: selectedTemplate, subject: subjects[selectedTemplate] || "Mensagem do seu consultor" }, "POST");
+            await api("agent.sendMeetingEmail", { meetingId, message, template: selectedTemplate, subject: subjects[selectedTemplate] || "Mensagem do seu consultor",attachments:await encodeFiles(files),confirmed:true,requestId:requestIdFor("email",message,files) }, "POST");
             alert("E-mail enviado e registrado no histórico do cliente.");
           } catch (error) {
             alert(error.message || "Não foi possível enviar o e-mail.");
@@ -149,6 +165,7 @@
       choose("template-second", "Segunda chamada", secondMessage);
       choose("template-no-show", "Não compareceu", noShowMessage);
       choose("template-referral", "Pedido de indicação", referralMessage);
+      choose("template-proposals", "Propostas de cobertura", proposalMessage);
       choose("template-blank", "Mensagem personalizada", "");
       document.getElementById("template-feedback")?.addEventListener("click", async () => {
         try {
@@ -160,6 +177,14 @@
         }
       });
       document.getElementById("send-whatsapp")?.addEventListener("click", async () => {
+        if(selectedFiles.length){
+          const message=area.value.trim(),files=[...selectedFiles];
+          if(!message)return alert('Escreva a mensagem para acompanhar os documentos.');
+          if(message.length>4000||files.some(file=>file.size>7*1024*1024))return alert('Para WhatsApp use até 4.000 caracteres e até 7 MB por arquivo.');
+          if(!confirm(`Enviar esta mensagem e ${files.length} anexo(s) pelo WhatsApp para ${meeting.inviteeName||'cliente'} (${phone})?`))return;
+          whatsappButton.disabled=true;whatsappButton.textContent='Enviando…';
+          try{await api('agent.sendMeetingWhatsapp',{meetingId,message,template:selectedTemplate,attachments:await encodeFiles(files),confirmed:true,requestId:requestIdFor('whatsapp',message,files)},'POST');alert('Mensagem e documentos enviados pelo WhatsApp e registrados no histórico.');}catch(error){alert(error.message||'Não foi possível confirmar o envio. Confira no aplicativo antes de tentar novamente.');}finally{whatsappButton.disabled=false;renderFiles();}return;
+        }
         if (!area.value.trim()) {
           location.href = `whatsapp://send?phone=${whatsapp}`;
           return;

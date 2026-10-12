@@ -1,6 +1,7 @@
+import {sendMeetingMessage} from './meeting-message-send.js';
 import {syncExcludedWorkGroups} from './excluded-work-groups.js';
 import {sendPaymentCase} from './payment-case-send.js';
-import {syncLogSchema,recordSyncLog,notifyImportantLog} from './system-sync-log.js';
+import {syncLogSchema,recordSyncLog,notifyImportantLog,resolveImportantLog} from './system-sync-log.js';
 import {findPaymentClient,compactClientName,rawPaymentPolicies} from './payment-client-match.js';
 import {recordPortalInteraction,interactionSchema} from './portal-interactions.js';
 import {birthdayAlerts} from './birthday-alerts.js';
@@ -55579,7 +55580,7 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(), meetingId || null, clientName || null, clientEmail || null, token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
-  if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail" || name === "agent.openMeetingClient") {
+  if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail" || name === "agent.sendMeetingWhatsapp" || name === "agent.openMeetingClient") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), meetingId = Number(input.meetingId || 0);
     const message = String(input.message || "").trim().slice(0, 1e4);
@@ -55589,7 +55590,10 @@ Detalhes: ${details}` : ""}`;
     if (!meetingId || !openClient && !message) return trpcError("Mensagem ou compromisso inv\xE1lido");
     const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
     if (!meeting) return trpcError("Compromisso n\xE3o encontrado", "NOT_FOUND", 404);
-    const sendMeetingEmail = name === "agent.sendMeetingEmail";
+    const sendMeetingEmail = name === "agent.sendMeetingEmail",sendMeetingWhatsapp=name==="agent.sendMeetingWhatsapp";
+    if((sendMeetingEmail||sendMeetingWhatsapp)&&!await hasFeature(env,owner,sendMeetingWhatsapp?'whatsapp':'email'))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
+    let attachments=[];
+    if(sendMeetingEmail||sendMeetingWhatsapp){try{attachments=parseMailAttachments(input.attachments);if(sendMeetingWhatsapp){for(const file of attachments){const ext=file.filename.split('.').pop().toLowerCase(),types={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',xls:'application/vnd.ms-excel'};if(!types[ext])throw Error('Para WhatsApp use PDF, imagens ou planilhas.');file.contentType=types[ext];}}}catch(e){return trpcError(e.message);}}
     if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso n\xE3o possui e-mail v\xE1lido");
     let clientId = Number(meeting.clientId || 0);
     if (clientId && !await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first()) clientId = 0;
@@ -55609,11 +55613,12 @@ Detalhes: ${details}` : ""}`;
       const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
       const subject = String(input.subject || "Seu atendimento \u2014 Affinity Financial Consulting").trim().slice(0, 300);
-      const sent = await sendAgentEmail(env, owner, { to: String(meeting.inviteeEmail), subject, html: clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n", "<br>")}</p>`), replyTo: String(config.fromEmail) });
-      await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message, String(config.fromEmail), String(meeting.inviteeEmail)).run();
+      let sent;
+      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{to:String(meeting.inviteeEmail),subject,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
+      await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message+(attachments.length?"\nAnexos: "+attachments.map(file=>file.filename).join(", "):""), String(config.fromEmail), String(meeting.inviteeEmail)).run();
     }
-    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : channel, `${template}
-${message}`, owner).run();
+    if(sendMeetingWhatsapp){try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'whatsapp'},attachments);if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true});try{await syncWhatsappAudit(env,owner,{id:clientId,phone:meeting.inviteePhone});}catch{console.error('whatsapp_send_audit_pending');}}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}}
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : sendMeetingWhatsapp?'whatsapp':channel, `${template}\n${message}${attachments.length?'\nAnexos: '+attachments.map(f=>f.filename).join(', '):''}`, owner).run();
     return trpcResult({ success: true, clientId });
   }
   if (name === "admin.deleteApplication") {
@@ -59985,17 +59990,18 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
  if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
- let response;try{response=await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error'});await notifyImportantLog(env,'server',{event:'service',state:'error'},sendEmail);}catch{}throw error;}
- if(response.status>=500)ctx.waitUntil((async()=>{try{await recordSyncLog(env.DB,'server',{event:'service',state:'error'});await notifyImportantLog(env,'server',{event:'service',state:'error'},sendEmail);}catch{}})());
+ let response;try{response=await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
+ if(response.status>=500)ctx.waitUntil((async()=>{try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,httpStatus:response.status,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,httpStatus:response.status,errorCode:'request_failed'},sendEmail);}catch{}})());
+ if(response.ok&&url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{const resolved=await resolveImportantLog(env.DB,'server',{event:'service',path:url.pathname});if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{event:'service',state:'completed',path:url.pathname,httpStatus:response.status});}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
  if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/admin-unified-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/staff-setup-check.js?v=20261012-silent-1" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-views-7" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-views-7');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-incident-8" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-incident-8');}}).transform(response);
  }
  return response;
 };

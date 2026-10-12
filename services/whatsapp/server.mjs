@@ -2,6 +2,7 @@ import {auditMessages} from './audit.mjs';
 import {sendAllowed} from './send-permission.mjs';
 import {pruneMedia,mediaExpired} from './media-retention.mjs';
 import {chatDirectory,groupContacts,groupId,allContacts} from './directory.mjs';
+import {contactImportJob} from './contact-import-job.mjs';
 import http from 'node:http';
 import {createHash} from 'node:crypto';
 import {mkdirSync,existsSync,renameSync,writeFileSync,statSync,createReadStream} from 'node:fs';
@@ -123,8 +124,8 @@ const server=http.createServer(async(req,res)=>{
     }
     if(action==='/all-contacts'&&req.method==='GET'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
-      if(!s.allContactsJob){const job={result:null,error:false,progress:{}};s.allContactsJob=job;void allContacts(s.client,p=>job.progress=p).then(result=>job.result=result).catch(()=>job.error=true);}
-      const job=s.allContactsJob;if(job.error)return reply({error:'Não foi possível preparar os contatos.'},503);
+      const job=contactImportJob(s,p=>allContacts(s.client,p),Date.now(),data=>console.error(JSON.stringify(data)));
+      if(job.error)return reply({error:'Não foi possível preparar os contatos. Uma nova tentativa será feita automaticamente.',retryAfter:Math.max(1,Math.ceil((job.retryAt-Date.now())/1000))},503);
       return job.result?reply(job.result):reply({pending:true,...job.progress},202);
     }
     if(action==='/chats'&&req.method==='GET'){
