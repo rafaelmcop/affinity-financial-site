@@ -1,3 +1,4 @@
+import {publicTestimonial,publicTestimonialColumns} from './public-testimonials.js';
 import {authenticationLimit} from './auth-rate-limit.js';
 import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
@@ -55003,19 +55004,19 @@ async function runProcedure(name, input, request, env) {
   }
   if (name === "testimonials.getActive") {
     const result = await env.DB.prepare(
-      "SELECT * FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
+      "SELECT "+publicTestimonialColumns+" FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
     ).all();
-    return trpcResult(result.results.map(normalizeTestimonial));
+    return trpcResult(result.results.map(publicTestimonial));
   }
   if (name === "testimonials.getLocalized") {
     const languageValue = String(input.language ?? "pt");
     if (!isSupportedLanguage(languageValue))
       return trpcError("Idioma n\xE3o suportado.");
     const result = await env.DB.prepare(
-      "SELECT * FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
+      "SELECT "+publicTestimonialColumns+" FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
     ).all();
     return trpcResult(
-      await localizeTestimonials(result.results, languageValue, env)
+      (await localizeTestimonials(result.results, languageValue, env)).map(publicTestimonial)
     );
   }
   if (name === "testimonials.submitReview") {
