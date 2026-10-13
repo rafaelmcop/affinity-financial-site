@@ -22,14 +22,18 @@ export async function deletePortalUser(env,actor,input,compare,send=null){
  await env.DB.prepare('DELETE FROM userDeletionAttempts WHERE actor=?').bind(owner).run();
  const target=await env.DB.prepare('SELECT id,adminRole,accountType FROM adminAccounts WHERE lower(email)=? AND portalDeletedAt IS NULL').bind(email).first();
  const affiliate=await env.DB.prepare('SELECT id FROM affiliates WHERE lower(email)=? AND portalDeletedAt IS NULL').bind(email).first();
- if(!target&&!affiliate)throw Error('Usuário não encontrado.');
+ const assistantTable=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='portalAssistants'").first();
+ const assistant=assistantTable?await env.DB.prepare('SELECT id FROM portalAssistants WHERE lower(email)=? AND deletedAt IS NULL').bind(email).first():null;
+ if(!target&&!affiliate&&!assistant)throw Error('Usuário não encontrado.');
  if(target&&['admin','both'].includes(target.accountType)&&admin.adminRole!=='master')throw Error('Somente um administrador mestre pode excluir outro administrador.');
  // Keep the identity and financial references for audit; remove all portal access.
- await env.DB.batch([
+ const statements=[
   env.DB.prepare("UPDATE adminAccounts SET status='blocked',isActive=0,portalDeletedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
   env.DB.prepare("UPDATE affiliates SET status='blocked',isActive=0,portalDeletedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
   env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId) VALUES (?,'Excluiu acesso do usuário','user',?)").bind(owner,email)
- ]);
+ ];
+ if(assistant){statements.push(env.DB.prepare('UPDATE portalAssistants SET active=0,deletedAt=CURRENT_TIMESTAMP,sessionVersion=sessionVersion+1,updatedAt=CURRENT_TIMESTAMP WHERE id=?').bind(assistant.id));statements.push(env.DB.prepare('UPDATE assistantAgentAccess SET active=0 WHERE assistantId=?').bind(assistant.id));}
+ await env.DB.batch(statements);
  let notification='not_requested';
  if(input.notifyUser===true){
   try{if(!send)throw Error('Mail unavailable');await send(env,{to:email,subject:'Affinity · Acesso à plataforma encerrado',text:'Informamos que seu acesso à plataforma Affinity Financial foi encerrado pela administração. Para esclarecer dúvidas, entre em contato com a equipe da Affinity. Este aviso não altera os registros administrativos necessários.',html:'<p>Informamos que seu acesso à plataforma <strong>Affinity Financial</strong> foi encerrado pela administração.</p><p>Para esclarecer dúvidas, entre em contato com a equipe da Affinity.</p><p>Este aviso não altera os registros administrativos necessários.</p>'});notification='accepted';}catch{notification='failed';console.error('user_deletion_notice_failed');}

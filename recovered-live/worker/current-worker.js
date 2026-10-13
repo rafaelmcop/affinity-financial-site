@@ -1,4 +1,5 @@
 import {publicTestimonial,publicTestimonialColumns} from './public-testimonials.js';
+import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
 import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
@@ -54152,8 +54153,8 @@ __name2(getSession, "getSession");
 async function getAdminEmail(request, env) {
   const session = await getSession(request, env, ADMIN_COOKIE);
   if(session?.type!=="admin"||typeof session.email!=="string")return null;
-  const active=await env.DB.prepare("SELECT isActive,status FROM adminAccounts WHERE lower(email)=?").bind(session.email.toLowerCase()).first();
-  if(active&&(!Number(active.isActive)||active.status!=="approved"))return null;
+  const active=await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=?").bind(session.email.toLowerCase()).first();
+  if(active&&(active.portalDeletedAt||!Number(active.isActive)||active.status!=="approved"))return null;
   return active||session.email.toLowerCase()===String(env.ADMIN_EMAIL).toLowerCase()?session.email:null;
 }
 __name(getAdminEmail, "getAdminEmail");
@@ -54174,8 +54175,8 @@ __name2(getAdminAccess, "getAdminAccess");
 async function getAffiliateId(request, env) {
   const session = await getSession(request, env, AFFILIATE_COOKIE);
   if(session?.type!=="affiliate")return null;
-  const active=await env.DB.prepare("SELECT isActive,status FROM affiliates WHERE id=?").bind(Number(session.affiliateId)).first();
-  return active&&Number(active.isActive)&&active.status==='approved'?Number(session.affiliateId):null;
+  const active=await env.DB.prepare("SELECT * FROM affiliates WHERE id=?").bind(Number(session.affiliateId)).first();
+  return active&&!active.portalDeletedAt&&Number(active.isActive)&&active.status==='approved'?Number(session.affiliateId):null;
 }
 __name(getAffiliateId, "getAffiliateId");
 __name2(getAffiliateId, "getAffiliateId");
@@ -54855,11 +54856,11 @@ async function syncAllCalendlyConnections(env) {
 }
 __name(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 __name2(syncAllCalendlyConnections, "syncAllCalendlyConnections");
-async function runProcedure(name, input, request, env) {
+async function runProcedure(name, input, request, env, delegation=null) {
   await accessSchema(env);
   const feature=procedureFeature(name);
   if(feature){let email;if(name.startsWith('affiliate.')){const id=await getAffiliateId(request,env);email=id?(await env.DB.prepare('SELECT email FROM affiliates WHERE id=?').bind(id).first())?.email:null;}else email=await getAdminEmail(request,env);
-   const access=email?await getAdminAccess(email,env):null,adminCRM=name.startsWith('crm.')&&(access?.isMaster||(access?.account?.isActive&&access.account.status==='approved'&&['admin','both'].includes(access.account.accountType)));
+   const access=email?await getAdminAccess(email,env):null,adminCRM=!delegation&&name.startsWith('crm.')&&(access?.isMaster||(access?.account?.isActive&&access.account.status==='approved'&&['admin','both'].includes(access.account.accountType)));
    if(email&&!adminCRM&&!await hasFeature(env,email,feature))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
   }
 
@@ -54895,7 +54896,7 @@ async function runProcedure(name, input, request, env) {
     const account = await env.DB.prepare(
       "SELECT * FROM adminAccounts WHERE lower(email)=?"
     ).bind(email).first();
-    const accountMatches = account && String(account.status || "approved") === "approved" && Number(account.isActive) === 1 ? await bcryptjs_default.compare(password, String(account.passwordHash)) : false;
+    const accountMatches = account && !account.portalDeletedAt && String(account.status || "approved") === "approved" && Number(account.isActive) === 1 ? await bcryptjs_default.compare(password, String(account.passwordHash)) : false;
     const passwordHash = new Uint8Array(
       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(password))
     );
@@ -54976,7 +54977,7 @@ async function runProcedure(name, input, request, env) {
         "FORBIDDEN",
         403
       );
-    if (status === "blocked" || Number(account.isActive) !== 1)
+    if (account.portalDeletedAt || status === "blocked" || Number(account.isActive) !== 1)
       return trpcError(
         "Sua conta est\xE1 bloqueada. Entre em contato com a Affinity.",
         "FORBIDDEN",
@@ -55122,7 +55123,7 @@ async function runProcedure(name, input, request, env) {
     }
     if (!row || !matches)
       return trpcError("Email ou senha inv\xE1lidos", "UNAUTHORIZED", 401);
-    if (!Number(row.isActive))
+    if (row.portalDeletedAt || !Number(row.isActive))
       return trpcError("Conta de afiliado bloqueada", "FORBIDDEN", 403);
     if (row.status !== "approved")
       return trpcError("Sua conta ainda n\xE3o foi aprovada", "FORBIDDEN", 403);
@@ -55432,7 +55433,8 @@ Detalhes: ${details}` : ""}`;
   const adminEmail = await getAdminEmail(request, env);
   if (!adminEmail)
     return trpcError("Acesso administrativo necess\xE1rio", "UNAUTHORIZED", 401);
-  const adminAccess = await getAdminAccess(adminEmail, env);
+  const rawAdminAccess = await getAdminAccess(adminEmail, env);
+  const adminAccess = delegation?delegatedAccess(rawAdminAccess):rawAdminAccess;
   const accountType = String(adminAccess.account?.accountType || "admin");
   if(!globalTestimonialsAllowed(name,accountType))return trpcError("Acesso restrito ao administrador", "FORBIDDEN",403);
   const adminMailboxProcedures = /* @__PURE__ */ new Set([
@@ -55465,6 +55467,9 @@ Detalhes: ${details}` : ""}`;
     }
   }
   const auditedActions = {
+    "agent.saveApplication": "Criou ou alterou uma aplicação",
+    "agent.submitApplication": "Concluiu uma aplicação",
+    "agent.uploadApplicationDocument": "Anexou um documento à aplicação",
     "agent.saveClient": "Criou ou alterou um cliente",
     "agent.requestClientDeletion": "Solicitou a exclus\xE3o de um cliente",
     "agent.requestApplicationDeletion": "Solicitou a exclus\xE3o de uma aplica\xE7\xE3o",
@@ -55497,7 +55502,7 @@ Detalhes: ${details}` : ""}`;
   const auditedAction = auditedActions[name];
   if (auditedAction) {
     const targetId = String(input.clientId ?? input.affiliateId ?? input.id ?? input.email ?? input.agentEmail ?? "").trim() || null;
-    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)").bind(adminEmail.toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
+    await env.DB.prepare("INSERT INTO portalAuditLogs (actorEmail,action,entityType,targetId) VALUES (?,?,?,?)").bind(String(delegation?.actorEmail||adminEmail).toLowerCase(), auditedAction, name.split(".")[0], targetId).run();
   }
   if (["careers.access", "careers.list", "careers.updateStatus"].includes(name)) {
     await env.DB.prepare(`CREATE TABLE IF NOT EXISTS careerApplications (
@@ -59988,6 +59993,8 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(/(?:^|\/)(?:\.git|\.env(?:\.[^/]*)?|\.dev\.vars|private)(?:\/|$)/i.test(url.pathname))return new Response('Não encontrado',{status:404,headers:{'cache-control':'no-store'}});
  if(!/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname))await accessSchema(env);
  const featureAuth={email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId};
+ const assistantResponse=await assistantsRoute(request,env,{...featureAuth,session:getSession,createSession,validEmail,hash:password=>bcryptjs_default.hash(password,12),compare:(password,hash)=>bcryptjs_default.compare(password,hash),runProcedure,features:owner=>userAccess(env,owner),appearance:owner=>agentAppearance(env,'agent:'+owner),calendarLinked:async owner=>{await ensureCalendlyTables(env);return !!await env.DB.prepare("SELECT 1 FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND trim(coalesce(encryptedToken,''))<>''").bind(owner).first();},page:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx),resource:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx)});
+ if(assistantResponse&&!(assistantResponse.headers.get('content-type')?.includes('text/html')&&['/agentes/assistentes','/admin/assistentes'].includes(url.pathname))){const secured=secureResponse(assistantResponse,{privateData:true});if(assistantResponse.headers.get('x-affinity-assistant-view')==='1'){secured.headers.set('X-Frame-Options','SAMEORIGIN');secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace("frame-ancestors 'none'","frame-ancestors 'self'"));if(secured.headers.has('Content-Security-Policy-Report-Only'))secured.headers.set('Content-Security-Policy-Report-Only',secured.headers.get('Content-Security-Policy-Report-Only').replace("frame-ancestors 'none'","frame-ancestors 'self'"));secured.headers.delete('x-affinity-assistant-view');}if(url.pathname==='/assistentes/dashboard')secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace('frame-src ',"frame-src 'self' "));return secured;}
  const agendaResponse=await addressBookRoute(request,env,featureAuth);if(agendaResponse)return agendaResponse;
  const accessResponse=await accessRoute(request,env,featureAuth);if(accessResponse)return accessResponse;
  if(request.method==='GET'&&url.pathname==='/agentes/tarefas')return Response.redirect(new URL('/agentes/novo-cliente',url),302);
@@ -59998,17 +60005,17 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
  if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
- let response;try{response=await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
+ let response;try{response=assistantResponse?secureResponse(assistantResponse,{privateData:true}):await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
  if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/admin-unified-menu.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/admin-unified-menu.js?v=4" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261012-client-entry-9" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261012-client-entry-9');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
  }
  return response;
 };
