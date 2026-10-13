@@ -9,7 +9,7 @@ import {syncLogSchema,recordSyncLog,notifyImportantLog,resolveImportantLog} from
 import {findPaymentClient,compactClientName,rawPaymentPolicies} from './payment-client-match.js';
 import {recordPortalInteraction,interactionSchema} from './portal-interactions.js';
 import {birthdayAlerts} from './birthday-alerts.js';
-import {deletePortalUser} from './user-deletion.js';
+import {deletePortalUser,ensureUserDeletionSchema} from './user-deletion.js';
 import {auditSchema,syncAllWhatsappAudit,syncWhatsappAudit,matchedClient} from './whatsapp-audit.js';
 import {personalEmailPredicate,personalActivityPredicate,clientAutomations} from './client-communication.js';
 import {welcomeTemplate,saveWelcomeTemplate} from './welcome-template.js';
@@ -57880,7 +57880,8 @@ Affinity Financial Consulting`,
     "admin.getAllAffiliates",
     "admin.getPendingAffiliates"
   ].includes(name)) {
-    const where = name === "admin.getPendingAffiliates" ? " WHERE status='pending'" : " WHERE status<>'deleted'";
+    await ensureUserDeletionSchema(env);
+    const where = name === "admin.getPendingAffiliates" ? " WHERE status='pending' AND portalDeletedAt IS NULL" : " WHERE portalDeletedAt IS NULL";
     const rows = await env.DB.prepare(
       `SELECT * FROM affiliates${where} ORDER BY createdAt DESC`
     ).all();
@@ -58108,8 +58109,9 @@ Affinity Financial Consulting`,
     try{return trpcResult(await deletePortalUser(env,adminEmail,input,(p,h)=>bcryptjs_default.compare(p,h)));}catch(e){return trpcError(e.message);}
   }
   if (name === "admin.listAdmins") {
+    await ensureUserDeletionSchema(env);
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive,createdAt FROM adminAccounts WHERE status<>'deleted' ORDER BY createdAt DESC"
+      "SELECT id,email,name,phone,contactEmail,whatsapp,accountType,adminRole,status,isActive,createdAt FROM adminAccounts WHERE portalDeletedAt IS NULL ORDER BY createdAt DESC"
     ).all();
     return trpcResult({
       admins: rows.results.map((row) => ({

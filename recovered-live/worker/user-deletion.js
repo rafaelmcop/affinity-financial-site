@@ -1,4 +1,11 @@
+const ready=new WeakSet();
+export async function ensureUserDeletionSchema(env){
+ if(ready.has(env.DB))return;
+ for(const table of ['adminAccounts','affiliates']){const found=await env.DB.prepare("SELECT name FROM pragma_table_info(?) WHERE name='portalDeletedAt'").bind(table).first();if(!found)try{await env.DB.prepare('ALTER TABLE '+table+' ADD COLUMN portalDeletedAt TEXT').run();}catch(e){if(!/duplicate column/i.test(String(e.message)))throw e;}}
+ ready.add(env.DB);
+}
 export async function deletePortalUser(env,actor,input,compare){
+ await ensureUserDeletionSchema(env);
  const owner=String(actor).toLowerCase(),email=String(input.email||'').trim().toLowerCase();
  if(input.confirmed!==true||!email||!input.password)throw Error('Marque a confirmação e informe sua senha de administrador.');
  if(email===owner||email===String(env.ADMIN_EMAIL||'').toLowerCase())throw Error('Não é possível excluir sua própria conta ou o administrador principal.');
@@ -16,8 +23,8 @@ export async function deletePortalUser(env,actor,input,compare){
  if(target&&['admin','both'].includes(target.accountType)&&admin.adminRole!=='master')throw Error('Somente um administrador mestre pode excluir outro administrador.');
  // Keep the identity and financial references for audit; remove all portal access.
  await env.DB.batch([
-  env.DB.prepare("UPDATE adminAccounts SET status='deleted',isActive=0,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
-  env.DB.prepare("UPDATE affiliates SET status='deleted',isActive=0,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
+  env.DB.prepare("UPDATE adminAccounts SET status='blocked',isActive=0,portalDeletedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
+  env.DB.prepare("UPDATE affiliates SET status='blocked',isActive=0,portalDeletedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
   env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId) VALUES (?,'Excluiu acesso do usuário','user',?)").bind(owner,email)
  ]);
  return {success:true};
