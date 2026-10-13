@@ -1,0 +1,2 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {applicationDay} from './public/application-date.js';
+test('application start date uses New York day across UTC midnight and daylight saving, including database timestamps',()=>{assert.equal(applicationDay('2026-10-13T02:00:00Z'),'2026-10-12');assert.equal(applicationDay('2026-01-02 04:30:00'),'2026-01-01');assert.equal(applicationDay('2026-10-12 16:00:00'),'2026-10-12');assert.equal(applicationDay('invalid'),'');});

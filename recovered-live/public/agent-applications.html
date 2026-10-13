@@ -311,7 +311,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
             <input type="hidden" id="id" />
             <section class="section" data-step="Cliente">
               <div class="form-grid">
-                <label>Data do atendimento inicial<input id="serviceDate" type="date" /></label><label>Nome completo *<input id="clientName" required /></label
+                <label>Data da aplicação<input id="applicationDate" type="date" readonly aria-readonly="true" /></label><label>Data do atendimento inicial<input id="serviceDate" type="date" /></label><label>Nome completo *<input id="clientName" required /></label
                 ><label
                   >Data de nascimento<input id="birthDate" type="date" /></label
                 ><label>E-mail<input id="clientEmail" type="email" /></label
@@ -645,7 +645,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261012-separate-views-6"></script>
+    <script src="/agent-applications.js?v=20261012-application-date-7"></script>
     <script src="/address-autocomplete.js?v=20260825-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>

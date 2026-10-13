@@ -810,6 +810,7 @@
       $("id").value = row.id || "";
       inputs.forEach(e => (e.value = row[e.id] ?? (e.id === "ssn" ? "0" : "")));
       $("application-client-details").textContent = row.clientName || "Cliente: informe o nome abaixo";
+      $("applicationDate").value=row.applicationDate||new Intl.DateTimeFormat("en-CA",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
       applyFieldFormats();
       beneficiaries = Array.isArray(row.beneficiaries)
         ? row.beneficiaries
@@ -913,6 +914,7 @@
       ]) +
       section("2. Dados pessoais", [
         ["Nome", row.clientName],
+        ["Data da aplicação", usDate(row.applicationDate)],
         ["Data do atendimento inicial", usDate(row.serviceDate)],
         ["Nascimento", usDate(row.birthDate)],
         ["Sexo", row.gender],
@@ -1125,7 +1127,8 @@
     sectionBlock("3. Informações do cliente", [
       ["Nome completo", row.clientName],
       ["Data de nascimento", usDate(row.birthDate)],
-      ["Data do atendimento inicial", usDate(row.serviceDate)],
+      ["Data da aplicação", usDate(row.applicationDate)],
+        ["Data do atendimento inicial", usDate(row.serviceDate)],
       ["Idade", ageFromBirthDate(row.birthDate)],
       ["Sexo", row.gender],
       ["Estado civil", row.maritalStatus],
@@ -1482,7 +1485,8 @@
       const result = await api("agent.saveApplication", snapshot, true);
       if (!Number(result?.id)) throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
       $("id").value = result.id;
-      unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id }) !== JSON.stringify(snapshot);
+      if(result.applicationDate) $("applicationDate").value=result.applicationDate;
+      unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id }) !== JSON.stringify({...snapshot,applicationDate:result.applicationDate||snapshot.applicationDate});
       if (!silent) {
         notice("Rascunho salvo com segurança.");
       }

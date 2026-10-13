@@ -1,3 +1,4 @@
+import {applicationDay} from '../public/application-date.js';
 import {sendMeetingMessage} from './meeting-message-send.js';
 import {syncExcludedWorkGroups} from './excluded-work-groups.js';
 import {sendPaymentCase} from './payment-case-send.js';
@@ -55788,7 +55789,7 @@ Detalhes: ${details}` : ""}`;
         }
         delete row.sensitiveData;
         delete row.applicationData;
-        return { ...row, ...extra, id: Number(row.id) };
+        return { ...row, ...extra, applicationDate:applicationDay(row.createdAt), id: Number(row.id) };
       }));
     }
     if (name === "agent.getApplication") {
@@ -55822,7 +55823,7 @@ Detalhes: ${details}` : ""}`;
       }
       delete row.applicationData;
       delete row.sensitiveData;
-      await leadSchema(env);return trpcResult({ ...row, ...extra, ...sensitive, agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
+      await leadSchema(env);return trpcResult({ ...row, ...extra, ...sensitive, applicationDate:applicationDay(row.createdAt), agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
     }
     if (name === "agent.saveApplication") {
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
@@ -55833,19 +55834,22 @@ Detalhes: ${details}` : ""}`;
       const extra = {}, sensitive = {};
       const supplied = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : input;
       for (const [key2, value] of Object.entries(supplied)) {
-        if (["id", "clientName", "clientEmail", "clientPhone"].includes(key2)) continue;
+        if (["id", "clientName", "clientEmail", "clientPhone", "applicationDate"].includes(key2)) continue;
         (sensitiveKeys.has(key2) ? sensitive : extra)[key2] = value;
       }
+      const started=id?await env.DB.prepare("SELECT createdAt FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first():null;
+      if(id&&!started)return trpcError("Aplicação não encontrada","NOT_FOUND",404);
+      extra.applicationDate=applicationDay(started?.createdAt||new Date());
       const encryptedSensitive = Object.keys(sensitive).length ? await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET) : null;
       const values = [clientName, clientEmail || null, String(input.clientPhone || "").trim() || null, String(input.birthDate || "").trim() || null, String(input.address || "").trim() || null, String(input.city || "").trim() || null, String(input.state || "").trim() || null, String(input.zipCode || "").trim() || null, String(input.maritalStatus || "").trim() || null, String(input.occupation || "").trim() || null, Number(input.annualIncome || 0), String(input.beneficiaryName || "").trim() || null, String(input.beneficiaryRelationship || "").trim() || null, Number(input.beneficiaryPercentage || 100), String(input.productInterest || "").trim() || null, Number(input.coverageRequested || 0), Number(input.premiumBudget || 0), String(input.applicationReason || "").trim() || null, String(input.notes || "").trim() || null, JSON.stringify(extra), encryptedSensitive];
       if (id) {
         const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),status=CASE WHEN status='submitted' THEN 'draft' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?`).bind(...values,id,owner).run();
         if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
-        return trpcResult({ success: true, id });
+        return trpcResult({ success: true, id,applicationDate:extra.applicationDate });
       }
       const accessCode = Array.from(crypto.getRandomValues(new Uint8Array(4)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,8).toUpperCase();
       const inserted = await env.DB.prepare(`INSERT INTO agentApplications (agentEmail,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,maritalStatus,occupation,annualIncome,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget,applicationReason,notes,applicationData,sensitiveData,accessCode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(owner,...values,accessCode).run();
-      return trpcResult({ success: true, id: Number(inserted.meta.last_row_id), accessCode });
+      return trpcResult({ success: true, id: Number(inserted.meta.last_row_id), accessCode,applicationDate:extra.applicationDate });
     }
     if (name === "agent.submitApplication") {
       const id = Number(input.id || 0);
@@ -56601,8 +56605,9 @@ Detalhes: ${details}` : ""}`;
         "Use uma data de anivers\xE1rio v\xE1lida no formato MM/DD/AAAA"
       );
     const storedBirthDate = birthday?.iso || null;
-    const ownerPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+    const ownerPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber,beneficiaries,issuedAt FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     const existingPolicy = (ownerPolicies.results || []).find((row) => paymentPolicyNumbersMatch(row.policyNumber, policyNumber)) || null;
+    if(input.entryMode==="manual")input={...input,issuedAt:existingPolicy?String(existingPolicy.issuedAt||""):applicationDay()};
     const extractedBeneficiaries = primaryBeneficiaryName(input.beneficiaries);
     const selectedClientId = Math.max(0, Number(input.clientId || 0));
     let client = selectedClientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(selectedClientId, owner).first() : existingPolicy?.clientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(existingPolicy.clientId), owner).first() : clientEmail ? await env.DB.prepare(
