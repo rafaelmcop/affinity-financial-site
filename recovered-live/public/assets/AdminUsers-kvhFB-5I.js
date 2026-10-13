@@ -1,4 +1,4 @@
-import {openUserDeletion} from '/user-delete-admin.js?v=2';
+import {openUserDeletion} from '/user-delete-admin.js?v=3';
 import {openUserAccess} from '/user-access-admin.js?v=3';
 import{c as J,t as p,r as N,j as e,B as l,C as k,b as r}from"./index-BIU-6RMI.js?v=20261009-setup-1";import{I as m}from"./input-maK0rC7f.js";import{A as ie,U as ne}from"./AdminSidebar-CB3x3HMt.js";import{M as $}from"./LanguageSelector-DkTXTche.js";import{X as K}from"./x-BKidgWlG.js";import{S as oe}from"./FloatingInternalChat-C-mZ1jql.js?v=20260903-2";import{P as X}from"./pen-BtFcHMZL.js";import{S as le}from"./shield-check-CQZEKJwS.js";import"./menu-pEVK7Y0F.js";import"./mail-DTOVvRc8.js";import"./external-link-CEjUwZyT.js";import"./send-u-E2Isyn.js";/**
  * @license lucide-react v0.453.0 - ISC
