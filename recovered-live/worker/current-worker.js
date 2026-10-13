@@ -58104,6 +58104,13 @@ Affinity Financial Consulting`,
     ).bind(status, amount, String(input.notes ?? "").trim() || null, id).run();
     return trpcResult({ success: true });
   }
+  if(name==='admin.sendSecurityReport'){
+    const to=String(input.to||'').trim().toLowerCase(),body=String(input.body||'').trim();
+    if(!validEmail(to)||body.length<100||body.length>50000)return trpcError('Revise o destinatário e o relatório.');
+    await sendEmail(env,{to,subject:'Affinity · Relatório de auditoria de segurança · 12/10/2026',text:body,html:'<pre style="white-space:pre-wrap;font:15px Arial;line-height:1.5">'+escapeAutomationHtml(body)+'</pre>',attachments:[{filename:'auditoria-seguranca-affinity-2026-10-12.md',content:body,contentType:'text/markdown; charset=utf-8'}]});
+    await env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId) VALUES (?,'Enviou relatório de segurança','security-report',?)").bind(adminEmail.toLowerCase(),to).run();
+    return trpcResult({success:true,status:'accepted'});
+  }
   if (name === "admin.deletePortalUser") {
     if(request.method!=="POST")return trpcError("Método inválido");
     try{return trpcResult(await deletePortalUser(env,adminEmail,input,(p,h)=>bcryptjs_default.compare(p,h)));}catch(e){return trpcError(e.message);}
@@ -59262,6 +59269,7 @@ var cloudflare_staging_default = {
         }
       }
     }
+    if(url.pathname==='/admin/relatorio-seguranca'){url.pathname='/admin-security-report.html';return secureResponse(await env.ASSETS.fetch(new Request(url.toString(),request)),{privateData:true});}
     if (url.pathname === "/agentes/email") {
       url.pathname = "/agent-email.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
