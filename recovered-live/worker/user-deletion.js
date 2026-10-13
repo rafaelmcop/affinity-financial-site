@@ -13,10 +13,13 @@ export async function deletePortalUser(env,actor,input,compare){
  if(!admin||!Number(admin.isActive)||!['admin','both'].includes(admin.accountType))throw Error('Acesso administrativo necessário.');
  await env.DB.prepare("CREATE TABLE IF NOT EXISTS userDeletionAttempts(actor TEXT PRIMARY KEY,attempts INTEGER NOT NULL,windowStart INTEGER NOT NULL)").run();
  const now=Date.now();
- await env.DB.prepare("INSERT INTO userDeletionAttempts(actor,attempts,windowStart) VALUES (?,1,?) ON CONFLICT(actor) DO UPDATE SET attempts=CASE WHEN windowStart<? THEN 1 ELSE attempts+1 END,windowStart=CASE WHEN windowStart<? THEN excluded.windowStart ELSE windowStart END").bind(owner,now,now-900000,now-900000).run();
- const attempts=await env.DB.prepare('SELECT attempts FROM userDeletionAttempts WHERE actor=?').bind(owner).first();
- if(Number(attempts.attempts)>5)throw Error('Muitas tentativas. Aguarde 15 minutos antes de tentar novamente.');
- if(!await compare(String(input.password),String(admin.passwordHash)))throw Error('Senha do administrador incorreta.');
+ const attempts=await env.DB.prepare('SELECT attempts,windowStart FROM userDeletionAttempts WHERE actor=?').bind(owner).first();
+ if(Number(attempts?.attempts)>=5&&Number(attempts?.windowStart)>now-900000)throw Error('Muitas senhas incorretas. Aguarde 15 minutos antes de tentar novamente.');
+ if(!await compare(String(input.password),String(admin.passwordHash))){
+  await env.DB.prepare("INSERT INTO userDeletionAttempts(actor,attempts,windowStart) VALUES (?,1,?) ON CONFLICT(actor) DO UPDATE SET attempts=CASE WHEN windowStart<? THEN 1 ELSE attempts+1 END,windowStart=CASE WHEN windowStart<? THEN excluded.windowStart ELSE windowStart END").bind(owner,now,now-900000,now-900000).run();
+  throw Error('Senha do administrador incorreta.');
+ }
+ await env.DB.prepare('DELETE FROM userDeletionAttempts WHERE actor=?').bind(owner).run();
  const target=await env.DB.prepare('SELECT id,adminRole,accountType FROM adminAccounts WHERE lower(email)=?').bind(email).first();
  const affiliate=await env.DB.prepare('SELECT id FROM affiliates WHERE lower(email)=?').bind(email).first();
  if(!target&&!affiliate)throw Error('Usuário não encontrado.');
