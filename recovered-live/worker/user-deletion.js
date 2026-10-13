@@ -4,7 +4,7 @@ export async function ensureUserDeletionSchema(env){
  for(const table of ['adminAccounts','affiliates']){const found=await env.DB.prepare("SELECT name FROM pragma_table_info(?) WHERE name='portalDeletedAt'").bind(table).first();if(!found)try{await env.DB.prepare('ALTER TABLE '+table+' ADD COLUMN portalDeletedAt TEXT').run();}catch(e){if(!/duplicate column/i.test(String(e.message)))throw e;}}
  ready.add(env.DB);
 }
-export async function deletePortalUser(env,actor,input,compare){
+export async function deletePortalUser(env,actor,input,compare,send=null){
  await ensureUserDeletionSchema(env);
  const owner=String(actor).toLowerCase(),email=String(input.email||'').trim().toLowerCase();
  if(input.confirmed!==true||!email||!input.password)throw Error('Marque a confirmação e informe sua senha de administrador.');
@@ -20,8 +20,8 @@ export async function deletePortalUser(env,actor,input,compare){
   throw Error('Senha do administrador incorreta.');
  }
  await env.DB.prepare('DELETE FROM userDeletionAttempts WHERE actor=?').bind(owner).run();
- const target=await env.DB.prepare('SELECT id,adminRole,accountType FROM adminAccounts WHERE lower(email)=?').bind(email).first();
- const affiliate=await env.DB.prepare('SELECT id FROM affiliates WHERE lower(email)=?').bind(email).first();
+ const target=await env.DB.prepare('SELECT id,adminRole,accountType FROM adminAccounts WHERE lower(email)=? AND portalDeletedAt IS NULL').bind(email).first();
+ const affiliate=await env.DB.prepare('SELECT id FROM affiliates WHERE lower(email)=? AND portalDeletedAt IS NULL').bind(email).first();
  if(!target&&!affiliate)throw Error('Usuário não encontrado.');
  if(target&&['admin','both'].includes(target.accountType)&&admin.adminRole!=='master')throw Error('Somente um administrador mestre pode excluir outro administrador.');
  // Keep the identity and financial references for audit; remove all portal access.
@@ -30,5 +30,10 @@ export async function deletePortalUser(env,actor,input,compare){
   env.DB.prepare("UPDATE affiliates SET status='blocked',isActive=0,portalDeletedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(email),
   env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId) VALUES (?,'Excluiu acesso do usuário','user',?)").bind(owner,email)
  ]);
- return {success:true};
+ let notification='not_requested';
+ if(input.notifyUser===true){
+  try{if(!send)throw Error('Mail unavailable');await send(env,{to:email,subject:'Affinity · Acesso à plataforma encerrado',text:'Informamos que seu acesso à plataforma Affinity Financial foi encerrado pela administração. Para esclarecer dúvidas, entre em contato com a equipe da Affinity. Este aviso não altera os registros administrativos necessários.',html:'<p>Informamos que seu acesso à plataforma <strong>Affinity Financial</strong> foi encerrado pela administração.</p><p>Para esclarecer dúvidas, entre em contato com a equipe da Affinity.</p><p>Este aviso não altera os registros administrativos necessários.</p>'});notification='accepted';}catch{notification='failed';console.error('user_deletion_notice_failed');}
+  await env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId) VALUES (?,?, 'user',?)").bind(owner,notification==='accepted'?'Aviso de exclusão aceito pelo servidor de e-mail':'Falha no aviso de exclusão',email).run();
+ }
+ return {success:true,notification};
 }

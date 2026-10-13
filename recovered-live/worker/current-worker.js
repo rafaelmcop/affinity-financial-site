@@ -58113,7 +58113,7 @@ Affinity Financial Consulting`,
   }
   if (name === "admin.deletePortalUser") {
     if(request.method!=="POST")return trpcError("Método inválido");
-    try{return trpcResult(await deletePortalUser(env,adminEmail,input,(p,h)=>bcryptjs_default.compare(p,h)));}catch(e){return trpcError(e.message);}
+    try{return trpcResult(await deletePortalUser(env,adminEmail,input,(p,h)=>bcryptjs_default.compare(p,h),sendEmail));}catch(e){return trpcError(e.message);}
   }
   if (name === "admin.listAdmins") {
     await ensureUserDeletionSchema(env);
