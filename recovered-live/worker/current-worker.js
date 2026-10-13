@@ -1,3 +1,6 @@
+import {authenticationLimit} from './auth-rate-limit.js';
+import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
+import {requestOutcomes} from './request-outcomes.js';
 import {applicationDay} from '../public/application-date.js';
 import {sendMeetingMessage} from './meeting-message-send.js';
 import {syncExcludedWorkGroups} from './excluded-work-groups.js';
@@ -54127,15 +54130,16 @@ async function getSession(request, env, cookieName) {
   const cookie = request.headers.get("cookie") ?? "";
   const encoded = cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
   if (!encoded) return null;
+  if(encoded.length>8192||encoded.split(".").length!==2)return null;
   const [payload, signature] = encoded.split(".");
   if (!payload || !signature) return null;
-  const expected = await hmac(payload, env.JWT_SECRET);
-  if (!constantTimeEqual(expected, fromBase64Url(signature))) return null;
   try {
+    const expected = await hmac(payload, env.JWT_SECRET);
+    if (!constantTimeEqual(expected, fromBase64Url(signature))) return null;
     const parsed = JSON.parse(
       new TextDecoder().decode(fromBase64Url(payload))
     );
-    if (!Number(parsed.expiresAt) || Number(parsed.expiresAt) < Date.now())
+    if (!Number.isFinite(Number(parsed.expiresAt)) || Number(parsed.expiresAt) < Date.now())
       return null;
     return parsed;
   } catch {
@@ -54310,24 +54314,7 @@ async function parseInputs(request) {
     const encoded = new URL(request.url).searchParams.get("input");
     return encoded ? JSON.parse(encoded) : {};
   }
-  if (new URL(request.url).pathname.includes("agent.sendMailboxEmail")) {
-    const reader = request.body?.getReader();
-    if (!reader) return {};
-    let size = 0;
-    const parts = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.length;
-      if (size > 15 * 1024 * 1024) {
-        await reader.cancel();
-        throw Error("Os anexos devem somar no m\xE1ximo 10 MB.");
-      }
-      parts.push(value);
-    }
-    return JSON.parse(await new Blob(parts).text());
-  }
-  return await request.json();
+  return boundedJson(request,/\/(?:admin\.login|agent\.login|affiliate\.login|passwordReset\.requestReset)(?:,|$)/.test(new URL(request.url).pathname)?8192:16*1024*1024);
 }
 __name(parseInputs, "parseInputs");
 __name2(parseInputs, "parseInputs");
@@ -55356,7 +55343,7 @@ Detalhes: ${details}` : ""}`;
     const clientName = String(payload.clientName || "").trim(), clientEmail = String(payload.clientEmail || "").trim().toLowerCase();
     if (!clientName) return trpcError("Informe seu nome completo");
     if (!validEmail(clientEmail)) return trpcError("Informe um e-mail v\xE1lido");
-    const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName"]), extra = {}, sensitive = {};
+    const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "residentCardNumber", "visaNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName", "physicianAddress", "healthHistory"]), extra = {}, sensitive = {};
     try {
       Object.assign(extra, JSON.parse(String(row.applicationData || "{}")));
     } catch {
@@ -55446,6 +55433,7 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso administrativo necess\xE1rio", "UNAUTHORIZED", 401);
   const adminAccess = await getAdminAccess(adminEmail, env);
   const accountType = String(adminAccess.account?.accountType || "admin");
+  if(!globalTestimonialsAllowed(name,accountType))return trpcError("Acesso restrito ao administrador", "FORBIDDEN",403);
   const adminMailboxProcedures = /* @__PURE__ */ new Set([
     "agent.mailbox",
     "agent.mailboxMessage",
@@ -56092,7 +56080,7 @@ Detalhes: ${details}` : ""}`;
       return trpcError(`A leitura visual n\xE3o foi conclu\xEDda: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  if(name==="agent.logSyncStatus"){if(request.method!=="POST")return trpcError("Método inválido");try{const result=await recordSyncLog(env.DB,adminEmail.toLowerCase(),input);await notifyImportantLog(env,adminEmail.toLowerCase(),input,sendEmail);return trpcResult(result);}catch(e){return trpcError(e.message);}}
+  if(name==="agent.logSyncStatus"){if(request.method!=="POST")return trpcError("Método inválido");try{const telemetry={event:'contacts',state:['started','completed','error'].includes(input.state)?input.state:'started',count:input.count};const result=await recordSyncLog(env.DB,adminEmail.toLowerCase(),telemetry);return trpcResult(result);}catch(e){return trpcError(e.message);}}
   if(name==="admin.systemSyncLogs"){await syncLogSchema(env.DB);return trpcResult((await env.DB.prepare('SELECT * FROM systemSyncLogs ORDER BY id DESC LIMIT 200').all()).results||[]);}
   if(name==="agent.logPortalInteraction"){if(request.method!=="POST")return trpcError("Método inválido");try{return trpcResult(await recordPortalInteraction(env,adminEmail.toLowerCase(),input));}catch(e){return trpcError(e.message);}}
   if(name==="agent.birthdayAlerts"){try{const features=(await userAccess(env,adminEmail.toLowerCase())).features;if(!features.includes("policies")&&!features.includes("messages"))return trpcResult([]);return trpcResult(await birthdayAlerts(env,adminEmail.toLowerCase()));}catch(e){return trpcError(e.message);}}
@@ -59348,7 +59336,7 @@ var cloudflare_staging_default = {
       const cookies = [];
       for (let index = 0; index < names.length; index += 1) {
         const input = getInput(inputs[String(index)] ?? inputs);
-        const result = await runProcedure(names[index], input, request, env);
+        const result = await authenticationLimit(request,env,names[index],input)?trpcError('Muitas tentativas. Aguarde 15 minutos.','TOO_MANY_REQUESTS',429):await runProcedure(names[index], input, request, env);
         if (result && typeof result === "object" && "body" in result) {
           responses.push(result.body);
           if (Array.isArray(result.cookies)) cookies.push(...result.cookies);
@@ -59378,6 +59366,7 @@ var cloudflare_staging_default = {
           message: error instanceof Error ? error.message : String(error)
         })
       );
+      if([400,413].includes(error?.httpStatus))return secureResponse(jsonResponse([trpcError(error.message,error.httpStatus===413?'PAYLOAD_TOO_LARGE':'BAD_REQUEST',error.httpStatus)],error.httpStatus),{privateData:true});
       const quotaExceeded = /daily row (?:read|write) limit/i.test(String(error?.message || error));
       return secureResponse(
         jsonResponse(
@@ -59984,6 +59973,8 @@ cloudflare_staging_default.fetch = async (request, env, context) => {
 const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
+ const boundary=trpcBoundary(request);if(boundary)return boundary;
+ if(/(?:^|\/)(?:\.git|\.env(?:\.[^/]*)?|\.dev\.vars|private)(?:\/|$)/i.test(url.pathname))return new Response('Não encontrado',{status:404,headers:{'cache-control':'no-store'}});
  if(!/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname))await accessSchema(env);
  const featureAuth={email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId};
  const agendaResponse=await addressBookRoute(request,env,featureAuth);if(agendaResponse)return agendaResponse;
@@ -59997,8 +59988,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
  let response;try{response=await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
- if(response.status>=500)ctx.waitUntil((async()=>{try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,httpStatus:response.status,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,httpStatus:response.status,errorCode:'request_failed'},sendEmail);}catch{}})());
- if(response.ok&&url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{const resolved=await resolveImportantLog(env.DB,'server',{event:'service',path:url.pathname});if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{event:'service',state:'completed',path:url.pathname,httpStatus:response.status});}catch{}})());
+ if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);

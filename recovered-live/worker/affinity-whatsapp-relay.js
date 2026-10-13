@@ -13,8 +13,10 @@ export default {
       signal: request.signal,
     };
     if (!['GET', 'HEAD'].includes(request.method)) {
-      const body = await request.arrayBuffer();
-      if (body.byteLength > 11500000) return Response.json({error:'Mensagem ou arquivo muito grande.'},{status:413});
+      if(Number(request.headers.get('content-length'))>11500000)return Response.json({error:'Mensagem ou arquivo muito grande.'},{status:413});
+      const chunks=[];let size=0;const reader=request.body?.getReader();
+      if(reader)while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>11500000){await reader.cancel();return Response.json({error:'Mensagem ou arquivo muito grande.'},{status:413});}chunks.push(value);}
+      const body=new Uint8Array(size);let offset=0;for(const chunk of chunks){body.set(chunk,offset);offset+=chunk.byteLength;}
       headers.delete('content-length');
       init.body = body;
     }

@@ -13,7 +13,7 @@ if (!existing) {
     }
 
     const script = document.createElement("script");
-    script.src = "/vendor/xlsx.full.min.js?v=0.18.5";
+    script.src = "/vendor/xlsx.full.min.js?v=0.20.3";
     script.async = true;
     script.dataset.affinityXlsx = "true";
     script.addEventListener("load", resolve, { once: true });

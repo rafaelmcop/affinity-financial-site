@@ -1,4 +1,4 @@
-const safePath=value=>/^\/api\/[a-zA-Z0-9/._-]{1,160}$/.test(value||'')?value:'';
+const safePath=value=>/^\/api\/[a-zA-Z0-9/.,_-]{1,1024}$/.test(value||'')?value:'';
 const incidentKey=input=>safePath(input.path)||input.event;
 export async function syncLogSchema(db){
  await db.prepare('CREATE TABLE IF NOT EXISTS systemSyncLogs(id INTEGER PRIMARY KEY AUTOINCREMENT,owner TEXT NOT NULL,event TEXT NOT NULL,state TEXT NOT NULL,count INTEGER,path TEXT,httpStatus INTEGER,errorCode TEXT,createdAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
