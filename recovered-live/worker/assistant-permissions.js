@@ -1,5 +1,5 @@
 import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
-export const assistantCatalog=[...featureCatalog,['profile','Perfil e configurações','Conta']];
+export const assistantCatalog=[...featureCatalog.map(row=>row[0]==='calendar'?['calendar','Agenda e aniversários',row[2]]:row),['profile','Perfil e configurações','Conta']];
 const actions=['view','edit','delete'];
 export function normalizeAssistantPermissions(value){return Object.fromEntries(assistantCatalog.map(([key])=>{const selected=actions.filter(action=>Array.isArray(value?.[key])&&value[key].includes(action));return [key,selected.length?[...new Set(['view',...selected])]:[]];}));}
 export function delegatedAccess(access){return {...access,isMaster:false,role:'agent',account:{...access.account,accountType:'agent',adminRole:'agent'}};}
