@@ -37,3 +37,17 @@ if(typeof document!=='undefined'&&location.pathname==='/agentes/whatsapp'){
   app.onclick=()=>{let phone=String(document.querySelector('#number,#contactPhone')?.textContent||'').replace(/\D/g,'');if(phone.length===10)phone='1'+phone;if(!/^\d{10,15}$/.test(phone)){app.textContent='Selecione uma conversa individual';return;}void prepareWhatsApp({phone,text:area.value}).catch(()=>{});location.href='whatsapp://send?phone='+phone+'&text='+encodeURIComponent(area.value);};send.after(app);
  }
 }
+
+// Decorate action controls without changing framework-owned text or children.
+if(typeof document!=='undefined'){
+ const decorateMessageActions=()=>{for(const el of document.querySelectorAll('button,a[href]')){
+  if(el.closest('nav,.agent-unified-nav'))continue;
+  const label=(el.textContent||'').trim(),href=el.getAttribute('href')||'';
+  let channel=el.getAttribute('data-message-channel');
+  if(!channel&&(/^(whatsapp:|https:\/\/wa\.me\/)/i.test(href)||(/whatsapp|\bwpp\b/i.test(label)&&/enviar|abrir|preparar|ligar|confirmar/i.test(label))))channel='whatsapp';
+  if(!channel&&(/^mailto:/i.test(href)||(/e-?mail/i.test(label)&&/enviar|abrir|preparar|confirmar/i.test(label))))channel='email';
+  if(!channel&&location.pathname==='/agentes/email'&&el.matches('button[type="submit"]')&&/^enviar$/i.test(label))channel='email';
+  if(channel&&el.getAttribute('data-message-channel')!==channel)el.setAttribute('data-message-channel',channel);
+ }};
+ decorateMessageActions();new MutationObserver(decorateMessageActions).observe(document.body,{childList:true,subtree:true});
+}
