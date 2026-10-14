@@ -1,4 +1,4 @@
-const confirmPortalMessage=message=>import('/portal-interactions.js?v=3').then(module=>module.confirmPortalMessage(message));
+const confirmPortalMessage=message=>import('/portal-interactions.js?v=4').then(module=>module.confirmPortalMessage(message));
 (() => {
   const content = document.getElementById("content"),
     meetingId = Number(
