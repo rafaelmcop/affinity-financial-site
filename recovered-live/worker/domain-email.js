@@ -1,7 +1,7 @@
 import {boundedJson} from './security-boundary.js';
 const DOMAIN='team.affinityfc.org',ZONE='571fbc6e04919396d68b456b38ebead6',ACCOUNT='d00b4fce2ba60918d8859e92dd98cf9e';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
-export function domainAddress(value){const address=String(value||'').trim().toLowerCase();return /^[a-z0-9]+(?:[._+-][a-z0-9]+)*@(?:[a-z0-9]+(?:-[a-z0-9]+)*\.)?affinityfc\.org$/.test(address)&&address.length<=254?address:null;}
+export function domainAddress(value){const address=String(value||'').trim().toLowerCase();return /^[a-z0-9]+(?:[._+-][a-z0-9]+)*@(?:[a-z0-9]+(?:-[a-z0-9]+)*\.)?affinityfc\.org$/.test(address)&&address.length<=254&&address.split('@')[0].length<=64?address:null;}
 export async function domainEmailSchema(env){await env.DB.batch([
  env.DB.prepare('CREATE TABLE IF NOT EXISTS domainEmailIntegration(id INTEGER PRIMARY KEY CHECK(id=1),encryptedToken TEXT NOT NULL,updatedBy TEXT NOT NULL,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
  env.DB.prepare("CREATE TABLE IF NOT EXISTS domainEmailDirectory(address TEXT PRIMARY KEY,destination TEXT NOT NULL,provider TEXT NOT NULL CHECK(provider IN ('icloud','cloudflare','other')),status TEXT NOT NULL CHECK(status IN ('reported','planned')),notes TEXT NOT NULL DEFAULT '',updatedBy TEXT NOT NULL,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
@@ -56,7 +56,7 @@ export async function domainEmailRoute(request,env,auth){
   await call(token,'accounts/'+ACCOUNT+'/email/routing/addresses',{email:destination});await audit('verification',null,destination);return json({ok:true,verificationRequested:true});
  }
  if(action==='create'){
-  if(!address||address.split('@')[1]!==DOMAIN||!auth.validEmail(destination)||address===destination)return json({error:'Use an address at @team.affinityfc.org and a valid destination.'},400);
+  if(!address||address.length>90||address.split('@')[1]!==DOMAIN||!auth.validEmail(destination)||address===destination)return json({error:'Use an address at @team.affinityfc.org and a valid destination.'},400);
   const provider=await mailProvider(address.split('@')[1],auth.fetch||fetch);if(provider.provider!=='cloudflare')return json({error:'The team subdomain is not receiving through Cloudflare yet. Existing delivery was preserved. Complete subdomain setup before activating forwarding.'},409);
   const [rules,destinations]=await Promise.all([all(token,'zones/'+ZONE+'/email/routing/rules'),all(token,'accounts/'+ACCOUNT+'/email/routing/addresses')]);
   if(rules.some(r=>r.matchers?.some(m=>m.type==='literal'&&m.field==='to'&&String(m.value).toLowerCase()===address)))return json({error:'This address already has a rule. No existing rule was replaced.'},409);
