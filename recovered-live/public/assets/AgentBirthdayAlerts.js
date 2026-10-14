@@ -1,4 +1,4 @@
-import {openWhatsApp} from '/portal-interactions.js?v=4';
+import {openWhatsApp} from '/portal-interactions.js?v=5';
 import {r as React,j as jsx,t as trpc} from './index-BIU-6RMI.js?v=20261009-setup-1';
 export default function BirthdayAlerts(){
  const query=trpc.agent.birthdayAlerts.useQuery(undefined,{refetchOnWindowFocus:true,staleTime:60000}),[chosen,setChosen]=React.useState(null),[text,setText]=React.useState('');

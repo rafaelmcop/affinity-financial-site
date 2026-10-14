@@ -101,15 +101,15 @@
       document
         .getElementById("whatsapp-ready")
         ?.addEventListener("click", async () => {
-          try{const {openWhatsApp}=await import("/portal-interactions.js?v=4");await openWhatsApp({phone:whatsapp,text:message()});}catch(error){alert(error.message);}
+          try{const {openWhatsApp}=await import("/portal-interactions.js?v=5");await openWhatsApp({phone:whatsapp,text:message()});}catch(error){alert(error.message);}
         });
       document
         .getElementById("whatsapp-blank")
         ?.addEventListener("click", async () => {
-          try{const {openWhatsApp}=await import("/portal-interactions.js?v=4");await openWhatsApp({phone:whatsapp,text:""});}catch(error){alert(error.message);}
+          try{const {openWhatsApp}=await import("/portal-interactions.js?v=5");await openWhatsApp({phone:whatsapp,text:""});}catch(error){alert(error.message);}
         });
       document.getElementById("email-ready")?.addEventListener("click", async event => {
-        if(!await (await import('/portal-interactions.js?v=4')).confirmPortalMessage(`Enviar este e-mail para ${candidate.name} (${candidate.email})?`))return;
+        if(!await (await import('/portal-interactions.js?v=5')).confirmPortalMessage(`Enviar este e-mail para ${candidate.name} (${candidate.email})?`))return;
         const button=event.currentTarget;button.disabled=true;button.textContent="Enviando…";
         try{await api("agent.sendPaymentCaseEmail",{taskId,subject:subject(),body:message(),confirmed:true},true);alert("E-mail enviado e registrado na auditoria.");await load();}catch(error){alert(error.message);button.disabled=false;button.textContent="Enviar e-mail pelo portal";}
       });

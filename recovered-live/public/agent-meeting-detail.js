@@ -1,4 +1,4 @@
-const confirmPortalMessage=message=>import('/portal-interactions.js?v=4').then(module=>module.confirmPortalMessage(message));
+const confirmPortalMessage=message=>import('/portal-interactions.js?v=5').then(module=>module.confirmPortalMessage(message));
 (() => {
   const content = document.getElementById("content"),
     meetingId = Number(
@@ -125,7 +125,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=4').then(m
       const renderFiles=()=>{
         const list=document.getElementById('meeting-attachment-list');list.innerHTML='';
         selectedFiles.forEach((file,index)=>{const li=document.createElement('li');li.textContent=file.name+' · '+(file.size/1024).toFixed(0)+' KB ';const remove=document.createElement('button');remove.type='button';remove.textContent='Remover';remove.onclick=()=>{selectedFiles.splice(index,1);renderFiles();};li.append(remove);list.append(li);});
-        document.getElementById('send-whatsapp').textContent='Enviar WhatsApp pelo portal';
+        document.getElementById('send-whatsapp').textContent='WhatsApp do portal';
       };
       document.getElementById('meeting-attachments').onchange=event=>{
         const incoming=[...selectedFiles,...event.target.files];const seen=new Set(),files=incoming.filter(file=>{const key=JSON.stringify([file.name,file.size,file.lastModified]);if(seen.has(key))return false;seen.add(key);return true;});
@@ -179,7 +179,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=4').then(m
           alert(error.message || "Não foi possível criar o link de avaliação.");
         }
       });
-      const appButton=document.createElement('button');appButton.type='button';appButton.textContent='Abrir texto no aplicativo';appButton.title='Para enviar os documentos anexados, use o envio pelo portal.';whatsappButton?.after(appButton);appButton.onclick=()=>{location.href='whatsapp://send?phone='+whatsapp+'&text='+encodeURIComponent(area.value);};
+      const appButton=document.createElement('button');appButton.type='button';appButton.textContent='App do WhatsApp (somente texto)';appButton.title='Para enviar os documentos anexados, use o envio pelo portal.';whatsappButton?.after(appButton);appButton.onclick=()=>{location.href='whatsapp://send?phone='+whatsapp+'&text='+encodeURIComponent(area.value);};
       whatsappButton?.addEventListener('click',async()=>{const message=area.value.trim(),files=[...selectedFiles];if(!message)return alert('Escreva a mensagem antes de enviar.');if(!await confirmPortalMessage('Enviar a mensagem'+(files.length?' e '+files.length+' anexo(s)':'')+' pelo WhatsApp para '+(meeting.inviteeName||phone)+'?'))return;whatsappButton.disabled=true;try{await api('agent.sendMeetingWhatsapp',{meetingId,message,template:selectedTemplate,attachments:await encodeFiles(files),confirmed:true,requestId:requestIdFor('whatsapp',message,files)},'POST');alert('Envio confirmado pelo WhatsApp do agente.');}catch(error){alert(error.message);}finally{whatsappButton.disabled=false;renderFiles();}});
 
     } catch (error) {
