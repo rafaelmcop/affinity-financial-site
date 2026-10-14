@@ -55627,7 +55627,7 @@ Detalhes: ${details}` : ""}`;
     if (!result.meta.changes) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
     return trpcResult({ success: true });
   }
-  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument", "agent.sendApplicationEmail"].includes(name)) {
+  if (["agent.listApplications", "agent.getApplication", "agent.saveApplication", "agent.submitApplication", "agent.requestApplicationDeletion", "agent.uploadApplicationDocument", "agent.getApplicationDocument", "agent.sendApplicationEmail", "agent.sendApplicationWhatsApp"].includes(name)) {
     const owner = adminEmail.toLowerCase();
     // Saving a draft uses the existing schema; never run migrations on each step.
     if (!["agent.listApplications", "agent.getApplication", "agent.getApplicationDocument", "agent.saveApplication"].includes(name)) {
@@ -55690,6 +55690,16 @@ Detalhes: ${details}` : ""}`;
         } catch {
         }
       }
+    }
+    if(name==='agent.sendApplicationWhatsApp'){
+      if(!await hasFeature(env,owner,'whatsapp'))return trpcError('O envio de WhatsApp aguarda liberação pelo Admin.','FORBIDDEN',403);
+      if(input.confirmed!==true)return trpcError('Confirme o envio do WhatsApp.');
+      const application=await env.DB.prepare('SELECT id,clientPhone FROM agentApplications WHERE id=? AND lower(agentEmail)=? LIMIT 1').bind(Number(input.applicationId||0),owner).first();
+      if(!application)return trpcError('Aplicação não encontrada.','NOT_FOUND',404);
+      const message=String(input.message||'').trim();if(!message||message.length>4000)return trpcError('Use uma mensagem de até 4.000 caracteres.');
+      try{const receipt=await sendMeetingMessage(env,owner,{id:-Number(application.id),inviteePhone:application.clientPhone},{confirmed:true,requestId:input.requestId,channel:'whatsapp',message},[]);
+      try{const clients=(await env.DB.prepare('SELECT id,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[];await syncWhatsappAudit(env,owner,matchedClient(clients,String(application.clientPhone||'')));}catch{console.error('whatsapp_send_audit_pending');}
+      return trpcResult({success:true,alreadySent:receipt.alreadySent});}catch(error){return trpcError(error.message,'BAD_REQUEST',error.status||400);}
     }
     if (name === "agent.sendApplicationEmail") {
       const applicationId = Number(input.applicationId || 0);
@@ -60031,7 +60041,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script src="/five-rings-background.js?v=2" defer></script><script src="/five-rings-settings-link.js?v=1" defer></script><script type="module" src="/portal-interactions.js?v=1"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/agent-theme.js?v=2"></script><script src="/five-rings-background.js?v=2" defer></script><script src="/five-rings-settings-link.js?v=1" defer></script><script type="module" src="/portal-interactions.js?v=3"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
  }
  return response;
 };

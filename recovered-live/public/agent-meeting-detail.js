@@ -1,3 +1,4 @@
+const confirmPortalMessage=message=>import('/portal-interactions.js?v=3').then(module=>module.confirmPortalMessage(message));
 (() => {
   const content = document.getElementById("content"),
     meetingId = Number(
@@ -124,7 +125,7 @@
       const renderFiles=()=>{
         const list=document.getElementById('meeting-attachment-list');list.innerHTML='';
         selectedFiles.forEach((file,index)=>{const li=document.createElement('li');li.textContent=file.name+' · '+(file.size/1024).toFixed(0)+' KB ';const remove=document.createElement('button');remove.type='button';remove.textContent='Remover';remove.onclick=()=>{selectedFiles.splice(index,1);renderFiles();};li.append(remove);list.append(li);});
-        document.getElementById('send-whatsapp').textContent=selectedFiles.length?'Enviar pelo WhatsApp':'Abrir direto no WhatsApp';
+        document.getElementById('send-whatsapp').textContent='Enviar WhatsApp pelo portal';
       };
       document.getElementById('meeting-attachments').onchange=event=>{
         const incoming=[...selectedFiles,...event.target.files];const seen=new Set(),files=incoming.filter(file=>{const key=JSON.stringify([file.name,file.size,file.lastModified]);if(seen.has(key))return false;seen.add(key);return true;});
@@ -140,7 +141,7 @@
           const message = area.value.trim();
           if (!message) return alert("Escreva a mensagem antes de enviar.");
           const files=[...selectedFiles];
-          if (!confirm(`Enviar esta mensagem${files.length?" e "+files.length+" anexo(s)":""} para ${meeting.inviteeName || "cliente"} (${email}) pelo seu e-mail configurado?`)) return;
+          if (!await confirmPortalMessage(`Enviar esta mensagem${files.length?" e "+files.length+" anexo(s)":""} para ${meeting.inviteeName || "cliente"} (${email}) pelo seu e-mail configurado?`)) return;
           emailButton.disabled = true;
           emailButton.textContent = "Enviando…";
           const subjects = { "Primeira chamada": "Lembrete da nossa reunião", "Segunda chamada": "Vamos continuar nosso atendimento?", "Não compareceu": "Sentimos sua falta na reunião", "Avaliação": "Como foi seu atendimento?", "Pedido de indicação": "Conhece alguém que podemos ajudar?", "Propostas de cobertura":"Propostas de cobertura que analisamos" };
@@ -178,24 +179,9 @@
           alert(error.message || "Não foi possível criar o link de avaliação.");
         }
       });
-      document.getElementById("send-whatsapp")?.addEventListener("click", async () => {
-        if(selectedFiles.length){
-          const message=area.value.trim(),files=[...selectedFiles];
-          if(!message)return alert('Escreva a mensagem para acompanhar os documentos.');
-          if(message.length>4000||files.some(file=>file.size>7*1024*1024))return alert('Para WhatsApp use até 4.000 caracteres e até 7 MB por arquivo.');
-          if(!confirm(`Enviar esta mensagem e ${files.length} anexo(s) pelo WhatsApp para ${meeting.inviteeName||'cliente'} (${phone})?`))return;
-          whatsappButton.disabled=true;whatsappButton.textContent='Enviando…';
-          try{await api('agent.sendMeetingWhatsapp',{meetingId,message,template:selectedTemplate,attachments:await encodeFiles(files),confirmed:true,requestId:requestIdFor('whatsapp',message,files)},'POST');alert('Mensagem e documentos enviados pelo WhatsApp e registrados no histórico.');}catch(error){alert(error.message||'Não foi possível confirmar o envio. Confira no aplicativo antes de tentar novamente.');}finally{whatsappButton.disabled=false;renderFiles();}return;
-        }
-        if (!area.value.trim()) {
-          location.href = `whatsapp://send?phone=${whatsapp}`;
-          return;
-        }
-        try {
-          await api("agent.logMeetingMessage", { meetingId, template: selectedTemplate, channel: "whatsapp", message: area.value }, "POST");
-        } catch {}
-        location.href = `whatsapp://send?phone=${whatsapp}&text=${encodeURIComponent(area.value)}`;
-      });
+      const appButton=document.createElement('button');appButton.type='button';appButton.textContent='Abrir no aplicativo';whatsappButton?.after(appButton);appButton.onclick=()=>{location.href='whatsapp://send?phone='+whatsapp+'&text='+encodeURIComponent(area.value);};
+      whatsappButton?.addEventListener('click',async()=>{const message=area.value.trim(),files=[...selectedFiles];if(!message)return alert('Escreva a mensagem antes de enviar.');if(!await confirmPortalMessage('Enviar a mensagem'+(files.length?' e '+files.length+' anexo(s)':'')+' pelo WhatsApp para '+(meeting.inviteeName||phone)+'?'))return;whatsappButton.disabled=true;try{await api('agent.sendMeetingWhatsapp',{meetingId,message,template:selectedTemplate,attachments:await encodeFiles(files),confirmed:true,requestId:requestIdFor('whatsapp',message,files)},'POST');alert('Envio confirmado pelo WhatsApp do agente.');}catch(error){alert(error.message);}finally{whatsappButton.disabled=false;renderFiles();}});
+
     } catch (error) {
       content.innerHTML = esc(error.message);
     }

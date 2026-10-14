@@ -1231,7 +1231,7 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Revise a mensagem abaixo. WhatsApp abre no aplicativo; e-mail é enviado pelo portal após sua confirmação.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Abrir WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Revise a mensagem abaixo. WhatsApp e e-mail são enviados pelo portal após sua confirmação. Se preferir, use Abrir no aplicativo.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar WhatsApp pelo portal</button><button type="button" data-whatsapp-app>Abrir no aplicativo</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1259,7 +1259,7 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Revise a mensagem abaixo. WhatsApp abre no aplicativo; e-mail é enviado pelo portal após sua confirmação.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Abrir WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Revise a mensagem abaixo. WhatsApp e e-mail são enviados pelo portal após sua confirmação. Se preferir, use Abrir no aplicativo.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar WhatsApp pelo portal</button><button type="button" data-whatsapp-app>Abrir no aplicativo</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1285,11 +1285,21 @@
   }
   function wireDirectShare(overlay, row, options) {
     const area=overlay.querySelector(options.textarea),whatsapp=overlay.querySelector('[data-whatsapp]'),email=overlay.querySelector('[data-email]');
-    area.setAttribute('aria-label','Mensagem para o cliente');whatsapp.textContent='Abrir WhatsApp';
+    area.setAttribute('aria-label','Mensagem para o cliente');whatsapp.textContent='Enviar WhatsApp pelo portal';
     const feedback=document.createElement('p');feedback.setAttribute('role','status');feedback.setAttribute('aria-live','polite');feedback.style.cssText='padding:12px;border-radius:8px;margin:12px 0;font-weight:600';feedback.hidden=true;overlay.querySelector('.card').append(feedback);
     function tell(message,error=false){feedback.hidden=false;feedback.textContent=message;feedback.setAttribute('role',error?'alert':'status');feedback.style.background=error?'#fff0ed':'#eaf4f8';feedback.style.color=error?'#8b1e14':'#173348';}
-    area.addEventListener('input',()=>{delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';});
+    area.addEventListener('input',()=>{delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';delete whatsapp.dataset.confirmedFor;delete whatsapp.dataset.requestId;whatsapp.textContent='Enviar WhatsApp pelo portal';});
     whatsapp.onclick=async()=>{
+      const number=whatsappNumber(row.clientPhone),message=area.value.trim();
+      if(!/^[0-9]{10,15}$/.test(number)){tell('Cadastre um telefone válido na aplicação antes de enviar.',true);return;}
+      if(!message||message.length>4000){tell('Use uma mensagem de até 4.000 caracteres para WhatsApp.',true);return;}
+      const confirmation=JSON.stringify([number,message]);
+      if(whatsapp.dataset.confirmedFor!==confirmation){whatsapp.dataset.confirmedFor=confirmation;whatsapp.dataset.requestId=crypto.randomUUID();whatsapp.textContent='Confirmar envio pelo portal';tell('Destinatário: +'+number+'. Confira a mensagem e clique em Confirmar envio pelo portal.');return;}
+      whatsapp.disabled=true;whatsapp.textContent='Enviando…';tell('Enviando pela conexão WhatsApp deste agente…');
+      try{await api('agent.sendApplicationWhatsApp',{applicationId:Number(row.id),message,confirmed:true,requestId:whatsapp.dataset.requestId},true);whatsapp.textContent='WhatsApp enviado';tell('Envio confirmado pela conexão WhatsApp do agente. O registro é feito no histórico do cliente quando o telefone corresponde ao cadastro.');}
+      catch(error){tell((error.message||'Não foi possível confirmar o envio.')+' Se houver dúvida, confira a conversa antes de tentar novamente ou use Abrir no aplicativo.',true);whatsapp.disabled=false;whatsapp.textContent='Verificar envio novamente';}
+    };
+    overlay.querySelector('[data-whatsapp-app]').onclick=async()=>{
       const number=whatsappNumber(row.clientPhone);
       if(!/^[0-9]{10,15}$/.test(number)){tell('Cadastre um telefone válido na aplicação antes de preparar o WhatsApp.',true);return;}
       if(!area.value.trim()){tell('Preencha a mensagem antes de continuar.',true);return;}

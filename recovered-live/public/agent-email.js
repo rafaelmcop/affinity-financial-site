@@ -105,6 +105,7 @@
       state.clients = await api('agent.mailboxClients'); $('client').innerHTML = '<option value="">Selecione um dos seus clientes</option>' + state.clients.map(client => `<option value="${client.id}">${escape(client.name)} — ${escape(client.email)}</option>`).join('');
       await loadFolders();
       await load();
+      if(new URLSearchParams(location.search).get('compose')==='1'){let draft;try{draft=JSON.parse(sessionStorage.getItem('affinity-email-draft')||'null')}catch{}sessionStorage.removeItem('affinity-email-draft');compose();if(draft){const client=state.clients.find(c=>String(c.email||'').toLowerCase()===String(draft.to||'').toLowerCase());$('client').value=client?String(client.id):'';$('to').value=client?.email||'';$('subject').value=draft.subject||'';$('message').value=draft.body||'';if(!client)notify('Selecione o cliente cadastrado para enviar pelo e-mail do portal.','error');}}
       setInterval(() => load(false), 300000);
     } catch (error) { notify(error.message, 'error'); }
   }
