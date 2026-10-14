@@ -325,7 +325,7 @@ function se() {
                           ));
                       }
                     },
-                s.data && e.jsx(d, { variant: "outline", className: "w-full border-sky-300/50 text-sky-200", onClick: () => window.location.assign('/agent-five-rings-sync.html?manual=1'), children: "Verificar pelo navegador" }),
+                    children: "Apenas verificar conexão",
                   }),
                 s.data?.requiresCode &&
                   e.jsxs("div", {
@@ -489,7 +489,7 @@ function se() {
                   ],
                 }),
                 s.data && e.jsx(d, { className: "w-full bg-gold text-black hover:bg-yellow-300", onClick: () => window.location.assign('/agent-five-rings-sync.html?manual=1'), children: "Sincronizar pelo navegador" }),
-                s.data && e.jsx(d, { variant: "outline", className: "w-full border-sky-300/50 text-sky-200", disabled: E.isPending, onClick: async () => { try { const a = await E.mutateAsync(); await s.refetch(); a.success ? r.success("Login confirmado em modo somente leitura") : a.requiresCode && r.info("Informe o código enviado pelo Five Rings"); } catch (a) { await s.refetch(); r.error(a instanceof Error ? a.message : "Não foi possível verificar o login"); } }, children: "Apenas verificar conexão" }),
+                s.data && e.jsx(d, { variant: "outline", className: "w-full border-sky-300/50 text-sky-200", onClick: () => window.location.assign('/agent-five-rings-sync.html?manual=1'), children: "Verificar pelo navegador" }),
                 !1 && e.jsxs("div", { className: "space-y-3 rounded-lg border border-amber-400/30 bg-amber-500/10 p-4", children: [
                   e.jsx("p", { className: "text-sm text-amber-100", children: "O Five Rings enviou um código por e-mail. Informe-o abaixo para concluir o acesso." }),
                   e.jsx(i, { inputMode: "numeric", autoComplete: "one-time-code", placeholder: "Código de confirmação", value: f, onChange: a => b(a.target.value.replace(/\D/g, "").slice(0, 10)) }),
