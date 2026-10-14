@@ -1,3 +1,4 @@
+import {corporateEmailSchema} from './corporate-email.js';
 import {boundedJson} from './security-boundary.js';
 const DOMAIN='team.affinityfc.org',ZONE='571fbc6e04919396d68b456b38ebead6',ACCOUNT='d00b4fce2ba60918d8859e92dd98cf9e';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
@@ -19,7 +20,7 @@ export async function domainEmailRoute(request,env,auth){
  if(page)return request.method==='GET'?env.ASSETS.fetch(new Request(new URL('/admin-domain-email.html',url),request)):json({error:'Use GET.'},405);
  if(!['GET','POST'].includes(request.method))return json({error:'Method not allowed.'},405);
  if(request.method==='POST'&&(request.headers.get('origin')!==url.origin||!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type')||'')))return json({error:'Invalid origin or request format.'},403);
- await domainEmailSchema(env);
+ await domainEmailSchema(env);await corporateEmailSchema(env);
  const audit=(operation,address,detail='')=>env.DB.prepare('INSERT INTO domainEmailAudit(actor,operation,address,detail) VALUES(?,?,?,?)').bind(actor,operation,address,detail).run();
  const call=async(token,path,body,method)=>{const response=await (auth.fetch||fetch)('https://api.cloudflare.com/client/v4/'+path,{method:method||(body?'POST':'GET'),headers:{Authorization:'Bearer '+token,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(20000)});let data;try{data=await response.json();}catch{throw Error('Cloudflare returned an unexpected response.');}if(!response.ok||!data.success)throw Error('Cloudflare rejected the operation (HTTP '+response.status+'). Check the integration permissions.');return data;};
  const all=async(token,path)=>{let rows=[];for(let page=1;page<=100;page++){const data=await call(token,path+'?per_page=100&page='+page);if(!Array.isArray(data.result))throw Error('Cloudflare returned an invalid list.');rows.push(...data.result);if(page>=Number(data.result_info?.total_pages||1))return rows;}throw Error('The list exceeded the reading limit.');};
@@ -33,7 +34,9 @@ export async function domainEmailRoute(request,env,auth){
   const directory=(await env.DB.prepare('SELECT address,destination,provider,status,notes,updatedAt FROM domainEmailDirectory ORDER BY address').all()).results;
   const users=(await env.DB.prepare("SELECT name,email FROM adminAccounts WHERE isActive=1 AND status='approved' AND portalDeletedAt IS NULL UNION SELECT name,email FROM affiliates WHERE isActive=1 AND status='approved' AND portalDeletedAt IS NULL UNION SELECT name,email FROM portalAssistants WHERE active=1 AND deletedAt IS NULL ORDER BY name").all()).results;
   const history=(await env.DB.prepare('SELECT actor,operation,address,detail,createdAt FROM domainEmailAudit ORDER BY id DESC LIMIT 50').all()).results;
-  return json({domain,provider,mainProvider,dnsError,connected:!!token,isMaster:!!access.isMaster,cloudflareError,rules:rules.map(routingRow),destinations:destinations.map(x=>({email:x.email,verified:!!x.verified})),directory,users,history});
+  const senders=(await env.DB.prepare('SELECT owner,address,displayName,destination,enabled,updatedAt FROM domainEmailSenders ORDER BY owner').all()).results;
+  const senderUsers=(await env.DB.prepare("SELECT name,email FROM adminAccounts WHERE isActive=1 AND status='approved' AND portalDeletedAt IS NULL AND accountType IN ('agent','both') ORDER BY name").all()).results;
+  return json({senders,senderUsers,sendingAvailable:!!env.CORPORATE_EMAIL?.send,domain,provider,mainProvider,dnsError,connected:!!token,isMaster:!!access.isMaster,cloudflareError,rules:rules.map(routingRow),destinations:destinations.map(x=>({email:x.email,verified:!!x.verified})),directory,users,history});
  }
  const input=await boundedJson(request,8192),action=input.action;
  if(action==='connect'){
@@ -55,13 +58,23 @@ export async function domainEmailRoute(request,env,auth){
   const rows=await all(token,'accounts/'+ACCOUNT+'/email/routing/addresses');if(rows.some(x=>x.email.toLowerCase()===destination))return json({ok:true,alreadyExists:true});
   await call(token,'accounts/'+ACCOUNT+'/email/routing/addresses',{email:destination});await audit('verification',null,destination);return json({ok:true,verificationRequested:true});
  }
+ if(action==='assignSender'){
+  const owner=String(input.owner||'').trim().toLowerCase();
+  const user=await env.DB.prepare("SELECT email,name FROM adminAccounts WHERE lower(email)=? AND isActive=1 AND status='approved' AND portalDeletedAt IS NULL AND accountType IN ('agent','both')").bind(owner).first();
+  if(!user||!address||address.split('@')[1]!==DOMAIN)return json({error:'Select an active agent and a team address.'},400);
+  if(!env.CORPORATE_EMAIL?.send)return json({error:'Corporate sending is not configured yet.'},409);
+  const rules=await all(token,'zones/'+ZONE+'/email/routing/rules');const rule=rules.map(routingRow).find(r=>r.address?.toLowerCase()===address&&r.enabled&&r.editable);
+  if(!rule)return json({error:'This address must have an active forwarding rule before it can be assigned as a portal sender.'},409);
+  await env.DB.prepare('INSERT INTO domainEmailSenders(owner,address,displayName,ruleId,destination,updatedBy) VALUES(?,?,?,?,?,?) ON CONFLICT(owner) DO UPDATE SET address=excluded.address,displayName=excluded.displayName,ruleId=excluded.ruleId,destination=excluded.destination,enabled=1,updatedBy=excluded.updatedBy,updatedAt=CURRENT_TIMESTAMP').bind(owner,address,user.name,rule.id,rule.destinations[0],actor).run();await audit('assign_sender',address,owner);return json({ok:true});
+ }
  if(action==='create'){
   if(!address||address.length>90||address.split('@')[1]!==DOMAIN||!auth.validEmail(destination)||address===destination)return json({error:'Use an address at @team.affinityfc.org and a valid destination.'},400);
+  const requestedOwner=String(input.owner||'').trim().toLowerCase();let assignedUser=null;if(requestedOwner){assignedUser=await env.DB.prepare("SELECT email,name FROM adminAccounts WHERE lower(email)=? AND isActive=1 AND status='approved' AND portalDeletedAt IS NULL AND accountType IN ('agent','both')").bind(requestedOwner).first();if(!assignedUser||!env.CORPORATE_EMAIL?.send)return json({error:'Select an active agent with corporate sending available.'},400);}
   const provider=await mailProvider(address.split('@')[1],auth.fetch||fetch);if(provider.provider!=='cloudflare')return json({error:'The team subdomain is not receiving through Cloudflare yet. Existing delivery was preserved. Complete subdomain setup before activating forwarding.'},409);
   const [rules,destinations]=await Promise.all([all(token,'zones/'+ZONE+'/email/routing/rules'),all(token,'accounts/'+ACCOUNT+'/email/routing/addresses')]);
   if(rules.some(r=>r.matchers?.some(m=>m.type==='literal'&&m.field==='to'&&String(m.value).toLowerCase()===address)))return json({error:'This address already has a rule. No existing rule was replaced.'},409);
   if(!destinations.some(x=>x.email.toLowerCase()===destination&&x.verified))return json({error:'The recipient must confirm the verification email first.'},409);
-  await call(token,'zones/'+ZONE+'/email/routing/rules',{name:'Affinity · '+address,enabled:true,matchers:[{type:'literal',field:'to',value:address}],actions:[{type:'forward',value:[destination]}]});await audit('create',address,destination);return json({ok:true});
+  const created=await call(token,'zones/'+ZONE+'/email/routing/rules',{name:'Affinity · '+address,enabled:true,matchers:[{type:'literal',field:'to',value:address}],actions:[{type:'forward',value:[destination]}]});await audit('create',address,destination);if(assignedUser){const id=created.result?.id||created.result?.tag;if(!id)return json({ok:true,warning:'Forwarding was created. Assign the corporate sender from the section below.'});await env.DB.prepare('INSERT INTO domainEmailSenders(owner,address,displayName,ruleId,destination,updatedBy) VALUES(?,?,?,?,?,?) ON CONFLICT(owner) DO UPDATE SET address=excluded.address,displayName=excluded.displayName,ruleId=excluded.ruleId,destination=excluded.destination,enabled=1,updatedBy=excluded.updatedBy,updatedAt=CURRENT_TIMESTAMP').bind(requestedOwner,address,assignedUser.name,id,destination,actor).run();await audit('assign_sender',address,requestedOwner);}return json({ok:true});
  }
  return json({error:'Invalid action.'},400);
  }catch(error){return json({error:/Cloudflare|mail.server|mail servers|list exceeded/.test(error.message)?error.message:'Unable to complete the request. No DNS change was requested.'},502);}

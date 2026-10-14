@@ -1,3 +1,4 @@
+import {sendCorporateEmail,corporateFromEmail} from './corporate-email.js';
 import {domainEmailRoute} from './domain-email.js';
 import {optionalFiveRingsCredits} from './five-rings-credit-status.js';
 import {claimBrowserChunk,finishBrowserChunk} from './five-rings-browser-job.js';
@@ -12601,6 +12602,7 @@ async function sendEmail(env, options) {
 }
 __name(sendEmail, "sendEmail");
 async function sendAgentEmail(env, agentEmail, options) {
+  const corporate=await sendCorporateEmail(env,agentEmail,options);if(corporate)return corporate;
   const config = await env.DB.prepare(
     "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
   ).bind(agentEmail.toLowerCase()).first();
@@ -12631,7 +12633,8 @@ async function appendAgentEmailSignature(env, owner, body) {
   await ensureAgentMessageSignatureColumn(env);
   const profile = await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail,email,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner.toLowerCase()).first();
   if (!profile) throw new Error("Perfil do remetente n\xE3o encontrado");
-  const signature = String(profile.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE).replaceAll("{agente_nome}", String(profile.name || "")).replaceAll("{agente}", String(profile.name || "")).replaceAll("{agente_telefone}", String(profile.phone || profile.whatsapp || "")).replaceAll("{telefone do agente}", String(profile.phone || profile.whatsapp || "")).replaceAll("{agente_whatsapp}", String(profile.whatsapp || profile.phone || "")).replaceAll("{agente_email}", String(profile.contactEmail || profile.email || "")).replaceAll("{email do agente}", String(profile.contactEmail || profile.email || "")).trim();
+  const signatureEmail=await corporateFromEmail(env,owner,profile.contactEmail||profile.email||"");
+  const signature = String(profile.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE).replaceAll("{agente_nome}", String(profile.name || "")).replaceAll("{agente}", String(profile.name || "")).replaceAll("{agente_telefone}", String(profile.phone || profile.whatsapp || "")).replaceAll("{telefone do agente}", String(profile.phone || profile.whatsapp || "")).replaceAll("{agente_whatsapp}", String(profile.whatsapp || profile.phone || "")).replaceAll("{agente_email}", String(signatureEmail)).replaceAll("{email do agente}", String(signatureEmail)).trim();
   const text = String(body || "").trim();
   return !signature || text.endsWith(signature) ? text : `${text}
 
@@ -51047,7 +51050,7 @@ Ap\xF3lice n\xBA {apolice}`;
       ).bind(owner, externalId),
       env.DB.prepare(
         "INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'automation')"
-      ).bind(owner, Number(resolvedMatch.clientId), String(sent.messageId || `payment-sent:${owner}:${uid}`), subjectToClient, message, String(config.fromEmail || owner), String(resolvedMatch.email)),
+      ).bind(owner, Number(resolvedMatch.clientId), String(sent.messageId || `payment-sent:${owner}:${uid}`), subjectToClient, message, String(sent.fromEmail || config.fromEmail || owner), String(resolvedMatch.email)),
       env.DB.prepare(
         "INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,'email',?,?)"
       ).bind(Number(resolvedMatch.clientId), `Aviso de pagamento encaminhado automaticamente para a ap\xF3lice ${clearPolicyNumber}. Refer\xEAncia: ${String(sent.messageId || externalId)}`, owner),
@@ -55612,6 +55615,7 @@ Detalhes: ${details}` : ""}`;
     if (openClient) return trpcResult({ success: true, clientId });
     if (sendMeetingEmail) {
       const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+    if(config)config.fromEmail=await corporateFromEmail(env,owner,config.fromEmail);
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
       const subject = String(input.subject || "Seu atendimento \u2014 Affinity Financial Consulting").trim().slice(0, 300);
       let sent;
@@ -55712,6 +55716,7 @@ Detalhes: ${details}` : ""}`;
       if (!validEmail(recipient)) return trpcError("Esta cliente n\xE3o possui um e-mail v\xE1lido");
       if (!subject || subject.length > 500 || !body || body.length > 5e4) return trpcError("Revise o assunto e a mensagem");
       const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+    if(config)config.fromEmail=await corporateFromEmail(env,owner,config.fromEmail);
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
       const sent = await sendAgentEmail(env, owner, {
         to: recipient,
@@ -56347,6 +56352,7 @@ Detalhes: ${details}` : ""}`;
     const config = await env.DB.prepare(
       "SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?"
     ).bind(adminEmail.toLowerCase()).first();
+    if(config)config.fromEmail=await corporateFromEmail(env,adminEmail.toLowerCase(),config.fromEmail);
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
     const previous = await env.DB.prepare(
       "SELECT subject,externalId FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND coalesce(visibility,'client')='client' AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 1"
@@ -56571,6 +56577,7 @@ Detalhes: ${details}` : ""}`;
     if (!validEmail(recipient)) return trpcError("O destinat\xE1rio n\xE3o possui um e-mail v\xE1lido");
     if (!subject) subject = "Mensagem da Affinity Financial";
     const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+    if(config)config.fromEmail=await corporateFromEmail(env,owner,config.fromEmail);
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
     body = await appendAgentEmailSignature(env, owner, body);
     const sent = await sendAgentEmail(env, owner, {
@@ -57193,6 +57200,7 @@ Affinity Financial Consulting`,
         secure: Number(row.secure) === 1,
         user: row.user,
         fromEmail: row.fromEmail,
+        corporateFromEmail: await corporateFromEmail(env,adminEmail.toLowerCase(),null),
         fromName: row.fromName,
         imapHost: row.imapHost || "imap.mail.me.com",
         imapPort: Number(row.imapPort || 993),
@@ -59818,7 +59826,7 @@ ${signatureLines.join("\n")}`.trim();
               String(sentMail.messageId || "") || null,
               `Autom\xE1tico \xB7 ${subject}`,
               historyBody,
-              String(automation.agentEmail).toLowerCase(),
+              String(sentMail.fromEmail||automation.agentEmail).toLowerCase(),
               String(policy.email)
             )
           ]);
@@ -59934,7 +59942,7 @@ ${signatureLines.join("\n")}`.trim();
             String(sentMail.messageId || "") || null,
             `Autom\xE1tico \xB7 ${personalize(automation.subject || automation.title)}`,
             personalizedMessage.replaceAll("**", ""),
-            String(automation.agentEmail).toLowerCase(),
+            String(sentMail.fromEmail||automation.agentEmail).toLowerCase(),
             String(client.email)
           )
         );
