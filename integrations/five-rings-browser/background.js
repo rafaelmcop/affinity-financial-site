@@ -77,7 +77,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   if(message.action==='collectStart'){
    if([...jobs.values()].some(j=>!j.result))throw Error('Uma leitura já está em andamento. Aguarde antes de tentar novamente.');
    const id=crypto.randomUUID(),job={tab:sender.tab.id,document:sender.documentId,started:Date.now(),result:null};jobs.set(id,job);
-   collectSnapshot(message).then(result=>job.result=result).catch(error=>job.result={ok:false,error:error.message||'Leitura interrompida. Tente novamente.'});
+   collectSnapshot(message).then(result=>job.result=result&&typeof result.ok==='boolean'?result:{ok:false,error:'O canal de leitura não respondeu. Recarregue o Five Rings e tente novamente.'}).catch(error=>job.result={ok:false,error:error.message||'Leitura interrompida. Tente novamente.'});
    return {ok:true,jobId:id};
   }
   const job=jobs.get(message.jobId);
