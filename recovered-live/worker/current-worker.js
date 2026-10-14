@@ -1,3 +1,6 @@
+import {userRolesRoute} from './user-roles.js';
+import {browserSnapshot} from './five-rings-browser-snapshot.js';
+import {deferFiveRingsSession,deferredFiveRingsSession} from './five-rings-session-defer.js';
 import {publicTestimonial,publicTestimonialColumns} from './public-testimonials.js';
 import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
@@ -51323,7 +51326,7 @@ async function syncIcloudInbox(env, agentEmail) {
 __name(syncIcloudInbox, "syncIcloudInbox");
 async function syncAllIcloudInboxes(env) {
   const rows = await env.DB.prepare(
-    "SELECT agentEmail FROM agentEmailSettings WHERE imapHost IS NOT NULL AND trim(imapHost)<>'' AND imapUser IS NOT NULL AND trim(imapUser)<>''"
+    "SELECT agentEmail FROM agentEmailSettings WHERE lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND imapHost IS NOT NULL AND trim(imapHost)<>'' AND imapUser IS NOT NULL AND trim(imapUser)<>''"
   ).all();
   await Promise.all((rows.results || []).map(async (row) => {
     try {
@@ -53840,9 +53843,9 @@ function fiveRingsDataTableUrl(path, columns) {
 }
 __name(fiveRingsDataTableUrl, "fiveRingsDataTableUrl");
 __name2(fiveRingsDataTableUrl, "fiveRingsDataTableUrl");
-async function fiveRingsDataTableRecords(path, cookies) {
+async function fiveRingsDataTableRecords(path, cookies,fetchPortal=fiveRingsFetch) {
   const columns = path === "clients" ? ["", "entity_name", "type", "status", "latest_policy", "latest_policy_status", "policies", "products", "product_types", "product_categories", "primary_email", "primary_phone", "primary_address", "gender", "birth_date", "start_date", ""] : ["number", "status", "client_names", "owner_email", "owner_phone", "agent_names", "carrier_name", "product_name", "product_type_name", "product_category_name", "state", "annual_premium", "submitted_date", "issued_date", "effective_date", "updated_at", "requirement_name", ""];
-  const response = await fiveRingsFetch(fiveRingsDataTableUrl(path, columns), {
+  const response = await fetchPortal(fiveRingsDataTableUrl(path, columns), {
     headers: { cookie: cookies, accept: "application/json", "x-requested-with": "XMLHttpRequest", referer: `https://portal.fiveringsfinancial.com/account/${path}` },
     redirect: "follow"
   }, 2e4);
@@ -53852,10 +53855,10 @@ async function fiveRingsDataTableRecords(path, cookies) {
 }
 __name(fiveRingsDataTableRecords, "fiveRingsDataTableRecords");
 __name2(fiveRingsDataTableRecords, "fiveRingsDataTableRecords");
-async function readFiveRingsRecords(session, sections) {
+async function readFiveRingsRecords(session, sections,fetchPortal=fiveRingsFetch) {
   const directResults = await Promise.allSettled([
-    fiveRingsDataTableRecords("clients", session.cookies),
-    fiveRingsDataTableRecords("policies", session.cookies)
+    fiveRingsDataTableRecords("clients", session.cookies,fetchPortal),
+    fiveRingsDataTableRecords("policies", session.cookies,fetchPortal)
   ]);
   const directRecords = directResults.flatMap((result) => result.status === "fulfilled" ? result.value : []);
   const required = [
@@ -53867,7 +53870,7 @@ async function readFiveRingsRecords(session, sections) {
   )].filter((item, index, all2) => all2.findIndex((other) => other.url === item.url) === index).slice(0, 10);
   const pages = [{ body: session.html, html: true, url: session.url }];
   const fetched = await Promise.allSettled(safe.map(async (item) => {
-    const response = await fiveRingsFetch(
+    const response = await fetchPortal(
       item.url,
       { headers: { cookie: session.cookies }, redirect: "follow" },
       12e3
@@ -53881,7 +53884,7 @@ async function readFiveRingsRecords(session, sections) {
     if (result.status === "fulfilled" && result.value) pages.push(result.value);
   const discovered = pages.filter((page) => page.html).flatMap((page) => fiveRingsSections(page.body, "https://portal.fiveringsfinancial.com")).filter((item) => /(client|customer|insured|polic|contract|production|business|case|application)/i.test(`${item.label} ${item.url}`)).filter((item) => !/(\/create|\/add|\/edit|\/delete|\/remove|\/logout|\/settings?|\/profile)/i.test(item.url)).filter((item) => !pages.some((page) => page.url === item.url)).filter((item, index, all2) => all2.findIndex((other) => other.url === item.url) === index).slice(0, 10);
   const extra = await Promise.allSettled(discovered.map(async (item) => {
-    const response = await fiveRingsFetch(item.url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
+    const response = await fetchPortal(item.url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
     if (!response.ok) return null;
     const contentType = response.headers.get("content-type") || "";
     if (!/(text\/html|application\/json)/i.test(contentType)) return null;
@@ -53905,7 +53908,7 @@ async function readFiveRingsRecords(session, sections) {
     ...detailItems.filter((item) => /\/account\/policies\//i.test(item.url)).slice(0, 30)
   ];
   const details = await Promise.allSettled(selectedDetails.map(async ({ record, url }) => {
-    const response = await fiveRingsFetch(url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
+    const response = await fetchPortal(url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
     if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return record;
     const detail = normalizeFiveRingsRecord(fiveRingsDataListRecord(await response.text()));
     return { ...record, ...Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== "" && value !== 0)), detailUrl: record.detailUrl, clientDetailUrl: record.clientDetailUrl };
@@ -53963,7 +53966,7 @@ const row=await env.DB.prepare("SELECT portalEmail,encryptedPassword,encryptedSe
 if(!row?.encryptedPassword)throw Error("Cadastre seu acesso Five Rings nas configurações.");
 if(row.status==='pending'&&row.encryptedChallenge)return null;
 let session=null;
-if(row.encryptedSession){try{session=await resumeFiveRingsSession(JSON.parse(await decryptSmtpPassword(row.encryptedSession,env.JWT_SECRET)));}catch{}}
+if(row.encryptedSession){const saved=JSON.parse(await decryptSmtpPassword(row.encryptedSession,env.JWT_SECRET));if(saved.browser===true)throw Error("Atualize os créditos pela sincronização no navegador com o conector Five Rings.");try{session=await resumeFiveRingsSession(saved);}catch{}}
 if(!session){
 let result;try{result=await verifyFiveRingsLogin(row.portalEmail,await decryptSmtpPassword(row.encryptedPassword,env.JWT_SECRET));}catch(error){await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(String(error.message||"Não foi possível autenticar no Five Rings.").slice(0,500),owner).run();throw error;}
 if(result.requiresCode){await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='pending',encryptedChallenge=?,encryptedSession=NULL,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(await encryptSmtpPassword(JSON.stringify(result.challenge),env.JWT_SECRET),owner).run();return null;}
@@ -54846,7 +54849,7 @@ __name(syncCalendlyForAgent, "syncCalendlyForAgent");
 __name2(syncCalendlyForAgent, "syncCalendlyForAgent");
 async function syncAllCalendlyConnections(env) {
   await ensureCalendlyTables(env);
-  const rows = await env.DB.prepare("SELECT agentEmail,lastSyncAt FROM agentCalendlyConnections WHERE status='connected'").all();
+  const rows = await env.DB.prepare("SELECT agentEmail,lastSyncAt FROM agentCalendlyConnections WHERE status='connected' AND lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved')").all();
   for (const row of rows.results || []) try {
     const needsPhoneBackfill = !row.lastSyncAt || String(row.lastSyncAt) < "2026-08-29 01:02:00";
     await syncCalendlyForAgent(env, String(row.agentEmail), { backfill: needsPhoneBackfill });
@@ -57275,6 +57278,7 @@ Affinity Financial Consulting`,
       return trpcResult({...await refreshFiveRingsCredits(env,owner,session,fiveRingsFetch),error:null});
     }catch(error){return trpcResult({...cached,error:String(error.message||"Não foi possível atualizar os créditos.")});}
   }
+  if (name === "agent.deferFiveRingsSession") return trpcResult(await deferFiveRingsSession(env,adminEmail,request));
   if (name === "agent.syncFiveRings") {
     const owner = adminEmail.toLowerCase();
     const row = await env.DB.prepare(
@@ -57282,10 +57286,13 @@ Affinity Financial Consulting`,
     ).bind(owner).first();
     if (!row) return trpcError("Conecte sua conta Five Rings primeiro");
     try {
-      let activeSession = null;
-      if (row.encryptedSession) {
+      const captured=input.browserSnapshot?browserSnapshot(input.browserSnapshot,row.portalEmail):null;
+      let activeSession = captured?.session||null;
+      if(captured) activeSession.sections=fiveRingsSections(activeSession.html,"https://portal.fiveringsfinancial.com");
+      if (!captured&&row.encryptedSession) {
         try {
           const saved = JSON.parse(await decryptSmtpPassword(String(row.encryptedSession), env.JWT_SECRET));
+          if(saved.browser===true)return trpcResult({success:false,requiresBrowser:true,message:"Abra a sincronização no navegador com o conector Five Rings."});
           activeSession = await resumeFiveRingsSession(saved);
         } catch {
           activeSession = null;
@@ -57294,8 +57301,8 @@ Affinity Financial Consulting`,
       const password = activeSession ? "" : await decryptSmtpPassword(String(row.encryptedPassword), env.JWT_SECRET);
       const login = activeSession ? null : await verifyFiveRingsLogin(String(row.portalEmail), password);
       if (activeSession) {
-        const records2 = await readFiveRingsRecords(activeSession, activeSession.sections);
-        await refreshFiveRingsCredits(env, owner, activeSession, fiveRingsFetch);
+        const records2 = await readFiveRingsRecords(activeSession, activeSession.sections,captured?.fetch||fiveRingsFetch);
+        await refreshFiveRingsCredits(env, owner, activeSession, captured?.fetch||fiveRingsFetch);
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
         const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
         for (const record of records2) {
@@ -57325,7 +57332,7 @@ Affinity Financial Consulting`,
             importedPolicies2 += 1;
           }
         }
-        const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(activeSession), env.JWT_SECRET);
+        const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(captured?{browser:true}:activeSession), env.JWT_SECRET);
         await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
         await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
         return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2 });
@@ -59491,7 +59498,7 @@ __name(waitForFiveRingsEmailCode, "waitForFiveRingsEmailCode");
 __name2(waitForFiveRingsEmailCode, "waitForFiveRingsEmailCode");
 async function syncPendingFiveRingsCodes(env) {
   const pending = await env.DB.prepare(
-    "SELECT lower(agentEmail) AS agentEmail,encryptedChallenge,updatedAt FROM agentFiveRingsConnections WHERE status='pending' AND encryptedChallenge IS NOT NULL"
+    "SELECT lower(agentEmail) AS agentEmail,encryptedChallenge,updatedAt FROM agentFiveRingsConnections WHERE lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND status='pending' AND encryptedChallenge IS NOT NULL"
   ).all();
   for (const connection of pending.results || []) {
     const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
@@ -59513,7 +59520,7 @@ __name(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
 __name2(syncPendingFiveRingsCodes, "syncPendingFiveRingsCodes");
 async function syncAllFiveRingsConnections(env) {
   const connections = await env.DB.prepare(
-    "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE encryptedPassword IS NOT NULL AND encryptedChallenge IS NULL AND status<>'error'"
+    "SELECT lower(agentEmail) AS agentEmail FROM agentFiveRingsConnections WHERE lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND encryptedPassword IS NOT NULL AND encryptedChallenge IS NULL AND status<>'error'"
   ).all();
   for (const connection of connections.results || []) {
     const agentEmail = String(connection.agentEmail || "").trim().toLowerCase();
@@ -59653,7 +59660,7 @@ async function runMessageAutomations(env) {
       )
     ]);
   const automations = await env.DB.prepare(
-    "SELECT * FROM scheduledMessages WHERE isActive=1 AND channel='email' ORDER BY CASE occasion WHEN 'weekly_monday' THEN 0 WHEN 'monthly' THEN 1 WHEN 'birthday' THEN 2 WHEN 'thanksgiving' THEN 3 WHEN 'christmas' THEN 3 WHEN 'new_year' THEN 3 WHEN 'custom' THEN 4 WHEN 'policy_anniversary' THEN 5 ELSE 6 END,id"
+    "SELECT * FROM scheduledMessages WHERE isActive=1 AND lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND channel='email' ORDER BY CASE occasion WHEN 'weekly_monday' THEN 0 WHEN 'monthly' THEN 1 WHEN 'birthday' THEN 2 WHEN 'thanksgiving' THEN 3 WHEN 'christmas' THEN 3 WHEN 'new_year' THEN 3 WHEN 'custom' THEN 4 WHEN 'policy_anniversary' THEN 5 ELSE 6 END,id"
   ).all();
   let deliveryBudget = 20;
   for (const automation of automations.results) {
@@ -59993,6 +60000,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(/(?:^|\/)(?:\.git|\.env(?:\.[^/]*)?|\.dev\.vars|private)(?:\/|$)/i.test(url.pathname))return new Response('Não encontrado',{status:404,headers:{'cache-control':'no-store'}});
  if(!/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname))await accessSchema(env);
  const featureAuth={email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId};
+ const rolesResponse=await userRolesRoute(request,env,{email:getAdminEmail,access:getAdminAccess});if(rolesResponse)return secureResponse(rolesResponse,{privateData:true});
  const assistantResponse=await assistantsRoute(request,env,{...featureAuth,session:getSession,createSession,validEmail,hash:password=>bcryptjs_default.hash(password,12),compare:(password,hash)=>bcryptjs_default.compare(password,hash),runProcedure,features:owner=>userAccess(env,owner),appearance:owner=>agentAppearance(env,'agent:'+owner),calendarLinked:async owner=>{await ensureCalendlyTables(env);return !!await env.DB.prepare("SELECT 1 FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND trim(coalesce(encryptedToken,''))<>''").bind(owner).first();},page:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx),resource:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx)});
  if(assistantResponse&&!(assistantResponse.headers.get('content-type')?.includes('text/html')&&['/agentes/assistentes','/admin/assistentes'].includes(url.pathname))){const secured=secureResponse(assistantResponse,{privateData:true});if(assistantResponse.headers.get('x-affinity-assistant-view')==='1'){secured.headers.set('X-Frame-Options','SAMEORIGIN');secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace("frame-ancestors 'none'","frame-ancestors 'self'"));if(secured.headers.has('Content-Security-Policy-Report-Only'))secured.headers.set('Content-Security-Policy-Report-Only',secured.headers.get('Content-Security-Policy-Report-Only').replace("frame-ancestors 'none'","frame-ancestors 'self'"));secured.headers.delete('x-affinity-assistant-view');}if(url.pathname==='/assistentes/dashboard')secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace('frame-src ',"frame-src 'self' "));return secured;}
  const agendaResponse=await addressBookRoute(request,env,featureAuth);if(agendaResponse)return agendaResponse;
@@ -60003,7 +60011,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const calendarPages=new Set(['/agentes/agenda','/agentes/compromisso','/agent-calendar.html','/agent-meeting-detail','/agent-meeting-detail.html']);
  if(request.method==='GET'&&calendarPages.has(url.pathname)){const staff=await staffIdentity(request,env,featureAuth,'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);await ensureCalendlyTables(env);const linked=await env.DB.prepare("SELECT 1 FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND trim(coalesce(encryptedToken,''))<>''").bind(staff.email.toLowerCase()).first();if(!linked)return Response.redirect(new URL('/agentes/configuracoes-agenda',url),302);}
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
- if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue)return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
+ if(staffPage){const kind=url.pathname.startsWith('/afiliados/')?'affiliate':'agent';const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},kind);if(staff){await leadSchema(env);const profile=await env.DB.prepare('SELECT completed FROM staffOnboarding WHERE owner=?').bind(staff.owner).first();if(!profile?.completed&&!await configuredAccess(env,staff))return Response.redirect(new URL(kind==='affiliate'?'/afiliados/inicio':'/agentes/inicio',url),302);if(kind==='agent'&&await hasFeature(env,staff.email,'five_rings')&&url.pathname!=='/agent-five-rings-sync.html'&&(await fiveRingsRequirement(env,staff.email)).fiveRingsSyncDue&&!await deferredFiveRingsSession(env,staff.email,request))return Response.redirect(new URL('/agent-five-rings-sync.html',url),302);}}
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
  let response;try{response=assistantResponse?secureResponse(assistantResponse,{privateData:true}):await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
  if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
@@ -60011,7 +60019,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/admin-unified-menu.js?v=4" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/admin-unified-menu.js?v=5" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};

@@ -33,6 +33,7 @@ export async function deletePortalUser(env,actor,input,compare,send=null){
   env.DB.prepare("INSERT INTO portalAuditLogs(actorEmail,action,entityType,targetId) VALUES (?,'Excluiu acesso do usuário','user',?)").bind(owner,email)
  ];
  if(assistant){statements.push(env.DB.prepare('UPDATE portalAssistants SET active=0,deletedAt=CURRENT_TIMESTAMP,sessionVersion=sessionVersion+1,updatedAt=CURRENT_TIMESTAMP WHERE id=?').bind(assistant.id));statements.push(env.DB.prepare('UPDATE assistantAgentAccess SET active=0 WHERE assistantId=?').bind(assistant.id));}
+ for(const [table,change] of [['scheduledMessages','isActive=0'],['agentFiveRingsConnections',"status='blocked',encryptedChallenge=NULL,encryptedSession=NULL,encryptedPassword=''"],['agentCalendlyConnections',"status='disconnected',encryptedToken=''"],['agentEmailSettings',"password=''"]]){if(await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").bind(table).first())statements.push(env.DB.prepare('UPDATE '+table+' SET '+change+' WHERE lower(agentEmail)=?').bind(email));}
  await env.DB.batch(statements);
  let notification='not_requested';
  if(input.notifyUser===true){
