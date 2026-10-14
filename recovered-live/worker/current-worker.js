@@ -57333,7 +57333,7 @@ Affinity Financial Consulting`,
           }
         }
         const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(captured?{browser:true}:activeSession), env.JWT_SECRET);
-        await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
+        await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
         await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
         return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2 });
       }
@@ -57512,7 +57512,7 @@ Affinity Financial Consulting`,
         }
       }
       const encryptedSession = await encryptSmtpPassword(JSON.stringify(result.session), env.JWT_SECRET);
-      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
+      await env.DB.prepare("UPDATE agentNationalLifeConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession, owner).run();
       return trpcResult({ success: true, found: result.records.length, importedClients, importedPolicies, updatedPolicies });
     } catch (error) {
       const message = error instanceof Error ? error.message : "N\xE3o foi poss\xEDvel sincronizar a National Life";
