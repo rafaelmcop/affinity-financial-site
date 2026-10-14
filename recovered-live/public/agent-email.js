@@ -20,7 +20,7 @@
     if (payload.error) throw new Error(payload.error.json?.message || 'Não foi possível concluir a operação');
     return payload.result?.data?.json;
   }
-  function notify(message, type = 'ok') { const box = $('notice'); box.textContent = message; box.className = `notice show ${type}`; setTimeout(() => box.className = 'notice', 6000); }
+  function notify(message, type = 'ok') { let box=$('notice');if($('modal').classList.contains('open')){box=$('compose-notice');if(!box){box=document.createElement('p');box.id='compose-notice';box.setAttribute('role','status');$('form').prepend(box);}}box.textContent=message;box.className=`notice show ${type}`;if(type!=='error')setTimeout(()=>{if(box.textContent===message)box.className='notice'},6000); }
   let audioContext;
   function unlockAudio(){try{audioContext ||= new (window.AudioContext||window.webkitAudioContext)();audioContext.resume();state.audioReady=true}catch{}}
   function playNewEmailSound(){if(!state.audioReady)return;try{const now=audioContext.currentTime,gain=audioContext.createGain();gain.gain.setValueAtTime(.0001,now);gain.gain.exponentialRampToValueAtTime(.16,now+.02);gain.gain.exponentialRampToValueAtTime(.0001,now+.7);gain.connect(audioContext.destination);[[659,0,.18],[880,.22,.32]].forEach(([frequency,delay,duration])=>{const oscillator=audioContext.createOscillator();oscillator.type='sine';oscillator.frequency.value=frequency;oscillator.connect(gain);oscillator.start(now+delay);oscillator.stop(now+delay+duration)});}catch{}}
