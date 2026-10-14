@@ -1,3 +1,4 @@
+import {claimBrowserChunk,finishBrowserChunk} from './five-rings-browser-job.js';
 import {userRolesRoute} from './user-roles.js';
 import {browserSnapshot} from './five-rings-browser-snapshot.js';
 import {deferFiveRingsSession,deferredFiveRingsSession} from './five-rings-session-defer.js';
@@ -57285,6 +57286,7 @@ Affinity Financial Consulting`,
       "SELECT portalEmail,encryptedPassword,encryptedSession FROM agentFiveRingsConnections WHERE lower(agentEmail)=?"
     ).bind(owner).first();
     if (!row) return trpcError("Conecte sua conta Five Rings primeiro");
+    let browserClaim=null;
     try {
       const captured=input.browserSnapshot?browserSnapshot(input.browserSnapshot,row.portalEmail):null;
       let activeSession = captured?.session||null;
@@ -57303,9 +57305,10 @@ Affinity Financial Consulting`,
       if (activeSession) {
         const records2 = await readFiveRingsRecords(activeSession, activeSession.sections,captured?.fetch||fiveRingsFetch);
         await refreshFiveRingsCredits(env, owner, activeSession, captured?.fetch||fiveRingsFetch);
+        if(captured){browserClaim=await claimBrowserChunk(env,owner,input.browserSnapshot,records2.length);if(browserClaim.busy)return trpcResult({success:false,processing:true,retryAfter:2});}
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
         const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
-        for (const record of records2) {
+        for (const record of (browserClaim?records2.slice(browserClaim.start,browserClaim.end):records2)) {
           const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
           const existingPolicy = canonicalPolicyNumber ? (knownPolicies2.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
           let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.email, owner).first() : null;
@@ -57332,9 +57335,10 @@ Affinity Financial Consulting`,
             importedPolicies2 += 1;
           }
         }
+        if(browserClaim){await finishBrowserChunk(env,browserClaim);if(browserClaim.end<records2.length)return trpcResult({success:false,processing:true,processed:browserClaim.end,total:records2.length});}
         const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(captured?{browser:true}:activeSession), env.JWT_SECRET);
         await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
-        await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
+        await syncPolicyLeadLinks(env,owner);await markPortalFiveRingsSync(env,owner);
         return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2 });
       }
       if (!login) throw new Error("N\xE3o foi poss\xEDvel iniciar a sess\xE3o");
@@ -57397,9 +57401,10 @@ Affinity Financial Consulting`,
       await env.DB.prepare(
         "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
       ).bind(encryptedSession, owner).run();
-      await markPortalFiveRingsSync(env,owner);await syncPolicyLeadLinks(env,owner);
+      await syncPolicyLeadLinks(env,owner);await markPortalFiveRingsSync(env,owner);
       return trpcResult({ success: true, requiresCode: false, found: records.length, importedClients, importedPolicies, updatedPolicies });
     } catch (error) {
+      await finishBrowserChunk(env,browserClaim,false);
       const message = error instanceof Error ? error.message : "N\xE3o foi poss\xEDvel sincronizar o Five Rings";
       await env.DB.prepare(
         "UPDATE agentFiveRingsConnections SET status='error',lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
