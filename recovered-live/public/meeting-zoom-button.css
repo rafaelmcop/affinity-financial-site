@@ -1,0 +1,4 @@
+html[data-agent-theme] body a.meeting-zoom-button,html body a.meeting-zoom-button{display:inline-flex;align-items:center;gap:9px;background:#0b5cdb!important;color:#fff!important;border:1px solid #0848ad!important;font-weight:750;text-decoration:none!important}
+html body a.meeting-zoom-button:hover{background:#0848ad!important;color:#fff!important}
+html body a.meeting-zoom-button:focus-visible{outline:3px solid #2563eb;outline-offset:3px}
+.meeting-zoom-icon{display:inline-block;width:26px;height:26px;flex-shrink:0;border-radius:7px;background-image:url('/message-icons/zoom.png');background-size:auto 155%;background-position:98% center;background-repeat:no-repeat}
