@@ -1,3 +1,4 @@
+import {optionalFiveRingsCredits} from './five-rings-credit-status.js';
 import {claimBrowserChunk,finishBrowserChunk} from './five-rings-browser-job.js';
 import {userRolesRoute} from './user-roles.js';
 import {browserSnapshot} from './five-rings-browser-snapshot.js';
@@ -57195,7 +57196,9 @@ Affinity Financial Consulting`,
     const row = await env.DB.prepare(
       "SELECT portalEmail,status,lastSyncAt,lastError,encryptedChallenge,trustDevice FROM agentFiveRingsConnections WHERE lower(agentEmail)=?"
     ).bind(adminEmail.toLowerCase()).first();
+    const summaryTable=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='fiveRingsImportSummaries'").first();const lastImport=summaryTable?await env.DB.prepare('SELECT found,clients,policies,updated,creditsUpdated,warning,completedAt FROM fiveRingsImportSummaries WHERE owner=?').bind(adminEmail.toLowerCase()).first():null;
     return trpcResult(row ? {
+      lastImport,
       portalEmail: row.portalEmail,
       status: row.status,
       lastSyncAt: row.lastSyncAt,
@@ -57286,7 +57289,7 @@ Affinity Financial Consulting`,
       "SELECT portalEmail,encryptedPassword,encryptedSession FROM agentFiveRingsConnections WHERE lower(agentEmail)=?"
     ).bind(owner).first();
     if (!row) return trpcError("Conecte sua conta Five Rings primeiro");
-    let browserClaim=null;
+    let browserClaim=null,creditStatus={updated:true,warning:null};
     try {
       const captured=input.browserSnapshot?browserSnapshot(input.browserSnapshot,row.portalEmail):null;
       let activeSession = captured?.session||null;
@@ -57304,7 +57307,7 @@ Affinity Financial Consulting`,
       const login = activeSession ? null : await verifyFiveRingsLogin(String(row.portalEmail), password);
       if (activeSession) {
         const records2 = await readFiveRingsRecords(activeSession, activeSession.sections,captured?.fetch||fiveRingsFetch);
-        await refreshFiveRingsCredits(env, owner, activeSession, captured?.fetch||fiveRingsFetch);
+        creditStatus=await optionalFiveRingsCredits(()=>refreshFiveRingsCredits(env, owner, activeSession, captured?.fetch||fiveRingsFetch));
         if(captured){browserClaim=await claimBrowserChunk(env,owner,input.browserSnapshot,records2.length);if(browserClaim.busy)return trpcResult({success:false,processing:true,retryAfter:2});}
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
         const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
@@ -57335,11 +57338,11 @@ Affinity Financial Consulting`,
             importedPolicies2 += 1;
           }
         }
-        if(browserClaim){await finishBrowserChunk(env,browserClaim);if(browserClaim.end<records2.length)return trpcResult({success:false,processing:true,processed:browserClaim.end,total:records2.length});}
+        if(browserClaim){const totals=await finishBrowserChunk(env,browserClaim,true,{clients:importedClients2,policies:importedPolicies2,updated:updatedPolicies2});importedClients2=Number(totals.clients);importedPolicies2=Number(totals.policies);updatedPolicies2=Number(totals.updated);if(browserClaim.end<records2.length)return trpcResult({success:false,processing:true,processed:browserClaim.end,total:records2.length});}
         const encryptedSession2 = await encryptSmtpPassword(JSON.stringify(captured?{browser:true}:activeSession), env.JWT_SECRET);
-        await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, owner).run();
-        await syncPolicyLeadLinks(env,owner);await markPortalFiveRingsSync(env,owner);
-        return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2 });
+        await env.DB.prepare("UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(encryptedSession2, creditStatus.warning, owner).run();
+        await syncPolicyLeadLinks(env,owner);await markPortalFiveRingsSync(env,owner);await env.DB.prepare('CREATE TABLE IF NOT EXISTS fiveRingsImportSummaries(owner TEXT PRIMARY KEY,found INTEGER,clients INTEGER,policies INTEGER,updated INTEGER,creditsUpdated INTEGER,warning TEXT,completedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();await env.DB.prepare('INSERT INTO fiveRingsImportSummaries(owner,found,clients,policies,updated,creditsUpdated,warning) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner) DO UPDATE SET found=excluded.found,clients=excluded.clients,policies=excluded.policies,updated=excluded.updated,creditsUpdated=excluded.creditsUpdated,warning=excluded.warning,completedAt=CURRENT_TIMESTAMP').bind(owner,records2.length,importedClients2,importedPolicies2,updatedPolicies2,creditStatus.updated?1:0,creditStatus.warning).run();
+        return trpcResult({ success: true, requiresCode: false, found: records2.length, importedClients: importedClients2, importedPolicies: importedPolicies2, updatedPolicies: updatedPolicies2, creditsUpdated:creditStatus.updated, warning:creditStatus.warning });
       }
       if (!login) throw new Error("N\xE3o foi poss\xEDvel iniciar a sess\xE3o");
       if (login.requiresCode) {
@@ -57401,7 +57404,7 @@ Affinity Financial Consulting`,
       await env.DB.prepare(
         "UPDATE agentFiveRingsConnections SET status='connected',encryptedChallenge=NULL,encryptedSession=?,lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
       ).bind(encryptedSession, owner).run();
-      await syncPolicyLeadLinks(env,owner);await markPortalFiveRingsSync(env,owner);
+      await syncPolicyLeadLinks(env,owner);await markPortalFiveRingsSync(env,owner);await env.DB.prepare('CREATE TABLE IF NOT EXISTS fiveRingsImportSummaries(owner TEXT PRIMARY KEY,found INTEGER,clients INTEGER,policies INTEGER,updated INTEGER,creditsUpdated INTEGER,warning TEXT,completedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();await env.DB.prepare('INSERT INTO fiveRingsImportSummaries(owner,found,clients,policies,updated,creditsUpdated,warning) VALUES(?,?,?,?,?,?,?) ON CONFLICT(owner) DO UPDATE SET found=excluded.found,clients=excluded.clients,policies=excluded.policies,updated=excluded.updated,creditsUpdated=excluded.creditsUpdated,warning=excluded.warning,completedAt=CURRENT_TIMESTAMP').bind(owner,records2.length,importedClients2,importedPolicies2,updatedPolicies2,creditStatus.updated?1:0,creditStatus.warning).run();
       return trpcResult({ success: true, requiresCode: false, found: records.length, importedClients, importedPolicies, updatedPolicies });
     } catch (error) {
       await finishBrowserChunk(env,browserClaim,false);

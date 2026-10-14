@@ -44,6 +44,7 @@ async function collectSnapshot(message){
  const original=tabs[0]?.url?(()=>{const u=new URL(tabs[0].url);return /^\/account\/(?:dashboard|clients|policies)(?:\/[0-9a-f-]+)?$/.test(u.pathname)?base+u.pathname:base+'/account/dashboard';})():null;
  try{
   const queries={};for(const type of ['clients','policies'])queries[type]=await nativeTableQuery(type,reader);
+  await chrome.tabs.update(reader.id,{url:base+'/account/dashboard'});await loadedTab(reader.id);
   const request={action:'collect',portalEmail:message.portalEmail,manualConfirmed:message.manualConfirmed===true,queries};
   try{return await chrome.tabs.sendMessage(reader.id,request);}
   catch(error){
@@ -51,7 +52,7 @@ async function collectSnapshot(message){
    await loadedTab(reader.id);
    return await chrome.tabs.sendMessage(reader.id,request);
   }
- }finally{if(!original)await chrome.tabs.remove(reader.id).catch(()=>{});else {const current=await chrome.tabs.get(reader.id).catch(()=>null);if(current&&['/account/clients','/account/policies'].includes(new URL(current.url).pathname))await chrome.tabs.update(reader.id,{url:original}).catch(()=>{});}}
+ }finally{if(!original)await chrome.tabs.remove(reader.id).catch(()=>{});else {const current=await chrome.tabs.get(reader.id).catch(()=>null);if(current&&['/account/clients','/account/policies','/account/dashboard'].includes(new URL(current.url).pathname))await chrome.tabs.update(reader.id,{url:original}).catch(()=>{});}}
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
  if(!sender.tab?.url?.startsWith('https://www.affinityfc.org/')||!['open','collectStart','collectStatus','ping','backgroundStart','backgroundFinish'].includes(message.action))return;
