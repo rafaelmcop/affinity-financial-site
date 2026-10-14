@@ -329,9 +329,10 @@
     }
     return sections.join("");
   }
-  async function api(name, input = {}, mutation = false) {
+  async function api(name, input = {}, mutation = false, keepalive = false) {
     const opt = {
       credentials: "include",
+      keepalive,
       headers: { "content-type": "application/json" },
     };
     let url = `/api/trpc/${name}`;
@@ -1230,7 +1231,7 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Envie diretamente pelo WhatsApp ou pelo e-mail configurado no portal.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">Revise a mensagem abaixo. WhatsApp abre no aplicativo; e-mail é enviado pelo portal após sua confirmação.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Abrir WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1258,7 +1259,7 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Envie diretamente pelo WhatsApp ou pelo e-mail configurado no portal.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">Revise a mensagem abaixo. WhatsApp abre no aplicativo; e-mail é enviado pelo portal após sua confirmação.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Abrir WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1284,16 +1285,22 @@
   }
   function wireDirectShare(overlay, row, options) {
     const area=overlay.querySelector(options.textarea),whatsapp=overlay.querySelector('[data-whatsapp]'),email=overlay.querySelector('[data-email]');
+    area.setAttribute('aria-label','Mensagem para o cliente');whatsapp.textContent='Abrir WhatsApp';
     const feedback=document.createElement('p');feedback.setAttribute('role','status');feedback.setAttribute('aria-live','polite');feedback.style.cssText='padding:12px;border-radius:8px;margin:12px 0;font-weight:600';feedback.hidden=true;overlay.querySelector('.card').append(feedback);
     function tell(message,error=false){feedback.hidden=false;feedback.textContent=message;feedback.setAttribute('role',error?'alert':'status');feedback.style.background=error?'#fff0ed':'#eaf4f8';feedback.style.color=error?'#8b1e14':'#173348';}
-    area.addEventListener('input',()=>{delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';delete whatsapp.dataset.preparedFor;delete whatsapp.dataset.url;whatsapp.textContent='Enviar pelo WhatsApp';});
+    area.addEventListener('input',()=>{delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';});
     whatsapp.onclick=async()=>{
       const number=whatsappNumber(row.clientPhone);
       if(!/^[0-9]{10,15}$/.test(number)){tell('Cadastre um telefone válido na aplicação antes de preparar o WhatsApp.',true);return;}
       if(!area.value.trim()){tell('Preencha a mensagem antes de continuar.',true);return;}
-      const fingerprint=JSON.stringify([number,area.value]);if(whatsapp.dataset.preparedFor===fingerprint&&whatsapp.dataset.url){location.href=whatsapp.dataset.url;tell('Confirme o envio no aplicativo WhatsApp. Se ele não abriu, use Copiar mensagem.');return;}whatsapp.disabled=true;tell('Preparando a mensagem no aplicativo WhatsApp…');
-      try{const {prepareWhatsApp}=await import('/portal-interactions.js?v=2');whatsapp.dataset.url=await prepareWhatsApp({applicationId:row.id,phone:number,text:area.value});whatsapp.dataset.preparedFor=fingerprint;whatsapp.textContent='Abrir mensagem no WhatsApp';tell('Mensagem preparada. Clique em Abrir mensagem no WhatsApp e confirme o envio no aplicativo.');}
-      catch(error){tell(error.message||'Não foi possível abrir o WhatsApp.',true);}finally{whatsapp.disabled=false;}
+      const input={applicationId:row.id,phone:number,text:area.value,channel:'whatsapp',requestId:crypto.randomUUID()};
+      // Start the audit request, but navigate during the original click so the
+      // browser retains user activation for the WhatsApp protocol handler.
+      const recorded=api('agent.logPortalInteraction',input,true,new TextEncoder().encode(JSON.stringify(input)).length<60000);
+      tell('Abrindo o WhatsApp com a mensagem pronta. Revise e toque em Enviar no aplicativo. O envio não é automático.');
+      location.href='whatsapp://send?phone='+number+'&text='+encodeURIComponent(area.value);
+      try{await recorded;}catch(error){tell('O WhatsApp foi solicitado, mas não foi possível registrar a ação no histórico: '+(error.message||'tente novamente mais tarde'),true);}
+
     };
     email.onclick=async()=>{
       const recipient=String(row.clientEmail||'').trim();
