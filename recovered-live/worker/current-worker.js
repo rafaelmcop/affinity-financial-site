@@ -1,3 +1,4 @@
+import {copySettings,copyRecipients,sendMeetingCopies} from './meeting-copy.js';
 import {Buffer as AssistantMailBuffer} from 'node:buffer';
 import {provisionAssistantEmail,receiveAssistantEmail} from './assistant-communications.js';
 import {sendCorporateEmail,corporateFromEmail} from './corporate-email.js';
@@ -55586,6 +55587,7 @@ Detalhes: ${details}` : ""}`;
     await env.DB.prepare("INSERT INTO serviceFeedbackInvites (agentEmail,meetingId,clientName,clientEmail,token) VALUES (?,?,?,?,?)").bind(adminEmail.toLowerCase(), meetingId || null, clientName || null, clientEmail || null, token).run();
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/feedback-atendimento.html?token=${token}` });
   }
+  if(name==='agent.getMeetingCopySettings'||name==='agent.saveMeetingCopySettings'){try{return trpcResult(await copySettings(env,adminEmail.toLowerCase(),name==='agent.saveMeetingCopySettings'?input:undefined));}catch(error){return trpcError(error.message);}}
   if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail" || name === "agent.sendMeetingWhatsapp" || name === "agent.openMeetingClient") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), meetingId = Number(input.meetingId || 0);
@@ -55598,6 +55600,7 @@ Detalhes: ${details}` : ""}`;
     if (!meeting) return trpcError("Compromisso n\xE3o encontrado", "NOT_FOUND", 404);
     const sendMeetingEmail = name === "agent.sendMeetingEmail",sendMeetingWhatsapp=name==="agent.sendMeetingWhatsapp";
     if((sendMeetingEmail||sendMeetingWhatsapp)&&!await hasFeature(env,owner,sendMeetingWhatsapp?'whatsapp':'email'))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
+    if(input.jointSend){try{if(template!=='Primeira chamada')throw Error('Envio conjunto disponível apenas na primeira chamada.');const recipients=copyRecipients(input.jointSend);if(recipients.some(r=>r.selected)&&!await hasFeature(env,owner,'whatsapp'))throw Error('WhatsApp aguarda liberação pelo Admin.');}catch(error){return trpcError(error.message);}}
     let attachments=[];
     if(sendMeetingEmail||sendMeetingWhatsapp){try{attachments=parseMailAttachments(input.attachments);if(sendMeetingWhatsapp){for(const file of attachments){const ext=file.filename.split('.').pop().toLowerCase(),types={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',xls:'application/vnd.ms-excel'};if(!types[ext])throw Error('Para WhatsApp use PDF, imagens ou planilhas.');file.contentType=types[ext];}}}catch(e){return trpcError(e.message);}}
     if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso n\xE3o possui e-mail v\xE1lido");
@@ -55621,12 +55624,13 @@ Detalhes: ${details}` : ""}`;
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
       const subject = String(input.subject || "Seu atendimento \u2014 Affinity Financial Consulting").trim().slice(0, 300);
       let sent;
-      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{to:String(meeting.inviteeEmail),subject,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
+      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{to:String(meeting.inviteeEmail),subject,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
       await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message+(attachments.length?"\nAnexos: "+attachments.map(file=>file.filename).join(", "):""), String(config.fromEmail), String(meeting.inviteeEmail)).run();
     }
-    if(sendMeetingWhatsapp){try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'whatsapp'},attachments);if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true});try{await syncWhatsappAudit(env,owner,{id:clientId,phone:meeting.inviteePhone});}catch{console.error('whatsapp_send_audit_pending');}}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}}
+    if(sendMeetingWhatsapp){try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'whatsapp'},attachments);if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});try{await syncWhatsappAudit(env,owner,{id:clientId,phone:meeting.inviteePhone});}catch{console.error('whatsapp_send_audit_pending');}}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}}
     await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : sendMeetingWhatsapp?'whatsapp':channel, `${template}\n${message}${attachments.length?'\nAnexos: '+attachments.map(f=>f.filename).join(', '):''}`, owner).run();
-    return trpcResult({ success: true, clientId });
+    const jointResults=(sendMeetingEmail||sendMeetingWhatsapp)?await sendMeetingCopies(env,owner,{...meeting,clientId},input):[];
+    return trpcResult({ success: true, clientId,jointResults });
   }
   if (name === "admin.deleteApplication") {
     if (!adminAccess.isMaster) return trpcError("Somente o administrador mestre pode excluir aplica\xE7\xF5es", "FORBIDDEN", 403);
