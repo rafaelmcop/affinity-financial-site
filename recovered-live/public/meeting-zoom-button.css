@@ -2,3 +2,7 @@ html[data-agent-theme] body a.meeting-zoom-button,html body a.meeting-zoom-butto
 html body a.meeting-zoom-button:hover{background:#0848ad!important;color:#fff!important}
 html body a.meeting-zoom-button:focus-visible{outline:3px solid #2563eb;outline-offset:3px}
 .meeting-zoom-icon{display:inline-block;width:26px;height:26px;flex-shrink:0;border-radius:7px;background-image:url('/message-icons/zoom.png');background-size:auto 155%;background-position:98% center;background-repeat:no-repeat}
+
+html[data-agent-theme] body a.meeting-application-button,html body a.meeting-application-button{display:inline-flex;align-items:center;background:#166534!important;color:#fff!important;border:1px solid #14532d!important;font-weight:750;text-decoration:none!important}
+html body a.meeting-application-button:hover{background:#14532d!important;color:#fff!important}
+html body a.meeting-application-button:focus-visible{outline:3px solid #22c55e;outline-offset:3px}
