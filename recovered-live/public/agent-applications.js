@@ -1283,44 +1283,27 @@
     return number;
   }
   function wireDirectShare(overlay, row, options) {
-    const area = overlay.querySelector(options.textarea);
-    const whatsapp = overlay.querySelector("[data-whatsapp]");
-    const email = overlay.querySelector("[data-email]");
-    whatsapp.onclick = async () => {
-      const number = whatsappNumber(row.clientPhone);
-      if (!number) {
-        notice("Cadastre o telefone da cliente antes de enviar pelo WhatsApp.", true);
-        return;
-      }
-      try { const {openWhatsApp}=await import("/portal-interactions.js?v=1");await openWhatsApp({applicationId:row.id,phone:number,text:area.value}); } catch(error){notice(error.message,true);}
+    const area=overlay.querySelector(options.textarea),whatsapp=overlay.querySelector('[data-whatsapp]'),email=overlay.querySelector('[data-email]');
+    const feedback=document.createElement('p');feedback.setAttribute('role','status');feedback.setAttribute('aria-live','polite');feedback.style.cssText='padding:12px;border-radius:8px;margin:12px 0;font-weight:600';feedback.hidden=true;overlay.querySelector('.card').append(feedback);
+    function tell(message,error=false){feedback.hidden=false;feedback.textContent=message;feedback.setAttribute('role',error?'alert':'status');feedback.style.background=error?'#fff0ed':'#eaf4f8';feedback.style.color=error?'#8b1e14':'#173348';}
+    area.addEventListener('input',()=>{delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';delete whatsapp.dataset.preparedFor;delete whatsapp.dataset.url;whatsapp.textContent='Enviar pelo WhatsApp';});
+    whatsapp.onclick=async()=>{
+      const number=whatsappNumber(row.clientPhone);
+      if(!/^[0-9]{10,15}$/.test(number)){tell('Cadastre um telefone válido na aplicação antes de preparar o WhatsApp.',true);return;}
+      if(!area.value.trim()){tell('Preencha a mensagem antes de continuar.',true);return;}
+      const fingerprint=JSON.stringify([number,area.value]);if(whatsapp.dataset.preparedFor===fingerprint&&whatsapp.dataset.url){location.href=whatsapp.dataset.url;tell('Confirme o envio no aplicativo WhatsApp. Se ele não abriu, use Copiar mensagem.');return;}whatsapp.disabled=true;tell('Preparando a mensagem no aplicativo WhatsApp…');
+      try{const {prepareWhatsApp}=await import('/portal-interactions.js?v=2');whatsapp.dataset.url=await prepareWhatsApp({applicationId:row.id,phone:number,text:area.value});whatsapp.dataset.preparedFor=fingerprint;whatsapp.textContent='Abrir mensagem no WhatsApp';tell('Mensagem preparada. Clique em Abrir mensagem no WhatsApp e confirme o envio no aplicativo.');}
+      catch(error){tell(error.message||'Não foi possível abrir o WhatsApp.',true);}finally{whatsapp.disabled=false;}
     };
-    email.onclick = async () => {
-      const recipient = String(row.clientEmail || "").trim();
-      if (!recipient) {
-        notice("Cadastre o e-mail da cliente antes de enviar.", true);
-        return;
-      }
-      if (!confirm(`Confirmar o envio deste e-mail para ${recipient}?`)) return;
-      const original = email.textContent;
-      email.disabled = true;
-      email.textContent = "Enviando…";
-      try {
-        await api(
-          "agent.sendApplicationEmail",
-          {
-            applicationId: Number(row.id),
-            subject: options.subject,
-            body: area.value,
-          },
-          true
-        );
-        notice(`E-mail enviado para ${recipient} e registrado no histórico.`);
-        overlay.remove();
-      } catch (error) {
-        notice(error.message, true);
-        email.disabled = false;
-        email.textContent = original;
-      }
+    email.onclick=async()=>{
+      const recipient=String(row.clientEmail||'').trim();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)){tell('Cadastre um e-mail válido na aplicação antes de enviar.',true);return;}
+      if(!area.value.trim()){tell('Preencha a mensagem antes de continuar.',true);return;}
+      const confirmation=JSON.stringify([recipient,area.value]);
+      if(email.dataset.confirmedFor!==confirmation){email.dataset.confirmedFor=confirmation;email.textContent='Confirmar envio por e-mail';tell('Confira a mensagem acima. Destinatário: '+recipient+'. Clique em Confirmar envio por e-mail para enviar.');return;}
+      email.disabled=true;email.textContent='Enviando…';tell('Enviando pelo e-mail configurado no portal…');
+      try{await api('agent.sendApplicationEmail',{applicationId:Number(row.id),subject:options.subject,body:area.value},true);tell('E-mail enviado para '+recipient+' e registrado no histórico.');email.textContent='E-mail enviado';delete email.dataset.confirmedFor;}
+      catch(error){tell(error.message||'Não foi possível enviar o e-mail.',true);email.disabled=false;email.textContent='Tentar novamente';delete email.dataset.confirmedFor;}
     };
   }
   new MutationObserver(() => {
