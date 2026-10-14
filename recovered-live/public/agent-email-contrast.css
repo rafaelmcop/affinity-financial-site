@@ -11,3 +11,7 @@ html[data-agent-theme] body :is(input,textarea)::placeholder{color:var(--agent-m
 html[data-agent-theme=light] body :is(.pill.sent,.notice.ok){background:#dcfce7!important;color:#14532d!important}
 html[data-agent-theme=light] body :is(.pill.failed,.notice.error){background:#fee2e2!important;color:#881c1c!important}
 html[data-agent-theme=light] body .pill.pending{background:#fef3c7!important;color:#713f12!important}
+html[data-agent-theme] body #affinity-category-toggle>summary,
+html[data-agent-theme] body #affinity-category-menu{background:var(--agent-surface)!important;color:var(--agent-text)!important;border:1px solid var(--agent-border)!important}
+html[data-agent-theme] body #affinity-category-toggle>summary{font-weight:700}
+html[data-agent-theme] body #affinity-category-menu button{color:var(--agent-text)!important;background:var(--agent-inset)!important}
