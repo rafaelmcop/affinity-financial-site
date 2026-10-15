@@ -124,7 +124,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
       const area = document.getElementById("meeting-message");
       const getCopies=await import("/meeting-copy.js?v=2").then(m=>m.meetingCopies(api,document.getElementById("meeting-attachment-list")));
       const jointSend=()=>selectedTemplate==="Primeira chamada"?getCopies():[];
-      const copyResult=result=>result.jointResults?.length?'\nEnvio conjunto: '+result.jointResults.map(r=>r.name+': '+(r.status==='sent'?'enviado':'não confirmado; confira antes de reenviar')).join('; '):'';
+      const copyResult=result=>result.jointResults?.length?'\nEnvio conjunto: '+result.jointResults.map(r=>r.name+': '+(r.status==='sent'?'enviado':r.reason||'não confirmado; confira antes de reenviar')).join('; '):'';
       const copyNotice=()=>jointSend().length?" Também receberão pelo WhatsApp: "+jointSend().map(r=>r.name+" (+"+r.phone+")").join(", ")+".":"";
       const renderFiles=()=>{
         const list=document.getElementById('meeting-attachment-list');list.innerHTML='';

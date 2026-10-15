@@ -1,3 +1,4 @@
+import {meetingSendTransport} from './meeting-send-transport.js';
 export async function sendMeetingMessage(env,owner,meeting,input,attachments,sendEmail){
  if(input.confirmed!==true)throw Object.assign(Error('Confirme o envio antes de continuar.'),{status:400});
  const requestId=String(input.requestId||'');if(!/^[a-f0-9-]{36}$/.test(requestId))throw Object.assign(Error('Identificador de envio inválido.'),{status:400});
@@ -19,9 +20,9 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(requestId+':'+i)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,32);const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-'+hash.slice(12,16)+'-'+hash.slice(16,20)+'-'+hash.slice(20);
     const file=attachments[i],mime=file&&file.contentType;
     const body={manual:true,chat,text:i===0?input.message:'',requestId:id,...file?{media:{kind:mime.startsWith('image/')?'image':'file',mime,filename:file.filename,data:file.content}}:{}};
-    const response=await fetch(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{authorization:'Bearer '+ticket,'content-type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(60000)});const result=await response.json();if(!response.ok||result.state!=='sent')throw Error(result.error||'Não foi possível confirmar o envio do WhatsApp.');
+    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{authorization:'Bearer '+ticket,'content-type':'application/json'},body:JSON.stringify(body)});
    }
   }
   await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sent' WHERE owner=? AND requestId=?").bind(owner,requestId).run();return {alreadySent:false};
- }catch(error){await env.DB.prepare("UPDATE meetingMessageDispatches SET status='uncertain' WHERE owner=? AND requestId=?").bind(owner,requestId).run();throw error;}
+ }catch(error){await env.DB.prepare("UPDATE meetingMessageDispatches SET status=? WHERE owner=? AND requestId=?").bind(error.notSent&&!attachments.length?'not_sent':'uncertain',owner,requestId).run();throw error;}
 }
