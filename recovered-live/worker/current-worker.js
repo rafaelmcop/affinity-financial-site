@@ -1,3 +1,4 @@
+import {smtpConnectionOptions,mailFailureCode,blockMailAutomation,mailAutomationBlocked} from './mail-health.js';
 import {unresolvedDeliveryFailureSQL} from './delivery-reconciliation.js';
 import {copySettings,copyRecipients,sendMeetingCopies} from './meeting-copy.js';
 import {Buffer as AssistantMailBuffer} from 'node:buffer';
@@ -12594,9 +12595,7 @@ async function sendEmail(env, options) {
   );
   const port = Number(config.port);
   const transporter = import_nodemailer.default.createTransport({
-    host: String(config.host),
-    port,
-    secure: Number(config.secure) === 1,
+    ...smtpConnectionOptions(config),
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587
   });
@@ -12618,9 +12617,7 @@ async function sendAgentEmail(env, agentEmail, options) {
   );
   const port = Number(config.port);
   const transporter = import_nodemailer.default.createTransport({
-    host: String(config.host),
-    port,
-    secure: Number(config.secure) === 1,
+    ...smtpConnectionOptions(config),
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587
   });
@@ -56117,6 +56114,12 @@ Detalhes: ${details}` : ""}`;
     }
   }
   if(name==="agent.logSyncStatus"){if(request.method!=="POST")return trpcError("Método inválido");try{const telemetry={event:'contacts',state:['started','completed','error'].includes(input.state)?input.state:'started',count:input.count};const result=await recordSyncLog(env.DB,adminEmail.toLowerCase(),telemetry);return trpcResult(result);}catch(e){return trpcError(e.message);}}
+  if(name==='admin.verifyAgentEmailConnection'){
+    if(!adminAccess.isMaster)return trpcError('Acesso exclusivo do Admin.','FORBIDDEN',403);
+    const owner=String(input.email||'').trim().toLowerCase();if(!validEmail(owner))return trpcError('Informe o e-mail do usuário.');
+    const config=await env.DB.prepare('SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first();if(!config)return trpcError('Este usuário não configurou e-mail.');
+    try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET),transport=import_nodemailer.default.createTransport({...smtpConnectionOptions(config),auth:{user:String(config.user),pass:password}});try{await transport.verify();}finally{transport.close?.();}return trpcResult({verified:true,message:'Conexão e autenticação verificadas. Nenhum e-mail enviado. As automações pausadas continuam pausadas até revisão.'});}catch(error){return trpcResult({verified:false,code:mailFailureCode(error)||'email_verification_failed',message:'Não foi possível verificar a conexão. As automações continuam pausadas; confira a conta e a senha de aplicativo.'});}
+  }
   if(name==="admin.systemSyncLogs"){await syncLogSchema(env.DB);return trpcResult((await env.DB.prepare('SELECT * FROM systemSyncLogs ORDER BY id DESC LIMIT 200').all()).results||[]);}
   if(name==="agent.logPortalInteraction"){if(request.method!=="POST")return trpcError("Método inválido");try{return trpcResult(await recordPortalInteraction(env,adminEmail.toLowerCase(),input));}catch(e){return trpcError(e.message);}}
   if(name==="agent.birthdayAlerts"){try{const features=(await userAccess(env,adminEmail.toLowerCase())).features;if(!features.includes("policies")&&!features.includes("messages"))return trpcResult([]);return trpcResult(await birthdayAlerts(env,adminEmail.toLowerCase()));}catch(e){return trpcError(e.message);}}
@@ -57582,6 +57585,7 @@ Affinity Financial Consulting`,
     return trpcResult({ success: true });
   }
   if (name === "agent.saveEmailSettings") {
+    try{smtpConnectionOptions(input);}catch(error){return trpcError(error.message);}
     const owner = adminEmail.toLowerCase(), current = await env.DB.prepare(
       "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
     ).bind(owner).first(), clear = String(input.password ?? "").replace(/\s/g, ""), password = clear ? await encryptSmtpPassword(clear, env.JWT_SECRET) : String(current?.password ?? "");
@@ -57595,7 +57599,7 @@ Affinity Financial Consulting`,
       owner,
       String(input.host),
       Number(input.port),
-      input.secure ? 1 : 0,
+      Number(input.port)===465 ? 1 : 0,
       String(input.user),
       password,
       String(input.fromEmail),
@@ -59701,6 +59705,7 @@ async function runMessageAutomations(env) {
   ).all();
   let deliveryBudget = 20;
   for (const automation of automations.results) {
+    if(await mailAutomationBlocked(env,String(automation.agentEmail)))continue;
     const occasion = String(automation.occasion);
     const dueToday = occasion === "birthday" || occasion === "weekly_monday" && isMonday || occasion === "thanksgiving" && isThanksgiving || occasion === "christmas" && month === 12 && day === 25 || occasion === "new_year" && month === 1 && day === 1 || occasion === "monthly" && day === 1 && Number(automation.monthNumber) === month || occasion === "custom" && automation.scheduledAt && new Date(String(automation.scheduledAt)) <= now;
     const cycle=await automationCycle(env,automation,`${year}-${eastern.month}-${eastern.day}`,dueToday&&isMorningRun);
@@ -59922,6 +59927,7 @@ ${signatureLines.join("\n")}`.trim();
         escapeAutomationHtml(client.name)
       );
       try {
+        if(await mailAutomationBlocked(env,String(automation.agentEmail)))break;
         deliveryBudget -= 1;
         const sentMail = await sendAgentEmail(
           env,
@@ -59958,6 +59964,7 @@ ${signatureLines.join("\n")}`.trim();
         );
         await env.DB.batch(statements);
       } catch (error) {
+        const connectionFailure=mailFailureCode(error);if(connectionFailure)await blockMailAutomation(env,String(automation.agentEmail),connectionFailure);
         await env.DB.prepare("INSERT INTO crmDeliveryLogs (agentEmail,messageId,clientId,clientName,recipientEmail,subject,status,errorMessage) VALUES (?,?,?,?,?,?,'failed',?)").bind(String(automation.agentEmail).toLowerCase(), Number(automation.id), Number(client.id), String(client.name || "Cliente"), String(client.email || ""), personalize(automation.subject || automation.title), String(error instanceof Error ? error.message : error).slice(0, 1e3)).run();
         console.error(
           "automation_email_failed",
