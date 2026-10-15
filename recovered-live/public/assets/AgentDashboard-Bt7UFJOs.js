@@ -40,7 +40,8 @@ function H() {
   const [credits,setCredits]=k.useState(null),[creditLoading,setCreditLoading]=k.useState(true);
   async function updateCredits(refresh=false){setCreditLoading(true);try{const response=await fetch('/api/trpc/agent.fiveRingsCredits?input='+encodeURIComponent(JSON.stringify({json:{refresh}})),{credentials:'include',cache:'no-store'});const data=await response.json();if(data.error)throw Error(data.error.json?.message||'Não foi possível consultar os créditos');setCredits(data.result.data.json);}catch(error){setCredits(previous=>({...previous,error:error.message}));}finally{setCreditLoading(false);}}
   // Production counters remain hidden until the integration is ready.
-  const [, o] = w(),
+  const o = destination => window.location.assign(destination);
+  const
     r = i.agent.dashboard.useQuery(void 0, {
       staleTime: 0,
       refetchOnMount: "always",
@@ -214,7 +215,7 @@ function H() {
                                       type: "button",
                                       onClick: () =>
                                         o(
-                                          `/agentes/clientes?cliente=${t.clientId}`
+                                          `/agentes/email?clientEmailId=${t.id}`
                                         ),
                                       className: "w-full text-left",
                                       children: [
@@ -245,7 +246,7 @@ function H() {
                                           type: "button",
                                           onClick: () =>
                                             o(
-                                              `/agentes/clientes?cliente=${t.clientId}`
+                                              `/agentes/email?clientEmailId=${t.id}`
                                             ),
                                           className:
                                             "text-xs font-bold text-red-200 hover:text-white",
@@ -319,8 +320,8 @@ function H() {
                                       onClick: () =>
                                         o(
                                           t.clientId
-                                            ? `/agentes/clientes?cliente=${t.clientId}&conversa=1`
-                                            : "/agentes/apolices"
+                                            ? `/agentes/caso-pagamento?task=${t.id}`
+                                            : `/agentes/caso-pagamento?task=${t.id}`
                                         ),
                                       className: "w-full text-left",
                                       children: [
@@ -373,7 +374,7 @@ function H() {
                                             type: "button",
                                             onClick: () =>
                                               o(
-                                                `/agentes/clientes?cliente=${t.clientId}&completar=1`
+                                                `/agentes/cliente?clientId=${t.clientId}`
                                               ),
                                             className:
                                               "flex items-center gap-1.5 rounded-full border border-sky-300/25 px-3 py-1 text-xs font-semibold text-sky-200 transition hover:border-sky-300 hover:bg-sky-400/10",

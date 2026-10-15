@@ -1,3 +1,5 @@
+import {legacyPortalDestination} from './navigation-targets.js';
+import {notificationEmail} from './notification-email.js';
 import {smtpConnectionOptions,mailFailureCode,blockMailAutomation,mailAutomationBlocked,releaseFutureMailAutomation} from './mail-health.js';
 import {unresolvedDeliveryFailureSQL} from './delivery-reconciliation.js';
 import {copySettings,copyRecipients,sendMeetingCopies} from './meeting-copy.js';
@@ -56444,6 +56446,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.mailboxMessage") {
     const owner = adminEmail.toLowerCase();
+    if(input.clientEmailId){const email=await notificationEmail(env,owner,input.clientEmailId);return email?trpcResult(email):trpcError("Mensagem não encontrada nesta conta.","NOT_FOUND",404);}
     const id = Number(input.id || 0);
     const row = await env.DB.prepare("SELECT m.*,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? LIMIT 1").bind(owner, owner, id, owner).first();
     if (!row) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
@@ -60053,6 +60056,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(request.method==='GET'&&url.pathname==='/agentes/tarefas')return Response.redirect(new URL('/agentes/novo-cliente',url),302);
  const needed=/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname)?null:pageFeature(url.pathname,url.searchParams);
  if(needed&&(url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/afiliados/')||url.pathname.startsWith('/agent-')||/^\/api\/(agent|affiliate)\//.test(url.pathname))){const staff=await staffIdentity(request,env,featureAuth,url.pathname.startsWith('/afiliados/')||url.pathname.startsWith('/api/affiliate/')?'affiliate':'agent');if(staff&&!await hasFeature(env,staff.email,needed)){if(url.pathname.startsWith('/api/'))return Response.json({error:'Esta função aguarda liberação pelo Admin.'},{status:403,headers:{'cache-control':'no-store'}});return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/staff-flow.css"><main><h1>Função aguardando liberação</h1><p>O Admin ainda não liberou esta função para seu cadastro.</p><a href="'+(staff.kind==='affiliate'?'/afiliados/dashboard':'/agentes/dashboard')+'">Voltar ao início</a></main></html>',{status:403,headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});}}
+ if(request.method==='GET'){const destination=legacyPortalDestination(url);if(destination)return Response.redirect(new URL(destination,url),302);}
  const calendarPages=new Set(['/agentes/agenda','/agentes/compromisso','/agent-calendar.html','/agent-meeting-detail','/agent-meeting-detail.html']);
  if(request.method==='GET'&&calendarPages.has(url.pathname)){const staff=await staffIdentity(request,env,featureAuth,'agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);await ensureCalendlyTables(env);const linked=await env.DB.prepare("SELECT 1 FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND trim(coalesce(encryptedToken,''))<>''").bind(staff.email.toLowerCase()).first();if(!linked)return Response.redirect(new URL('/agentes/configuracoes-agenda',url),302);}
  const staffPage=request.method==='GET'&&!url.pathname.endsWith('.js')&&!url.pathname.endsWith('.css')&&((url.pathname.startsWith('/agentes/')&&!['/agentes/login','/agentes/registrar','/agentes/inicio','/agentes/configuracoes'].includes(url.pathname))||url.pathname.startsWith('/agent-')||['/afiliados/dashboard'].includes(url.pathname));
