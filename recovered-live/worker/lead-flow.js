@@ -111,7 +111,7 @@ async function leadFlowAttempt(request,env,auth){
  const onboard=['/afiliados/inicio','/agentes/inicio'].includes(path),queue=path==='/agentes/fila-leads',marketing=path==='/agentes/obrigacoes-marketing';
  if(!admin&&!onboard&&!queue&&!marketing&&!/^\/api\/(agent|affiliate)\/(onboarding|contact-import|lead-queue|marketing)\//.test(path))return null;
  try{
- const identity=admin?await adminIdentity(request,env,auth):await staffIdentity(request,env,auth,kind);if(!identity)return json({error:'Entre com uma conta aprovada para acessar.'},401);
+ const identity=admin?await adminIdentity(request,env,auth):await staffIdentity(request,env,auth,kind);if(!identity){if(request.method==='GET'&&(onboard||queue||marketing||path==='/admin/central-leads'))return Response.redirect(new URL(admin?'/admin/login':kind==='affiliate'?'/afiliados/login':'/agentes/login',url),302);return json({error:'Entre com uma conta aprovada para acessar.'},401);}
  if(request.method==='GET'&&(onboard||queue||marketing||path==='/admin/central-leads'))return env.ASSETS.fetch(new Request(new URL(admin?'/central-leads-admin.html':marketing?'/marketing-obligations.html':queue?(url.searchParams.get('view')==='crm'?'/mobile-crm.html':'/central-leads-agent.html'):'/staff-onboarding.html',url),request));
  phase='schema';await leadSchema(env);const action=path.split('/').at(-1),input=request.method==='POST'?await inputJSON(request,url):{};
  if(!['GET','POST'].includes(request.method))return json({error:'Ação indisponível.'},405);
