@@ -14,7 +14,7 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
   if(channel==='email')await sendEmail(attachments);
   else{
    const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');const encoder=new TextEncoder();
-   const payload=encoded(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+120})));const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);const ticket=payload+'.'+encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));
+   const payload=encoded(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+60})));const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);const ticket=payload+'.'+encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));
    for(let i=0;i<Math.max(1,attachments.length);i++){
     if(i)await new Promise(r=>setTimeout(r,3100));
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(requestId+':'+i)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,32);const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-'+hash.slice(12,16)+'-'+hash.slice(16,20)+'-'+hash.slice(20);
