@@ -122,8 +122,8 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
         } catch (error) { alert(error.message); this.disabled = false; }
       };
       const area = document.getElementById("meeting-message");
-      const getCopies=await import("/meeting-copy.js?v=2").then(m=>m.meetingCopies(api,document.getElementById("meeting-attachment-list")));
-      const jointSend=()=>selectedTemplate==="Primeira chamada"?getCopies():[];
+      const getCopies=await import("/meeting-copy.js?v=3").then(m=>m.meetingCopies(api,document.getElementById("meeting-attachment-list")));
+      const jointSend=()=>["Primeira chamada","Segunda chamada"].includes(selectedTemplate)?getCopies():[];
       const copyResult=result=>result.jointResults?.length?'\nEnvio conjunto: '+result.jointResults.map(r=>r.name+': '+(r.status==='sent'?'enviado':r.reason||'não confirmado; confira antes de reenviar')).join('; '):'';
       const copyNotice=()=>jointSend().length?" Também receberão pelo WhatsApp: "+jointSend().map(r=>r.name+" (+"+r.phone+")").join(", ")+".":"";
       const renderFiles=()=>{
@@ -163,7 +163,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
       const whatsappButton = document.getElementById("send-whatsapp");
       if (whatsappButton) whatsappButton.disabled = !whatsapp;
       const selectTemplate=(id,label,message)=>{
-        selectedTemplate=label;area.value=message;
+        selectedTemplate=label;getCopies.setTemplate(label);area.value=message;
         document.querySelectorAll('[id^="template-"]').forEach(button=>button.classList.toggle('primary',button.id===id));
       };
       const choose = (id,label,message)=>document.getElementById(id)?.addEventListener('click',()=>selectTemplate(id,label,message));
@@ -177,7 +177,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
         try {
           const invite = await api("agent.createServiceFeedbackInvite", { meetingId, clientName: meeting.inviteeName || "Cliente", clientEmail: email }, "POST");
           document.querySelectorAll('[id^="template-"]').forEach(button=>button.classList.toggle('primary',button.id==='template-feedback'));
-          selectedTemplate = "Avaliação";
+          selectedTemplate = "Avaliação";getCopies.setTemplate(selectedTemplate);
           area.value = `Olá, ${firstName}! Tudo bem?\n\nObrigado por conversar comigo. Sua opinião é muito importante para que eu possa melhorar cada vez mais meu atendimento.\n\nPreparei um formulário rápido para você me contar como foi nossa conversa, se ficou alguma dúvida e o que gostaria de analisar melhor antes de tomar uma decisão:\n\n${invite.link}\n\nPode responder com total sinceridade. Ficarei à disposição para esclarecer qualquer dúvida.\n\n${personalSignature}`;
         } catch (error) {
           alert(error.message || "Não foi possível criar o link de avaliação.");

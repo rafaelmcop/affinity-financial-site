@@ -2,7 +2,7 @@ import {legacyPortalDestination} from './navigation-targets.js';
 import {notificationEmail} from './notification-email.js';
 import {smtpConnectionOptions,mailFailureCode,blockMailAutomation,mailAutomationBlocked,releaseFutureMailAutomation} from './mail-health.js';
 import {unresolvedDeliveryFailureSQL} from './delivery-reconciliation.js';
-import {copySettings,copyRecipients,sendMeetingCopies} from './meeting-copy.js';
+import {copySettings,copyRecipients,sendMeetingCopies,allowsMeetingCopies} from './meeting-copy.js';
 import {Buffer as AssistantMailBuffer} from 'node:buffer';
 import {provisionAssistantEmail,receiveAssistantEmail} from './assistant-communications.js';
 import {sendCorporateEmail,corporateFromEmail} from './corporate-email.js';
@@ -55601,7 +55601,8 @@ Detalhes: ${details}` : ""}`;
     if (!meeting) return trpcError("Compromisso n\xE3o encontrado", "NOT_FOUND", 404);
     const sendMeetingEmail = name === "agent.sendMeetingEmail",sendMeetingWhatsapp=name==="agent.sendMeetingWhatsapp";
     if((sendMeetingEmail||sendMeetingWhatsapp)&&!await hasFeature(env,owner,sendMeetingWhatsapp?'whatsapp':'email'))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
-    if(input.jointSend){try{if(template!=='Primeira chamada')throw Error('Envio conjunto disponível apenas na primeira chamada.');const recipients=copyRecipients(input.jointSend);if(recipients.some(r=>r.selected)&&!await hasFeature(env,owner,'whatsapp'))throw Error('WhatsApp aguarda liberação pelo Admin.');}catch(error){return trpcError(error.message);}}
+    if(!allowsMeetingCopies(template))input.jointSend=undefined;
+    if(input.jointSend){try{const recipients=copyRecipients(input.jointSend);if(recipients.some(r=>r.selected)&&!await hasFeature(env,owner,'whatsapp'))throw Error('WhatsApp aguarda liberação pelo Admin.');}catch(error){return trpcError(error.message);}}
     let attachments=[];
     if(sendMeetingEmail||sendMeetingWhatsapp){try{attachments=parseMailAttachments(input.attachments);if(sendMeetingWhatsapp){for(const file of attachments){const ext=file.filename.split('.').pop().toLowerCase(),types={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',xls:'application/vnd.ms-excel'};if(!types[ext])throw Error('Para WhatsApp use PDF, imagens ou planilhas.');file.contentType=types[ext];}}}catch(e){return trpcError(e.message);}}
     if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso n\xE3o possui e-mail v\xE1lido");
