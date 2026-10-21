@@ -1,3 +1,4 @@
+import {codeRecipients} from './assistant-access-codes.js';
 import {corporateEmailSchema,corporateMessage} from './corporate-email.js';
 import {boundedJson} from './security-boundary.js';
 const DOMAIN='team.affinityfc.org',ZONE='571fbc6e04919396d68b456b38ebead6',ACCOUNT='d00b4fce2ba60918d8859e92dd98cf9e';
@@ -50,9 +51,10 @@ export async function assistantCommunicationsRoute(request,env,assistant,auth){
  if(path==='/assistentes/email'){const response=await env.ASSETS.fetch(new Request(new URL('/assistant-email.html',url),request));const headers=new Headers(response.headers);headers.set('x-affinity-assistant-view','1');return new Response(response.body,{status:response.status,headers});}
  if(!path.startsWith('/api/assistants/communications/'))return null;
  await communicationsSchema(env);
+ if(path.endsWith('/sync-access-codes')&&request.method==='POST'){if(!assistant.permissions?.portal_codes?.includes('view'))return json({error:'O agente precisa liberar o recebimento de códigos.'},403);try{return json(await auth.pollAccessCodes(env,assistant.owner));}catch{return json({error:'Não foi possível consultar os códigos agora. Tente atualizar novamente.'},503);}}
  if(path.endsWith('/setup')&&request.method==='POST')return json(await provisionAssistantEmail(env,assistant,auth));
  const config=await env.DB.prepare('SELECT address,state,error FROM assistantCommunications WHERE assistantId=?').bind(assistant.id).first();
- if(path.endsWith('/mailbox')&&request.method==='GET'){const rows=(await env.DB.prepare('SELECT id,direction,fromEmail,toEmail,subject,body,sentAt FROM assistantMailbox WHERE assistantId=? ORDER BY id DESC LIMIT 200').bind(assistant.id).all()).results;return json({config,messages:rows});}
+ if(path.endsWith('/mailbox')&&request.method==='GET'){const rows=(await env.DB.prepare('SELECT id,direction,externalId,fromEmail,toEmail,subject,body,sentAt FROM assistantMailbox WHERE assistantId=? ORDER BY id DESC LIMIT 200').bind(assistant.id).all()).results;const granted=new Set();for(const link of assistant.links||[]){const recipients=await codeRecipients(env,link.owner);if(recipients.some(r=>Number(r.id)===Number(assistant.id)))granted.add(link.owner);}const messages=rows.filter(row=>!row.externalId.startsWith('access-code|')||(granted.has(row.externalId.split('|')[1])&&Date.now()-Date.parse(row.sentAt+(/[zZ]|[+-]\d\d:\d\d$/.test(row.sentAt)?'':'Z'))<600000)).map(row=>({...row,accessCode:row.externalId.startsWith('access-code|')}));return json({config,messages,canSyncCodes:granted.has(assistant.owner)});}
  if(path.endsWith('/send')&&request.method==='POST'){
   if(config?.state!=='ready')return json({error:'O e-mail corporativo ainda está sendo preparado.'},409);
   const input=await boundedJson(request,100000),to=String(input.to||'').trim().toLowerCase(),subject=String(input.subject||'').trim(),body=String(input.body||'').trim();
