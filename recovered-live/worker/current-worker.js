@@ -1,3 +1,4 @@
+import {readableMailboxBody} from './mailbox-body.js';
 import {renderWhatsAppPage} from './affinity-agent-whatsapp-portal.js';
 import {paymentCaseInteractionsSQL} from './payment-case-interactions.js';
 import {legacyPortalDestination} from './navigation-targets.js';
@@ -50916,7 +50917,7 @@ __export(icloud_email_exports, {
 });
 async function handlePaymentNotice(env, owner, config, uid, parsed) {
   const subject = String(parsed.subject || "Aviso sobre pagamento da ap\xF3lice");
-  const rawBody = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
+  const rawBody = readableMailboxBody(parsed);
   const kind = classifyPaymentNotice(subject, rawBody);
   if (!kind) return false;
   if (kind !== "attention") return false;
@@ -51193,7 +51194,7 @@ async function syncIcloudInbox(env, agentEmail) {
         }
       }
       const externalId = parsed.messageId || `icloud:${owner}:${uid}`;
-      const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
+      const body = readableMailboxBody(parsed);
       if (!body) continue;
       const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
       if (!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
@@ -51269,7 +51270,7 @@ async function syncIcloudInbox(env, agentEmail) {
         const parsed = await (0, import_mailparser.simpleParser)(Buffer2.from(source));
         const recipient = cleanAddress(String(parsed.to?.value?.[0]?.address || parsed.to?.text || ""));
         if (!recipient) continue;
-        const body = cleanReplyBody(String(parsed.text || "")).slice(0, 5e4);
+        const body = readableMailboxBody(parsed);
         if (!body) continue;
         const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
         const customer = customerByEmail.get(recipient);
@@ -55966,6 +55967,7 @@ Detalhes: ${details}` : ""}`;
     if (!task) return trpcError("Pend\xEAncia de pagamento n\xE3o encontrada", "NOT_FOUND", 404);
     const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
     const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
+        if(mailbox)mailbox.body=readableMailboxBody(mailbox);
     const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     const policyRows = policies?.results || [];
     const extractedPolicies = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
@@ -56412,6 +56414,7 @@ Detalhes: ${details}` : ""}`;
     const id = Number(input.id || 0);
     const row = await env.DB.prepare("SELECT m.*,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? LIMIT 1").bind(owner, owner, id, owner).first();
     if (!row) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
+    row.body=readableMailboxBody(row);
     return trpcResult({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null });
   }
   if (name === "agent.mailboxFolders") {
@@ -59215,6 +59218,7 @@ var cloudflare_staging_default = {
         if (!task) return secureResponse(jsonResponse({ error: "Pend\xEAncia de pagamento n\xE3o encontrada" }, 404), { privateData: true });
         const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
         const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
+        if(mailbox)mailbox.body=readableMailboxBody(mailbox);
         const extracted = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
         const candidates = [mailbox?.policyNumber, ...extracted].filter(Boolean);
         const policyRows = (await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all()).results || [];
