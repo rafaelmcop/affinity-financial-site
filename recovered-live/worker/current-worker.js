@@ -1,3 +1,4 @@
+import {completePaymentCase} from './payment-case-complete.js';
 import {readableMailboxBody} from './mailbox-body.js';
 import {renderWhatsAppPage} from './affinity-agent-whatsapp-portal.js';
 import {paymentCaseInteractionsSQL} from './payment-case-interactions.js';
@@ -55982,6 +55983,7 @@ Detalhes: ${details}` : ""}`;
       client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''));
     }
     const resolvedClientId = Number(client?.id || clientId || policy?.clientId || 0);
+    policy=await completePaymentCase(env,owner,policy,rawPaymentPolicies(String(mailbox?.subject||""),String(mailbox?.body||"")),extractPaymentAmount(String(mailbox?.subject||""),String(mailbox?.body||"")),mailbox?.id,taskId);
     const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
     const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
     const candidateName = String(client?.name || policy?.clientName || extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || "")) || "").trim();
@@ -59236,11 +59238,7 @@ var cloudflare_staging_default = {
           client = await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first();
         }
         const paymentAmount = extractPaymentAmount(String(mailbox?.subject || ""), String(mailbox?.body || ""));
-        if (policy && paymentAmount > 0) {
-          const annualTarget = Math.round(paymentAmount * 12 * 100) / 100;
-          await env.DB.prepare("UPDATE agentPolicies SET premiumAmount=CASE WHEN coalesce(premiumAmount,0)<=0 THEN ? ELSE premiumAmount END,premiumFrequency=CASE WHEN trim(coalesce(premiumFrequency,''))='' THEN 'monthly' ELSE premiumFrequency END,targetPremium=CASE WHEN coalesce(targetPremium,0)<=0 THEN ? ELSE targetPremium END,points=CASE WHEN coalesce(points,0)<=0 THEN ? ELSE points END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(paymentAmount, annualTarget, Math.round(annualTarget), Number(policy.id), owner).run();
-          policy = { ...policy, premiumAmount: Number(policy.premiumAmount || 0) > 0 ? policy.premiumAmount : paymentAmount, premiumFrequency: policy.premiumFrequency || "monthly", targetPremium: Number(policy.targetPremium || 0) > 0 ? policy.targetPremium : annualTarget, points: Number(policy.points || 0) > 0 ? policy.points : Math.round(annualTarget) };
-        }
+        policy=await completePaymentCase(env,owner,policy,rawPaymentPolicies(String(mailbox?.subject||""),String(mailbox?.body||"")),paymentAmount,mailbox?.id,taskId);
         const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
         const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
         const candidateName = String(client?.name || policy?.clientName || extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || "")) || "").trim();
