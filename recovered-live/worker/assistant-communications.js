@@ -1,3 +1,4 @@
+import {renderAssistantWhatsAppPage} from './assistant-whatsapp-page.js';
 import {notificationResolution,recentNotificationActions} from './notification-actions.js';
 import {codeRecipients} from './assistant-access-codes.js';
 import {corporateEmailSchema,corporateMessage} from './corporate-email.js';
@@ -44,10 +45,13 @@ export async function receiveAssistantEmail(message,env,parse){
 }
 export async function assistantCommunicationsRoute(request,env,assistant,auth){
  const url=new URL(request.url),path=url.pathname;
- if(path==='/assistentes/whatsapp'||path.startsWith('/api/assistants/communications/whatsapp/')){
-  const target=new URL(path==='/assistentes/whatsapp'?'/agentes/whatsapp':'/api/agent/whatsapp/'+path.split('/').at(-1),url);target.search=url.search;
-  const forwarded=new Request(target,request);const response=await auth.whatsapp(forwarded,env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}})});
-  if(path==='/assistentes/whatsapp'){const text=(await response.text()).replaceAll('/api/agent/whatsapp/','/api/assistants/communications/whatsapp/').replaceAll('/agentes/configuracoes?view=settings','#assistant-whatsapp-connect').replace('<body>','<body><section id="assistant-whatsapp-connect" style="padding:16px;background:#edf5fb;color:#142b3c;border-bottom:1px solid #9fb8cb"><strong>Meu WhatsApp · conexão pessoal da assistente</strong><p id="own-wa-status">Conferindo conexão…</p><button id="own-wa-connect" type="button" style="padding:12px 18px;background:#166534;color:white;border:1px solid #14532d;border-radius:8px;font-weight:750">Gerar QR Code do meu WhatsApp</button><div id="own-wa-qr"></div><p id="own-wa-error" role="alert"></p></section>').replace('</body>','<script src="/assistant-whatsapp.js?v=3"></script></body>');return new Response(text,{status:response.status,headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store','x-affinity-assistant-view':'1'}});}return response;
+ if(path==='/assistentes/whatsapp'){
+  let theme='light';try{theme=(await auth.appearance?.(assistant.owner))?.theme||'light';}catch{}
+  return new Response(renderAssistantWhatsAppPage(theme),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store','x-affinity-assistant-view':'1'}});
+ }
+ if(path.startsWith('/api/assistants/communications/whatsapp/')){
+  const target=new URL('/api/agent/whatsapp/'+path.split('/').at(-1),url);target.search=url.search;
+  return auth.whatsapp(new Request(target,request),env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}})});
  }
  if(path==='/assistentes/email'){const response=await env.ASSETS.fetch(new Request(new URL('/assistant-email.html',url),request));const headers=new Headers(response.headers);headers.set('x-affinity-assistant-view','1');return new Response(response.body,{status:response.status,headers});}
  if(!path.startsWith('/api/assistants/communications/'))return null;

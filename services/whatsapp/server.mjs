@@ -1,3 +1,4 @@
+import {sessionRecovery} from './session-recovery.mjs';
 import {visibilitySchema,hideMessage,restoreMessages} from './message-visibility.mjs';
 import {auditMessages} from './audit.mjs';
 import {sendAllowed} from './send-permission.mjs';
@@ -77,8 +78,8 @@ async function connect(owner){
   if(sessions.has(owner))return sessions.get(owner);
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
   const key=createHash('sha256').update(owner).digest('hex');
-  const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
-  const s={client,lastSeen:Date.now(),state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
+  const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,timeout:90000,protocolTimeout:120000,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
+  const s={client,startedAt:Date.now(),lastSeen:Date.now(),state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
   db.prepare('INSERT OR IGNORE INTO session_owners(owner) VALUES(?)').run(owner);
   client.on('qr',qr=>{s.state='qr';s.qr=qr;s.qrAt=Date.now();});
   client.on('authenticated',()=>{s.state='authenticating';s.qr=null;});
@@ -214,10 +215,11 @@ const server=http.createServer(async(req,res)=>{
   }catch{return reply({error:'A conexão não respondeu. Confira o status e tente novamente.'},503);}
 });
 server.requestTimeout=65000;
+const recovery=sessionRecovery({owners:()=>db.prepare('SELECT owner FROM session_owners').all().map(row=>row.owner).filter(owner=>!affiliateOwner(owner)).slice(0,maxSessions),sessions,connect,onError:()=>console.error('whatsapp_session_restore_failed')});
 server.listen(Number(process.env.PORT||3088),process.env.HOST||'127.0.0.1',()=>{
-  console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port}));
-  for(const {owner} of db.prepare('SELECT owner FROM session_owners').all().filter(row=>!affiliateOwner(row.owner)).slice(0,maxSessions))void connect(owner).catch(()=>console.error('whatsapp_session_restore_failed'));
+ console.log(JSON.stringify({event:'whatsapp_bridge_started',port:server.address().port}));void recovery.tick();
 });
+const recoveryTimer=setInterval(()=>{void recovery.tick().catch(()=>console.error('whatsapp_recovery_failed'));},30000);recoveryTimer.unref();
 const affiliateCleanup=setInterval(()=>{for(const [owner,s] of sessions){if(!affiliateOwner(owner)||s.state==='disconnecting'||Date.now()-(s.lastSeen||0)<900000)continue;s.state='disconnecting';void (async()=>{try{await s.client.logout();}catch{}await closeClient(s.client);sessions.delete(owner);db.prepare('DELETE FROM session_owners WHERE owner=?').run(owner);})().catch(()=>console.error('affiliate_session_cleanup_failed'));}},60000);affiliateCleanup.unref();
-async function stop(){server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
+async function stop(){recovery.stop();clearInterval(recoveryTimer);server.close();await Promise.allSettled([...sessions.values()].map(s=>closeClient(s.client)));db.close();process.exit(0);}
 process.on('SIGTERM',()=>{void stop();});process.on('SIGINT',()=>{void stop();});
