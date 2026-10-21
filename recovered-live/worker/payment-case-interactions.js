@@ -1,0 +1,3 @@
+// Sort the compound result from an outer SELECT: SQLite disallows datetime()
+// directly in ORDER BY on a UNION unless it is a result column.
+export const paymentCaseInteractionsSQL="SELECT type,content,createdAt FROM (SELECT type,content,createdAt FROM crmActivities WHERE clientId=? AND lower(createdBy)=? AND type<>'email' UNION ALL SELECT 'whatsapp',body,sentAt FROM whatsappClientAudit WHERE clientId=? AND owner=? AND direction='sent' UNION ALL SELECT channel,'Preparada no portal · envio externo não confirmado'||char(10)||body,createdAt FROM portalContactInteractions WHERE clientId=? AND owner=?) ORDER BY datetime(createdAt) DESC LIMIT 100";

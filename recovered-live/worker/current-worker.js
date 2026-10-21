@@ -1,3 +1,4 @@
+import {paymentCaseInteractionsSQL} from './payment-case-interactions.js';
 import {legacyPortalDestination} from './navigation-targets.js';
 import {notificationEmail} from './notification-email.js';
 import {smtpConnectionOptions,mailFailureCode,blockMailAutomation,mailAutomationBlocked,releaseFutureMailAutomation} from './mail-health.js';
@@ -56028,7 +56029,7 @@ Detalhes: ${details}` : ""}`;
     const preparedMessage = personalizeTemplate(settings?.paymentReturnMessage || DEFAULT_PAYMENT_RETURN_MESSAGE, candidateName || "cliente", String(agent?.name || "Seu agente Affinity"), String(agent?.phone || agent?.whatsapp || "(857) 421-8325"), String(policy?.policyNumber || policyNumber || ""));
     const history = resolvedClientId ? await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND direction='sent' AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(resolvedClientId, owner).all() : { results: [] };
     await auditSchema(env.DB);await interactionSchema(env.DB);
-    const interactions=resolvedClientId?(await env.DB.prepare("SELECT type,content,createdAt FROM crmActivities WHERE clientId=? AND lower(createdBy)=? AND type<>'email' UNION ALL SELECT 'whatsapp',body,sentAt FROM whatsappClientAudit WHERE clientId=? AND owner=? AND direction='sent' UNION ALL SELECT channel,'Preparada no portal · envio externo não confirmado'||char(10)||body,createdAt FROM portalContactInteractions WHERE clientId=? AND owner=? ORDER BY datetime(createdAt) DESC LIMIT 100").bind(resolvedClientId,owner,resolvedClientId,owner,resolvedClientId,owner).all()).results||[]:[];
+    const interactions=resolvedClientId?(await env.DB.prepare(paymentCaseInteractionsSQL).bind(resolvedClientId,owner,resolvedClientId,owner,resolvedClientId,owner).all()).results||[]:[];
     return trpcResult({
       interactions,
       task: { ...task, id: Number(task.id), clientId: resolvedClientId || null },
@@ -59286,7 +59287,7 @@ var cloudflare_staging_default = {
         const agentPhone = String(agent?.phone || agent?.whatsapp || "(857) 421-8325");
         const history = clientId ? (await env.DB.prepare("SELECT id,direction,subject,body,fromEmail,toEmail,sentAt,readAt FROM clientEmails WHERE clientId=? AND lower(agentEmail)=? AND direction='sent' AND deletedAt IS NULL AND coalesce(visibility,'client')='client' ORDER BY datetime(sentAt) DESC,id DESC LIMIT 30").bind(clientId, owner).all()).results || [] : [];
         await auditSchema(env.DB);await interactionSchema(env.DB);
-        const interactions=clientId?(await env.DB.prepare("SELECT type,content,createdAt FROM crmActivities WHERE clientId=? AND lower(createdBy)=? AND type<>'email' UNION ALL SELECT 'whatsapp',body,sentAt FROM whatsappClientAudit WHERE clientId=? AND owner=? AND direction='sent' UNION ALL SELECT channel,'Preparada no portal · envio externo não confirmado'||char(10)||body,createdAt FROM portalContactInteractions WHERE clientId=? AND owner=? ORDER BY datetime(createdAt) DESC LIMIT 100").bind(clientId,owner,clientId,owner,clientId,owner).all()).results||[]:[];
+        const interactions=clientId?(await env.DB.prepare(paymentCaseInteractionsSQL).bind(clientId,owner,clientId,owner,clientId,owner).all()).results||[]:[];
         return secureResponse(jsonResponse({
           interactions,
           task: { ...task, id: Number(task.id), clientId: clientId || null },
