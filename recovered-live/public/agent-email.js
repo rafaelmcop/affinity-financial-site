@@ -60,7 +60,7 @@
     if (!state.selected) return;
     if (state.selected.direction === 'received' && !state.selected.readAt) { await api(state.selected.legacyClientEmail?'agent.markClientEmailRead':'agent.markMailboxRead', {id:state.selected.id}, true); state.selected.readAt = new Date().toISOString(); load(false); }
     const item = state.selected;
-    const {attachmentLinks}=await import('/email-attachment-links.js?v=2');
+    const {attachmentLinks}=await import('/email-attachment-links.js?v=3');
     const visualBody=item.htmlBody?'<iframe class="email-frame" id="email-frame" sandbox="allow-popups allow-popups-to-escape-sandbox"></iframe>':`<div class="body">${escape(item.body)}</div>`;
     const deleted=Boolean(item.deletedAt),legacy=!!item.legacyClientEmail;
     const providerEmail=/national\s*life|nationallife|nlgroup|five\s*rings|fiverings|core\s*bridge|corebridge|aig\.com/i.test(`${item.fromEmail||''} ${item.subject||''}`);
