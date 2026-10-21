@@ -1,7 +1,7 @@
 import {paymentCaseIdentity} from './payment-case-identity.js';
 import {actOnNotification,notificationResolution} from './notification-actions.js';
 import {relayAccessCode,pollAccessCodes,accessCodeProvider} from './assistant-access-codes.js';
-import {completePaymentCase} from './payment-case-complete.js';
+import {completePaymentCase,linkPaymentCaseContact} from './payment-case-complete.js';
 import {readableMailboxBody} from './mailbox-body.js';
 import {renderWhatsAppPage} from './affinity-agent-whatsapp-portal.js';
 import {paymentCaseInteractionsSQL} from './payment-case-interactions.js';
@@ -55976,18 +55976,19 @@ Detalhes: ${details}` : ""}`;
         if(mailbox)mailbox.body=readableMailboxBody(mailbox);
     const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     const policyRows = policies?.results || [];
-    const extractedPolicies = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
+    const extractedPolicies = mailbox ? rawPaymentPolicies(String(mailbox.subject || ""), String(mailbox.body || "")) : [];
     const candidatePolicies = [mailbox?.policyNumber, ...extractedPolicies].map(normalizePolicyNumber).filter(Boolean);
     let policy = policyRows.find((row) => candidatePolicies.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || null;
     const policyNumber = String(policy?.policyNumber || mailbox?.policyNumber || rawPaymentPolicies(String(mailbox?.subject||""),String(mailbox?.body||""))[0] || candidatePolicies[0] || "").trim();
     const clientId = Number(task.clientId || mailbox?.clientId || policy?.clientId || 0);
-    if (!policy && clientId) policy = policyRows.find((row) => Number(row.clientId) === clientId) || null;
+    if (!policy && clientId && !candidatePolicies.length) {const linked=policyRows.filter(row=>Number(row.clientId)===clientId);if(linked.length===1)policy=linked[0];}
     let client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
     if (!client) {
       const extractedName = extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || ""));
-      client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''));
+      client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''),policyRows.map(row=>Number(row.clientId)).filter(Boolean));
     }
     const resolvedClientId = Number(client?.id || clientId || policy?.clientId || 0);
+    await linkPaymentCaseContact(env,owner,resolvedClientId,mailbox?.id,taskId);
     policy=await completePaymentCase(env,owner,policy,rawPaymentPolicies(String(mailbox?.subject||""),String(mailbox?.body||"")),extractPaymentAmount(String(mailbox?.subject||""),String(mailbox?.body||"")),mailbox?.id,taskId);
     const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
     const settings = await env.DB.prepare("SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=? LIMIT 1").bind(owner).first();
@@ -56006,7 +56007,7 @@ Detalhes: ${details}` : ""}`;
       task: { ...task, id: Number(task.id), clientId: resolvedClientId || null },
       client: client ? { ...client, id: Number(client.id) } : null,
       policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId) } : null,
-      notice: mailbox ? { id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
+      notice: mailbox ? { paymentAmount:extractPaymentAmount(String(mailbox.subject||""),String(mailbox.body||"")), id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
       candidate: { name: candidateName, email: candidateEmail, phone: candidatePhone, policyNumber: String(policy?.policyNumber || policyNumber || "") },
       prepared: { subject: preparedSubject, message: preparedMessage },
       history: (history.results || []).map((row) => ({ ...row, id: Number(row.id) }))
@@ -59230,7 +59231,7 @@ var cloudflare_staging_default = {
         const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
         const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
         if(mailbox)mailbox.body=readableMailboxBody(mailbox);
-        const extracted = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
+        const extracted = mailbox ? rawPaymentPolicies(String(mailbox.subject || ""), String(mailbox.body || "")) : [];
         const candidates = [mailbox?.policyNumber, ...extracted].filter(Boolean);
         const policyRows = (await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all()).results || [];
         let policy = policyRows.find((row) => candidates.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || null;
@@ -59238,14 +59239,15 @@ var cloudflare_staging_default = {
         let client = clientId ? await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first() : null;
         if (!client) {
           const name = extractPaymentClientName(String(mailbox?.subject || ""), String(mailbox?.body || ""));
-          client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''));
+          client=findPaymentClient((await env.DB.prepare('SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[],String(mailbox?.subject||''),String(mailbox?.body||''),policyRows.map(row=>Number(row.clientId)).filter(Boolean));
           clientId = Number(client?.id || 0);
         }
-        if (!policy && clientId) policy = policyRows.find((row) => Number(row.clientId) === clientId && candidates.some((candidate) => paymentPolicyNumbersMatch(row.policyNumber, candidate))) || policyRows.find((row) => Number(row.clientId) === clientId && String(row.status || "").toLowerCase() === "active") || null;
+        if (!policy && clientId && !candidates.length) {const linked=policyRows.filter(row=>Number(row.clientId)===clientId);if(linked.length===1)policy=linked[0];}
         if (!client && policy?.clientId) {
           clientId = Number(policy.clientId);
           client = await env.DB.prepare("SELECT * FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(clientId, owner).first();
         }
+        await linkPaymentCaseContact(env,owner,client?.id,mailbox?.id,taskId);
         const paymentAmount = extractPaymentAmount(String(mailbox?.subject || ""), String(mailbox?.body || ""));
         policy=await completePaymentCase(env,owner,policy,rawPaymentPolicies(String(mailbox?.subject||""),String(mailbox?.body||"")),paymentAmount,mailbox?.id,taskId);
         const agent = await env.DB.prepare("SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner).first();
@@ -59266,7 +59268,7 @@ var cloudflare_staging_default = {
           task: { ...task, id: Number(task.id), clientId: clientId || null },
           client: client ? { ...client, id: Number(client.id) } : null,
           policy: policy ? { ...policy, id: Number(policy.id), clientId: Number(policy.clientId || clientId || 0) || null } : null,
-          notice: mailbox ? { id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
+          notice: mailbox ? { paymentAmount:extractPaymentAmount(String(mailbox.subject||""),String(mailbox.body||"")), id: Number(mailbox.id), subject: mailbox.subject, body: mailbox.body, sentAt: mailbox.sentAt, paymentStatus: mailbox.paymentStatus, actionStatus: mailbox.actionStatus, actionDetail: mailbox.actionDetail, policyNumber: mailbox.policyNumber } : null,
           candidate: { name: candidateName, email: candidateEmail, phone: candidatePhone, policyNumber },
           prepared: {
             subject: personalizeTemplate(settings?.paymentReturnSubject || DEFAULT_PAYMENT_RETURN_SUBJECT, candidateName || "cliente", agentName, agentPhone, policyNumber),

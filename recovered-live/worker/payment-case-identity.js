@@ -8,7 +8,7 @@ export function paymentCaseIdentity(policy,client,notice){
   ||subject.match(/^Payment Returned by Bank\s*[-–:]\s*(.{3,100})$/i)?.[1]
   ||body.match(/payment attempted for\s+(.{3,100}?)\s+on\s+\d{1,2}\/\d{1,2}\/\d{4}/i)?.[1]);
  const storedName=clean(policy?.clientName||client?.name);
- const explicitOwner=clean(body.match(/policy\s*owner\s*(?:name)?\s*[:#]\s*([^\r\n]{3,100})/i)?.[1]);
+ const explicitOwner=clean(body.match(/(?:policy\s*owner|depositor)\s*(?:name)?\s*[:#]\s*([^\r\n]{3,100})/i)?.[1]);
  const responsibleName=explicitOwner||(insuredName&&storedName&&key(insuredName)!==key(storedName)?storedName:'');
  return {insuredName,responsibleName,displayName:insuredName||storedName,displayRole:insuredName?'Segurado':'Cliente'};
 }

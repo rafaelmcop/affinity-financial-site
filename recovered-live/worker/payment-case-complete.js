@@ -18,3 +18,13 @@ export async function completePaymentCase(env,owner,policy,sources,amount,mailbo
  if(taskId&&current.clientId)await env.DB.prepare('UPDATE agentTasks SET clientId=? WHERE id=? AND lower(agentEmail)=? AND clientId IS NULL').bind(current.clientId,Number(taskId),owner).run();
  return await env.DB.prepare('SELECT * FROM agentPolicies WHERE id=? AND lower(agentEmail)=?').bind(Number(current.id),owner).first();
 }
+// A notice may reference a policy not yet imported. Keep the identified contact
+// linked for communication and audit without inventing or substituting a policy.
+export async function linkPaymentCaseContact(env,owner,clientId,mailboxId,taskId){
+ if(!Number.isSafeInteger(Number(clientId))||Number(clientId)<=0)return;
+ const client=await env.DB.prepare('SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?').bind(Number(clientId),owner).first();if(!client)return;
+ await env.DB.batch([
+  env.DB.prepare('UPDATE agentTasks SET clientId=? WHERE id=? AND lower(agentEmail)=? AND clientId IS NULL').bind(Number(clientId),Number(taskId),owner),
+  env.DB.prepare('UPDATE agentMailboxEmails SET clientId=? WHERE id=? AND lower(agentEmail)=? AND clientId IS NULL').bind(Number(clientId),Number(mailboxId||0),owner)
+ ]);
+}
