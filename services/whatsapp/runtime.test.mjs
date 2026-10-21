@@ -39,6 +39,14 @@ test('fresh bridge blocks sends, isolates attachments and preserves SQLite acros
       db.prepare('INSERT INTO messages(owner,id,chat,body,direction,stamp,mediaKind) VALUES(?,?,?,?,?,?,?)').run('one@example.test','legacy-text','123456789@c.us','Texto simples','received',2,'file');
     }finally{db.close();}
     assert.equal((await request(base,'/media?id=synthetic-media','two@example.test')).status,404);
+    const hide={method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat:'123456789@c.us',id:'legacy-text',confirmed:true})};
+    assert.equal((await request(base,'/delete-message','two@example.test',hide)).status,404);
+    assert.equal((await request(base,'/delete-message','one@example.test',{...hide,body:JSON.stringify({chat:'123456789@c.us',id:'legacy-text'})})).status,400);
+    assert.equal((await request(base,'/delete-message','one@example.test',hide)).status,200);
+    assert(!(await(await request(base,'/messages?chat=123456789%40c.us')).json()).some(m=>m.id==='legacy-text'));
+    const audit=await(await request(base,'/audit')).json();assert(audit.messages.some(m=>m.id==='legacy-text'));
+    assert.equal((await request(base,'/restore-messages','one@example.test',{...hide,body:JSON.stringify({chat:'123456789@c.us'})})).status,200);
+
     const range=await request(base,'/media?id=synthetic-media',undefined,{headers:{range:'bytes=1-2'}});
     assert.match(range.headers.get('content-disposition'),/arquivo\.ogg/);
     const messages=await (await request(base,'/messages?chat=123456789%40c.us')).json();

@@ -64,3 +64,5 @@ html[data-agent-theme=light] :is(.client-record,#crm-client-profile,#client-conv
 html[data-agent-theme=light] :is(.client-record,#crm-client-profile,#client-conversation) :is(button,a[role=button],.actions a)[class*=bg-gold] {background:#d5b52f!important;color:#17202e!important;border-color:#927712!important}
 
 html[data-agent-theme=light] .client-record button.primary {background:#d5b52f!important;color:#17202e!important;border-color:#927712!important}
+
+html[data-agent-theme] #messages .message.mine{background:var(--agent-sent)!important;margin-left:auto;margin-right:0}html[data-agent-theme] #messages .message:not(.mine){margin-left:0;margin-right:auto}

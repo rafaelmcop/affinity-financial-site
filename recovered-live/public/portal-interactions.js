@@ -6,10 +6,10 @@ export async function prepareWhatsApp(input){
  return 'whatsapp://send?phone='+phone+'&text='+encodeURIComponent(input.text||'');
 }
 
-export function confirmPortalMessage(message){return new Promise(resolve=>{
+export function confirmPortalMessage(message,confirmLabel="Confirmar envio"){return new Promise(resolve=>{
  const overlay=document.createElement('div');overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.style.cssText='position:fixed;inset:0;background:#0008;z-index:10050;display:grid;place-items:center;padding:20px';
  const card=document.createElement('section');card.style.cssText='background:var(--agent-surface,#fff);color:var(--agent-text,#173348);padding:24px;border-radius:12px;max-width:600px;max-height:85vh;overflow:auto';const text=document.createElement('p');text.textContent=message;card.append(text);
- for(const [label,value]of [['Cancelar',false],['Confirmar envio',true]]){const button=document.createElement('button');button.type='button';button.textContent=label;button.style.cssText='padding:12px;margin:6px;border:1px solid #64748b;border-radius:8px;background:#e8eef5;color:#173348;font-weight:700';if(value)button.style.cssText+=';background:#166534!important;color:#fff!important;border:2px solid #14532d!important;font-weight:800';button.onclick=()=>{overlay.remove();resolve(value)};card.append(button);}overlay.append(card);document.body.append(overlay);
+ for(const [label,value]of [['Cancelar',false],[confirmLabel,true]]){const button=document.createElement('button');button.type='button';button.textContent=label;button.style.cssText='padding:12px;margin:6px;border:1px solid #64748b;border-radius:8px;background:#e8eef5;color:#173348;font-weight:700';if(value)button.style.cssText+=';background:#166534!important;color:#fff!important;border:2px solid #14532d!important;font-weight:800';button.onclick=()=>{overlay.remove();resolve(value)};card.append(button);}overlay.append(card);document.body.append(overlay);
 });}
 export function openWhatsApp(input){return new Promise(resolve=>{
  let phone=String(input.phone||'').replace(/\D/g,'');if(phone.length===10)phone='1'+phone;

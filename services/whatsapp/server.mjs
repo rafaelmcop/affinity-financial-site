@@ -1,3 +1,4 @@
+import {visibilitySchema,hideMessage,restoreMessages} from './message-visibility.mjs';
 import {auditMessages} from './audit.mjs';
 import {sendAllowed} from './send-permission.mjs';
 import {pruneMedia,mediaExpired} from './media-retention.mjs';
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,chat TE
 CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
 CREATE TABLE IF NOT EXISTS session_owners(owner TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
+visibilitySchema(db);
 const sessions=new Map();
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
@@ -157,6 +159,13 @@ const server=http.createServer(async(req,res)=>{
       res.writeHead(req.headers.range?206:200,{...base,...(req.headers.range?{'content-range':`bytes ${start}-${end}/${length}`} : {}),'content-length':String(end-start+1)});
       const stream=createReadStream(file,{start,end});stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());return stream.pipe(res);
     }
+    if(['/delete-message','/restore-messages'].includes(action)&&req.method==='POST'){
+      const input=await body(req);if(!safeChat(input.chat))return reply({error:'Selecione uma conversa.'},400);
+      const ids=contactIds(db,owner,input.chat);
+      if(action==='/restore-messages')return reply({ok:true,restored:restoreMessages(db,owner,ids)});
+      if(input.confirmed!==true)return reply({error:'Confirme para apagar a mensagem do portal.'},400);
+      return hideMessage(db,owner,ids,input)?reply({ok:true}):reply({error:'Mensagem não encontrada nesta conversa.'},404);
+    }
     if(action==='/messages'&&req.method==='GET'){
       const chat=url.searchParams.get('chat')||'';if(!safeChat(chat))return reply({error:'Selecione uma conversa.'},400);
       // Reconcile the selected conversation, including messages received while
@@ -180,7 +189,7 @@ const server=http.createServer(async(req,res)=>{
         }
       }
       const ids=contactIds(db,owner,chat);
-      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') ORDER BY stamp DESC LIMIT 100').all(owner,...ids).reverse().map(({mediaKey,...item})=>({...item,mediaKind:mediaKey||item.mediaState?item.mediaKind:null,mediaUrl:mediaKey?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
+      return reply(db.prepare('SELECT id,body,direction,stamp,ack,mediaKey,mediaKind,mime,filename,mediaSize,mediaState FROM messages WHERE owner=? AND chat IN ('+ids.map(()=>'?').join(',')+') AND NOT EXISTS(SELECT 1 FROM hidden_messages h WHERE h.owner=messages.owner AND h.id=messages.id) ORDER BY stamp DESC,rowid DESC LIMIT 100').all(owner,...ids).reverse().map(({mediaKey,...item})=>({...item,mediaKind:mediaKey||item.mediaState?item.mediaKind:null,mediaUrl:mediaKey?'/api/agent/whatsapp/media?id='+encodeURIComponent(item.id):null})));
     }
     if(action==='/send'&&req.method==='POST'){
       const input=await body(req,11500000);
