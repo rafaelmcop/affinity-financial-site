@@ -86,7 +86,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
         .trim()
         .split(/\s+/)[0];
       const zoom = meeting.meetingUrl || "";
-      const {meetingAgentProfile,meetingAgentSignature}=await import('/meeting-agent-signature.js?v=1');
+      const {meetingAgentProfile,meetingAgentSignature}=await import('/meeting-agent-signature.js?v=2');
       const profile=meetingAgentProfile(savedProfile,meeting.responsibleAgent);
       const personalSignature = meetingAgentSignature(profile);
       const agentName = String(profile?.name || "").trim();
