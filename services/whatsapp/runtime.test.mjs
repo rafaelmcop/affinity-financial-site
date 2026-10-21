@@ -31,6 +31,10 @@ test('fresh bridge blocks sends, isolates attachments and preserves SQLite acros
     assert.equal((await request(base,'/send','affiliate-1@affinity-whatsapp.invalid',{method:'POST',body:'{}'})).status,403);
     assert.equal((await request(base,'/send',undefined,{method:'POST',headers:{'content-type':'application/json'},body:'{}'})).status,403);
     const db=new DatabaseSync(path.join(directory,'history.sqlite'));
+    db.prepare("INSERT INTO sends(owner,requestId,state,messageId) VALUES(?,?,?,?)").run('one@example.test','12345678-1234-1234-1234-123456789012','sent','synthetic-receipt');
+    assert.equal((await (await request(base,'/send-status?requestId=12345678-1234-1234-1234-123456789012')).json()).state,'sent');
+    assert.equal((await request(base,'/send-status?requestId=12345678-1234-1234-1234-123456789012','two@example.test')).status,404);
+    assert.equal((await request(base,'/send-status?requestId=invalid')).status,400);
     try{
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM messages').get().n,0);
       assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');

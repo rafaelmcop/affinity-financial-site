@@ -57679,7 +57679,7 @@ Affinity Financial Consulting`,
     }
   }
   if(name==='agent.weekMeetings'||name==='agent.meetingDetail'){
-    try{await ensureCalendlyTables(env);return trpcResult(name==='agent.weekMeetings'?await weeklyMeetings(env,adminEmail,input):await ownMeeting(env,adminEmail,input.id));}catch(error){return trpcError(error.message);}
+    try{await ensureCalendlyTables(env);if(name==='agent.weekMeetings')return trpcResult(await weeklyMeetings(env,adminEmail,input));const meeting=await ownMeeting(env,adminEmail,input.id);if(meeting)meeting.responsibleAgent=await env.DB.prepare('SELECT name,email,contactEmail,phone,whatsapp,messageSignature FROM adminAccounts WHERE lower(email)=?').bind(adminEmail.toLowerCase()).first();return trpcResult(meeting);}catch(error){return trpcError(error.message);}
   }
   if (name === "agent.calendlyMeetings") {
     await ensureCalendlyTables(env);

@@ -104,6 +104,7 @@ const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost'),action=url.pathname;
   try{
     if(affiliateOwner(owner)&&!['/connect','/status','/all-contacts','/disconnect'].includes(action))return reply({error:'Ação indisponível para importação de afiliado.'},403);
+    if(action==='/send-status'&&req.method==='GET'){const id=url.searchParams.get('requestId')||'';if(!/^[-a-f0-9]{36}$/.test(id))return reply({error:'Identificador inválido.'},400);const row=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,id);return reply(row||{state:'not_found'},row?200:404);}
     if(action==='/audit'&&req.method==='GET')return reply(auditMessages(db,owner,url.searchParams.get('cursor'),url.searchParams.get('phone')));
     if(action==='/connect'&&req.method==='POST'){await connect(owner);return reply({ok:true});}
     const s=sessions.get(owner);if(s)s.lastSeen=Date.now();
@@ -201,15 +202,17 @@ const server=http.createServer(async(req,res)=>{
       const validMedia=media&&['image','audio','video','file'].includes(media.kind)&&typeof media.data==='string'&&media.data.length<=11200000&&((media.kind==='image'&&/^image\/(jpeg|png|webp|gif)$/.test(media.mime))||(media.kind==='audio'&&/^audio\/(ogg|webm|mpeg|mp4|wav)(;.*)?$/.test(media.mime))||(media.kind==='video'&&/^video\/(mp4|webm)$/.test(media.mime))||validDocument);
       if(!safeChat(chat)||(!text&&!validMedia)||text.length>4000||!/^[-a-f0-9]{36}$/.test(requestId))return reply({error:'Revise o telefone, a mensagem e o arquivo.'},400);
       const old=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,requestId);
-      if(old)return reply({...old,...(old.state==='sent'?{}:{error:'Este envio ainda não foi confirmado. Confira no celular antes de tentar novamente.'})},old.state==='sent'?200:409);
+      if(old)return reply({...old,...(old.state==='sent'?{}:{error:'Este envio ainda não foi confirmado. Confira no celular antes de tentar novamente.'})},old.state==='sent'?200:old.state==='pending'&&req.headers.prefer==='respond-async'?202:409);
       if(s.busy||Date.now()-s.lastSend<3000)return reply({error:'Aguarde o envio atual.'},429);
       s.busy=true;
       db.prepare("INSERT INTO sends(owner,requestId,state) VALUES(?,?,'pending')").run(owner,requestId);
-      try{
+      const perform=async()=>{try{
         const m=validMedia?await sendMedia(s.client,chat,{data:media.data,mime:media.mime,filename:String(media.filename||'').slice(0,240),caption:text,voice:media.kind==='audio'&&/^audio\/ogg(?:;|$)/i.test(media.mime)}):await sendText(s.client,chat,text);await save(owner,m,validMedia?{data:media.data,mimetype:media.mime,filename:String(media.filename||'').slice(0,240)}:null);
         db.prepare("UPDATE sends SET state='sent',messageId=? WHERE owner=? AND requestId=?").run(m.id._serialized,owner,requestId);s.lastSend=Date.now();
-        return reply({state:'sent',messageId:m.id._serialized});
-      }catch(error){const code=sendErrorCode(error);console.error(JSON.stringify({event:'whatsapp_send_failed',code}));db.prepare("UPDATE sends SET state='uncertain' WHERE owner=? AND requestId=?").run(owner,requestId);return reply({error:code==='number_not_registered'?'Este telefone não foi encontrado no WhatsApp. Confira o país e o número.':'Não foi possível confirmar o envio ('+code+'). Confira no celular antes de tentar novamente.',state:'uncertain',code},502);}finally{s.busy=false;}
+        return {data:{state:'sent',messageId:m.id._serialized},status:200};
+      }catch(error){const code=sendErrorCode(error);console.error(JSON.stringify({event:'whatsapp_send_failed',code,name:error?.name||'Error'}));db.prepare("UPDATE sends SET state='uncertain' WHERE owner=? AND requestId=?").run(owner,requestId);return {data:{error:code==='number_not_registered'?'Este telefone não foi encontrado no WhatsApp. Confira o país e o número.':'Não foi possível confirmar o envio ('+code+'). Confira no celular antes de tentar novamente.',state:'uncertain',code},status:502};}finally{s.busy=false;}};
+      if(req.headers.prefer==='respond-async'){void perform().catch(()=>{s.busy=false;console.error('whatsapp_async_send_failed');});return reply({state:'pending',requestId},202);}
+      const result=await perform();return reply(result.data,result.status);
     }
     return reply({error:'Não encontrado'},404);
   }catch{return reply({error:'A conexão não respondeu. Confira o status e tente novamente.'},503);}

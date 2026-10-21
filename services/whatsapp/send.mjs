@@ -1,3 +1,4 @@
+import {confirmMedia} from './media-confirmation.mjs';
 import {normalizeMessage,serializedKey} from './message.mjs';
 
 export async function sendText(client, chat, text) {
@@ -27,9 +28,9 @@ export async function sendMedia(client,chat,{data,mime,filename='',caption='',vo
   // the browser target before the bridge can return a JSON error. Keep WebM as
   // a normal playable audio attachment instead of using the PTT conversion.
   const sendAudioAsVoice=voice&&/^audio\/ogg(?:;|$)/i.test(mime);
-  const message=normalizeMessage(await client.sendMessage(destination,media,{caption,sendAudioAsVoice,sendSeen:false,waitUntilMsgSent:true}));
+  const message=normalizeMessage(await client.sendMessage(destination,media,{caption,sendAudioAsVoice,sendMediaAsDocument:!/^image\/|^audio\/|^video\//i.test(mime),sendSeen:false,waitUntilMsgSent:false}));
   if(!message?.id?._serialized)throw Error('WHATSAPP_NO_SEND_CONFIRMATION');
-  return message;
+  return normalizeMessage(await confirmMedia(client,message));
 }
 
 export function sendErrorCode(error) {

@@ -14,13 +14,13 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
   if(channel==='email')await sendEmail(attachments);
   else{
    const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');const encoder=new TextEncoder();
-   const payload=encoded(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+60})));const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);const ticket=payload+'.'+encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));
+   const authorization=async()=>{const payload=encoded(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+60})));const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);const ticket=payload+'.'+encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));return 'Bearer '+ticket;};
    for(let i=0;i<Math.max(1,attachments.length);i++){
     if(i)await new Promise(r=>setTimeout(r,3100));
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(requestId+':'+i)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,32);const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-'+hash.slice(12,16)+'-'+hash.slice(16,20)+'-'+hash.slice(20);
     const file=attachments[i],mime=file&&file.contentType;
     const body={manual:true,chat,text:i===0?input.message:'',requestId:id,...file?{media:{kind:mime.startsWith('image/')?'image':'file',mime,filename:file.filename,data:file.content}}:{}};
-    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{authorization:'Bearer '+ticket,'content-type':'application/json'},body:JSON.stringify(body)});
+    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{'content-type':'application/json',prefer:'respond-async'},authorization,body:JSON.stringify(body)});
    }
   }
   await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sent' WHERE owner=? AND requestId=?").bind(owner,requestId).run();return {alreadySent:false};

@@ -55,16 +55,6 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
       );
     return payload?.result?.data?.json;
   }
-  function signature(profile) {
-    const name = profile?.name || "Seu agente Affinity",
-      phone = profile?.phone || profile?.whatsapp || "(857) 421-8325",
-      email = profile?.contactEmail || profile?.email || "";
-    return String(profile?.messageSignature || "{agente_nome}\nAffinity Financial Consulting Inc.\n📞 {agente_telefone}\n✉️ {agente_email}\n🌐 www.affinityfc.org")
-      .replaceAll("{agente_nome}", name).replaceAll("{agente}", name)
-      .replaceAll("{agente_telefone}", phone).replaceAll("{telefone do agente}", phone)
-      .replaceAll("{agente_email}", email).replaceAll("{email do agente}", email)
-      .split("\n").filter(line => line.trim() && !(line.includes("✉️") && !email)).join("\n");
-  }
   function zoomAppLink(value,userAgent=navigator.userAgent) {
     try {
       const url=new URL(value);
@@ -83,7 +73,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
       return;
     }
     try {
-      const [meeting, profile] = await Promise.all([api("agent.meetingDetail",{id:meetingId}), api("agent.getProfile")]);
+      const [meeting, savedProfile] = await Promise.all([api("agent.meetingDetail",{id:meetingId}), api("agent.getProfile").catch(()=>null)]);
       if (!meeting)
         throw new Error(
           "Este compromisso mudou ou foi cancelado. Atualize a agenda antes de enviar qualquer mensagem."
@@ -96,7 +86,9 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=9').then(m
         .trim()
         .split(/\s+/)[0];
       const zoom = meeting.meetingUrl || "";
-      const personalSignature = signature(profile);
+      const {meetingAgentProfile,meetingAgentSignature}=await import('/meeting-agent-signature.js?v=1');
+      const profile=meetingAgentProfile(savedProfile,meeting.responsibleAgent);
+      const personalSignature = meetingAgentSignature(profile);
       const agentName = String(profile?.name || "").trim();
       const meetingHost = agentName ? `${agentName} da Affinity Financial Consulting` : "a equipe da Affinity Financial Consulting";
       const dayFormat = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});

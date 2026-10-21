@@ -72,7 +72,7 @@ test('Sending resolves recipient and does not depend on read receipts',async()=>
 test('Image, voice, PDF and video media preserve type, caption and confirmation',async()=>{
  class Media{constructor(mime,data,filename){Object.assign(this,{mime,data,filename});}}
  let sent;
- const client={getNumberId:async()=>({_serialized:'123456789@c.us'}),sendMessage:async(chat,media,options)=>{sent={chat,media,options};return {id:{_serialized:'media-id'},fromMe:true,to:chat};}};
+ const client={getNumberId:async()=>({_serialized:'123456789@c.us'}),sendMessage:async(chat,media,options)=>{sent={chat,media,options};return {id:{_serialized:'media-id'},ack:1,fromMe:true,to:chat};}};
  const image=await sendMedia(client,'123456789@c.us',{mime:'image/png',data:'AA==',filename:'foto.png',caption:'Legenda'},Media);
  assert.equal(image.id._serialized,'media-id');assert.equal(sent.media.mime,'image/png');assert.equal(sent.options.caption,'Legenda');assert.equal(sent.options.sendAudioAsVoice,false);
  await sendMedia(client,'123456789@c.us',{mime:'audio/ogg;codecs=opus',data:'AA==',voice:true},Media);
@@ -80,7 +80,7 @@ test('Image, voice, PDF and video media preserve type, caption and confirmation'
  await sendMedia(client,'123456789@c.us',{mime:'audio/webm;codecs=opus',data:'AA==',filename:'voz.webm',voice:true},Media);
  assert.equal(sent.options.sendAudioAsVoice,false);assert.equal(sent.media.mime,'audio/webm;codecs=opus');
  await sendMedia(client,'123456789@c.us',{mime:'application/pdf',data:'AA==',filename:'documento.pdf'},Media);
- assert.equal(sent.media.mime,'application/pdf');assert.equal(sent.media.filename,'documento.pdf');assert.equal(sent.options.sendAudioAsVoice,false);
+ assert.equal(sent.media.mime,'application/pdf');assert.equal(sent.media.filename,'documento.pdf');assert.equal(sent.options.sendMediaAsDocument,true);assert.equal(sent.options.waitUntilMsgSent,false);assert.equal(sent.options.sendAudioAsVoice,false);
  await sendMedia(client,'123456789@c.us',{mime:'video/mp4',data:'AA==',filename:'clip.mp4'},Media);
  assert.equal(sent.media.mime,'video/mp4');assert.equal(sent.media.filename,'clip.mp4');
 });
