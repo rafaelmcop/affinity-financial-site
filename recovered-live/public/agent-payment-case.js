@@ -51,6 +51,11 @@
       );
     return payload?.result?.data?.json;
   }
+  function returnToStart() {
+    const assistant=document.documentElement.dataset.assistant==='true'||new URLSearchParams(location.search).get('assistantView')==='1';
+    if(assistant)window.top.location.assign('/assistentes/dashboard');
+    else location.assign('/agentes/dashboard');
+  }
   async function loadCase() {
     const response = await fetch(
       `/api/agent/payment-case?taskId=${encodeURIComponent(taskId)}`,
@@ -136,8 +141,8 @@
             button.textContent = "Relacionar cadastro e preparar mensagem";
           }
         };
-      document.getElementById('resolve').onclick=async()=>{if(await(await import('/notification-actions.js?v=1')).notificationAction('payment',taskId,'complete'))await load();};
-      document.getElementById('delete').onclick=async()=>{if(await(await import('/notification-actions.js?v=1')).notificationAction('payment',taskId,'archive'))await load();};
+      document.getElementById('resolve').onclick=async()=>{if(await(await import('/notification-actions.js?v=1')).notificationAction('payment',taskId,'complete'))returnToStart();};
+      document.getElementById('delete').onclick=async()=>{if(await(await import('/notification-actions.js?v=1')).notificationAction('payment',taskId,'archive'))returnToStart();};
     } catch (error) {
       content.innerHTML = `<div class="card empty">${esc(error.message || "Não foi possível abrir este caso.")}</div>`;
     }
