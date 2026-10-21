@@ -350,59 +350,6 @@ function H() {
                                         }),
                                       ],
                                     }),
-                                    e.jsxs("div", {
-                                      className:
-                                        "mt-3 flex flex-wrap gap-2 border-t border-amber-200/10 pt-3",
-                                      children: [
-                                        e.jsxs("button", {
-                                          type: "button",
-                                          disabled: b.isPending,
-                                          onClick: async () => {
-                                            (await b.mutateAsync({
-                                              id: t.id,
-                                              completed: !0,
-                                            }),
-                                              await r.refetch());
-                                          },
-                                          className:
-                                            "flex items-center gap-1.5 rounded-full border border-green-300/25 px-3 py-1 text-xs font-semibold text-green-200 transition hover:border-green-300 hover:bg-green-400/10 disabled:opacity-50",
-                                          children: [
-                                            e.jsx(T, { size: 13 }),
-                                            " Resolvido",
-                                          ],
-                                        }),
-                                        t.clientId &&
-                                          e.jsx("button", {
-                                            type: "button",
-                                            onClick: () =>
-                                              o(
-                                                `/agentes/cliente?clientId=${t.clientId}`
-                                              ),
-                                            className:
-                                              "flex items-center gap-1.5 rounded-full border border-sky-300/25 px-3 py-1 text-xs font-semibold text-sky-200 transition hover:border-sky-300 hover:bg-sky-400/10",
-                                            children: "Abrir/alterar cadastro",
-                                          }),
-                                        e.jsxs("button", {
-                                          type: "button",
-                                          disabled: h.isPending,
-                                          onClick: async () => {
-                                            window.confirm(
-                                              "Excluir esta pendência?"
-                                            ) &&
-                                              (await h.mutateAsync({
-                                                id: t.id,
-                                              }),
-                                              await r.refetch());
-                                          },
-                                          className:
-                                            "ml-auto flex items-center gap-1.5 rounded-full border border-red-300/25 px-3 py-1 text-xs font-semibold text-red-200 transition hover:border-red-300 hover:bg-red-400/10 disabled:opacity-50",
-                                          children: [
-                                            e.jsx(S, { size: 13 }),
-                                            " Excluir",
-                                          ],
-                                        }),
-                                      ],
-                                    }),
                                   ],
                                 },
                                 t.id

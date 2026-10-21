@@ -1,3 +1,4 @@
+import {paymentCaseIdentity} from './payment-case-identity.js';
 import {actOnNotification,notificationResolution} from './notification-actions.js';
 import {relayAccessCode,pollAccessCodes,accessCodeProvider} from './assistant-access-codes.js';
 import {completePaymentCase} from './payment-case-complete.js';
@@ -55999,6 +56000,7 @@ Detalhes: ${details}` : ""}`;
     await auditSchema(env.DB);await interactionSchema(env.DB);
     const interactions=resolvedClientId?(await env.DB.prepare(paymentCaseInteractionsSQL).bind(resolvedClientId,owner,resolvedClientId,owner,resolvedClientId,owner).all()).results||[]:[];
     return trpcResult({
+      identity:paymentCaseIdentity(policy,client,mailbox),
       resolution:await notificationResolution(env,owner,"payment",taskId),
       interactions,
       task: { ...task, id: Number(task.id), clientId: resolvedClientId || null },
@@ -59258,7 +59260,8 @@ var cloudflare_staging_default = {
         await auditSchema(env.DB);await interactionSchema(env.DB);
         const interactions=clientId?(await env.DB.prepare(paymentCaseInteractionsSQL).bind(clientId,owner,clientId,owner,clientId,owner).all()).results||[]:[];
         return secureResponse(jsonResponse({
-          resolution:await notificationResolution(env,owner,"payment",taskId),
+          identity:paymentCaseIdentity(policy,client,mailbox),
+      resolution:await notificationResolution(env,owner,"payment",taskId),
           interactions,
           task: { ...task, id: Number(task.id), clientId: clientId || null },
           client: client ? { ...client, id: Number(client.id) } : null,
