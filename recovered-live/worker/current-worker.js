@@ -1,3 +1,6 @@
+import {emailArchiveSchema,archiveRecoveredAttachments,reserveEmailAttachments,finalizeEmailAttachments,listEmailAttachments,emailAttachmentBytes,withEmailAttachments,messageKey,emailRecordKey} from './email-attachment-archive.js';
+import {enrichArchivedDocuments,readPendingEmailDocuments} from './email-document-facts.js';
+import {recoverEmailAttachments} from './email-attachment-recovery.js';
 import {paymentCaseIdentity} from './payment-case-identity.js';
 import {actOnNotification,notificationResolution} from './notification-actions.js';
 import {relayAccessCode,pollAccessCodes,accessCodeProvider} from './assistant-access-codes.js';
@@ -12574,7 +12577,11 @@ async function sendEmail(env, options) {
 }
 __name(sendEmail, "sendEmail");
 async function sendAgentEmail(env, agentEmail, options) {
-  const corporate=await sendCorporateEmail(env,agentEmail,options);if(corporate)return corporate;
+  const owner=agentEmail.toLowerCase(),{historyClientId,...mailOptions}=options;
+  let clientId=Number(historyClientId)||null;if(mailOptions.attachments?.length&&!clientId&&typeof mailOptions.to==='string'){const customers=(await env.DB.prepare('SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? LIMIT 2').bind(owner,mailOptions.to.trim().toLowerCase()).all()).results;if(customers.length===1)clientId=Number(customers[0].id);}
+  const archiveIds=await reserveEmailAttachments(env,owner,mailOptions.attachments,clientId);
+  const finish=async sent=>{sent={...sent,messageId:sent.messageId||('portal:'+crypto.randomUUID())};if(archiveIds.length){try{await finalizeEmailAttachments(env,owner,archiveIds,sent.messageId,clientId);}catch{sent.attachmentArchivePending=true;console.error('email_attachment_reading_pending');}}return sent;};
+  const corporate=await sendCorporateEmail(env,agentEmail,mailOptions);if(corporate)return finish(corporate);
   const config = await env.DB.prepare(
     "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
   ).bind(agentEmail.toLowerCase()).first();
@@ -12589,10 +12596,10 @@ async function sendAgentEmail(env, agentEmail, options) {
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587
   });
-  return transporter.sendMail({
+  return finish(await transporter.sendMail({
     from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
-    ...options
-  });
+    ...mailOptions
+  }));
 }
 __name(sendAgentEmail, "sendAgentEmail");
 function emailHtml(title, content) {
@@ -51284,6 +51291,7 @@ async function syncIcloudInbox(env, agentEmail) {
         if (!isProfessionalMailboxMessage(subject, body, config.fromEmail || owner, recipient, Boolean(customer))) continue;
         const externalId = parsed.messageId || `icloud-sent:${owner}:${uid}`;
         const topic = classifyMailboxTopic(subject, body);
+        if(parsed.attachments?.length)await archiveRecoveredAttachments(env,owner,externalId,customer?Number(customer.id):null,parsed.attachments.filter(file=>file.contentDisposition!=='inline'));
         await env.DB.prepare(
           "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,?,'sent',?,?,?,?,?,?,CURRENT_TIMESTAMP,'sent','Sincronizado da pasta Enviados',?)"
         ).bind(owner, customer ? Number(customer.id) : null, externalId, String(uid), String(config.fromEmail || owner), recipient, subject, body, htmlBody, (parsed.date || /* @__PURE__ */ new Date()).toISOString(), topic).run();
@@ -55594,7 +55602,7 @@ Detalhes: ${details}` : ""}`;
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
       const subject = String(input.subject || "Seu atendimento \u2014 Affinity Financial Consulting").trim().slice(0, 300);
       let sent;
-      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{to:String(meeting.inviteeEmail),subject,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
+      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{historyClientId:clientId,to:String(meeting.inviteeEmail),subject,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
       await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message+(attachments.length?"\nAnexos: "+attachments.map(file=>file.filename).join(", "):""), String(config.fromEmail), String(meeting.inviteeEmail)).run();
     }
     if(sendMeetingWhatsapp){try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'whatsapp'},attachments);if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}}
@@ -56309,11 +56317,11 @@ Detalhes: ${details}` : ""}`;
       "SELECT id,agentEmail,clientId,direction,externalId,subject,substr(coalesce(body,''),1,5000) AS body,fromEmail,toEmail,sentAt,readAt,visibility,CASE WHEN visibility='automation' THEN 1 ELSE 0 END AS isAutomatic FROM clientEmails e WHERE clientId=? AND lower(agentEmail)=? AND "+personalEmailPredicate+" AND deletedAt IS NULL ORDER BY sentAt DESC,id DESC LIMIT 50"
     ).bind(clientId, adminEmail.toLowerCase()).all();
     return trpcResult(
-      rows.results.map((row) => ({
+      await Promise.all(rows.results.map(async (row) => withEmailAttachments(env,adminEmail.toLowerCase(),{
         ...row,
         id: Number(row.id),
         clientId: Number(row.clientId)
-      }))
+      },'clientEmails')))
     );
   }
   if (name === "agent.markClientEmailsRead") {
@@ -56418,14 +56426,24 @@ Detalhes: ${details}` : ""}`;
       topicCounts
     });
   }
+  if(name==='agent.restoreEmailAttachments'){
+    const owner=adminEmail.toLowerCase(),table=input.clientEmailId?'clientEmails':'agentMailboxEmails',id=Number(input.clientEmailId||input.mailboxId);
+    const message=await env.DB.prepare('SELECT * FROM '+table+" WHERE id=? AND lower(agentEmail)=? AND direction='sent' AND deletedAt IS NULL").bind(id,owner).first();if(!message)return trpcError('E-mail enviado não encontrado nesta conta.','NOT_FOUND',404);
+    const existing=await listEmailAttachments(env,owner,emailRecordKey(message,table));if(existing.length)return trpcResult({success:true,attachments:existing});
+    let files;try{files=parseMailAttachments(input.attachments);if(!files.length)throw Error('Selecione os anexos originais.');const expected=[...String(message.body||'').matchAll(/Anexos(?: enviados)?:\s*([^\n]+)/gi)].at(-1)?.[1]||'';if(!expected||files.some(file=>!expected.includes(file.filename)))throw Error('Selecione os arquivos com os mesmos nomes registrados neste envio.');}catch(error){return trpcError(error.message);}
+    const ids=await reserveEmailAttachments(env,owner,files,message.clientId||null,'user_restored');await finalizeEmailAttachments(env,owner,ids,emailRecordKey(message,table),message.clientId||null);
+    await env.DB.prepare("UPDATE emailAttachmentRecovery SET state='restored',updatedAt=CURRENT_TIMESTAMP WHERE owner=? AND externalId=?").bind(owner,messageKey(emailRecordKey(message,table))).run();
+    if(message.clientId)await env.DB.prepare("INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,'note',?,?)").bind(message.clientId,'Cópias dos anexos adicionadas posteriormente ao histórico, sem reenviar o e-mail: '+files.map(file=>file.filename).join(', '),delegation?.actorEmail||owner).run();
+    return trpcResult({success:true,attachments:await listEmailAttachments(env,owner,emailRecordKey(message,table))});
+  }
   if (name === "agent.mailboxMessage") {
     const owner = adminEmail.toLowerCase();
-    if(input.clientEmailId){const email=await notificationEmail(env,owner,input.clientEmailId);return email?trpcResult(email):trpcError("Mensagem não encontrada nesta conta.","NOT_FOUND",404);}
+    if(input.clientEmailId){const email=await notificationEmail(env,owner,input.clientEmailId);return email?trpcResult(await withEmailAttachments(env,owner,email)):trpcError("Mensagem não encontrada nesta conta.","NOT_FOUND",404);}
     const id = Number(input.id || 0);
     const row = await env.DB.prepare("SELECT m.*,c.name AS clientName,f.name AS folderName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId AND lower(c.assignedAdminEmail)=? LEFT JOIN agentMailboxFolders f ON f.id=m.folderId AND lower(f.agentEmail)=? WHERE m.id=? AND lower(m.agentEmail)=? LIMIT 1").bind(owner, owner, id, owner).first();
     if (!row) return trpcError("Mensagem n\xE3o encontrada", "NOT_FOUND", 404);
     row.body=readableMailboxBody(row);
-    return trpcResult({ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null });
+    return trpcResult(await withEmailAttachments(env,owner,{ ...row, id: Number(row.id), clientId: row.clientId ? Number(row.clientId) : null }));
   }
   if (name === "agent.mailboxFolders") {
     const owner = adminEmail.toLowerCase();
@@ -56571,6 +56589,7 @@ Detalhes: ${details}` : ""}`;
     if (!config) return trpcError("Configure seu e-mail antes de enviar");
     body = await appendAgentEmailSignature(env, owner, body);
     const sent = await sendAgentEmail(env, owner, {
+      historyClientId:clientId,
       to: recipient,
       subject,
       html: await signedClientEmailHtml(env, owner, body),
@@ -59220,6 +59239,12 @@ var cloudflare_staging_default = {
     if (request.method === "GET" && url.pathname === "/.well-known/security.txt") {
       return secureResponse(new Response("Contact: mailto:rafael.cunha@affinityfc.org\nCanonical: https://www.affinityfc.org/.well-known/security.txt\nPreferred-Languages: pt, en, es\nExpires: 2027-09-08T00:00:00.000Z\n", { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=86400" } }));
     }
+    if(url.pathname==='/api/agent/email-attachment'&&request.method==='GET'){
+      const owner=await getAdminEmail(request,env);if(!owner)return secureResponse(jsonResponse({error:'Entre novamente no portal.'},401),{privateData:true});
+      if(!await hasFeature(env,owner.toLowerCase(),'email'))return secureResponse(jsonResponse({error:'E-mail não liberado.'},403),{privateData:true});
+      const file=await emailAttachmentBytes(env,owner.toLowerCase(),url.searchParams.get('id'));if(!file)return secureResponse(jsonResponse({error:'Anexo não encontrado nesta conta.'},404),{privateData:true});
+      return secureResponse(new Response(file.bytes,{headers:{'content-type':file.mime,'content-disposition':(url.searchParams.get('download')==='1'?'attachment':'inline')+"; filename*=UTF-8''"+encodeURIComponent(file.filename),'cache-control':'private, no-store','x-content-type-options':'nosniff','content-length':String(file.bytes.length)}}),{privateData:true});
+    }
     if (url.pathname === "/api/agent/payment-case" && request.method === "GET") {
       try {
         const email = await getAdminEmail(request, env);
@@ -59422,6 +59447,8 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    ctx.waitUntil(Promise.resolve().then(()=>{init_icloud_email();return recoverEmailAttachments(env,{open:openAgentImap,quote:quoteImap,literal:extractLiteral,parse:source=>import_mailparser.simpleParser(Buffer2.from(source))});}).then(()=>readPendingEmailDocuments(env)).catch(()=>console.error('email_attachment_maintenance_failed')));
+
     ctx.waitUntil(syncPolicyLeadLinks(env));
     if(["*/5 * * * *","2,7,12,17,22,27,32,37,42,47,52,57 * * * *"].includes(controller.cron))ctx.waitUntil(syncExcludedWorkGroups(env));
     if (controller.cron === "calendly-phone-backfill") {
@@ -60028,7 +60055,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const rolesResponse=await userRolesRoute(request,env,{email:getAdminEmail,access:getAdminAccess});if(rolesResponse)return secureResponse(rolesResponse,{privateData:true});
  if(request.method==='GET'){const destination=legacyPortalDestination(url);if(destination)return Response.redirect(new URL(destination,url),302);}
  const assistantResponse=await assistantsRoute(request,env,{...featureAuth,decrypt:decryptSmtpPassword,whatsapp:whatsappRoute,pollAccessCodes:async(e,owner)=>{init_icloud_email();return pollAccessCodes(e,owner,{open:openAgentImap,imapDate,literal:extractLiteral,parse:raw=>import_mailparser.simpleParser(Buffer2.from(raw))});},prepareAssistant:assistant=>ctx.waitUntil(provisionAssistantEmail(env,assistant,{decrypt:decryptSmtpPassword})),session:getSession,createSession,validEmail,hash:password=>bcryptjs_default.hash(password,12),compare:(password,hash)=>bcryptjs_default.compare(password,hash),runProcedure,features:owner=>userAccess(env,owner),appearance:owner=>agentAppearance(env,'agent:'+owner),calendarLinked:async owner=>{await ensureCalendlyTables(env);return !!await env.DB.prepare("SELECT 1 FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND trim(coalesce(encryptedToken,''))<>''").bind(owner).first();},page:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx),resource:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx)});
- if(assistantResponse&&!(assistantResponse.headers.get('content-type')?.includes('text/html')&&['/agentes/assistentes','/admin/assistentes'].includes(url.pathname))){const secured=secureResponse(assistantResponse,{privateData:true});if(assistantResponse.headers.get('x-affinity-assistant-view')==='1'){secured.headers.set('X-Frame-Options','SAMEORIGIN');secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace("frame-ancestors 'none'","frame-ancestors 'self'"));if(secured.headers.has('Content-Security-Policy-Report-Only'))secured.headers.set('Content-Security-Policy-Report-Only',secured.headers.get('Content-Security-Policy-Report-Only').replace("frame-ancestors 'none'","frame-ancestors 'self'"));secured.headers.delete('x-affinity-assistant-view');}if(url.pathname==='/assistentes/dashboard')secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace('frame-src ',"frame-src 'self' "));return secured;}
+ if(assistantResponse&&!(assistantResponse.headers.get('content-type')?.includes('text/html')&&['/agentes/assistentes','/admin/assistentes'].includes(url.pathname))){if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));const secured=secureResponse(assistantResponse,{privateData:true});if(assistantResponse.headers.get('x-affinity-assistant-view')==='1'){secured.headers.set('X-Frame-Options','SAMEORIGIN');secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace("frame-ancestors 'none'","frame-ancestors 'self'"));if(secured.headers.has('Content-Security-Policy-Report-Only'))secured.headers.set('Content-Security-Policy-Report-Only',secured.headers.get('Content-Security-Policy-Report-Only').replace("frame-ancestors 'none'","frame-ancestors 'self'"));secured.headers.delete('x-affinity-assistant-view');}if(url.pathname==='/assistentes/dashboard')secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace('frame-src ',"frame-src 'self' "));return secured;}
  if(url.pathname==='/api/agent/notification-action'){if(request.method!=='POST'||request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403});const owner=await getAdminEmail(request,env);if(!owner)return Response.json({error:'Entre novamente.'},{status:401});const access=await getAdminAccess(owner,env);if(!access.account?.isActive||access.account.status!=='approved')return Response.json({error:'Acesso bloqueado.'},{status:403});try{const input=await boundedJson(request,4096);if(!await hasFeature(env,owner,input.kind==='payment'?'tasks':'email'))return Response.json({error:'Função não liberada.'},{status:403});const row=await env.DB.prepare('SELECT name,passwordHash FROM adminAccounts WHERE lower(email)=?').bind(owner.toLowerCase()).first();return Response.json(await actOnNotification(env,{owner:owner.toLowerCase(),email:owner.toLowerCase(),name:row?.name||owner,canComplete:()=>true,canDelete:()=>true,verifyPassword:password=>bcryptjs_default.compare(password,row.passwordHash)},input),{headers:{'cache-control':'no-store'}});}catch(e){return Response.json({error:e.message},{status:e.status||400});}}
  const agendaResponse=await addressBookRoute(request,env,featureAuth);if(agendaResponse)return agendaResponse;
  const accessResponse=await accessRoute(request,env,featureAuth);if(accessResponse)return accessResponse;
@@ -60046,6 +60073,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
+ if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));
  if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=11" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
