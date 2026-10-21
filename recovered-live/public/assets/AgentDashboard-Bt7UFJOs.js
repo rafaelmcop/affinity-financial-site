@@ -45,13 +45,15 @@ function H() {
     r = i.agent.dashboard.useQuery(void 0, {
       staleTime: 0,
       refetchOnMount: "always",
-      refetchOnWindowFocus: !1,
+      refetchOnWindowFocus: true,
+      refetchInterval: 30000,
       retry: 3,
     }),
     l = i.agent.pendingCounts.useQuery(void 0, {
       staleTime: 0,
       refetchOnMount: "always",
-      refetchOnWindowFocus: !1,
+      refetchOnWindowFocus: true,
+      refetchInterval: 30000,
       retry: 3,
     }),
     q = i.agent.syncCalendly.useMutation(),

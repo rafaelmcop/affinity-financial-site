@@ -1,3 +1,4 @@
+import {notificationSchema} from './notification-actions.js';
 export function isOverduePaymentNotice(subject,body=''){
 const title=String(subject||'');
 if(/starting line|newsletter|linha de partida|issue notification|policy issued|ap[oó]lice emitida|emiss[aã]o de ap[oó]lice/i.test(title))return false;
@@ -5,7 +6,8 @@ const text=(title+'\n'+String(body||'')).replace(/<[^>]*>/g,' ').replace(/\s+/g,
 return /\b(?:payment|premium|bank draft|billing|pagamento|cobran[cç]a)\s+(?:(?:was|is|has been|could not be|não foi|nao foi|foi|est[aá])\s+)?(?:returned|declined|failed|rejected|reversed|overdue|past due|not received|not processed|recusado|devolvido|atrasado|vencido|não processado|nao processado)\b|\b(?:returned|declined|failed|rejected|overdue|past due|unpaid|missed)\s+(?:premium\s+)?(?:payment|premium|bank draft)\b|\b(?:insufficient funds|non.?sufficient funds|fundos insuficientes|saldo insuficiente|nsf)\b/i.test(text);
 }
 export async function paymentTasks(env,owner,pendingOnly=false){
-const rows=(await env.DB.prepare("SELECT * FROM agentTasks WHERE lower(agentEmail)=? "+(pendingOnly?"AND status='pending' ":"")+"ORDER BY status,dueAt").bind(owner).all()).results;
+await notificationSchema(env);
+const rows=(await env.DB.prepare("SELECT * FROM agentTasks WHERE lower(agentEmail)=? AND NOT EXISTS(SELECT 1 FROM notificationStates n WHERE n.owner=lower(agentTasks.agentEmail) AND n.kind='payment' AND n.itemKey=CAST(agentTasks.id AS TEXT) AND n.state='archived') "+(pendingOnly?"AND status='pending' ":"")+"ORDER BY status,dueAt").bind(owner).all()).results;
 const uids=[...new Set(rows.map(r=>String(r.title||'').match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1]).filter(Boolean))],notices=[];
 for(let i=0;i<uids.length;i+=80){const chunk=uids.slice(i,i+80);notices.push(...(await env.DB.prepare('SELECT imapUid,subject,body FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT) IN ('+chunk.map(()=>'?').join(',')+')').bind(owner,...chunk).all()).results);}
 const byUid=new Map(notices.map(row=>[String(row.imapUid),row]));

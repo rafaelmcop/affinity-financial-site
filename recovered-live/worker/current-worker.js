@@ -1,3 +1,4 @@
+import {actOnNotification,notificationResolution} from './notification-actions.js';
 import {relayAccessCode,pollAccessCodes,accessCodeProvider} from './assistant-access-codes.js';
 import {completePaymentCase} from './payment-case-complete.js';
 import {readableMailboxBody} from './mailbox-body.js';
@@ -50962,7 +50963,7 @@ ${rawBody}`.toLowerCase();
     const reason = !resolvedMatch ? (possibleMatch||namedClient) ? "Confirmar n\xFAmero da ap\xF3lice" : "Identificar cliente e ap\xF3lice" : "Completar o e-mail do cliente";
     const title = `${taskPrefix} ${reason} \u2014 ${subject}`.slice(0, 255);
     const existing = await env.DB.prepare(
-      "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND title LIKE ? AND status='pending' LIMIT 1"
+      "SELECT id FROM agentTasks WHERE lower(agentEmail)=? AND title LIKE ? LIMIT 1"
     ).bind(owner, `${taskPrefix}%`).first();
     if (!existing)
       await env.DB.prepare(
@@ -51222,6 +51223,7 @@ async function syncIcloudInbox(env, agentEmail) {
         topic
       ).run();
       if (htmlBody) await env.DB.prepare("UPDATE agentMailboxEmails SET htmlBody=coalesce(htmlBody,?) WHERE lower(agentEmail)=? AND externalId=? AND direction='received'").bind(htmlBody, owner, externalId).run();
+      if(accessCodeProvider(parsed)&&await notificationResolution(env,owner,'code','access-code|'+owner+'|'+externalId))await env.DB.prepare('UPDATE agentMailboxEmails SET readAt=COALESCE(readAt,CURRENT_TIMESTAMP) WHERE lower(agentEmail)=? AND externalId=?').bind(owner,externalId).run();
       if (!customer) {
         if (paymentKind === "attention") {
           const paymentResult = await handlePaymentNotice(env, owner, config, uid, parsed);
@@ -55969,7 +55971,7 @@ Detalhes: ${details}` : ""}`;
     const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
     if (!task) return trpcError("Pend\xEAncia de pagamento n\xE3o encontrada", "NOT_FOUND", 404);
     const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
-    const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
+    const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
         if(mailbox)mailbox.body=readableMailboxBody(mailbox);
     const policies = await env.DB.prepare("SELECT * FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
     const policyRows = policies?.results || [];
@@ -55997,6 +55999,7 @@ Detalhes: ${details}` : ""}`;
     await auditSchema(env.DB);await interactionSchema(env.DB);
     const interactions=resolvedClientId?(await env.DB.prepare(paymentCaseInteractionsSQL).bind(resolvedClientId,owner,resolvedClientId,owner,resolvedClientId,owner).all()).results||[]:[];
     return trpcResult({
+      resolution:await notificationResolution(env,owner,"payment",taskId),
       interactions,
       task: { ...task, id: Number(task.id), clientId: resolvedClientId || null },
       client: client ? { ...client, id: Number(client.id) } : null,
@@ -56864,6 +56867,7 @@ Detalhes: ${details}` : ""}`;
     return trpcResult({ success: true });
   }
   if (name === "agent.toggleTask") {
+    const paymentTask=await env.DB.prepare("SELECT id FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(Number(input.id),adminEmail.toLowerCase()).first();if(paymentTask){try{const actorEmail=delegation?.actorEmail||adminEmail.toLowerCase(),actor=delegation?.assistantId?await env.DB.prepare('SELECT name FROM portalAssistants WHERE id=?').bind(delegation.assistantId).first():await env.DB.prepare('SELECT name FROM adminAccounts WHERE lower(email)=?').bind(adminEmail.toLowerCase()).first();return trpcResult(await actOnNotification(env,{owner:adminEmail.toLowerCase(),email:actorEmail,name:actor?.name||actorEmail,assistantId:delegation?.assistantId,canComplete:()=>true,canDelete:()=>false},{kind:'payment',key:String(paymentTask.id),action:input.completed?'complete':'restore',confirmed:true}));}catch(e){return trpcError(e.message);}}
     await env.DB.prepare(
       "UPDATE agentTasks SET status=? WHERE id=? AND lower(agentEmail)=?"
     ).bind(
@@ -56875,6 +56879,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "agent.deleteTask") {
     const owner = adminEmail.toLowerCase();
+    if(await env.DB.prepare("SELECT id FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(Number(input.id),owner).first())return trpcError("Use Excluir no caso de pagamento, com confirmação e senha.","FORBIDDEN",403);
     await env.DB.batch([
       env.DB.prepare(
         "UPDATE agentTasks SET status='completed' WHERE id=? AND lower(agentEmail)=? AND title LIKE '%Flex Life%'"
@@ -59221,7 +59226,7 @@ var cloudflare_staging_default = {
         const task = await env.DB.prepare("SELECT * FROM agentTasks WHERE id=? AND lower(agentEmail)=? AND title LIKE '[Pagamento %'").bind(taskId, owner).first();
         if (!task) return secureResponse(jsonResponse({ error: "Pend\xEAncia de pagamento n\xE3o encontrada" }, 404), { privateData: true });
         const uid = String(task.title || "").match(/^\[Pagamento\s+([^\]]+)\]/i)?.[1] || "";
-        const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
+        const mailbox = uid ? await env.DB.prepare("SELECT * FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND CAST(imapUid AS TEXT)=? ORDER BY id DESC LIMIT 1").bind(owner, uid).first() : null;
         if(mailbox)mailbox.body=readableMailboxBody(mailbox);
         const extracted = mailbox ? [...extractPolicyNumbers(String(mailbox.subject || ""), String(mailbox.body || ""))] : [];
         const candidates = [mailbox?.policyNumber, ...extracted].filter(Boolean);
@@ -59253,6 +59258,7 @@ var cloudflare_staging_default = {
         await auditSchema(env.DB);await interactionSchema(env.DB);
         const interactions=clientId?(await env.DB.prepare(paymentCaseInteractionsSQL).bind(clientId,owner,clientId,owner,clientId,owner).all()).results||[]:[];
         return secureResponse(jsonResponse({
+          resolution:await notificationResolution(env,owner,"payment",taskId),
           interactions,
           task: { ...task, id: Number(task.id), clientId: clientId || null },
           client: client ? { ...client, id: Number(client.id) } : null,
@@ -60018,6 +60024,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(request.method==='GET'){const destination=legacyPortalDestination(url);if(destination)return Response.redirect(new URL(destination,url),302);}
  const assistantResponse=await assistantsRoute(request,env,{...featureAuth,decrypt:decryptSmtpPassword,whatsapp:whatsappRoute,pollAccessCodes:async(e,owner)=>{init_icloud_email();return pollAccessCodes(e,owner,{open:openAgentImap,imapDate,literal:extractLiteral,parse:raw=>import_mailparser.simpleParser(Buffer2.from(raw))});},prepareAssistant:assistant=>ctx.waitUntil(provisionAssistantEmail(env,assistant,{decrypt:decryptSmtpPassword})),session:getSession,createSession,validEmail,hash:password=>bcryptjs_default.hash(password,12),compare:(password,hash)=>bcryptjs_default.compare(password,hash),runProcedure,features:owner=>userAccess(env,owner),appearance:owner=>agentAppearance(env,'agent:'+owner),calendarLinked:async owner=>{await ensureCalendlyTables(env);return !!await env.DB.prepare("SELECT 1 FROM agentCalendlyConnections WHERE lower(agentEmail)=? AND trim(coalesce(encryptedToken,''))<>''").bind(owner).first();},page:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx),resource:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx)});
  if(assistantResponse&&!(assistantResponse.headers.get('content-type')?.includes('text/html')&&['/agentes/assistentes','/admin/assistentes'].includes(url.pathname))){const secured=secureResponse(assistantResponse,{privateData:true});if(assistantResponse.headers.get('x-affinity-assistant-view')==='1'){secured.headers.set('X-Frame-Options','SAMEORIGIN');secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace("frame-ancestors 'none'","frame-ancestors 'self'"));if(secured.headers.has('Content-Security-Policy-Report-Only'))secured.headers.set('Content-Security-Policy-Report-Only',secured.headers.get('Content-Security-Policy-Report-Only').replace("frame-ancestors 'none'","frame-ancestors 'self'"));secured.headers.delete('x-affinity-assistant-view');}if(url.pathname==='/assistentes/dashboard')secured.headers.set('Content-Security-Policy',secured.headers.get('Content-Security-Policy').replace('frame-src ',"frame-src 'self' "));return secured;}
+ if(url.pathname==='/api/agent/notification-action'){if(request.method!=='POST'||request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403});const owner=await getAdminEmail(request,env);if(!owner)return Response.json({error:'Entre novamente.'},{status:401});const access=await getAdminAccess(owner,env);if(!access.account?.isActive||access.account.status!=='approved')return Response.json({error:'Acesso bloqueado.'},{status:403});try{const input=await boundedJson(request,4096);if(!await hasFeature(env,owner,input.kind==='payment'?'tasks':'email'))return Response.json({error:'Função não liberada.'},{status:403});const row=await env.DB.prepare('SELECT name,passwordHash FROM adminAccounts WHERE lower(email)=?').bind(owner.toLowerCase()).first();return Response.json(await actOnNotification(env,{owner:owner.toLowerCase(),email:owner.toLowerCase(),name:row?.name||owner,canComplete:()=>true,canDelete:()=>true,verifyPassword:password=>bcryptjs_default.compare(password,row.passwordHash)},input),{headers:{'cache-control':'no-store'}});}catch(e){return Response.json({error:e.message},{status:e.status||400});}}
  const agendaResponse=await addressBookRoute(request,env,featureAuth);if(agendaResponse)return agendaResponse;
  const accessResponse=await accessRoute(request,env,featureAuth);if(accessResponse)return accessResponse;
  if(request.method==='GET'&&url.pathname==='/agentes/tarefas')return Response.redirect(new URL('/agentes/novo-cliente',url),302);
