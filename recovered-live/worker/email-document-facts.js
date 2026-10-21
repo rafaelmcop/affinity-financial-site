@@ -5,6 +5,8 @@ export function proposalPerson(text){
  const source=String(text||'').replace(/[*#|]/g,' ').replace(/\r/g,'');
  const names=[];for(const match of source.matchAll(/(?:proposed\s+insured(?:\s+name)?|primary\s+insured(?:\s+name)?|insured\s+name|insured\s*:|client\s+name|full\s+name|nome\s+completo|prepared\s+for)\s*[:\-]?\s*([^\n]{3,120})/gi)){const name=match[1].split(/\b(?:date of birth|birth date|DOB|gender|female|male|age|sex)\b/i)[0].replace(/\s+/g,' ').trim();if(/^[\p{L}][\p{L}' .-]+$/u.test(name)&&name.split(/\s+/).length>=2&&!/information|signature|beneficiar|illustration/i.test(name))names.push(name);}
  if(!names.length){const block=source.match(/insured\s+information[\s\S]{0,80}?\bname\s*:\s*([^\n]{3,100})/i);if(block)names.push(block[1].trim());}
+ // National Life policy-cost illustrations identify the proposed insured on the cover as "For".
+ if(!names.length&&/(?:statement of policy cost|term life insurance|life insurance illustration)/i.test(source.slice(0,6000))){const cover=source.slice(0,6000).match(/^\s*For[ \t]+([\p{L}][\p{L}' .-]{3,119})[ \t]*$/mu);if(cover&&cover[1].trim().split(/\s+/).length>=2)names.push(cover[1].trim());}
  const uniqueNames=[...new Map(names.map(name=>[compact(name),name])).values()];
  const dates=[...new Set([...source.matchAll(/(?:date\s+of\s+birth|birth\s*date|DOB|data\s+de\s+nascimento)\s*[:\-]?\s*(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{4})/gi)].map(match=>documentBirthDate(match[1])).filter(Boolean))];
  return uniqueNames.length===1?{name:uniqueNames[0],birthDate:dates.length===1?dates[0]:'',ambiguousDate:dates.length>1}:null;
