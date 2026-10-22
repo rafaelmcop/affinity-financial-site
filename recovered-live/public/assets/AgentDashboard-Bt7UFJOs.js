@@ -1,3 +1,4 @@
+import AgentEmailReviews from './AgentEmailReviews.js?v=1';
 import BirthdayAlerts from './AgentBirthdayAlerts.js?v=4';
 import {
   c as v,
@@ -170,7 +171,7 @@ function H() {
                 }),
                 e.jsxs("div", {
                   className: "mt-5 grid gap-4 xl:grid-cols-3",
-                  children: [e.jsx(BirthdayAlerts,{}),
+                  children: [e.jsx(AgentEmailReviews,{}),e.jsx(BirthdayAlerts,{}),
                     (s?.notifications?.length || 0) > 0 &&
                       e.jsxs("section", {
                         className:

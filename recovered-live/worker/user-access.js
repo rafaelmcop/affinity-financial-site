@@ -39,6 +39,7 @@ export function procedureFeature(name){
  if(['listApplications','getApplication','getApplicationDocument','applicationAgentDetails'].includes(op))return ['application_create','applications','policies'];
  if(op==='savePcSheet')return 'policies';
  if(/Application|PcSheet/.test(op))return op==='requestApplicationDeletion'?['application_create','applications','policies']:'application_create';
+ if(/EmailReview/.test(op))return 'email';
  if(/Review|review|ServiceFeedback/.test(op))return 'reviews';
  if(/Task|Tasks/.test(op))return 'tasks';
  if(/Policy|Policies|Application|Applications|PcSheet|Spreadsheet|NationalLife/.test(op))return 'policies';

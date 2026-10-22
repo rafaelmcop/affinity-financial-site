@@ -1,3 +1,4 @@
+import {listEmailReviews,getEmailReview,sendEmailReview,deleteEmailReview} from './email-reviews.js';
 import {emailArchiveSchema,archiveRecoveredAttachments,reserveEmailAttachments,finalizeEmailAttachments,listEmailAttachments,emailAttachmentBytes,withEmailAttachments,messageKey,emailRecordKey} from './email-attachment-archive.js';
 import {enrichArchivedDocuments,readPendingEmailDocuments} from './email-document-facts.js';
 import {recoverEmailAttachments} from './email-attachment-recovery.js';
@@ -55427,6 +55428,7 @@ Detalhes: ${details}` : ""}`;
   const accountType = String(adminAccess.account?.accountType || "admin");
   if(!globalTestimonialsAllowed(name,accountType))return trpcError("Acesso restrito ao administrador", "FORBIDDEN",403);
   const adminMailboxProcedures = /* @__PURE__ */ new Set([
+    "agent.listEmailReviews","agent.getEmailReview","agent.sendEmailReview","agent.deleteEmailReview",
     "agent.mailbox",
     "agent.mailboxMessage",
     "agent.mailboxFolders",
@@ -56551,6 +56553,17 @@ Detalhes: ${details}` : ""}`;
     const id = Number(input.id);
     await env.DB.prepare("UPDATE agentMailboxEmails SET readAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND direction='received'").bind(id, adminEmail.toLowerCase()).run();
     return trpcResult({ success: true });
+  }
+  if (["agent.listEmailReviews","agent.getEmailReview","agent.sendEmailReview","agent.deleteEmailReview"].includes(name)) {
+    const owner=adminEmail.toLowerCase(),actor=delegation?.actorEmail||owner;
+    const services={sender:async()=>{const setting=await env.DB.prepare('SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first();return corporateFromEmail(env,owner,setting?.fromEmail||owner);},paymentDraft:async (taskId,row)=>{if(!taskId){const agent=await env.DB.prepare('SELECT name,phone,whatsapp FROM adminAccounts WHERE lower(email)=?').bind(owner).first(),settings=await env.DB.prepare('SELECT paymentReturnSubject,paymentReturnMessage FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first(),personalize=text=>personalizeTemplate(text,row.name,agent?.name||'',agent?.phone||agent?.whatsapp||'',row.policyNumber||'');return {prepared:{subject:personalize(settings?.paymentReturnSubject||DEFAULT_PAYMENT_RETURN_SUBJECT),message:personalize(settings?.paymentReturnMessage||DEFAULT_PAYMENT_RETURN_MESSAGE)}};}const result=await runProcedure('agent.paymentCase',{taskId},request,env,delegation);if(result.error)throw Error(result.error.json.message);return result.result.data.json;},send:async data=>{const reviewBody=await appendAgentEmailSignature(env,owner,data.body);return {...await sendAgentEmail(env,owner,{to:data.to,subject:data.subject,html:await signedClientEmailHtml(env,owner,reviewBody),historyClientId:data.clientId}),reviewBody};},record:async data=>{data.body=data.sent.reviewBody||data.body;
+      const setting=await env.DB.prepare('SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first(),from=await corporateFromEmail(env,owner,setting?.fromEmail||owner),ref=String(data.sent.messageId||'review:'+crypto.randomUUID());
+      const statements=[env.DB.prepare("INSERT INTO agentMailboxEmails(agentEmail,clientId,externalId,direction,fromEmail,toEmail,subject,body,sentAt,readAt,actionStatus,actionDetail,topic) VALUES(?,?,?,'sent',?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,'sent','Revisado e enviado pelo portal','general')").bind(owner,data.clientId,ref,from,data.to,data.subject,data.body)];
+      if(data.clientId){statements.push(env.DB.prepare("INSERT INTO clientEmails(agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES(?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'client')").bind(owner,data.clientId,ref,data.subject,data.body,from,data.to));statements.push(env.DB.prepare("INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,'email',?,?)").bind(data.clientId,'E-mail revisado e enviado pelo portal: '+data.subject+' · Responsável: '+actor,actor));}
+      if(data.row.kind==='payment')statements.push(env.DB.prepare("UPDATE agentMailboxEmails SET actionStatus='sent',actionDetail='Aviso revisado e enviado pelo portal' WHERE id=? AND lower(agentEmail)=?").bind(data.row.mailboxId,owner));
+      await env.DB.batch(statements);
+    }};
+    try {if(name==='agent.listEmailReviews')return trpcResult(await listEmailReviews(env,owner));if(name==='agent.getEmailReview')return trpcResult(await getEmailReview(env,owner,String(input.key||''),services));if(request.method!=='POST')return trpcError('Método inválido');if(name==='agent.sendEmailReview')return trpcResult(await sendEmailReview(env,owner,actor,input,services));return trpcResult(await deleteEmailReview(env,owner,actor,input,async password=>{const row=delegation?.assistantId?await env.DB.prepare('SELECT passwordHash FROM portalAssistants WHERE id=? AND active=1 AND deletedAt IS NULL').bind(delegation.assistantId).first():await env.DB.prepare('SELECT passwordHash FROM adminAccounts WHERE lower(email)=? AND isActive=1').bind(owner).first();return !!row&&await bcryptjs_default.compare(password,row.passwordHash);}));}catch(error){return trpcError(error.message);}
   }
   if (name === "agent.sendMailboxEmail") {
     const owner = adminEmail.toLowerCase();
