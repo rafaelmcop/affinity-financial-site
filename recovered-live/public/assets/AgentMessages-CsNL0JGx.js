@@ -1030,7 +1030,7 @@ function J() {
                                   ? "Enviada"
                                   : i.status === "failed"
                                     ? "Falhou"
-                                    : i.status === "review" ? "Não enviada · Revisar" : "Programada",
+                                    : i.status === "review" ? (i.deliveryUnconfirmed ? "Envio não confirmado" : "Não enviada · Revisar") : "Programada",
                             }),
                           ],
                         }),

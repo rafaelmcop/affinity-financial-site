@@ -11,7 +11,7 @@ import {paymentCaseInteractionsSQL} from './payment-case-interactions.js';
 import {legacyPortalDestination} from './navigation-targets.js';
 import {notificationEmail} from './notification-email.js';
 import {smtpConnectionOptions,mailFailureCode,blockMailAutomation,mailAutomationBlocked,releaseFutureMailAutomation} from './mail-health.js';
-import {unresolvedDeliveryFailureSQL} from './delivery-reconciliation.js';
+import {unresolvedDeliveryFailureSQL,deliveryFailurePresentation} from './delivery-reconciliation.js';
 import {copySettings,copyRecipients,sendMeetingCopies,allowsMeetingCopies} from './meeting-copy.js';
 import {Buffer as AssistantMailBuffer} from 'node:buffer';
 import {provisionAssistantEmail,receiveAssistantEmail} from './assistant-communications.js';
@@ -57146,7 +57146,7 @@ Affinity Financial Consulting`,
       let recipients=[];try{recipients=JSON.parse(row.recipients||'[]').map(recipient=>({...recipient,name:recipient.name||'Contato'}));}catch{}
       return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, recipients, status: "sent", date: row.sentAt, firstSentAt: row.firstSentAt, errorMessage: null };
     });
-    const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, clientId:Number(row.clientId)||null,title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "failed", date: row.attemptedAt, errorMessage: row.errorMessage ? String(row.errorMessage) : "Falha n\xE3o identificada" }));
+    const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, clientId:Number(row.clientId)||null,title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, date: row.attemptedAt, ...deliveryFailurePresentation(row) }));
     const paymentDeliveries=(paymentSent.results||[]).map(row=>({id:'payment-sent-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente',recipientEmail:row.recipientEmail||null,status:'sent',date:row.sentAt,recipients:[{clientId:Number(row.clientId)||null,name:row.clientName||'Cliente',email:row.recipientEmail||null,sentAt:row.sentAt}],recipientCount:1}));
     const paymentReviews=(paymentPending.results||[]).map(row=>({id:'payment-review-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente ainda não identificado',status:'review',date:row.sentAt,errorMessage:row.actionDetail||'Verificar cliente e apólice antes do envio'}));
     return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews]);
