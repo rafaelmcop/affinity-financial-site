@@ -56578,9 +56578,17 @@ Detalhes: ${details}` : ""}`;
       subject = `Re: ${baseSubject}`;
       inReplyTo = String(previous.externalId || "").trim() || void 0;
     } else {
-      const customer = await env.DB.prepare("SELECT id,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(requestedClientId, owner).first();
-      if (!customer) return trpcError("Selecione um dos seus clientes");
-      recipient = String(customer.email || "").trim().toLowerCase();
+      // A CRM link is optional; never associate a different recipient with the selected client.
+      const suppliedRecipient = String(input.to || "").trim().toLowerCase();
+      const customer = requestedClientId ? await env.DB.prepare("SELECT id,email FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(requestedClientId, owner).first() : null;
+      if (requestedClientId && !customer) return trpcError("Cliente não encontrado", "NOT_FOUND", 404);
+      recipient = suppliedRecipient || String(customer?.email || "").trim().toLowerCase();
+      if (recipient.length > 254 || !/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(recipient)) return trpcError("Informe um endereço de e-mail válido no campo Para");
+      if (customer && String(customer.email || "").trim().toLowerCase() === recipient) clientId = Number(customer.id);
+      else {
+        const matches = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(trim(email))=? AND lower(assignedAdminEmail)=? LIMIT 2").bind(recipient, owner).all();
+        clientId = matches.results?.length === 1 ? Number(matches.results[0].id) : null;
+      }
     }
     if (!validEmail(recipient)) return trpcError("O destinat\xE1rio n\xE3o possui um e-mail v\xE1lido");
     if (!subject) subject = "Mensagem da Affinity Financial";
