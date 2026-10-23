@@ -56,3 +56,7 @@ This review is not evidence that a breach never occurred. It did not include a f
 - Sitemap documentation: https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap
 - Nodemailer advisory and patched version: https://github.com/advisories/GHSA-39m8-27wv-hr27
 - SheetJS authoritative browser distribution: https://docs.sheetjs.com/docs/getting-started/installation/standalone/
+
+## Publication verification
+
+Production Worker version: `5a5323ea-946e-468d-bcbb-964858e6480a`. Release source commit: `6d07de8`, pushed to `agent/personalizar-mensagens-agentes` before deployment. After publication, 22 read-only/denied-request checks passed: homepage/search assets and service landing page returned 200, homepage alias returned 301, unknown/private-resource paths returned 404, private APIs returned 401, login screens carried noindex, system ping returned 200, and a cross-origin CRM mutation was rejected with 403. These checks sent no customer messages. Repository code remained clean after deployment.
