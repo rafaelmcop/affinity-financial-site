@@ -1,3 +1,4 @@
+import {crmClientDetail} from './crm-client-detail.js';
 import {listEmailReviews,getEmailReview,sendEmailReview,deleteEmailReview} from './email-reviews.js';
 import {emailArchiveSchema,archiveRecoveredAttachments,reserveEmailAttachments,finalizeEmailAttachments,listEmailAttachments,emailAttachmentBytes,withEmailAttachments,messageKey,emailRecordKey} from './email-attachment-archive.js';
 import {enrichArchivedDocuments,readPendingEmailDocuments} from './email-document-facts.js';
@@ -58589,10 +58590,16 @@ Affinity Financial Consulting`,
     ).bind(adminEmail.toLowerCase(), await bcryptjs_default.hash(next, 12)).run();
     return trpcResult({ success: true });
   }
+  if (name === "crm.getClient") {
+    const row=await crmClientDetail(env,adminEmail.toLowerCase(),input.clientId);
+    return row?trpcResult(row):trpcError("Cliente não encontrado nesta conta", "NOT_FOUND", 404);
+  }
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
     const agentView = accountType === "agent" || Boolean(input.agentMode);
-    await leadSchema(env);await protectInternalContacts(env);
+    // Lead imports, group changes and queue reservations maintain suppression.
+    // Reading customer records must not run writes against the global lead queue.
+    await leadSchema(env);
     const globalBlocked=await env.DB.prepare('SELECT phone FROM centralLeads WHERE suppressed=1 OR isUS=0').all();
     const blockedPhones=new Set(globalBlocked.results.map(r=>sourcePhone(r.phone)));
     const [rows, policyStages, applicationStages] = agentView ? await Promise.all([

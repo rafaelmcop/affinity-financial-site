@@ -1,0 +1,7 @@
+// A customer record is not a lead queue: retrieve one owned record without global lead maintenance.
+export async function crmClientDetail(env,owner,value){const id=Number(value);if(!Number.isSafeInteger(id)||id<=0)return null;const row=await env.DB.prepare("SELECT c.*,(SELECT MAX(m.startTime) FROM calendlyMeetings m WHERE lower(m.agentEmail)=? AND datetime(m.startTime)<=datetime('now') AND (m.clientId=c.id OR (trim(coalesce(c.email,''))<>'' AND lower(trim(m.inviteeEmail))=lower(trim(c.email))))) lastMeetingAt FROM crmClients c WHERE c.id=? AND lower(c.assignedAdminEmail)=? LIMIT 1").bind(owner,id,owner).first();if(!row)return null;
+ const email=String(row.email||'').trim().toLowerCase(),digits=String(row.phone||row.whatsapp||'').replace(/\D/g,''),phone=digits.length>=10?digits.slice(-10):'';
+ const policies=(await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status,policyNumber FROM agentPolicies WHERE lower(agentEmail)=? AND (clientId=? OR (coalesce(clientId,0)=0 AND ((?<>'' AND lower(trim(clientEmail))=?) OR (?<>'' AND substr(replace(replace(replace(replace(replace(coalesce(clientPhone,''),'+',''),'(',''),')',''),'-',''),' ',''),-10)=?))))").bind(owner,id,email,email,phone,phone).all()).results||[];
+ const inforce=policies.some(p=>['active','ativa','ativo','inforce','issued'].includes(String(p.status||'').trim().toLowerCase().replace(/[\s_-]+/g,'')));
+ return {...row,id:Number(row.id),hasPolicy:policies.length>0,hasInforcePolicy:inforce,policyNumbers:policies.map(p=>p.policyNumber).filter(Boolean)};
+}
