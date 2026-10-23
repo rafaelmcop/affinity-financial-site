@@ -1,0 +1,6 @@
+html[data-agent-theme] .grid>div,html[data-agent-theme] .message{background:var(--agent-inset)!important;color:var(--agent-text)!important;border:1px solid var(--agent-border)}
+html[data-agent-theme] .grid b,html[data-agent-theme] .message *,html[data-agent-theme] .email{color:var(--agent-text)!important}
+html[data-agent-theme] .actions a{background:var(--agent-inset)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme=light] .status.review{background:#fff1ce!important;color:#684400!important}
+html[data-agent-theme=light] .status.sent{background:#daf2e4!important;color:#155638!important}
+html[data-agent-theme=light] .status.failed{background:#ffe2e2!important;color:#862323!important}

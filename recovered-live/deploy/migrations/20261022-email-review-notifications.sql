@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS emailReviewStates(owner TEXT NOT NULL,itemKey TEXT NOT NULL,state TEXT NOT NULL,actor TEXT NOT NULL,recipient TEXT,externalId TEXT,subject TEXT,body TEXT,clientId INTEGER,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,itemKey));
+CREATE TABLE IF NOT EXISTS paymentCaseEmailDispatches(owner TEXT,taskId INTEGER,status TEXT,createdAt TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(owner,taskId));

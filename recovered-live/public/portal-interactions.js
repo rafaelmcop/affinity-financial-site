@@ -1,0 +1,53 @@
+export async function prepareWhatsApp(input){
+ let phone=String(input.phone||'').replace(/\D/g,'');if(phone.length===10)phone='1'+phone;
+ if(!phone)throw Error('Telefone não informado.');
+ const response=await fetch('/api/trpc/agent.logPortalInteraction',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({json:{...input,phone,channel:'whatsapp',requestId:crypto.randomUUID()}})}),payload=await response.json();
+ if(!response.ok||payload.error)throw Error(payload.error?.json?.message||'Não foi possível salvar a interação.');
+ return 'whatsapp://send?phone='+phone+'&text='+encodeURIComponent(input.text||'');
+}
+
+export function confirmPortalMessage(message,confirmLabel="Confirmar envio"){return new Promise(resolve=>{
+ const overlay=document.createElement('div');overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.style.cssText='position:fixed;inset:0;background:#0008;z-index:10050;display:grid;place-items:center;padding:20px';
+ const card=document.createElement('section');card.style.cssText='background:var(--agent-surface,#fff);color:var(--agent-text,#173348);padding:24px;border-radius:12px;max-width:600px;max-height:85vh;overflow:auto';const text=document.createElement('p');text.textContent=message;card.append(text);
+ for(const [label,value]of [['Cancelar',false],[confirmLabel,true]]){const button=document.createElement('button');button.type='button';button.textContent=label;button.style.cssText='padding:12px;margin:6px;border:1px solid #64748b;border-radius:8px;background:#e8eef5;color:#173348;font-weight:700';if(value)button.style.cssText+=';background:#166534!important;color:#fff!important;border:2px solid #14532d!important;font-weight:800';button.onclick=()=>{overlay.remove();resolve(value)};card.append(button);}overlay.append(card);document.body.append(overlay);
+});}
+export function openWhatsApp(input){return new Promise(resolve=>{
+ let phone=String(input.phone||'').replace(/\D/g,'');if(phone.length===10)phone='1'+phone;
+ const overlay=document.createElement('div');overlay.setAttribute('role','dialog');overlay.setAttribute('aria-modal','true');overlay.style.cssText='position:fixed;inset:0;background:#0008;z-index:10040;display:grid;place-items:center;padding:20px';
+ const card=document.createElement('section');card.style.cssText='background:var(--agent-surface,#fff);color:var(--agent-text,#173348);padding:24px;border-radius:12px;width:min(650px,100%);max-height:85vh;overflow:auto';
+ const title=document.createElement('h2');title.textContent='WhatsApp · +'+phone;const help=document.createElement('p');help.textContent='Enviar pelo portal usa seu WhatsApp conectado. Abrir no WhatsApp leva a mensagem ao aplicativo, onde você poderá revisar e enviar.';
+ const area=document.createElement('textarea');area.value=input.text||'';area.setAttribute('aria-label','Mensagem para o cliente');area.rows=7;area.style.cssText='width:100%;background:var(--agent-inset,#f8fafc);color:var(--agent-text,#173348);border:1px solid #64748b;padding:12px';
+ const status=document.createElement('p');status.setAttribute('role','status');let requestId=crypto.randomUUID(),confirmed='',outcome={cancelled:true};
+ function button(label){const b=document.createElement('button');b.type='button';b.textContent=label.replace(/^[💬✉️]+\s*/u,'');if(label.startsWith('💬'))b.setAttribute('data-message-channel','whatsapp');if(label.startsWith('✉'))b.setAttribute('data-message-channel','email');b.style.cssText='padding:12px;margin:6px;border:1px solid #64748b;border-radius:8px;background:#e8eef5;color:#173348;font-weight:700';card.append(b);return b;}
+ card.append(title,help,area,status);const send=button('💬 Enviar pelo portal'),app=button('💬 Abrir no WhatsApp'),close=button('Fechar');
+ close.onclick=()=>{overlay.remove();resolve(outcome)};area.oninput=()=>{confirmed='';requestId=crypto.randomUUID();send.disabled=false;send.textContent='Enviar pelo portal';send.style.cssText=app.style.cssText};
+ app.onclick=()=>{void prepareWhatsApp({...input,phone,text:area.value}).catch(error=>{status.textContent='Não foi possível registrar a abertura: '+error.message});outcome={opened:true};location.href='whatsapp://send?phone='+phone+'&text='+encodeURIComponent(area.value);status.textContent='Revise e confirme o envio no aplicativo. Nenhuma mensagem é enviada automaticamente.'};
+ send.onclick=async()=>{const text=area.value.trim();if(!/^\d{10,15}$/.test(phone)||!text||text.length>4000){status.textContent='Informe um telefone válido e uma mensagem de até 4.000 caracteres.';return;}if(confirmed!==text){confirmed=text;send.textContent='Confirmar envio';send.style.cssText+=';background:#166534!important;color:#fff!important;border:2px solid #14532d!important;font-weight:800';status.textContent='Confira a mensagem para +'+phone+' e confirme o envio.';return;}send.disabled=true;status.textContent='Enviando…';try{const response=input.sendWithPortal?null:await fetch('/api/agent/whatsapp/send',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({chat:phone+'@c.us',text,manual:true,requestId})}),result=input.sendWithPortal?await input.sendWithPortal({text,requestId}):await response.json();if((response&&!response.ok)||result.state!=='sent')throw Error(result.error||'A conexão não confirmou o envio.');outcome={sent:true};status.textContent='Envio confirmado pela sua conexão WhatsApp.';send.textContent='WhatsApp enviado';}catch(error){status.textContent=error.message+' Confira a conversa antes de tentar novamente.';send.disabled=false;send.textContent='Verificar envio novamente';}};
+ overlay.append(card);document.body.append(overlay);
+});}
+
+if(typeof document!=='undefined'&&(location.pathname.startsWith('/agentes/')||location.pathname.startsWith('/agent-'))){document.addEventListener('click',async event=>{if(event.target.closest('#sms-client')){event.preventDefault();event.stopImmediatePropagation();const params=new URLSearchParams(location.search),clientId=Number(params.get('clientId')||params.get('id')),href=document.querySelector('a[href^="tel:"]')?.getAttribute('href')||'',phone=href.slice(4);try{const r=await fetch('/api/trpc/agent.logPortalInteraction',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({json:{clientId,phone,text:'',channel:'sms',requestId:crypto.randomUUID()}})}),p=await r.json();if(!r.ok||p.error)throw Error(p.error?.json?.message||'Não foi possível salvar.');location.href='sms:'+phone;}catch(error){alert(error.message);}return;}const link=event.target.closest('a[href]');if(!link||event.defaultPrevented)return;const href=link.getAttribute('href');if(!/^(whatsapp:|https:\/\/wa\.me\/|tel:|sms:|mailto:)/i.test(href))return;event.preventDefault();try{const url=new URL(href,location.href),channel=url.protocol==='tel:'?'call':url.protocol==='sms:'?'sms':url.protocol==='mailto:'?'email':'whatsapp',phone=channel==='whatsapp'?(url.searchParams.get('phone')||url.pathname.slice(1)):href.split(':')[1].split('?')[0],text=url.searchParams.get('text')||url.searchParams.get('body')||'',clientId=Number(new URLSearchParams(location.search).get('clientId')||new URLSearchParams(location.search).get('id'))||undefined;if(channel==='whatsapp'){if(link.id==='whatsapp-contact'||/ligar.*whats/i.test(link.textContent||'')){void prepareWhatsApp({clientId,phone,text:''}).catch(()=>{});location.href='whatsapp://send?phone='+phone;}else await openWhatsApp({clientId,phone,text});}else if(channel==='email'){sessionStorage.setItem('affinity-email-draft',JSON.stringify({to:decodeURIComponent(url.pathname),subject:url.searchParams.get('subject')||'',body:text}));location.href='/agentes/email?compose=1';}else{const res=await fetch('/api/trpc/agent.logPortalInteraction',{method:'POST',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({json:{clientId,phone,text,channel,requestId:crypto.randomUUID()}})}),data=await res.json();if(!res.ok||data.error)throw Error(data.error?.json?.message||'Não foi possível salvar.');location.href=href;}}catch(error){alert(error.message);}},true);}
+
+// The conversation screen already sends directly through the connected account.
+// Offer the same optional app hand-off without changing its existing composer.
+if(typeof document!=='undefined'&&location.pathname==='/agentes/whatsapp'){
+ const area=document.querySelector('#text,#messageText'),send=document.getElementById('send');
+ if(area&&send&&!document.getElementById('whatsapp-open-app')){
+  const app=document.createElement('button');app.id='whatsapp-open-app';app.type='button';app.textContent='Abrir no WhatsApp';app.setAttribute('data-message-channel','whatsapp');app.title='Abre o texto no WhatsApp. Anexos devem ser enviados pelo portal ou adicionados no aplicativo.';
+  app.onclick=()=>{let phone=String(document.querySelector('#number,#contactPhone')?.textContent||'').replace(/\D/g,'');if(phone.length===10)phone='1'+phone;if(!/^\d{10,15}$/.test(phone)){app.textContent='Selecione uma conversa individual';return;}void prepareWhatsApp({phone,text:area.value}).catch(()=>{});location.href='whatsapp://send?phone='+phone+'&text='+encodeURIComponent(area.value);};send.after(app);
+ }
+}
+
+// Decorate action controls without changing framework-owned text or children.
+if(typeof document!=='undefined'){
+ const decorateMessageActions=()=>{for(const el of document.querySelectorAll('button,a[href]')){
+  if(el.closest('nav,.agent-unified-nav'))continue;
+  const label=(el.textContent||'').trim(),href=el.getAttribute('href')||'';
+  let channel=el.getAttribute('data-message-channel');
+  if(!channel&&(/^(whatsapp:|https:\/\/wa\.me\/)/i.test(href)||(/whatsapp|\bwpp\b/i.test(label)&&/enviar|abrir|preparar|ligar|confirmar/i.test(label))))channel='whatsapp';
+  if(!channel&&(/^mailto:/i.test(href)||(/e-?mail/i.test(label)&&/enviar|abrir|preparar|confirmar/i.test(label))))channel='email';
+  if(!channel&&location.pathname==='/agentes/email'&&el.matches('button[type="submit"]')&&/^enviar$/i.test(label))channel='email';
+  if(channel&&el.getAttribute('data-message-channel')!==channel)el.setAttribute('data-message-channel',channel);
+ }};
+ decorateMessageActions();new MutationObserver(decorateMessageActions).observe(document.body,{childList:true,subtree:true});
+}

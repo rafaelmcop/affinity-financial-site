@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Affinity · Conector Five Rings",
+  "version": "1.0.6",
+  "description": "Leitura de clientes, apólices e créditos na sessão Five Rings do próprio navegador.",
+  "host_permissions": [
+    "https://portal.fiveringsfinancial.com/*",
+    "https://www.affinityfc.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.affinityfc.org/*"
+      ],
+      "js": [
+        "affinity.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://portal.fiveringsfinancial.com/*"
+      ],
+      "js": [
+        "five-rings.js"
+      ]
+    }
+  ],
+  "permissions": [
+    "scripting"
+  ]
+}

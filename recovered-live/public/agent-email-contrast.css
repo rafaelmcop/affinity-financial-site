@@ -1,0 +1,17 @@
+html[data-agent-theme] body .email-row .who,
+html[data-agent-theme] body .email-row .subject{color:var(--agent-text)!important}
+html[data-agent-theme] body .email-row .subject{font-weight:700}
+html[data-agent-theme] body .email-row :is(.preview,time){color:var(--agent-muted)!important}
+html[data-agent-theme] body .email-row.active{background:var(--agent-sent)!important;box-shadow:inset 4px 0 #287b89}
+html[data-agent-theme] body .affinity-mailbar :is(summary,select,option),
+html[data-agent-theme] body .affinity-mailbar details>div{background:var(--agent-surface)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+html[data-agent-theme] body .affinity-mailbar summary{border:1px solid var(--agent-border)!important;font-weight:700}
+html[data-agent-theme] body .dialog :is(label,input,textarea,select){color:var(--agent-text)!important}
+html[data-agent-theme] body :is(input,textarea)::placeholder{color:var(--agent-muted)!important;opacity:1}
+html[data-agent-theme=light] body :is(.pill.sent,.notice.ok){background:#dcfce7!important;color:#14532d!important}
+html[data-agent-theme=light] body :is(.pill.failed,.notice.error){background:#fee2e2!important;color:#881c1c!important}
+html[data-agent-theme=light] body .pill.pending{background:#fef3c7!important;color:#713f12!important}
+html[data-agent-theme] body #affinity-category-toggle>summary,
+html[data-agent-theme] body #affinity-category-menu{background:var(--agent-surface)!important;color:var(--agent-text)!important;border:1px solid var(--agent-border)!important}
+html[data-agent-theme] body #affinity-category-toggle>summary{font-weight:700}
+html[data-agent-theme] body #affinity-category-menu button{color:var(--agent-text)!important;background:var(--agent-inset)!important}
