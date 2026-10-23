@@ -1,3 +1,4 @@
+import {emailDefinitelyNotSent} from './smtp-runtime.js';
 import {meetingSendTransport} from './meeting-send-transport.js';
 export async function sendMeetingMessage(env,owner,meeting,input,attachments,sendEmail){
  if(input.confirmed!==true)throw Object.assign(Error('Confirme o envio antes de continuar.'),{status:400});
@@ -8,8 +9,8 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
  let chat;if(channel==='whatsapp'){let phone=String(meeting.inviteePhone||'').replace(/\D/g,'');if(phone.length===10)phone='1'+phone;if(!/^\d{8,15}$/.test(phone))throw Object.assign(Error('Telefone inválido neste compromisso.'),{status:400});chat=phone+'@c.us';}
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS meetingMessageDispatches(owner TEXT,meetingId INTEGER,channel TEXT,requestId TEXT,status TEXT,createdAt TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,requestId))').run();
  const old=await env.DB.prepare('SELECT status,meetingId,channel FROM meetingMessageDispatches WHERE owner=? AND requestId=?').bind(owner,requestId).first();
- if(old){if(old.meetingId!==Number(meeting.id)||old.channel!==channel)throw Error('Identificador já usado em outro envio.');if(old.status==='sent')return {alreadySent:true};throw Object.assign(Error('Este envio não foi confirmado. Confira no aplicativo antes de tentar novamente.'),{status:409});}
- const reserved=await env.DB.prepare("INSERT OR IGNORE INTO meetingMessageDispatches(owner,meetingId,channel,requestId,status) VALUES(?,?,?,?,'sending')").bind(owner,Number(meeting.id),channel,requestId).run();if(!reserved.meta?.changes)throw Object.assign(Error('Envio em processamento.'),{status:409});
+ if(old){if(old.meetingId!==Number(meeting.id)||old.channel!==channel)throw Error('Identificador já usado em outro envio.');if(old.status==='sent')return {alreadySent:true};if(old.status!=='not_sent')throw Object.assign(Error(old.status==='sending'?'Envio em processamento. Aguarde antes de tentar novamente.':channel==='email'?'Não foi possível confirmar o envio deste e-mail. Confira o histórico de e-mails antes de preparar uma nova tentativa.':'Este envio de WhatsApp não foi confirmado. Confira no aplicativo antes de tentar novamente.'),{status:409});}
+ const reserved=old?.status==='not_sent'?await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sending' WHERE owner=? AND requestId=? AND status='not_sent'").bind(owner,requestId).run():await env.DB.prepare("INSERT OR IGNORE INTO meetingMessageDispatches(owner,meetingId,channel,requestId,status) VALUES(?,?,?,?,'sending')").bind(owner,Number(meeting.id),channel,requestId).run();if(!reserved.meta?.changes)throw Object.assign(Error('Envio em processamento.'),{status:409});
  try{
   if(channel==='email')await sendEmail(attachments);
   else{
@@ -24,5 +25,7 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
    }
   }
   await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sent' WHERE owner=? AND requestId=?").bind(owner,requestId).run();return {alreadySent:false};
- }catch(error){await env.DB.prepare("UPDATE meetingMessageDispatches SET status=? WHERE owner=? AND requestId=?").bind(error.notSent&&!attachments.length?'not_sent':'uncertain',owner,requestId).run();throw error;}
+ }catch(error){const notSent=channel==='email'?emailDefinitelyNotSent(error):error.notSent&&!attachments.length;
+ await env.DB.prepare("UPDATE meetingMessageDispatches SET status=? WHERE owner=? AND requestId=?").bind(notSent?'not_sent':'uncertain',owner,requestId).run();
+ if(channel==='email'&&notSent)throw Object.assign(Error('O e-mail não foi enviado: falha na conexão ou autenticação do servidor de e-mail. Tente novamente; se persistir, confira a configuração de e-mail.'),{status:400,notSent:true});throw error;}
 }

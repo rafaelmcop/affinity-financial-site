@@ -1,3 +1,4 @@
+import {runtimeSmtpOptions} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
 import {crmClientDetail} from './crm-client-detail.js';
@@ -572,7 +573,7 @@ async function sendEmail(env, options) {
   );
   const port = Number(config.port);
   const transporter = import_nodemailer.default.createTransport({
-    ...smtpConnectionOptions(config),
+    ...runtimeSmtpOptions(config),
     disableFileAccess: true, disableUrlAccess: true,
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587
@@ -599,7 +600,7 @@ async function sendAgentEmail(env, agentEmail, options) {
   );
   const port = Number(config.port);
   const transporter = import_nodemailer.default.createTransport({
-    ...smtpConnectionOptions(config),
+    ...runtimeSmtpOptions(config),
     disableFileAccess: true, disableUrlAccess: true,
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587
@@ -44111,7 +44112,7 @@ Detalhes: ${details}` : ""}`;
     if(!adminAccess.isMaster)return trpcError('Acesso exclusivo do Admin.','FORBIDDEN',403);
     const owner=String(input.email||'').trim().toLowerCase();if(!validEmail(owner))return trpcError('Informe o e-mail do usuário.');
     const config=await env.DB.prepare('SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first();if(!config)return trpcError('Este usuário não configurou e-mail.');
-    try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET),transport=import_nodemailer.default.createTransport({...smtpConnectionOptions(config),auth:{user:String(config.user),pass:password}});try{await transport.verify();}finally{transport.close?.();}if(input.resumeFuture===true)await releaseFutureMailAutomation(env,owner);return trpcResult({verified:true,message:input.resumeFuture===true?'Conexão verificada. Somente os próximos ciclos foram liberados; campanhas antigas não serão retomadas. Nenhum e-mail enviado neste teste.':'Conexão e autenticação verificadas. Nenhum e-mail enviado. As automações pausadas continuam pausadas até revisão.'});}catch(error){return trpcResult({verified:false,code:mailFailureCode(error)||'email_verification_failed',message:'Não foi possível verificar a conexão. As automações continuam pausadas; confira a conta e a senha de aplicativo.'});}
+    try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET),transport=import_nodemailer.default.createTransport({...runtimeSmtpOptions(config),auth:{user:String(config.user),pass:password}});try{await transport.verify();}finally{transport.close?.();}if(input.resumeFuture===true)await releaseFutureMailAutomation(env,owner);return trpcResult({verified:true,message:input.resumeFuture===true?'Conexão verificada. Somente os próximos ciclos foram liberados; campanhas antigas não serão retomadas. Nenhum e-mail enviado neste teste.':'Conexão e autenticação verificadas. Nenhum e-mail enviado. As automações pausadas continuam pausadas até revisão.'});}catch(error){return trpcResult({verified:false,code:mailFailureCode(error)||'email_verification_failed',message:'Não foi possível verificar a conexão. As automações continuam pausadas; confira a conta e a senha de aplicativo.'});}
   }
   if(name==="admin.systemSyncLogs"){await syncLogSchema(env.DB);return trpcResult((await env.DB.prepare('SELECT * FROM systemSyncLogs ORDER BY id DESC LIMIT 200').all()).results||[]);}
   if(name==="agent.logPortalInteraction"){if(request.method!=="POST")return trpcError("Método inválido");try{return trpcResult(await recordPortalInteraction(env,adminEmail.toLowerCase(),input));}catch(e){return trpcError(e.message);}}
