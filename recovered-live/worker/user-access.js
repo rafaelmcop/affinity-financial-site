@@ -2,7 +2,14 @@ import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
 export {pageFeature};
 export const accessFeatures=featureCatalog.map(([key,label])=>[key,label]);
 const keys=accessFeatures.map(([key])=>key),all=JSON.stringify(keys);
-export async function accessSchema(env){
+const schemaInitializations=new WeakMap();
+export async function accessSchema(env,refresh=false){
+ if(refresh)schemaInitializations.delete(env.DB);
+ const existing=schemaInitializations.get(env.DB);if(existing)return existing;
+ const pending=initializeAccessSchema(env);schemaInitializations.set(env.DB,pending);
+ try{return await pending;}catch(error){schemaInitializations.delete(env.DB);throw error;}
+}
+async function initializeAccessSchema(env){
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalFeatureAccess(email TEXT PRIMARY KEY,featuresJson TEXT NOT NULL,updatedBy TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalFeatureAccessMeta(version TEXT PRIMARY KEY)').run();
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalFeatureAccessAudit(id INTEGER PRIMARY KEY AUTOINCREMENT,email TEXT NOT NULL,featuresJson TEXT NOT NULL,updatedBy TEXT NOT NULL,createdAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
