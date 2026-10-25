@@ -4,6 +4,7 @@ export function sendFailureHint(error){
  const text=String(error?.message||'');
  const property=text.match(/Cannot read properties of (?:undefined|null) \(reading '([A-Za-z_$][A-Za-z0-9_$]{0,60})'\)/);
  if(property)return 'missing_property:'+property[1];
+ if(/Data passed to getter must include an id property/.test(text))return 'media_identity_collision';
  if(/No LID for user/.test(text))return 'lid_mapping_missing';
  if(/is not a function/.test(text))return 'web_function_unavailable';
  if(/upload failed|media-fault/.test(text))return 'media_upload_failed';

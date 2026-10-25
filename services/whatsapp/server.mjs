@@ -1,3 +1,4 @@
+import {installMediaIdentityCompatibility} from './media-identity-compat.mjs';
 import {recordSendFailure,sendFailureText,sendFailureHint} from './send-failure.mjs';
 import {directorySnapshot,directorySchema} from './directory-snapshot.mjs';
 import {stopProfileBrowser} from './browser-process.mjs';
@@ -25,7 +26,7 @@ import {downloadMedia} from './download.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
-const bridgeVersion='2026-10-25-receipts-1';
+const bridgeVersion='2026-10-25-media-identity-1';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
 const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');
@@ -94,6 +95,8 @@ async function connectSession(owner){
   client.on('ready',()=>{void (async()=>{try{
     const compatibility=await client.pupPage.evaluate(installKeyCompatibility);
     if(!compatibility.wid||!compatibility.message)throw Error('Key compatibility unavailable');
+    const mediaCompatibility=await client.pupPage.evaluate(installMediaIdentityCompatibility);
+    if(!mediaCompatibility.ok)throw Error('Media identity compatibility unavailable');
     s.state='ready';s.qr=null;s.number=client.info?.wid?.user||null;
   }catch{s.state='error';console.error('whatsapp_key_compatibility_failed');}})();});
   if(!affiliateOwner(owner))client.on('message_create',m=>{void save(owner,m).catch(()=>{console.error('whatsapp_history_write_failed');s.state='history_error';});});
