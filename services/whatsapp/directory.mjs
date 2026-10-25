@@ -5,12 +5,23 @@ export const cachedGroupContacts=async ids=>{
     return {id,phone:phone?._serialized,name};}));
   };
 export const groupId=value=>/^\d{5,25}(?:-\d{5,25})?@g\.us$/.test(String(value||''));
+// Read only the local chat index. whatsapp-web.js getChats() refreshes every
+// group's metadata and last message; one slow archived group stalls all chats.
+export function cachedChatList(){
+ const collections=window.require('WAWebCollections');if(!collections.Chat)return null;
+ const contacts=collections.Contact,api=window.require('WAWebApiContact');
+ return collections.Chat.getModelsArray().map(chat=>{
+  const id=chat.id?._serialized||'',contact=contacts?.get?.(chat.id);let phone=null;
+  try{phone=chat.id.server==='lid'?api.getPhoneNumber(chat.id):chat.id;}catch{}
+  return {id:{_serialized:id},name:String(chat.formattedTitle||chat.name||contact?.name||contact?.pushname||''),archived:!!chat.archive,isGroup:id.endsWith('@g.us'),timestamp:Number(chat.t)||0,unreadCount:Number(chat.unreadCount)||0,phone:phone?._serialized||null};
+ });
+}
 export async function chatDirectory(client){
- const chats=await client.getChats();
- const rows=chats.filter(c=>groupId(c.id?._serialized)||/^\d{8,20}@(c\.us|lid)$/.test(c.id?._serialized||'')).map(c=>({chat:c.id._serialized,label:String(c.name||'Conversa WhatsApp'),archived:!!(c.archived??c.archive),isGroup:groupId(c.id._serialized)||!!c.isGroup,phone:/^\d{8,15}@c\.us$/.test(c.id._serialized)?'+'+c.id._serialized.split('@')[0]:null,stamp:Number(c.timestamp)||0,count:Number(c.unreadCount)||0}));
- const lids=rows.filter(c=>!c.isGroup&&c.chat.endsWith('@lid')).map(c=>c.chat),resolved=new Map();
- if(lids.length&&client.pupPage)try{for(const c of await client.pupPage.evaluate(cachedGroupContacts,lids))if(/^\d{8,15}@c\.us$/.test(c.phone||''))resolved.set(c.id,'+'+c.phone.split('@')[0]);}catch{}
- for(let i=0;i<lids.length;i+=50){const missing=lids.slice(i,i+50).filter(id=>!resolved.has(id));if(missing.length&&client.getContactLidAndPhone)try{for(const pair of await client.getContactLidAndPhone(missing))if(/^\d{8,15}@c\.us$/.test(pair.pn||''))resolved.set(pair.lid,'+'+pair.pn.split('@')[0]);}catch{}}
+ const chats=(client.pupPage?await client.pupPage.evaluate(cachedChatList):null)||await client.getChats();
+ const rows=chats.filter(c=>groupId(c.id?._serialized)||/^\d{8,20}@(c\.us|lid)$/.test(c.id?._serialized||'')).map(c=>({chat:c.id._serialized,label:String(c.name||'Conversa WhatsApp'),archived:!!(c.archived??c.archive),isGroup:groupId(c.id._serialized)||!!c.isGroup,phone:/^\d{8,15}@c\.us$/.test(c.phone||c.id._serialized)?'+'+(c.phone||c.id._serialized).split('@')[0]:null,stamp:Number(c.timestamp)||0,count:Number(c.unreadCount)||0}));
+ const lids=rows.filter(c=>!c.isGroup&&!c.phone&&c.chat.endsWith('@lid')).map(c=>c.chat),resolved=new Map();
+ // For adapters without a browser (tests/compatibility), retain explicit mappings.
+ if(!client.pupPage&&lids.length&&client.getContactLidAndPhone)try{for(const pair of await client.getContactLidAndPhone(lids))if(/^\d{8,15}@c\.us$/.test(pair.pn||''))resolved.set(pair.lid,'+'+pair.pn.split('@')[0]);}catch{}
  for(const row of rows)if(resolved.has(row.chat))row.phone=resolved.get(row.chat);
  return rows.sort((a,b)=>b.stamp-a.stamp);
 }

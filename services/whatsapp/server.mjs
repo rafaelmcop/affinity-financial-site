@@ -1,3 +1,5 @@
+import {directorySnapshot,directorySchema} from './directory-snapshot.mjs';
+import {stopProfileBrowser} from './browser-process.mjs';
 import {sessionRecovery} from './session-recovery.mjs';
 import {visibilitySchema,hideMessage,restoreMessages} from './message-visibility.mjs';
 import {auditMessages} from './audit.mjs';
@@ -38,7 +40,7 @@ visibilitySchema(db);
 const sessions=new Map();
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
-initializeContacts(db);
+initializeContacts(db);directorySchema(db);
 const cleanupMedia=()=>{try{const result=pruneMedia(db,mediaDir);if(result.removed)console.log(JSON.stringify({event:'whatsapp_media_retention',...result}));}catch{console.error('whatsapp_media_retention_failed');}};
 cleanupMedia();const mediaCleanup=setInterval(cleanupMedia,60000);mediaCleanup.unref();
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
@@ -69,7 +71,9 @@ async function save(owner,m,providedMedia=null){
   db.prepare(mediaUpsert).run(owner,m.id._serialized,chat,String(m.body||fallback).slice(0,12000),m.fromMe?'sent':'received',Number(m.timestamp)||Math.floor(Date.now()/1000),Number(m.ack)||0,key,mime,filename,kind,size,state);
 }
 const affiliateOwner=owner=>/^affiliate-\d+@affinity-whatsapp\.invalid$/.test(owner);
-async function connect(owner){
+const connecting=new Map();
+function connect(owner){if(connecting.has(owner))return connecting.get(owner);const pending=connectSession(owner).finally(()=>connecting.delete(owner));connecting.set(owner,pending);return pending;}
+async function connectSession(owner){
   if(['error','disconnected','auth_failure'].includes(sessions.get(owner)?.state)){
     const old=sessions.get(owner);
     if(!old.closing)old.closing=closeClient(old.client).then(()=>{if(sessions.get(owner)===old)sessions.delete(owner);}).finally(()=>{old.closing=null;});
@@ -78,6 +82,8 @@ async function connect(owner){
   if(sessions.has(owner))return sessions.get(owner);
   if(sessions.size>=maxSessions)throw Error('O limite de sessões de teste foi atingido.');
   const key=createHash('sha256').update(owner).digest('hex');
+  await stopProfileBrowser(path.join(dataDir,'sessions','session-'+key),process.env.CHROME_PATH);
+  if(sessions.size>=maxSessions)throw Error('O limite de sessões foi atingido.');
   const client=new Client({authStrategy:new LocalAuth({clientId:key,dataPath:path.join(dataDir,'sessions')}),puppeteer:{headless:true,timeout:90000,protocolTimeout:120000,...(process.env.CHROME_PATH?{executablePath:process.env.CHROME_PATH}:{})},qrMaxRetries:5,authTimeoutMs:60000,webVersionCache:{type:'local',path:path.join(dataDir,'cache')}});
   const s={client,startedAt:Date.now(),lastSeen:Date.now(),state:'connecting',qr:null,qrAt:0,number:null,busy:false,lastSend:0,refreshes:new Map()};sessions.set(owner,s);
   db.prepare('INSERT OR IGNORE INTO session_owners(owner) VALUES(?)').run(owner);
@@ -134,11 +140,9 @@ const server=http.createServer(async(req,res)=>{
     }
     if(action==='/chats'&&req.method==='GET'){
       if(s?.state!=='ready')return reply(listContacts(db,owner));
-      if(!s.directory||Date.now()-s.directory.at>30000){
-        if(!s.directoryPromise)s.directoryPromise=chatDirectory(s.client).then(rows=>{s.directory={rows,at:Date.now()};return rows;}).finally(()=>s.directoryPromise=null);
-        await s.directoryPromise;
-      }
-      return reply(s.directory.rows);
+      const snapshot=await directorySnapshot(db,owner,s,()=>chatDirectory(s.client),{onError:error=>{s.state='error';console.error(JSON.stringify({event:'whatsapp_directory_refresh_failed',name:error?.name||'Error',cached:!!s.directory,code:error?.message==='directory_timeout'?'timeout':'read_failed'}));}});
+      if(snapshot.error)return reply({error:'A lista de conversas está demorando para atualizar. Tente novamente em instantes.'},503);
+      return reply(snapshot.rows);
     }
     if(action==='/group-contacts'&&req.method==='GET'){
       if(s?.state!=='ready')return reply({error:'Conecte o WhatsApp primeiro.'},409);
