@@ -47917,7 +47917,8 @@ ${signatureLines.join("\n")}`.trim();
     if(occasion==='birthday'){
       await birthdayHoldSchema(env);
       birthdayPolicies=(await env.DB.prepare('SELECT clientId,clientName,birthDate FROM agentPolicies WHERE lower(agentEmail)=?').bind(String(automation.agentEmail).toLowerCase()).all()).results||[];
-      birthdayHolds=new Set(((await env.DB.prepare('SELECT clientId FROM birthdayIdentityHolds WHERE owner=? AND day=?').bind(String(automation.agentEmail).toLowerCase(),`${year}-${eastern.month}-${eastern.day}`).all()).results||[]).map(row=>Number(row.clientId)));
+      birthdayPolicies.push(...((await env.DB.prepare('SELECT clientName,birthDate FROM agentApplications WHERE lower(agentEmail)=?').bind(String(automation.agentEmail).toLowerCase()).all()).results||[]));
+      birthdayHolds=new Set(((await env.DB.prepare("SELECT clientId FROM birthdayIdentityHolds WHERE owner=? AND day IN (?,'*')").bind(String(automation.agentEmail).toLowerCase(),`${year}-${eastern.month}-${eastern.day}`).all()).results||[]).map(row=>Number(row.clientId)));
     }
     for (const client of clients.results) {
       if(occasion==='birthday'&&(!birthdayIdentitySafe(client,birthdayPolicies)||birthdayHolds.has(Number(client.id))))continue;

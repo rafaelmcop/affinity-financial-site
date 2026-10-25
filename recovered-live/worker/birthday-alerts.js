@@ -17,12 +17,13 @@ export async function birthdayAlerts(env,owner,now=new Date()){
  const emailConfigured=await env.DB.prepare("SELECT 1 FROM agentEmailSettings WHERE lower(agentEmail)=? AND trim(coalesce(fromEmail,''))<>''").bind(owner).first();
  await birthdayHoldSchema(env);
  const policies=(await env.DB.prepare('SELECT clientId,clientName,birthDate FROM agentPolicies WHERE lower(agentEmail)=?').bind(owner).all()).results||[];
- const holds=(await env.DB.prepare('SELECT clientId,reason FROM birthdayIdentityHolds WHERE owner=? AND day=?').bind(owner,parts.year+'-'+parts.month+'-'+parts.day).all()).results||[];
+ const applications=(await env.DB.prepare('SELECT clientName,birthDate FROM agentApplications WHERE lower(agentEmail)=?').bind(owner).all()).results||[];
+ const holds=(await env.DB.prepare("SELECT clientId,day,reason FROM birthdayIdentityHolds WHERE owner=? AND day IN (?,'*')").bind(owner,parts.year+'-'+parts.month+'-'+parts.day).all()).results||[];
  const contacts=(await env.DB.prepare('SELECT id,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[];
  const phoneKey=value=>String(value||'').replace(/\D/g,'').slice(-10);
  const result=[];
  for(const c of clients){
- if(!birthdayIdentitySafe(c,policies))continue;
+ if(!birthdayIdentitySafe(c,policies,applications)||holds.some(row=>Number(row.clientId)===Number(c.id)&&row.day==='*'))continue;
  const hold=holds.find(row=>Number(row.clientId)===Number(c.id));
  const sharedPhone=!!phoneKey(c.whatsapp||c.phone)&&contacts.some(row=>Number(row.id)!==Number(c.id)&&phoneKey(row.whatsapp||row.phone)===phoneKey(c.whatsapp||c.phone));
  const sent=await env.DB.prepare("SELECT d.sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE lower(m.agentEmail)=? AND m.occasion='birthday' AND d.clientId=? AND d.sentKey=? ORDER BY d.sentAt DESC LIMIT 1").bind(owner,c.id,'birthday-'+parts.year).first();
