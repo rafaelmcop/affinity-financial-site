@@ -1,3 +1,4 @@
+import {recordSendFailure,sendFailureText,sendFailureHint} from './send-failure.mjs';
 import {directorySnapshot,directorySchema} from './directory-snapshot.mjs';
 import {stopProfileBrowser} from './browser-process.mjs';
 import {sessionRecovery} from './session-recovery.mjs';
@@ -24,7 +25,7 @@ import {downloadMedia} from './download.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
-const bridgeVersion='2026-09-28.1';
+const bridgeVersion='2026-10-25-receipts-1';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
 const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');
@@ -37,6 +38,7 @@ CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
 CREATE TABLE IF NOT EXISTS session_owners(owner TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
 visibilitySchema(db);
+for(const column of ['errorCode TEXT','failureStage TEXT','errorHint TEXT'])try{db.exec('ALTER TABLE sends ADD COLUMN '+column);}catch{}
 const sessions=new Map();
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
@@ -110,7 +112,7 @@ const server=http.createServer(async(req,res)=>{
   const url=new URL(req.url,'http://localhost'),action=url.pathname;
   try{
     if(affiliateOwner(owner)&&!['/connect','/status','/all-contacts','/disconnect'].includes(action))return reply({error:'Ação indisponível para importação de afiliado.'},403);
-    if(action==='/send-status'&&req.method==='GET'){const id=url.searchParams.get('requestId')||'';if(!/^[-a-f0-9]{36}$/.test(id))return reply({error:'Identificador inválido.'},400);const row=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,id);return reply(row||{state:'not_found'},row?200:404);}
+    if(action==='/send-status'&&req.method==='GET'){const id=url.searchParams.get('requestId')||'';if(!/^[-a-f0-9]{36}$/.test(id))return reply({error:'Identificador inválido.'},400);const row=db.prepare('SELECT state,messageId,errorCode,failureStage,errorHint FROM sends WHERE owner=? AND requestId=?').get(owner,id);return reply(row?{...row,...(row.state==='uncertain'?{error:sendFailureText(row.errorCode)}:{})}:{state:'not_found'},row?200:404);}
     if(action==='/audit'&&req.method==='GET')return reply(auditMessages(db,owner,url.searchParams.get('cursor'),url.searchParams.get('phone')));
     if(action==='/connect'&&req.method==='POST'){await connect(owner);return reply({ok:true});}
     const s=sessions.get(owner);if(s)s.lastSeen=Date.now();
@@ -214,7 +216,7 @@ const server=http.createServer(async(req,res)=>{
         const m=validMedia?await sendMedia(s.client,chat,{data:media.data,mime:media.mime,filename:String(media.filename||'').slice(0,240),caption:text,voice:media.kind==='audio'&&/^audio\/ogg(?:;|$)/i.test(media.mime)}):await sendText(s.client,chat,text);await save(owner,m,validMedia?{data:media.data,mimetype:media.mime,filename:String(media.filename||'').slice(0,240)}:null);
         db.prepare("UPDATE sends SET state='sent',messageId=? WHERE owner=? AND requestId=?").run(m.id._serialized,owner,requestId);s.lastSend=Date.now();
         return {data:{state:'sent',messageId:m.id._serialized},status:200};
-      }catch(error){const code=sendErrorCode(error);console.error(JSON.stringify({event:'whatsapp_send_failed',code,name:error?.name||'Error'}));db.prepare("UPDATE sends SET state='uncertain' WHERE owner=? AND requestId=?").run(owner,requestId);return {data:{error:code==='number_not_registered'?'Este telefone não foi encontrado no WhatsApp. Confira o país e o número.':'Não foi possível confirmar o envio ('+code+'). Confira no celular antes de tentar novamente.',state:'uncertain',code},status:502};}finally{s.busy=false;}};
+      }catch(error){const code=sendErrorCode(error);const failure=recordSendFailure(db,owner,requestId,error,code);console.error(JSON.stringify({event:'whatsapp_send_failed',code,stage:failure.stage,hint:sendFailureHint(error),hasMessageId:!!failure.messageId,name:error?.name||'Error'}));return {data:{error:sendFailureText(code),state:'uncertain',code,...(failure.messageId?{messageId:failure.messageId}:{})},status:502};}finally{s.busy=false;}};
       if(req.headers.prefer==='respond-async'){void perform().catch(()=>{s.busy=false;console.error('whatsapp_async_send_failed');});return reply({state:'pending',requestId},202);}
       const result=await perform();return reply(result.data,result.status);
     }
