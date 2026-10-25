@@ -11,6 +11,7 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
  const old=await env.DB.prepare('SELECT status,meetingId,channel FROM meetingMessageDispatches WHERE owner=? AND requestId=?').bind(owner,requestId).first();
  if(old){if(old.meetingId!==Number(meeting.id)||old.channel!==channel)throw Error('Identificador já usado em outro envio.');if(old.status==='sent')return {alreadySent:true};if(old.status!=='not_sent')throw Object.assign(Error(old.status==='sending'?'Envio em processamento. Aguarde antes de tentar novamente.':channel==='email'?'Não foi possível confirmar o envio deste e-mail. Confira o histórico de e-mails antes de preparar uma nova tentativa.':'Este envio de WhatsApp não foi confirmado. Confira no aplicativo antes de tentar novamente.'),{status:409});}
  const reserved=old?.status==='not_sent'?await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sending' WHERE owner=? AND requestId=? AND status='not_sent'").bind(owner,requestId).run():await env.DB.prepare("INSERT OR IGNORE INTO meetingMessageDispatches(owner,meetingId,channel,requestId,status) VALUES(?,?,?,?,'sending')").bind(owner,Number(meeting.id),channel,requestId).run();if(!reserved.meta?.changes)throw Object.assign(Error('Envio em processamento.'),{status:409});
+ let confirmedParts=0;
  try{
   if(channel==='email')await sendEmail(attachments);
   else{
@@ -21,11 +22,11 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(requestId+':'+i)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,32);const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-'+hash.slice(12,16)+'-'+hash.slice(16,20)+'-'+hash.slice(20);
     const file=attachments[i],mime=file&&file.contentType;
     const body={manual:true,chat,text:i===0?input.message:'',requestId:id,...file?{media:{kind:mime.startsWith('image/')?'image':'file',mime,filename:file.filename,data:file.content}}:{}};
-    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{'content-type':'application/json',prefer:'respond-async'},authorization,body:JSON.stringify(body)});
+    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{'content-type':'application/json',prefer:'respond-async'},authorization,body:JSON.stringify(body)});confirmedParts++;
    }
   }
   await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sent' WHERE owner=? AND requestId=?").bind(owner,requestId).run();return {alreadySent:false};
- }catch(error){const notSent=channel==='email'?emailDefinitelyNotSent(error):error.notSent&&!attachments.length;
+ }catch(error){const notSent=channel==='email'?emailDefinitelyNotSent(error):error.notSent&&confirmedParts===0;
  await env.DB.prepare("UPDATE meetingMessageDispatches SET status=? WHERE owner=? AND requestId=?").bind(notSent?'not_sent':'uncertain',owner,requestId).run();
  if(channel==='email'&&notSent)throw Object.assign(Error('O e-mail não foi enviado: falha na conexão ou autenticação do servidor de e-mail. Tente novamente; se persistir, confira a configuração de e-mail.'),{status:400,notSent:true});throw error;}
 }
