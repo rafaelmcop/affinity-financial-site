@@ -1,3 +1,5 @@
+import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
+import {birthdayHoldSchema} from './birthday-alerts.js';
 import {runtimeSmtpOptions} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
@@ -42611,7 +42613,7 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
   const clients = clientResult.results || [], applications = applicationResult.results || [], policies = policyResult.results || [], meetings = meetingResult.results || [];
   for (const application of applications) {
     const applicationEmail = sourceEmail(application.clientEmail), applicationPhone = sourcePhone(application.clientPhone), applicationName = sourceName(application.clientName);
-    const existingClient = clients.find((client) => applicationEmail && sourceEmail(client.email) === applicationEmail) || clients.find((client) => applicationPhone && sourcePhone(client.phone || client.whatsapp) === applicationPhone) || clients.find((client) => applicationName && sourceName(client.name) === applicationName);
+    const existingClient = clients.find(client=>samePersonRecord(client,application));
     if (existingClient) continue;
     const composedAddress = [application.address, application.city, application.state, application.zipCode].filter((value) => String(value || "").trim()).join(", ");
     const completed = ["submitted", "completed", "complete", "concluida", "concluido"].includes(String(application.status || "").toLowerCase());
@@ -42646,7 +42648,7 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
   }
   let clientsUpdated = 0, policiesUpdated = 0, applicationsUpdated = 0;
   for (const client of clients) {
-    const matches = [...emailMap.get(sourceEmail(client.email)) || [], ...phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || [], ...nameMap.get(sourceName(client.name)) || [], ...policies.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, sourceType: "policy" })), ...meetings.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }))].filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
+    const matches = [...emailMap.get(sourceEmail(client.email)) || [], ...phoneMap.get(sourcePhone(client.phone || client.whatsapp)) || [], ...nameMap.get(sourceName(client.name)) || [], ...policies.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, sourceType: "policy" })), ...meetings.filter((row) => Number(row.clientId || 0) === Number(client.id)).map((row) => ({ ...row, clientEmail: row.inviteeEmail, clientPhone: row.inviteePhone, clientName: row.inviteeName, sourceType: "calendly" }))].filter(row=>samePersonRecord(client,row)).filter((row, index, list) => list.findIndex((item) => item.sourceType === row.sourceType && Number(item.id) === Number(row.id)) === index);
     if (!matches.length) continue;
     const prioritized = matches.sort((a, b) => ({ application: 0, policy: 1, calendly: 2 })[a.sourceType] - { application: 0, policy: 1, calendly: 2 }[b.sourceType]);
     const app = prioritized.find((row) => row.sourceType === "application");
@@ -42655,7 +42657,7 @@ async function mergeClientSourcesForAgent(env, agentEmail) {
     const email = client.email || sourceValue(prioritized, "clientEmail");
     const phone = client.phone || sourceValue(prioritized, "clientPhone");
     const whatsapp = client.whatsapp || phone;
-    const birthDate = client.birthDate || sourceValue(prioritized, "birthDate");
+    const birthDate = client.birthDate || unambiguousPersonBirthdate(prioritized);
     const address = client.address || composedAddress || null;
     const changed = name !== client.name || email !== client.email || phone !== client.phone || whatsapp !== client.whatsapp || birthDate !== client.birthDate || address !== client.address;
     if (changed) {
@@ -44665,17 +44667,7 @@ Detalhes: ${details}` : ""}`;
     if(input.entryMode==="manual")input={...input,issuedAt:existingPolicy?String(existingPolicy.issuedAt||""):applicationDay()};
     const extractedBeneficiaries = primaryBeneficiaryName(input.beneficiaries);
     const selectedClientId = Math.max(0, Number(input.clientId || 0));
-    let client = selectedClientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(selectedClientId, owner).first() : existingPolicy?.clientId ? await env.DB.prepare("SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?").bind(Number(existingPolicy.clientId), owner).first() : clientEmail ? await env.DB.prepare(
-      "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=?"
-    ).bind(clientEmail, owner).first() : null;
-    if (!client && clientPhone)
-      client = await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND substr(replace(replace(replace(replace(replace(coalesce(phone,whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=? LIMIT 1"
-      ).bind(owner, clientPhone.replace(/\D/g, "").slice(-10)).first();
-    if (!client)
-      client = await env.DB.prepare(
-        "SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1"
-      ).bind(clientName, owner).first();
+    let client = await findCrmPerson(env,owner,{clientName,email:clientEmail,phone:clientPhone,birthDate:storedBirthDate},selectedClientId||existingPolicy?.clientId||0);
     let clientId = Number(client?.id || 0);
     if (clientId) {
       await env.DB.prepare(
@@ -44858,10 +44850,7 @@ Detalhes: ${details}` : ""}`;
       const email = String(row.clientEmail || "").trim().toLowerCase();
       const phone = String(row.clientPhone || "").trim();
       const birthDate = normalizeBirthDate(row.birthDate) || null;
-      let client = email ? await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(email)=? LIMIT 1").bind(owner, email).first() : null;
-      if (!client && phone) client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND substr(replace(replace(replace(replace(replace(coalesce(phone,whatsapp,''),'(',''),')',''),'-',''),' ',''),'+',''),-10)=? LIMIT 1").bind(owner, phone.replace(/\D/g, "").slice(-10)).first();
-      if (!client)
-        client = await env.DB.prepare("SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(name)=lower(?) LIMIT 1").bind(owner, clientName).first();
+      let client = await findCrmPerson(env,owner,{clientName,email,phone,birthDate});
       let clientId;
       if (client) {
         clientId = Number(client.id);
@@ -45373,9 +45362,7 @@ Affinity Financial Consulting`,
         for (const record of (browserClaim?records2.slice(browserClaim.start,browserClaim.end):records2)) {
           const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
           const existingPolicy = canonicalPolicyNumber ? (knownPolicies2.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
-          let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.email, owner).first() : null;
-          if (!client && record.phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE phone=? AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.phone, owner).first();
-          if (!client) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.clientName, owner).first();
+          let client = await findCrmPerson(env,owner,record,existingPolicy?.clientId||0);
           let clientId = Number(client?.id || 0);
           if (clientId) {
             await env.DB.prepare("UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status=CASE WHEN ?=1 THEN 'client' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? 1 : 0, clientId, owner).run();
@@ -45418,17 +45405,7 @@ Affinity Financial Consulting`,
       for (const record of records) {
         const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
         const existingPolicy = canonicalPolicyNumber ? (knownPolicies.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
-        let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare(
-          "SELECT id FROM crmClients WHERE lower(email)=? AND lower(assignedAdminEmail)=? LIMIT 1"
-        ).bind(record.email, owner).first() : null;
-        if (!client && record.phone)
-          client = await env.DB.prepare(
-            "SELECT id FROM crmClients WHERE phone=? AND lower(assignedAdminEmail)=? LIMIT 1"
-          ).bind(record.phone, owner).first();
-        if (!client)
-          client = await env.DB.prepare(
-            "SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1"
-          ).bind(record.clientName, owner).first();
+        let client = await findCrmPerson(env,owner,record,existingPolicy?.clientId||0);
         let clientId = Number(client?.id || 0);
         if (clientId) {
           await env.DB.prepare(
@@ -45557,9 +45534,7 @@ Affinity Financial Consulting`,
       for (const record of result.records) {
         const normalizedPolicy = String(record.policyNumber || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
         const existingPolicy = normalizedPolicy ? await env.DB.prepare("SELECT id,clientId FROM agentPolicies WHERE lower(agentEmail)=? AND upper(replace(replace(policyNumber,'-',''),' ',''))=? LIMIT 1").bind(owner, normalizedPolicy).first() : null;
-        let client = existingPolicy?.clientId ? { id: existingPolicy.clientId } : record.email ? await env.DB.prepare("SELECT id FROM crmClients WHERE lower(email)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.email, owner).first() : null;
-        if (!client && record.phone) client = await env.DB.prepare("SELECT id FROM crmClients WHERE replace(replace(replace(replace(phone,'(',''),')',''),'-',''),' ','')=replace(replace(replace(replace(?,'(',''),')',''),'-',''),' ','') AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.phone, owner).first();
-        if (!client && record.clientName) client = await env.DB.prepare("SELECT id FROM crmClients WHERE lower(name)=lower(?) AND lower(assignedAdminEmail)=? LIMIT 1").bind(record.clientName, owner).first();
+        let client = await findCrmPerson(env,owner,record,existingPolicy?.clientId||0);
         let clientId = Number(client?.id || 0);
         if (clientId) {
           await env.DB.prepare("UPDATE crmClients SET email=COALESCE(NULLIF(email,''),?),phone=COALESCE(NULLIF(phone,''),?),whatsapp=COALESCE(NULLIF(whatsapp,''),?),birthDate=COALESCE(birthDate,?),address=COALESCE(NULLIF(address,''),?),status=CASE WHEN ?=1 THEN 'client' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(assignedAdminEmail)=?").bind(record.email || null, record.phone || null, record.phone || null, record.birthDate || null, record.address || null, record.policyNumber ? 1 : 0, clientId, owner).run();
@@ -47899,7 +47874,7 @@ ${signatureLines.join("\n")}`.trim();
       }
       continue;
     }
-    let sql = "SELECT id,name,email FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND email<>''";
+    let sql = "SELECT id,name,email,birthDate FROM crmClients WHERE lower(assignedAdminEmail)=? AND email IS NOT NULL AND email<>''";
     const binds = [String(automation.agentEmail).toLowerCase()];
     if (occasion === "birthday") {
       sql += " AND (strftime('%m-%d',birthDate)=? OR substr(trim(birthDate),1,5)=?)";
@@ -47938,7 +47913,14 @@ ${signatureLines.join("\n")}`.trim();
     binds.push(Number(automation.id));
     const clients = await env.DB.prepare(sql).bind(...binds).all();
     if(cycle&&!clients.results.length)await completeAutomationCycle(env,automation.id,cycle.sentKey);
+    let birthdayPolicies=[],birthdayHolds=new Set();
+    if(occasion==='birthday'){
+      await birthdayHoldSchema(env);
+      birthdayPolicies=(await env.DB.prepare('SELECT clientId,clientName,birthDate FROM agentPolicies WHERE lower(agentEmail)=?').bind(String(automation.agentEmail).toLowerCase()).all()).results||[];
+      birthdayHolds=new Set(((await env.DB.prepare('SELECT clientId FROM birthdayIdentityHolds WHERE owner=? AND day=?').bind(String(automation.agentEmail).toLowerCase(),`${year}-${eastern.month}-${eastern.day}`).all()).results||[]).map(row=>Number(row.clientId)));
+    }
     for (const client of clients.results) {
+      if(occasion==='birthday'&&(!birthdayIdentitySafe(client,birthdayPolicies)||birthdayHolds.has(Number(client.id))))continue;
       if (deliveryBudget <= 0) return;
       try {
         const scope = occasion === "monthly" ? `monthly:${automation.monthNumber}` : occasion === "custom" ? `custom:${automation.id}` : occasion;

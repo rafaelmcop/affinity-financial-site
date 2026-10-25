@@ -6,7 +6,7 @@ export async function assistantHome(env,assistant,auth,services={}){
  const result={owner,ownerName:assistant.links.find(x=>x.owner===owner)?.name||owner,today,start,end,canOpenClient:!!can('policies'),payments:null,birthdays:null,meetings:null,warnings:[]};
  const jobs=[];
  if(can('tasks'))jobs.push(['payments',()=> (services.payments||paymentTasks)(env,owner,true).then(rows=>rows.map(row=>({id:row.id,title:row.title,dueAt:row.dueAt,clientId:row.clientId}))) ]);
- if(can('calendar')||can('policies')||can('messages'))jobs.push(['birthdays',()=> (services.birthdays||birthdayAlerts)(env,owner,now).then(rows=>rows.map(row=>({id:row.id,name:row.name,emailStatus:row.emailStatus,sentAt:row.sentAt}))) ]);
+ if(can('calendar')||can('policies')||can('messages'))jobs.push(['birthdays',()=> (services.birthdays||birthdayAlerts)(env,owner,now).then(rows=>rows.map(row=>({id:row.id,name:row.name,emailStatus:row.emailStatus,sentAt:row.sentAt,birthDate:row.birthDate,sharedPhone:row.sharedPhone}))) ]);
  if(can('calendar')){result.calendarLinked=!!await auth.calendarLinked?.(owner);if(result.calendarLinked)jobs.push(['meetings',async()=> (await weeklyMeetings(env,owner,{start,end})).filter(row=>{const day=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(row.startTime));return day>=start&&day<=end;})]);}
  await Promise.all(jobs.map(async([key,run])=>{try{result[key]=await run();}catch{result.warnings.push(key);}}));return result;
 }

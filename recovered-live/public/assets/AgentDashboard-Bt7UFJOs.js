@@ -1,5 +1,5 @@
 import AgentEmailReviews from './AgentEmailReviews.js?v=1';
-import BirthdayAlerts from './AgentBirthdayAlerts.js?v=4';
+import BirthdayAlerts from './AgentBirthdayAlerts.js?v=5';
 import {
   c as v,
   a as w,
