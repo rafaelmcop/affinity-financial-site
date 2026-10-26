@@ -117,25 +117,12 @@ function H() {
     children: [
       e.jsx(C, {}),
       e.jsxs("main", {
-        className: "mx-auto max-w-6xl space-y-7 px-4 py-8",
+        className: "mx-auto max-w-6xl space-y-4 px-4 py-4",
         children: [
-          e.jsxs("div", {
-            children: [
-              e.jsx("p", {
-                className:
-                  "text-sm font-bold uppercase tracking-[.2em] text-gold",
-                children: "Visão geral",
-              }),
-              e.jsx("h1", {
-                className: "mt-2 text-3xl font-bold",
-                children: "Início",
-              }),
-              e.jsx("p", {
-                className: "mt-2 text-gray-400",
-                children:
-                  "Sua agenda semanal e os avisos que precisam da sua atenção.",
-              }),
-            ],
+          e.jsx("h1", {
+            className: "text-xl font-bold leading-tight",
+            style: { margin: "0 0 12px" },
+            children: "Início",
           }),
           calendarAllowed && e.jsx(WeeklyAgenda,{version:calendarVersion,syncing:q.isPending,onSync:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar.');}}}),
           d > 0 &&
