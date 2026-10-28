@@ -1,3 +1,10 @@
+function describeApplicationParent(row,parent,feminine=false){
+  const living=String(row[`${parent}Living`]||'');
+  if(living==='Desconhecido')return 'Desconhecido';
+  if(living==='Sim')return `${feminine?'Viva':'Vivo'}, ${row[`${parent}Age`]||'idade não informada'} anos`;
+  if(living==='Não')return `${feminine?'Falecida':'Falecido'} aos ${row[`${parent}DeathAge`]||'idade não informada'} anos - ${row[`${parent}DeathReason`]||'motivo não informado'}`;
+  return 'Não informado';
+}
 (() => {
   const $ = id => document.getElementById(id),
     states = [
@@ -985,15 +992,11 @@
         ["Quais medicamentos", row.medications],
         [
           "Pai",
-          row.fatherLiving === "Sim"
-            ? `Vivo, ${value(row.fatherAge)} anos`
-            : `Falecido aos ${value(row.fatherDeathAge)} · ${value(row.fatherDeathReason)}`,
+          describeApplicationParent(row,"father"),
         ],
         [
           "Mãe",
-          row.motherLiving === "Sim"
-            ? `Viva, ${value(row.motherAge)} anos`
-            : `Falecida aos ${value(row.motherDeathAge)} · ${value(row.motherDeathReason)}`,
+          describeApplicationParent(row,"mother",true),
         ],
       ]) +
       section("5. Beneficiários", beneficiaries) +
@@ -1103,12 +1106,7 @@
       if (today.getMonth() < birth.getMonth() || (today.getMonth() === birth.getMonth() && today.getDate() < birth.getDate())) age -= 1;
       return age >= 0 ? `${age} anos` : "Não informado";
     };
-    const parentDescription = (parent, feminine = false) => {
-      const living = String(row[`${parent}Living`] || "");
-      if (living === "Sim") return `${feminine ? "Viva" : "Vivo"}, ${row[`${parent}Age`] || "idade não informada"} anos`;
-      if (living === "Não") return `${feminine ? "Falecida" : "Falecido"} aos ${row[`${parent}DeathAge`] || "idade não informada"} anos - ${row[`${parent}DeathReason`] || "motivo não informado"}`;
-      return "Não informado";
-    };
+    const parentDescription = (parent, feminine = false) => describeApplicationParent(row,parent,feminine);
     const measurements = americanMeasurements(row);
     sectionBlock("Agente responsável pela aplicação", [["Nome completo", row.agentDetails?.name],["E-mail",row.agentDetails?.email],["Telefone",row.agentDetails?.phone],["Número de agente",row.agentDetails?.number||"Aguardando número do Admin Rafael"],["Número utilizado",row.agentDetails?.usingAdminNumber?"Admin Rafael (temporário; agente responsável identificado acima)":"Número próprio"]]);
     if(row.referralAgentDetails)sectionBlock("Agente indicador - 10% do prêmio anual",[["Nome completo",row.referralAgentDetails.name],["E-mail",row.referralAgentDetails.email],["Telefone",row.referralAgentDetails.phone],["Número de agente",row.referralAgentDetails.number||"Pendente"]]);
