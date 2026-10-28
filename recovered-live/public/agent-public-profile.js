@@ -33,7 +33,10 @@ const detailCard = (title, value, wide = false) =>
       payload = await response.json(),
       profile = payload?.result?.data?.json;
     if (!profile) throw new Error("Perfil não encontrado");
-    const calendly = safeUrl(profile.calendlyUrl),
+    const calendarUrl = safeUrl(profile.calendlyUrl);
+    const themedCalendar = calendarUrl ? new URL(calendarUrl) : null;
+    if(themedCalendar){for(const [key,value] of Object.entries({background_color:"ffffff",text_color:"14233b",primary_color:"805e08"}))themedCalendar.searchParams.set(key,value);}
+    const calendly = themedCalendar?.href || "",
       whatsapp = String(profile.whatsapp || profile.phone || "").replace(
         /\D/g,
         ""

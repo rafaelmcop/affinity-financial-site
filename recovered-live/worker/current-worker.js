@@ -1,3 +1,4 @@
+import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
 import {birthdayHoldSchema} from './birthday-alerts.js';
@@ -48091,7 +48092,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  let response;try{response=domainEmailResponse?secureResponse(domainEmailResponse,{privateData:true}):assistantResponse?secureResponse(assistantResponse,{privateData:true}):await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
  if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300&&outcome.httpStatus!==202){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
- const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar']);
+ const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar','/assistentes/login','/assistant-login.html']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
  if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));
@@ -48114,6 +48115,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
   const html=await response.clone().text();
   if(unexpectedSpaPage(url.pathname,html))response=new Response('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width"><title>Page not found | Affinity Financial</title><main><h1>Page not found</h1><p>The address may have changed.</p><a href="/">Return to Affinity Financial</a></main></html>',{status:404,headers:{'content-type':'text/html; charset=utf-8'}});
  }
+ if(usesPublicAppearance(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('html',{element(el){el.setAttribute('data-public-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/public-theme.css?v=1">',{html:true});}}).transform(response);
  return perimeterHeaders(response,url.pathname);
 };
 export {
