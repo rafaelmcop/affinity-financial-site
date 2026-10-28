@@ -1231,7 +1231,7 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">WhatsApp: envie pelo portal ou abra no aplicativo. Revise a mensagem antes de confirmar o envio.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo portal</button><button type="button" data-whatsapp-app>Abrir no WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Mensagem pronta para enviar</h2><p class="muted">WhatsApp: envie pelo portal ou abra no aplicativo. Revise a mensagem antes de confirmar o envio.</p><textarea id="share-message" style="width:100%;min-height:210px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo portal</button><button type="button" data-whatsapp-app>Abrir no WhatsApp</button><button type="button" data-email>Enviar por e-mail</button><button type="button" class="primary" data-both>Enviar por e-mail e WhatsApp</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1259,7 +1259,7 @@
     overlay.setAttribute("aria-modal", "true");
     overlay.style.cssText =
       "position:fixed;inset:0;background:#0007;z-index:9999;display:grid;place-items:center;padding:20px;overflow:auto";
-    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">WhatsApp: envie pelo portal ou abra no aplicativo. Revise a mensagem antes de confirmar o envio.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo portal</button><button type="button" data-whatsapp-app>Abrir no WhatsApp</button><button type="button" class="primary" data-email>Enviar por e-mail</button></div></div>`;
+    overlay.innerHTML = `<div class="card" style="width:min(650px,100%);padding:24px"><h2>Link da avaliação pronto</h2><p class="muted">WhatsApp: envie pelo portal ou abra no aplicativo. Revise a mensagem antes de confirmar o envio.</p><textarea id="review-share-message" style="width:100%;min-height:230px">${esc(message)}</textarea><div class="actions"><button type="button" data-close>Fechar</button><button type="button" data-copy>Copiar mensagem</button><button type="button" data-whatsapp>Enviar pelo portal</button><button type="button" data-whatsapp-app>Abrir no WhatsApp</button><button type="button" data-email>Enviar por e-mail</button><button type="button" class="primary" data-both>Enviar por e-mail e WhatsApp</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.querySelector("[data-close]").onclick = () => overlay.remove();
     overlay.querySelector("[data-copy]").onclick = async () => {
@@ -1284,20 +1284,22 @@
     return number;
   }
   function wireDirectShare(overlay, row, options) {
-    const area=overlay.querySelector(options.textarea),whatsapp=overlay.querySelector('[data-whatsapp]'),email=overlay.querySelector('[data-email]');
+    const area=overlay.querySelector(options.textarea),whatsapp=overlay.querySelector('[data-whatsapp]'),email=overlay.querySelector('[data-email]'),both=overlay.querySelector('[data-both]');
+    let combinedBusy=false,combinedConfirmation='';
     whatsapp.dataset.messageChannel='whatsapp';email.dataset.messageChannel='email';overlay.querySelector('[data-whatsapp-app]').dataset.messageChannel='whatsapp';area.setAttribute('aria-label','Mensagem para o cliente');whatsapp.textContent='Enviar pelo portal';
     const feedback=document.createElement('p');feedback.setAttribute('role','status');feedback.setAttribute('aria-live','polite');feedback.style.cssText='padding:12px;border-radius:8px;margin:12px 0;font-weight:600';feedback.hidden=true;overlay.querySelector('.card').append(feedback);
     function tell(message,error=false){feedback.hidden=false;feedback.textContent=message;feedback.setAttribute('role',error?'alert':'status');feedback.style.background=error?'#fff0ed':'#eaf4f8';feedback.style.color=error?'#8b1e14':'#173348';}
-    area.addEventListener('input',()=>{delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';delete whatsapp.dataset.confirmedFor;delete whatsapp.dataset.requestId;whatsapp.textContent='Enviar pelo portal';});
+    area.addEventListener('input',()=>{combinedConfirmation='';if(both){both.textContent='Enviar por e-mail e WhatsApp';both.disabled=false;}delete email.dataset.confirmedFor;email.textContent='Enviar por e-mail';delete whatsapp.dataset.confirmedFor;delete whatsapp.dataset.requestId;whatsapp.textContent='Enviar pelo portal';});
     whatsapp.onclick=async()=>{
+      if(whatsapp.dataset.sent||whatsapp.dataset.busy)return;
       const number=whatsappNumber(row.clientPhone),message=area.value.trim();
       if(!/^[0-9]{10,15}$/.test(number)){tell('Cadastre um telefone válido na aplicação antes de enviar.',true);return;}
       if(!message||message.length>4000){tell('Use uma mensagem de até 4.000 caracteres para WhatsApp.',true);return;}
       const confirmation=JSON.stringify([number,message]);
       if(whatsapp.dataset.confirmedFor!==confirmation){whatsapp.dataset.confirmedFor=confirmation;whatsapp.dataset.requestId=crypto.randomUUID();whatsapp.textContent='Confirmar envio';tell('Destinatário: +'+number+'. Confira a mensagem e clique em Confirmar envio.');return;}
-      whatsapp.disabled=true;whatsapp.textContent='Enviando…';tell('Enviando pela conexão WhatsApp deste agente…');
-      try{await api('agent.sendApplicationWhatsApp',{applicationId:Number(row.id),message,confirmed:true,requestId:whatsapp.dataset.requestId},true);whatsapp.textContent='WhatsApp enviado';tell('Envio confirmado pela conexão WhatsApp do agente. O registro é feito no histórico do cliente quando o telefone corresponde ao cadastro.');}
-      catch(error){tell((error.message||'Não foi possível confirmar o envio.')+' Se houver dúvida, confira a conversa antes de tentar novamente ou use Abrir no WhatsApp.',true);whatsapp.disabled=false;whatsapp.textContent='Verificar envio novamente';}
+      whatsapp.dataset.busy='1';whatsapp.disabled=true;whatsapp.textContent='Enviando…';tell('Enviando pela conexão WhatsApp deste agente…');
+      try{await api('agent.sendApplicationWhatsApp',{applicationId:Number(row.id),message,confirmed:true,requestId:whatsapp.dataset.requestId},true);whatsapp.dataset.sent='1';whatsapp.textContent='WhatsApp enviado';tell('Envio confirmado pela conexão WhatsApp do agente. O registro é feito no histórico do cliente quando o telefone corresponde ao cadastro.');}
+      catch(error){tell((error.message||'Não foi possível confirmar o envio.')+' Se houver dúvida, confira a conversa antes de tentar novamente ou use Abrir no WhatsApp.',true);whatsapp.disabled=false;whatsapp.textContent='Verificar envio novamente';}finally{delete whatsapp.dataset.busy;}
     };
     overlay.querySelector('[data-whatsapp-app]').onclick=async()=>{
       const number=whatsappNumber(row.clientPhone);
@@ -1313,14 +1315,36 @@
 
     };
     email.onclick=async()=>{
+      if(email.dataset.sent||email.dataset.busy)return;
       const recipient=String(row.clientEmail||'').trim();
       if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)){tell('Cadastre um e-mail válido na aplicação antes de enviar.',true);return;}
       if(!area.value.trim()){tell('Preencha a mensagem antes de continuar.',true);return;}
       const confirmation=JSON.stringify([recipient,area.value]);
       if(email.dataset.confirmedFor!==confirmation){email.dataset.confirmedFor=confirmation;email.textContent='Confirmar envio por e-mail';tell('Confira a mensagem acima. Destinatário: '+recipient+'. Clique em Confirmar envio por e-mail para enviar.');return;}
-      email.disabled=true;email.textContent='Enviando…';tell('Enviando pelo e-mail configurado no portal…');
-      try{await api('agent.sendApplicationEmail',{applicationId:Number(row.id),subject:options.subject,body:area.value},true);tell('E-mail enviado para '+recipient+' e registrado no histórico.');email.textContent='E-mail enviado';delete email.dataset.confirmedFor;}
-      catch(error){tell(error.message||'Não foi possível enviar o e-mail.',true);email.disabled=false;email.textContent='Tentar novamente';delete email.dataset.confirmedFor;}
+      email.dataset.busy='1';email.disabled=true;email.textContent='Enviando…';tell('Enviando pelo e-mail configurado no portal…');
+      try{await api('agent.sendApplicationEmail',{applicationId:Number(row.id),subject:options.subject,body:area.value},true);tell('E-mail enviado para '+recipient+' e registrado no histórico.');email.dataset.sent='1';email.textContent='E-mail enviado';delete email.dataset.confirmedFor;}
+      catch(error){tell(error.message||'Não foi possível enviar o e-mail.',true);email.disabled=false;email.textContent='Tentar novamente';delete email.dataset.confirmedFor;}finally{delete email.dataset.busy;}
+    };
+    if(both)both.onclick=async()=>{
+      if(both.disabled||combinedBusy||email.dataset.busy||whatsapp.dataset.busy)return;
+      const recipient=String(row.clientEmail||'').trim(),number=whatsappNumber(row.clientPhone),message=area.value.trim();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)||!/^\d{10,15}$/.test(number)){tell('Cadastre o e-mail e o telefone da aplicação para enviar pelos dois canais.',true);return;}
+      if(!message||message.length>4000){tell('Use uma mensagem de até 4.000 caracteres.',true);return;}
+      if(email.dataset.sent&&whatsapp.dataset.sent)return;
+      const confirmation=JSON.stringify([recipient,number,area.value]);
+      if(combinedConfirmation!==confirmation){combinedConfirmation=confirmation;both.textContent='Confirmar envio nos dois canais';tell('Confira a mensagem: e-mail para '+recipient+' e WhatsApp para +'+number+'. Confirme para enviar pelos dois canais.');return;}
+      combinedBusy=true;both.disabled=true;area.readOnly=true;both.textContent='Enviando nos dois canais…';
+      email.dataset.confirmedFor=JSON.stringify([recipient,area.value]);
+      whatsapp.dataset.confirmedFor=JSON.stringify([number,message]);
+      whatsapp.dataset.requestId ||= crypto.randomUUID();
+      try{
+        await Promise.all([email.onclick(),whatsapp.onclick()]);
+        const emailSent=!!email.dataset.sent,whatsappSent=!!whatsapp.dataset.sent;
+        tell('E-mail: '+(emailSent?'enviado.':'sem confirmação; confira antes de tentar novamente.')+' WhatsApp: '+(whatsappSent?'enviado.':'sem confirmação; confira antes de tentar novamente.'),!emailSent||!whatsappSent);
+        both.textContent=emailSent&&whatsappSent?'E-mail e WhatsApp enviados':'Confira o canal sem confirmação';
+        // An uncertain channel must be reviewed individually, never retried as a pair.
+        both.disabled=true;
+      }finally{combinedBusy=false;}
     };
   }
   new MutationObserver(() => {

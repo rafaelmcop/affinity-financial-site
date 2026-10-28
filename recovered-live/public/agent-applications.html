@@ -176,7 +176,9 @@
         padding: 11px 12px;
         border: 1px solid #263246;
         border-radius: 10px;
-        background: #07101d;
+        background: var(--agent-inset, #eaf0f5);
+        color: var(--agent-text, #172b3a);
+        border-color: var(--agent-border, #cbd7e1);
       }
       .application-summary small {
         display: block;
@@ -249,6 +251,12 @@
     html[data-agent-theme] body #list a.application-nlg-link{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:10px 16px;border:1px solid #14532d!important;border-radius:9px;background:#166534!important;color:#fff!important;font-weight:700;text-decoration:none}
       html[data-agent-theme] body #list a.application-nlg-link:hover{background:#14532d!important}
       html[data-agent-theme] body #list a.application-nlg-link:focus-visible{outline:3px solid #4ade80;outline-offset:3px}
+      html[data-agent-theme] body .application-summary div{background:var(--agent-inset)!important;color:var(--agent-text)!important;border-color:var(--agent-border)!important}
+      html[data-agent-theme] body .application-summary small{color:var(--agent-muted)!important}
+      html[data-agent-theme] body .application-summary strong{color:var(--agent-text)!important;font-size:16px;font-weight:800}
+      html[data-agent-theme] body .application .pill{background:var(--agent-inset)!important;color:var(--agent-text)!important;border:1px solid var(--agent-border);font-weight:700}
+      html[data-agent-theme] body button[data-both]{background:#166534!important;color:#fff!important;border:2px solid #14532d!important;font-weight:800}
+      html[data-agent-theme] body button[data-both]:focus-visible{outline:3px solid #22c55e;outline-offset:3px}
     </style>
   <link rel="stylesheet" href="/application-share.css?v=3">
   <style>
@@ -645,7 +653,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261014-message-channel-16"></script>
+    <script src="/agent-applications.js?v=20261027-combined-review-17"></script>
     <script src="/address-autocomplete.js?v=20260825-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>
