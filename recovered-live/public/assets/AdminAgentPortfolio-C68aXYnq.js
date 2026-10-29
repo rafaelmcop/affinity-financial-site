@@ -10,7 +10,7 @@ import { A as E, U as P } from "./AdminSidebar-CB3x3HMt.js";
 import { I as l } from "./input-maK0rC7f.js";
 import { X as D } from "./x-BKidgWlG.js";
 import { C as R } from "./check-HBuRIKCq.js";
-import { F as I } from "./FloatingInternalChat-C-mZ1jql.js?v=20260903-2";
+import { F as I } from "./FloatingInternalChat-C-mZ1jql.js?v=20261029-assistant-chat-1";
 import { P as j } from "./pen-BtFcHMZL.js";
 import { T as f } from "./trash-2-DP0NeSJV.js";
 import "./LanguageSelector-DkTXTche.js";

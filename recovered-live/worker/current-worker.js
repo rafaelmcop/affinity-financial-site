@@ -1,3 +1,4 @@
+import {linkedChatAssistants,canChatWithPeer} from './assistant-chat.js';
 import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
@@ -46827,7 +46828,7 @@ Affinity Financial Consulting`,
   }
   if (name === "crm.presence") {
     const rows = await env.DB.prepare("SELECT email,name,accountType,presenceStatus,lastSeenAt FROM adminAccounts WHERE isActive=1 ORDER BY name").all();
-    return trpcResult({ currentEmail: adminEmail.toLowerCase(), users: rows.results });
+    return trpcResult({ currentEmail: adminEmail.toLowerCase(), users: [...rows.results,...await linkedChatAssistants(env,adminEmail.toLowerCase())] });
   }
   if (name === "crm.setPresence") {
     const status = String(input.status || "available");
@@ -46853,9 +46854,7 @@ Affinity Financial Consulting`,
       if (mode === "agent" && peerEmail) {
         if (peerEmail === agentEmail || !validEmail(peerEmail))
           return trpcError("Agente destinat\xE1rio inv\xE1lido");
-        const peer = await env.DB.prepare(
-          "SELECT id FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both') AND isActive=1 LIMIT 1"
-        ).bind(peerEmail).first();
+        const peer = await canChatWithPeer(env,agentEmail,peerEmail);
         if (!peer)
           return trpcError("Agente destinat\xE1rio inv\xE1lido", "NOT_FOUND", 404);
         const rows2 = await env.DB.prepare(
@@ -46880,9 +46879,7 @@ Affinity Financial Consulting`,
       if (mode === "agent" && peerEmail) {
         if (peerEmail === agentEmail || !validEmail(peerEmail))
           return trpcError("Agente destinat\xE1rio inv\xE1lido");
-        const peer = await env.DB.prepare(
-          "SELECT id FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both') AND isActive=1 LIMIT 1"
-        ).bind(peerEmail).first();
+        const peer = await canChatWithPeer(env,agentEmail,peerEmail);
         if (!peer)
           return trpcError("Agente destinat\xE1rio inv\xE1lido", "NOT_FOUND", 404);
       }

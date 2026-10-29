@@ -5,7 +5,7 @@ import {
   C as y,
   L as j,
   b as v,
-} from "./FloatingInternalChat-C-mZ1jql.js?v=20260903-2";
+} from "./FloatingInternalChat-C-mZ1jql.js?v=20261029-assistant-chat-1";
 import { L as w, S as k } from "./LanguageSelector-DkTXTche.js";
 import { C } from "./x-BKidgWlG.js";
 import { C as N } from "./chevron-right-DepQZrYR.js";

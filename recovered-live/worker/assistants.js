@@ -1,3 +1,4 @@
+import {assistantChat} from './assistant-chat.js';
 import {actOnNotification,recentNotificationActions,notificationResolution} from './notification-actions.js';
 import {queueCommunication} from './queue-communication.js';
 import {assistantHome} from './assistant-home.js';
@@ -69,6 +70,7 @@ export async function assistantsRoute(request,env,auth){
  }
  if(path==='/api/assistants/logout'){if(request.method!=='POST')return json({error:'Use POST.'},405);return json({ok:true},200,{'set-cookie':cookie+'=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict'});}
  const assistant=await identity(request,env,auth);if(!assistant){if((agentPage||directRest)&&url.searchParams.get('assistantView')!=='1')return null;return portal||agentPage?Response.redirect(new URL('/assistentes/login',url),302):json({error:'Entre como assistente.'},401);}
+ if(path==='/api/assistants/chat'){try{return json(await assistantChat(env,assistant,request.method==='POST'?await boundedJson(request,64000):{peerEmail:url.searchParams.get('peerEmail')||''},request.method==='POST'));}catch(e){return json({error:e.message},e.status||400);}}
  const handleNotification=async()=>{if(request.method!=='POST')return json({error:'Use POST.'},405);try{const input=await boundedJson(request,4096),selected=input.kind==='code'?assistant.links.find(link=>link.owner===String(input.key||'').split('|')[1]):null,permissions=selected?.permissions||assistant.permissions,owner=selected?.owner||assistant.owner;return json(await actOnNotification(env,{owner,email:assistant.email,name:assistant.name,assistantId:assistant.id,canComplete:kind=>hasAssistantAction(permissions,kind==='payment'?'tasks':'portal_codes','edit'),canDelete:kind=>hasAssistantAction(permissions,kind==='payment'?'tasks':'portal_codes','delete'),verifyPassword:async password=>{const row=await env.DB.prepare('SELECT passwordHash FROM portalAssistants WHERE id=? AND active=1 AND deletedAt IS NULL').bind(assistant.id).first();return !!row&&await auth.compare(password,row.passwordHash);}},input));}catch(e){return json({error:e.message},e.status||400);}};
  if(path==='/api/assistants/notification-action'||path==='/api/assistants/resource/notification-action')return handleNotification();
  const ownCommunications=await assistantCommunicationsRoute(request,env,assistant,auth);if(ownCommunications)return ownCommunications;
