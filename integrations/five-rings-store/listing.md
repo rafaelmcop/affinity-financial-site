@@ -1,6 +1,11 @@
 # Chrome Web Store submission — Affinity Five Rings Connector
 
-Status: prepared for submission; not submitted or approved. Registration fee paid by owner on October 29, 2026. Publisher account remains owned by the user.
+Status: submitted to Chrome Web Store review on October 29, 2026 at approximately 13:17 America/New_York. Dashboard confirmed "Seu item (extensão) foi enviado para revisão" and "Revisão pendente". Automatic publication after approval is enabled. Not approved or publicly installable yet. Registration fee paid by owner; publisher account remains owned by the user.
+
+Store item ID: mgpnjfokklkcbgpmkcfhiadldijhapic
+Publisher ID: 16a125e2-2d7d-4c68-a28c-cb7b656e1d14
+Submitted version: 1.0.9
+Distribution: Unlisted, no charge. Listing and privacy declarations saved; reviewer instructions saved without production credentials. Google may request coordinated test access. Publisher display name: Affinity Financial Consulting; contact: rafael.cunha@affinityfc.org.
 
 ## Store listing (English)
 
