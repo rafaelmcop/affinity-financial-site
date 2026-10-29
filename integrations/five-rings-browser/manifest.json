@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Affinity · Conector Five Rings",
-  "version": "1.0.8",
-  "description": "Leitura de clientes, apólices e créditos na sessão Five Rings do próprio navegador.",
+  "name": "Affinity \u00b7 Conector Five Rings",
+  "version": "1.0.9",
+  "description": "Leitura de clientes, ap\u00f3lices e cr\u00e9ditos na sess\u00e3o Five Rings do pr\u00f3prio navegador.",
   "host_permissions": [
     "https://portal.fiveringsfinancial.com/*",
     "https://www.affinityfc.org/*"
@@ -29,6 +29,7 @@
     }
   ],
   "permissions": [
-    "scripting"
+    "scripting",
+    "storage"
   ]
 }
