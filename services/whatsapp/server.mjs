@@ -1,3 +1,4 @@
+import {retentionSchema,acknowledgeArchive,pruneMessages} from './message-retention.mjs';
 import {installMediaIdentityCompatibility} from './media-identity-compat.mjs';
 import {recordSendFailure,sendFailureText,sendFailureHint} from './send-failure.mjs';
 import {directorySnapshot,directorySchema} from './directory-snapshot.mjs';
@@ -26,7 +27,7 @@ import {downloadMedia} from './download.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
-const bridgeVersion='2026-10-25-media-identity-1';
+const bridgeVersion='2026-10-29-retention-1';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
 const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');
@@ -38,13 +39,13 @@ CREATE TABLE IF NOT EXISTS messages(owner TEXT NOT NULL,id TEXT NOT NULL,chat TE
 CREATE INDEX IF NOT EXISTS message_chat ON messages(owner,chat,stamp);
 CREATE TABLE IF NOT EXISTS session_owners(owner TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS sends(owner TEXT NOT NULL,requestId TEXT NOT NULL,state TEXT NOT NULL,messageId TEXT,PRIMARY KEY(owner,requestId));`);
-visibilitySchema(db);
+visibilitySchema(db);retentionSchema(db);
 for(const column of ['errorCode TEXT','failureStage TEXT','errorHint TEXT'])try{db.exec('ALTER TABLE sends ADD COLUMN '+column);}catch{}
 const sessions=new Map();
 for(const [column,type] of [['mediaKey','TEXT'],['mime','TEXT'],['filename','TEXT'],['mediaKind','TEXT'],['mediaSize','INTEGER'],['mediaState','TEXT']])try{db.exec(`ALTER TABLE messages ADD COLUMN ${column} ${type}`);}catch{}
 const mediaDir=path.join(dataDir,'media');mkdirSync(mediaDir,{recursive:true,mode:0o700});
 initializeContacts(db);directorySchema(db);
-const cleanupMedia=()=>{try{const result=pruneMedia(db,mediaDir);if(result.removed)console.log(JSON.stringify({event:'whatsapp_media_retention',...result}));}catch{console.error('whatsapp_media_retention_failed');}};
+const cleanupMedia=()=>{try{const result=pruneMedia(db,mediaDir);const texts=pruneMessages(db);if(texts.removed)console.log(JSON.stringify({event:'whatsapp_message_retention',at:new Date().toISOString(),...texts}));if(result.removed)console.log(JSON.stringify({event:'whatsapp_media_retention',...result}));}catch{console.error('whatsapp_media_retention_failed');}};
 cleanupMedia();const mediaCleanup=setInterval(cleanupMedia,60000);mediaCleanup.unref();
 const maxSessions=Number(process.env.WHATSAPP_MAX_SESSIONS||1);
 const maxMediaBytes=Math.min(128000000,Math.max(8000000,Number(process.env.WHATSAPP_MAX_MEDIA_BYTES)||64000000));
@@ -55,6 +56,7 @@ const mediaKey=(owner,id)=>createHash('sha256').update(owner+'\0'+id).digest('he
 async function save(owner,m,providedMedia=null){
   normalizeMessage(m);
   const chat=m.fromMe?m.to:m.from;
+  if(mediaExpired(m.timestamp)&&!db.prepare('SELECT 1 FROM messageRetentionProtected WHERE owner=? AND id=?').get(owner,String(m.id?._serialized||'')))return;
   if(!safeChat(chat)||!m.id?._serialized){console.error(JSON.stringify({event:'whatsapp_message_shape',keys:Object.keys(m||{}),idKeys:Object.keys(m?.id||{}),rawKeys:Object.keys(m?._data||{}),hasChat:safeChat(chat),hasId:!!m?.id?._serialized}));return;}
   let key=null,mime=String(providedMedia?.mimetype||m?._data?.mimetype||m?.mimetype||'').slice(0,100)||null,filename=String(providedMedia?.filename||m?._data?.filename||m?.filename||'').slice(0,240)||null,kind=m.hasMedia||providedMedia||mime?mediaKind(mime):null,size=Number(m?._data?.size)||null,state=m.hasMedia||providedMedia?'unavailable':null;
   const previous=db.prepare('SELECT mediaKey,mime,filename,mediaKind,mediaSize,mediaState FROM messages WHERE owner=? AND id=?').get(owner,m.id._serialized);
@@ -116,6 +118,7 @@ const server=http.createServer(async(req,res)=>{
   try{
     if(affiliateOwner(owner)&&!['/connect','/status','/all-contacts','/disconnect'].includes(action))return reply({error:'Ação indisponível para importação de afiliado.'},403);
     if(action==='/send-status'&&req.method==='GET'){const id=url.searchParams.get('requestId')||'';if(!/^[-a-f0-9]{36}$/.test(id))return reply({error:'Identificador inválido.'},400);const row=db.prepare('SELECT state,messageId,errorCode,failureStage,errorHint FROM sends WHERE owner=? AND requestId=?').get(owner,id);return reply(row?{...row,...(row.state==='uncertain'?{error:sendFailureText(row.errorCode)}:{})}:{state:'not_found'},row?200:404);}
+    if(action==='/audit-ack'&&req.method==='POST'){try{return reply(acknowledgeArchive(db,owner,await body(req,128000)));}catch{return reply({error:'Confirmação de arquivo inválida.'},400);}}
     if(action==='/audit'&&req.method==='GET')return reply(auditMessages(db,owner,url.searchParams.get('cursor'),url.searchParams.get('phone')));
     if(action==='/connect'&&req.method==='POST'){await connect(owner);return reply({ok:true});}
     const s=sessions.get(owner);if(s)s.lastSeen=Date.now();

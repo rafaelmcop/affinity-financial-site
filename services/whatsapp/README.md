@@ -42,3 +42,13 @@ O diretório de clientes/leads é lido pelo Worker usando a identidade autentica
 Imagens JPEG, PNG e WebP e áudios OGG, WebM, MP3, MP4 ou WAV podem ter até 8 MB. Mídias recebidas são baixadas do WhatsApp, guardadas em `data/media/` com nome opaco e entregues apenas por uma rota autenticada vinculada ao agente. O banco guarda somente os metadados e a referência do arquivo. A gravação de voz solicita acesso ao microfone apenas quando o agente clica em **Gravar voz**.
 
 `npm test` cobre assinatura, expiração, isolamento de identidade e acesso ao proxy. Validar leitura de QR, envio e recebimento reais exige o número de teste do usuário. Credenciais e banco em `data/` estão excluídos do Git; proteja o disco e os backups do servidor.
+
+## Retenção de mensagens e arquivo profissional
+
+O serviço mantém mensagens comuns por 72 horas, além do prazo de 72 horas já usado para anexos. Mensagens antigas só são removidas depois que o sincronizador confirma a gravação das conversas vinculadas ao CRM; dados de clientes ambíguos ou identidades ainda não resolvidas ficam protegidos para revisão. Propostas, atendimentos e demais interações gravadas no CRM continuam disponíveis. Grupos não são incluídos no arquivo individual de clientes.
+
+O arquivo é confirmado por `/audit-ack`, acessível somente com o ticket assinado do serviço; a API do navegador não expõe essa ação. Falhas no arquivo ou na confirmação interrompem a limpeza desses registros. Um contador persistente impede reutilização de cursores quando o último registro local é removido.
+
+Para a primeira limpeza, `archive-before-prune.mjs` permite uma simulação com `--data`, `--wrangler`, `--config` e `--database`. Somente `--apply` grava as conversas vinculadas no D1 e libera a limpeza local. Identidades ambíguas são preservadas. Nenhuma mensagem é enviada. Execute apenas em ambiente administrativo confiável: arquivos SQL temporários são privados e removidos após a operação.
+
+A retenção trata das cópias mantidas pelo portal, não apaga mensagens do celular nem controla todos os caches internos do WhatsApp Web. Credenciais de sessão, identidades de contato e recibos de idempotência são preservados para manter conexão, identificação e proteção contra reenvio duplicado.
