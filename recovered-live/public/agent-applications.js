@@ -392,10 +392,14 @@ function describeApplicationParent(row,parent,feminine=false){
       badge.hidden = !total;
     })
     .catch(() => {});
-  function notice(message, error = false) {
+  function notice(message, error = false, critical = false) {
     const b = $("notice");
-    b.textContent = message;
-    b.className = `notice show${error ? " error" : ""}`;
+    const technical=/signal timed out|TimeoutError/i.test(String(message));
+    const text=technical&&critical?'Não foi possível confirmar o salvamento. Mantenha a ficha aberta e confira antes de tentar novamente.':technical?'Uma operação excedeu o tempo de espera. Verifique a conexão; se estava salvando, confirme o salvamento antes de fechar a ficha.':message;
+    const item={id:technical?'application-timeout':String(message),message:text};
+    if(window.affinityNotify)window.affinityNotify(item);else(window.affinityNotificationQueue||=[]).push(item);
+    if(error&&(!technical||critical)){b.textContent=text;b.className='notice show error';b.setAttribute('role','alert');}
+    else if(!b.classList.contains('error')){b.textContent='';b.className='notice';}
   }
   function updateBeneficiaryTotal() {
     const total = beneficiaries.reduce(
@@ -1515,7 +1519,7 @@ function describeApplicationParent(row,parent,feminine=false){
       return true;
     } catch (e) {
       unsavedChanges = true;
-      notice(`Não foi possível salvar: ${e.message} Os campos continuam nesta tela; não feche nem atualize a página.`, true);
+      notice(`Não foi possível salvar: ${e.message} Os campos continuam nesta tela; não feche nem atualize a página.`, true, true);
       return false;
     }
   }
