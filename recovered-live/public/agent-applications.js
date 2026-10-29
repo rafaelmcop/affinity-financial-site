@@ -399,7 +399,7 @@ function describeApplicationParent(row,parent,feminine=false){
     const item={id:technical?'application-timeout':String(message),message:text};
     if(window.affinityNotify)window.affinityNotify(item);else(window.affinityNotificationQueue||=[]).push(item);
     if(error&&(!technical||critical)){b.textContent=text;b.className='notice show error';b.setAttribute('role','alert');}
-    else if(!b.classList.contains('error')){b.textContent='';b.className='notice';}
+    else if(!technical||!b.classList.contains('error')){b.textContent='';b.className='notice';}
   }
   function updateBeneficiaryTotal() {
     const total = beneficiaries.reduce(
