@@ -32,7 +32,7 @@ test('failed schema initialization is retryable and a different database is init
  const f=schemaFixture();f.setFail();await assert.rejects(accessSchema(f.env));await accessSchema(f.env);const other=schemaFixture();await accessSchema(other.env);assert(other.runs>0);
 });
 test('patched mail runtime builds PDF attachment mail locally and blocks filesystem/URL attachment reads',async()=>{
- assert.equal(JSON.parse(fs.readFileSync(new URL('./dependencies/node_modules/nodemailer/package.json',import.meta.url))).version,'10.0.10');
+ assert.equal(JSON.parse(fs.readFileSync(new URL('./dependencies/node_modules/nodemailer/package.json',import.meta.url))).version,'10.3.1');
  const transport=mailer.createTransport({streamTransport:true,buffer:true,disableFileAccess:true,disableUrlAccess:true});
  const result=await transport.sendMail({from:'Agent <agent@example.invalid>',to:'client@example.invalid',subject:'Synthetic attachment test',text:'Fixture only',attachments:[{filename:'proposal.pdf',content:Buffer.from('%PDF-fixture'),contentType:'application/pdf'}]});
  const raw=result.message.toString();assert.match(raw,/filename=proposal.pdf/);assert.match(raw,/application\/pdf/);
@@ -45,4 +45,26 @@ test('homepage has crawlable initial text, valid structured data and accurate la
  assert.doesNotMatch(html,/hreflang="(?:en-US|es-US)"/);assert.doesNotMatch(html,/maximum-scale=1/);
  for(const [,json] of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g))assert.equal(JSON.parse(json)['@context'],'https://schema.org');
  assert.match(html,/index-BIU-6RMI.js\?v=20261009-setup-1/);
+});
+
+// Static resources bypass the Worker only for the compiled JavaScript/CSS.
+// Sensitive extensions and SPA fallbacks must still reach the perimeter.
+test('asset routing cannot bypass sensitive-file checks and static assets carry security headers',()=>{
+ const config=JSON.parse(fs.readFileSync(new URL('./deploy/wrangler-main.jsonc',import.meta.url),'utf8'));
+ assert.deepEqual(config.assets.run_worker_first,['/*','!/assets/*.js','!/assets/*.css','!/vendor/*.js','!/vendor/*.css']);
+ const headers=fs.readFileSync(new URL('./public/_headers',import.meta.url),'utf8');
+ for(const value of ['X-Content-Type-Options: nosniff','Strict-Transport-Security: max-age=31536000','Referrer-Policy: no-referrer'])assert(headers.includes(value));
+ for(const path of ['/assets/app.js.map','/vendor/.env','/assets/backup.sqlite'])assert(sensitiveResource(path));
+});
+
+test('mail recipient parser preserves the real address in nested comments and quoted local parts',async()=>{
+ const {default:parse}=await import('./dependencies/node_modules/nodemailer/dist/esm/addressparser/index.js');
+ assert.deepEqual(parse('Recipient (x(y) <attacker@example.invalid>) <recipient@example.test>').map(x=>x.address),['recipient@example.test']);
+ assert.deepEqual(parse('<"a@attacker.invalid>"@recipient.test>').map(x=>x.address),['"a@attacker.invalid>"@recipient.test']);
+ const source=fs.readFileSync(new URL('./worker/current-worker.js',import.meta.url),'utf8');
+ assert(source.includes('var addressparser = patchedAddressParser;'));
+ assert(!source.includes('var addressparser = require_addressparser2();'));
+ const transport=mailer.createTransport({streamTransport:true,buffer:true,disableFileAccess:true,disableUrlAccess:true});
+ const sent=await transport.sendMail({from:'agent@example.test',to:'Recipient (x(y) <attacker@example.invalid>) <recipient@example.test>',subject:'Synthetic parser test',text:'Fixture only'});
+ assert.deepEqual(sent.envelope.to,['recipient@example.test']);
 });

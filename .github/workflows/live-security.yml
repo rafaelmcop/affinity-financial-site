@@ -17,7 +17,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --ignore-scripts --prefix recovered-live/dependencies
-      - run: npm audit --omit=dev --audit-level=high --prefix recovered-live/dependencies
+      - run: npm audit --omit=dev --audit-level=moderate --prefix recovered-live/dependencies
       - run: node --test recovered-live/*.test.mjs
       - run: npm ci --ignore-scripts --prefix services/whatsapp
-      - run: npm audit --omit=dev --audit-level=high --prefix services/whatsapp
+      - run: npm audit --omit=dev --audit-level=moderate --prefix services/whatsapp

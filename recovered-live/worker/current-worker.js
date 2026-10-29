@@ -1,3 +1,4 @@
+import patchedAddressParser from '../dependencies/node_modules/nodemailer/dist/esm/addressparser/index.js';
 import {linkedChatAssistants,canChatWithPeer} from './assistant-chat.js';
 import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
@@ -37694,7 +37695,7 @@ var require_mail_parser = __commonJS({
     "use strict";
     var mailsplit = require_mailsplit();
     var libmime = require_libmime();
-    var addressparser = require_addressparser2();
+    var addressparser = patchedAddressParser;
     var Transform = require_stream().Transform;
     var Splitter = mailsplit.Splitter;
     var ChunkedPassthrough = mailsplit.ChunkedPassthrough;
