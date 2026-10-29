@@ -3,7 +3,7 @@
 import {DatabaseSync} from 'node:sqlite';import {execFileSync} from 'node:child_process';import {mkdtempSync,writeFileSync,rmSync,chmodSync} from 'node:fs';import path from 'node:path';import os from 'node:os';import {retentionSchema,acknowledgeArchive} from './message-retention.mjs';
 const args=process.argv.slice(2),arg=name=>args[args.indexOf(name)+1];
 const data=arg('--data'),wrangler=arg('--wrangler'),config=arg('--config'),database=arg('--database');if(!data||!wrangler||!config||!database)throw Error('Use --data --wrangler --config --database, and optional --apply.');
-const call=extra=>JSON.parse(execFileSync(process.execPath,[wrangler,'d1','execute',database,'--remote','--config',config,'--json',...extra],{encoding:'utf8',maxBuffer:32*1024*1024}));
+const call=extra=>{const output=execFileSync(process.execPath,[wrangler,'d1','execute',database,'--remote','--config',config,'--json',...extra],{encoding:'utf8',maxBuffer:32*1024*1024});for(const match of output.matchAll(/(?:^|\n)(\[\s*\{)/g)){try{const result=JSON.parse(output.slice(match.index+(output[match.index]==='\n'?1:0)));if(Array.isArray(result)&&result.every(r=>typeof r.success==='boolean'))return result;}catch{}}throw Error('The database did not return a recognized confirmation; retention remains blocked.');};
 const results=call(['--command',"SELECT id,phone,whatsapp,assignedAdminEmail FROM crmClients; SELECT lower(p.email) AS email,l.owner FROM portalAssistants p JOIN assistantAgentAccess l ON l.assistantId=p.id WHERE p.active=1 AND p.deletedAt IS NULL AND l.active=1;"]);
 const clients=results[0].results,links=results[1].results;
 const db=new DatabaseSync(path.join(data,'history.sqlite'));db.exec('PRAGMA busy_timeout=15000');
