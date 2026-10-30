@@ -1,3 +1,4 @@
+import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
 import {whatsappContacts} from './whatsapp-contact-names.js';
 import {assistantMessageSender,sendAssistantMessageEmail} from './assistant-message-sender.js';
 import patchedAddressParser from '../dependencies/node_modules/nodemailer/dist/esm/addressparser/index.js';
@@ -43590,7 +43591,7 @@ Detalhes: ${details}` : ""}`;
   if (name === "agent.logMeetingMessage" || name === "agent.sendMeetingEmail" || name === "agent.sendMeetingWhatsapp" || name === "agent.openMeetingClient") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), meetingId = Number(input.meetingId || 0);
-    const message = String(input.message || "").trim().slice(0, 1e4);
+    let message = String(input.message || "").trim().slice(0, 1e4);
     const template = String(input.template || "Mensagem").trim().slice(0, 120);
     const channel = String(input.channel || "whatsapp").toLowerCase() === "email" ? "email" : "whatsapp";
     const openClient = name === "agent.openMeetingClient";
@@ -43598,6 +43599,7 @@ Detalhes: ${details}` : ""}`;
     const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
     if (!meeting) return trpcError("Compromisso n\xE3o encontrado", "NOT_FOUND", 404);
     const assistantSender=delegation?.assistantId?await assistantMessageSender(env,owner,delegation):null,transport=assistantSender?{sender:assistantSender.email}:{};
+    if(assistantSender){const signature=(await assistantSignature(env,{...assistantSender,owner})).text;message=appendAssistantSignature(message,signature);input={...input,message};}
     const sendMeetingEmail = name === "agent.sendMeetingEmail",sendMeetingWhatsapp=name==="agent.sendMeetingWhatsapp";
     if(!assistantSender&&(sendMeetingEmail||sendMeetingWhatsapp)&&!await hasFeature(env,owner,sendMeetingWhatsapp?'whatsapp':'email'))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
     if(!allowsMeetingCopies(template))input.jointSend=undefined;

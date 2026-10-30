@@ -1,3 +1,4 @@
+import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
 import {hasAssistantAction} from './assistant-permissions.js';
 import {renderAssistantWhatsAppPage} from './assistant-whatsapp-page.js';
 import {notificationResolution,recentNotificationActions} from './notification-actions.js';
@@ -52,7 +53,8 @@ export async function assistantCommunicationsRoute(request,env,assistant,auth){
  }
  if(path.startsWith('/api/assistants/communications/whatsapp/')){
   const target=new URL('/api/agent/whatsapp/'+path.split('/').at(-1),url);target.search=url.search;
-  return auth.whatsapp(new Request(target,request),env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}}),contactScopes:{crmOwners:hasAssistantAction(assistant.permissions,'policies','view')?[assistant.owner]:[],leadOwners:hasAssistantAction(assistant.permissions,['queue','whatsapp_leads'],'view')?[assistant.owner]:[]}});
+  let outgoing=new Request(target,request);if(path.endsWith('/send')&&request.method==='POST'){const input=await boundedJson(request,11500000);if(input.includeSignature!==false){const signature=await assistantSignature(env,assistant);input.text=appendAssistantSignature(input.text,signature.text);}outgoing=new Request(target,{method:'POST',headers:request.headers,body:JSON.stringify(input)});}
+  return auth.whatsapp(outgoing,env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}}),contactScopes:{crmOwners:hasAssistantAction(assistant.permissions,'policies','view')?[assistant.owner]:[],leadOwners:hasAssistantAction(assistant.permissions,['queue','whatsapp_leads'],'view')?[assistant.owner]:[]}});
  }
  if(path==='/assistentes/email'){const response=await env.ASSETS.fetch(new Request(new URL('/assistant-email.html',url),request));const headers=new Headers(response.headers);headers.set('x-affinity-assistant-view','1');return new Response(response.body,{status:response.status,headers});}
  if(!path.startsWith('/api/assistants/communications/'))return null;
@@ -63,8 +65,9 @@ export async function assistantCommunicationsRoute(request,env,assistant,auth){
  if(path.endsWith('/mailbox')&&request.method==='GET'){const rows=(await env.DB.prepare('SELECT id,direction,externalId,fromEmail,toEmail,subject,body,sentAt FROM assistantMailbox WHERE assistantId=? ORDER BY id DESC LIMIT 200').bind(assistant.id).all()).results;const granted=new Set();for(const link of assistant.links||[]){const recipients=await codeRecipients(env,link.owner);if(recipients.some(r=>Number(r.id)===Number(assistant.id)))granted.add(link.owner);}const messages=[];for(const row of rows){const accessCode=row.externalId.startsWith('access-code|'),owner=row.externalId.split('|')[1];if(accessCode&&(!granted.has(owner)||Date.now()-Date.parse(row.sentAt+(/[zZ]|[+-]\d\d:\d\d$/.test(row.sentAt)?'':'Z'))>=600000||await notificationResolution(env,owner,'code',row.externalId)))continue;const permissions=assistant.links?.find(link=>link.owner===owner)?.permissions?.portal_codes||[];messages.push({...row,accessCode,canComplete:permissions.includes('edit'),canDelete:permissions.includes('delete')});}const resolutions=granted.has(assistant.owner)?(await recentNotificationActions(env,assistant.owner)).filter(row=>row.kind==='code'):[];return json({config,messages,resolutions,canRestoreCodes:assistant.permissions?.portal_codes?.includes('delete'),canSyncCodes:granted.has(assistant.owner)});}
  if(path.endsWith('/send')&&request.method==='POST'){
   if(config?.state!=='ready')return json({error:'O e-mail corporativo ainda está sendo preparado.'},409);
-  const input=await boundedJson(request,100000),to=String(input.to||'').trim().toLowerCase(),subject=String(input.subject||'').trim(),body=String(input.body||'').trim();
+  const input=await boundedJson(request,100000),to=String(input.to||'').trim().toLowerCase(),subject=String(input.subject||'').trim();let body=String(input.body||'').trim();
   if(input.confirmed!==true||!auth.validEmail(to)||/[\r\n]/.test(to)||!subject||subject.length>500||!body||body.length>50000)return json({error:'Revise o destinatário, assunto e mensagem e confirme o envio.'},400);
+  body=appendAssistantSignature(body,(await assistantSignature(env,assistant)).text);
   const sender=await env.DB.prepare('SELECT address,displayName FROM domainEmailSenders WHERE owner=? AND enabled=1 AND address=?').bind(assistant.email,config.address).first();if(!sender||!env.CORPORATE_EMAIL?.send)return json({error:'Envio corporativo indisponível. Avise o Admin.'},503);
   const result=await env.CORPORATE_EMAIL.send(corporateMessage(sender,{to,subject,text:body}));if(!result?.messageId)return json({error:'O serviço não confirmou o envio. Confira o histórico antes de tentar novamente.'},502);
   await env.DB.prepare("INSERT INTO assistantMailbox(assistantId,direction,externalId,fromEmail,toEmail,subject,body) VALUES(?,'sent',?,?,?,?,?)").bind(assistant.id,result.messageId,sender.address,to,subject,body).run();return json({ok:true});

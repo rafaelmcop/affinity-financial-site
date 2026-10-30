@@ -89,7 +89,8 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=11').then(
       const zoom = meeting.meetingUrl || "";
       const {meetingAgentProfile,meetingAgentSignature}=await import('/meeting-agent-signature.js?v=2');
       const profile=meetingAgentProfile(savedProfile,meeting.responsibleAgent);
-      const personalSignature = meetingAgentSignature(profile);
+      let personalSignature = meetingAgentSignature(profile);
+      if(document.documentElement.dataset.assistant==='true'){const r=await fetch('/api/assistants/signature',{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('Não foi possível carregar sua assinatura. Abra Minha assinatura e tente novamente.');personalSignature=(await r.json()).text;}
       const agentName = String(profile?.name || "").trim();
       const meetingHost = agentName ? `${agentName} da Affinity Financial Consulting` : "a equipe da Affinity Financial Consulting";
       const dayFormat = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});

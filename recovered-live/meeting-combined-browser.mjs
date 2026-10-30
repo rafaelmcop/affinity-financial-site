@@ -3,6 +3,7 @@ import http from 'node:http';import fs from 'node:fs';import assert from 'node:a
 const posts=[],alerts=[];let failEmail=false;
 const waitForPosts=async count=>{const deadline=Date.now()+10000;while(posts.length<count&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));assert.equal(posts.length,count);};
 const server=http.createServer(async(req,res)=>{const path=new URL(req.url,'http://localhost').pathname;
+ if(path==='/api/assistants/signature'){res.setHeader('content-type','application/json');res.end(JSON.stringify({text:'Assistant fixture\nExecutive Assistant to Fixture Agent\nAffinity Financial Consulting\nPhone: +1 617 555 0100\nEmail: helper@team.affinityfc.org\nwww.affinityfc.org'}));return;}
  if(path==='/api/assistants/me'){res.setHeader('content-type','application/json');res.end(JSON.stringify({permissions:{calendar:['view'],policies:['view']}}));return;}
  if(path==='/api/assistants/resource/access'){res.setHeader('content-type','application/json');res.end(JSON.stringify({features:['calendar','email','whatsapp','policies']}));return;}
  if(path.startsWith('/api/trpc/')||path.startsWith('/api/assistants/procedure/')){const name=path.split('/').pop();let body='';for await(const c of req)body+=c;const input=body?JSON.parse(body).json:{};
