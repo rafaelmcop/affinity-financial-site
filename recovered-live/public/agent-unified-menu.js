@@ -7,7 +7,7 @@
   const contrast=document.createElement('link');contrast.rel='stylesheet';contrast.href='/agent-number-contrast.css?v=1';document.head.appendChild(contrast);
   const five=document.createElement('script');five.src='/five-rings-onboarding.js?v=1';five.defer=true;document.head.appendChild(five);
   const setup=document.createElement('script');setup.src='/staff-setup-check.js?v=20261012-import-retry-2';setup.defer=true;document.head.appendChild(setup);
-  const assistantSettings=document.createElement('script');assistantSettings.src='/assistant-settings-link.js';assistantSettings.defer=true;document.head.appendChild(assistantSettings);
+  const assistantSettings=document.createElement('script');assistantSettings.src='/assistant-settings-link.js?v=2';assistantSettings.defer=true;document.head.appendChild(assistantSettings);
   const matches = (...items) => items.some(item => path === item || path.startsWith(`${item}/`));
   const trpc = async name => {
     const input = encodeURIComponent(JSON.stringify({ json: {} }));
