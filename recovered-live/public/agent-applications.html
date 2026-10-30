@@ -294,7 +294,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
           e acompanhe a emissão.
         </p>
         <div id="application-list-toolbar" class="card toolbar">
-          <div class="tabs">
+          <label style="flex:1 1 280px;min-width:0;margin:0">Pesquisar aplicações<input id="application-search" type="search" placeholder="Nome, e-mail ou telefone" autocomplete="off" style="width:100%;min-width:0;margin-top:6px;background:var(--agent-surface,#fff);color:var(--agent-text,#173348);border:1px solid var(--agent-border,#8196ab);padding:11px 12px;border-radius:9px"></label><button id="application-search-clear" type="button" hidden>Limpar busca</button><small id="application-search-count" role="status" aria-live="polite"></small><div class="tabs">
             <button data-tab="open" class="active">Em andamento</button
             ><button data-tab="completed">Concluídas</button>
           </div>
@@ -655,7 +655,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261028-notification-bell-20"></script>
+    <script src="/agent-applications.js?v=20261030-application-search-1"></script>
     <script src="/address-autocomplete.js?v=20260825-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>

@@ -1389,11 +1389,16 @@ function describeApplicationParent(row,parent,feminine=false){
     });
   }).observe($("list"), { childList: true, subtree: true });
   function render() {
-    const data = rows.filter(r =>
+    const categoryRows = rows.filter(r =>
       tab === "completed"
         ? r.status === "submitted" && !r.policyNumber && !r.matchedPolicyId
         : r.status === "draft"
     );
+    const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+    const query=normalize($("application-search")?.value),phoneQuery=/^[+\d\s().-]+$/.test(query)?query.replace(/\D/g,''):'';
+    const data=categoryRows.filter(row=>!query||[row.clientName,row.clientEmail].some(value=>normalize(value).includes(query))||(phoneQuery.length>0&&String(row.clientPhone||'').replace(/\D/g,'').includes(phoneQuery)));
+    if($("application-search-count"))$("application-search-count").textContent=data.length+' de '+categoryRows.length+' aplicação(ões)';
+    if($("application-search-clear"))$("application-search-clear").hidden=!query;
     $("list").innerHTML = data.length
       ? data
           .map(
@@ -1401,7 +1406,7 @@ function describeApplicationParent(row,parent,feminine=false){
               `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-access-feature="application_create" data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button data-access-feature="application_create" class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
-      : '<div class="empty">Nenhuma aplicação nesta categoria.</div>';
+      : '<div class="empty">'+(query?'Nenhuma aplicação encontrada para esta busca.':'Nenhuma aplicação nesta categoria.')+'</div>';
     document
       .querySelectorAll("[data-edit]")
       .forEach(
@@ -1523,6 +1528,8 @@ function describeApplicationParent(row,parent,feminine=false){
       return false;
     }
   }
+  $("application-search")?.addEventListener('input',render);
+  $("application-search-clear")?.addEventListener('click',()=>{$("application-search").value='';render();$("application-search").focus();});
   $("new").onclick = () => { location.href="/agent-applications?nova=1"; };
   $("cancel").onclick = () => { if(newApplicationView) location.href="/agentes/dashboard"; else $("form-card").classList.add("hidden"); };
   inputs.forEach(el => {
