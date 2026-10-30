@@ -1,3 +1,5 @@
+import {whatsappContacts} from './whatsapp-contact-names.js';
+import {assistantMessageSender,sendAssistantMessageEmail} from './assistant-message-sender.js';
 import patchedAddressParser from '../dependencies/node_modules/nodemailer/dist/esm/addressparser/index.js';
 import {linkedChatAssistants,canChatWithPeer,chatSummaries} from './assistant-chat.js';
 import {usesPublicAppearance} from './public-appearance.js';
@@ -202,8 +204,7 @@ async function whatsappRoute(request, env, auth) {
     if (page) return new Response(agentWhatsAppPage(), { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
     const action = url.pathname.split("/").at(-1), method = request.method;
     if (action === "contacts" && method === "GET") {
-      const rows = await env.DB.prepare("SELECT id,name,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name COLLATE NOCASE").bind(email.toLowerCase()).all();
-      return json2(rows.results || []);
+      return json2(await whatsappContacts(env,email,auth.contactScopes));
     }
     if (action === "contact" && method === "GET") {
       const id = Number(url.searchParams.get("clientId"));
@@ -593,10 +594,11 @@ async function sendEmail(env, options) {
 }
 __name(sendEmail, "sendEmail");
 async function sendAgentEmail(env, agentEmail, options) {
-  const owner=agentEmail.toLowerCase(),{historyClientId,...mailOptions}=options;
+  const owner=agentEmail.toLowerCase(),{historyClientId,assistantIdentity,...mailOptions}=options;
   let clientId=Number(historyClientId)||null;if(mailOptions.attachments?.length&&!clientId&&typeof mailOptions.to==='string'){const customers=(await env.DB.prepare('SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? LIMIT 2').bind(owner,mailOptions.to.trim().toLowerCase()).all()).results;if(customers.length===1)clientId=Number(customers[0].id);}
   const archiveIds=await reserveEmailAttachments(env,owner,mailOptions.attachments,clientId);
   const finish=async sent=>{sent={...sent,messageId:sent.messageId||('portal:'+crypto.randomUUID())};if(archiveIds.length){try{await finalizeEmailAttachments(env,owner,archiveIds,sent.messageId,clientId);}catch{sent.attachmentArchivePending=true;console.error('email_attachment_reading_pending');}}return sent;};
+  if(assistantIdentity)return finish(await sendAssistantMessageEmail(env,owner,assistantIdentity,mailOptions));
   const corporate=await sendCorporateEmail(env,agentEmail,mailOptions);if(corporate)return finish(corporate);
   const config = await env.DB.prepare(
     "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
@@ -43573,6 +43575,7 @@ Detalhes: ${details}` : ""}`;
     return trpcResult({ token, link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${token}` });
   }
   if (name === "agent.createServiceFeedbackInvite") {
+    if(delegation?.assistantId){const source=await env.DB.prepare('SELECT inviteeName,inviteeEmail FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=?').bind(Number(input.meetingId)||0,adminEmail.toLowerCase()).first();if(!source)return trpcError('Compromisso não encontrado','NOT_FOUND',404);input={...input,clientName:source.inviteeName,clientEmail:source.inviteeEmail};}
     await env.DB.prepare("CREATE TABLE IF NOT EXISTS serviceFeedbackInvites (id INTEGER PRIMARY KEY AUTOINCREMENT,agentEmail TEXT NOT NULL,meetingId INTEGER,clientName TEXT,clientEmail TEXT,token TEXT NOT NULL UNIQUE,rating INTEGER,comment TEXT,reason TEXT,doubts TEXT,submittedAt TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
     const meetingId = Number(input.meetingId || 0), clientName = String(input.clientName || "").trim(), clientEmail = String(input.clientEmail || "").trim().toLowerCase();
     if (meetingId) {
@@ -43594,10 +43597,11 @@ Detalhes: ${details}` : ""}`;
     if (!meetingId || !openClient && !message) return trpcError("Mensagem ou compromisso inv\xE1lido");
     const meeting = await env.DB.prepare("SELECT * FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=? LIMIT 1").bind(meetingId, owner).first();
     if (!meeting) return trpcError("Compromisso n\xE3o encontrado", "NOT_FOUND", 404);
+    const assistantSender=delegation?.assistantId?await assistantMessageSender(env,owner,delegation):null,transport=assistantSender?{sender:assistantSender.email}:{};
     const sendMeetingEmail = name === "agent.sendMeetingEmail",sendMeetingWhatsapp=name==="agent.sendMeetingWhatsapp";
-    if((sendMeetingEmail||sendMeetingWhatsapp)&&!await hasFeature(env,owner,sendMeetingWhatsapp?'whatsapp':'email'))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
+    if(!assistantSender&&(sendMeetingEmail||sendMeetingWhatsapp)&&!await hasFeature(env,owner,sendMeetingWhatsapp?'whatsapp':'email'))return trpcError('Esta função aguarda liberação pelo Admin.','FORBIDDEN',403);
     if(!allowsMeetingCopies(template))input.jointSend=undefined;
-    if(input.jointSend){try{const recipients=copyRecipients(input.jointSend);if(recipients.some(r=>r.selected)&&!await hasFeature(env,owner,'whatsapp'))throw Error('WhatsApp aguarda liberação pelo Admin.');}catch(error){return trpcError(error.message);}}
+    if(input.jointSend){try{const recipients=copyRecipients(input.jointSend);if(!assistantSender&&recipients.some(r=>r.selected)&&!await hasFeature(env,owner,'whatsapp'))throw Error('WhatsApp aguarda liberação pelo Admin.');}catch(error){return trpcError(error.message);}}
     let attachments=[];
     if(sendMeetingEmail||sendMeetingWhatsapp){try{attachments=parseMailAttachments(input.attachments);if(sendMeetingWhatsapp){for(const file of attachments){const ext=file.filename.split('.').pop().toLowerCase(),types={pdf:'application/pdf',jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',webp:'image/webp',gif:'image/gif',xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',xls:'application/vnd.ms-excel'};if(!types[ext])throw Error('Para WhatsApp use PDF, imagens ou planilhas.');file.contentType=types[ext];}}}catch(e){return trpcError(e.message);}}
     if (sendMeetingEmail && !validEmail(String(meeting.inviteeEmail || ""))) return trpcError("Este compromisso n\xE3o possui e-mail v\xE1lido");
@@ -43616,18 +43620,18 @@ Detalhes: ${details}` : ""}`;
     }
     if (openClient) return trpcResult({ success: true, clientId });
     if (sendMeetingEmail) {
-      const config = await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
-    if(config)config.fromEmail=await corporateFromEmail(env,owner,config.fromEmail);
+      const config = assistantSender?{fromEmail:assistantSender.address}:await env.DB.prepare("SELECT fromEmail FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
+    if(config&&!assistantSender)config.fromEmail=await corporateFromEmail(env,owner,config.fromEmail);
       if (!config) return trpcError("Configure seu e-mail no portal antes de enviar");
       const subject = String(input.subject || "Seu atendimento \u2014 Affinity Financial Consulting").trim().slice(0, 300);
       let sent;
-      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{historyClientId:clientId,to:String(meeting.inviteeEmail),subject,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
+      try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'email'},attachments,files=>sendAgentEmail(env,owner,{historyClientId:clientId,...(assistantSender?{assistantIdentity:delegation}:{}),to:String(meeting.inviteeEmail),subject,text:message,html:clientEmailHtml(`<p>${escapeAutomationHtml(message).replaceAll("\n","<br>")}</p>`),replyTo:String(config.fromEmail),attachments:files}).then(result=>{sent=result;}));if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input,transport)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}
       await env.DB.prepare("INSERT INTO clientEmails (agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt) VALUES (?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP)").bind(owner, clientId, String(sent.messageId || ""), subject, message+(attachments.length?"\nAnexos: "+attachments.map(file=>file.filename).join(", "):""), String(config.fromEmail), String(meeting.inviteeEmail)).run();
     }
-    if(sendMeetingWhatsapp){try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'whatsapp'},attachments);if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}}
-    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : sendMeetingWhatsapp?'whatsapp':channel, `${template}\n${message}${attachments.length?'\nAnexos: '+attachments.map(f=>f.filename).join(', '):''}`, owner).run();
-    const jointResults=(sendMeetingEmail||sendMeetingWhatsapp)?await sendMeetingCopies(env,owner,{...meeting,clientId},input):[];
-    if(sendMeetingWhatsapp){try{await syncWhatsappAudit(env,owner,{id:clientId,phone:meeting.inviteePhone});}catch{console.error('whatsapp_send_audit_pending');}}
+    if(sendMeetingWhatsapp){try{const receipt=await sendMeetingMessage(env,owner,meeting,{...input,channel:'whatsapp'},attachments,undefined,transport);if(receipt.alreadySent)return trpcResult({success:true,clientId,alreadySent:true,jointResults:await sendMeetingCopies(env,owner,{...meeting,clientId},input,transport)});}catch(e){return trpcError(e.message,'BAD_REQUEST',e.status||400);}}
+    await env.DB.prepare("INSERT INTO crmActivities (clientId,type,content,createdBy) VALUES (?,?,?,?)").bind(clientId, sendMeetingEmail ? "email" : sendMeetingWhatsapp?'whatsapp':channel, `${template}\n${message}${attachments.length?'\nAnexos: '+attachments.map(f=>f.filename).join(', '):''}`, delegation?.actorEmail||owner).run();
+    const jointResults=(sendMeetingEmail||sendMeetingWhatsapp)?await sendMeetingCopies(env,owner,{...meeting,clientId},input,transport):[];
+    if(sendMeetingWhatsapp){try{await syncWhatsappAudit(env,assistantSender?.email||owner,{id:clientId,phone:meeting.inviteePhone});}catch{console.error('whatsapp_send_audit_pending');}}
     return trpcResult({ success: true, clientId,jointResults });
   }
   if (name === "admin.deleteApplication") {

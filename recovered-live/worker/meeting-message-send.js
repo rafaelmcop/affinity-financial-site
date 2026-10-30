@@ -1,6 +1,6 @@
 import {emailDefinitelyNotSent} from './smtp-runtime.js';
 import {meetingSendTransport} from './meeting-send-transport.js';
-export async function sendMeetingMessage(env,owner,meeting,input,attachments,sendEmail){
+export async function sendMeetingMessage(env,owner,meeting,input,attachments,sendEmail,transport={}){
  if(input.confirmed!==true)throw Object.assign(Error('Confirme o envio antes de continuar.'),{status:400});
  const requestId=String(input.requestId||'');if(!/^[a-f0-9-]{36}$/.test(requestId))throw Object.assign(Error('Identificador de envio inválido.'),{status:400});
  const channel=input.channel==='whatsapp'?'whatsapp':'email';
@@ -16,7 +16,7 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
   if(channel==='email')await sendEmail(attachments);
   else{
    const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');const encoder=new TextEncoder();
-   const authorization=async()=>{const payload=encoded(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+60})));const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);const ticket=payload+'.'+encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));return 'Bearer '+ticket;};
+   const authorization=async()=>{const payload=encoded(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner:transport.sender||owner,exp:Math.floor(Date.now()/1000)+60})));const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);const ticket=payload+'.'+encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));return 'Bearer '+ticket;};
    for(let i=0;i<Math.max(1,attachments.length);i++){
     if(i)await new Promise(r=>setTimeout(r,3100));
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(requestId+':'+i)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,32);const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-'+hash.slice(12,16)+'-'+hash.slice(16,20)+'-'+hash.slice(20);
