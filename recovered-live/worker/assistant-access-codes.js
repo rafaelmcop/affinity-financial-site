@@ -1,3 +1,4 @@
+import {discussionRecipients,relayDiscussion} from './assistant-discussions.js';
 import {notificationSchema} from './notification-actions.js';
 import {readableMailboxBody} from './mailbox-body.js';
 export function accessCodeProvider(mail,now=Date.now()){
@@ -25,10 +26,10 @@ export async function relayAccessCode(env,owner,mail,now=Date.now()){
  return count;
 }
 export async function pollAccessCodes(env,owner,services){
- if(!(await codeRecipients(env,owner)).length)return {delivered:0};
+ if(!(await codeRecipients(env,owner)).length&&!(await discussionRecipients(env,owner)).length)return {delivered:0};
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS assistantCodePolls(owner TEXT PRIMARY KEY,checkedAt INTEGER NOT NULL)').run();const now=Date.now();
  const lease=await env.DB.prepare('INSERT INTO assistantCodePolls(owner,checkedAt) VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET checkedAt=excluded.checkedAt WHERE assistantCodePolls.checkedAt<?').bind(owner,now,now-20000).run();if(!Number(lease.meta?.changes))return {delivered:0,waiting:true};
- let client,delivered=0;try{({client}=await services.open(env,owner));await client.command('C1','SELECT INBOX');const search=await client.command('C2','UID SEARCH SINCE '+services.imapDate(new Date(now-600000))+' (OR FROM "nationallife.com" (OR FROM "mga360.com" (OR FROM "fiveringsfinancial.com" FROM "fiverings.com")))');const uids=(search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1]||'').trim().split(/\s+/).filter(x=>/^\d+$/.test(x)).slice(-20);let sequence=3;for(const uid of uids){const fetched=await client.command('C'+sequence++,'UID FETCH '+uid+' (BODY.PEEK[])'),raw=services.literal(fetched.bytes);if(!raw||raw.length>2000000)continue;const parsed=await services.parse(raw);delivered+=await relayAccessCode(env,owner,{...parsed,externalId:parsed.messageId||'icloud:'+owner+':'+uid},now);}return {delivered};}finally{if(client)await client.close();}
+ let client,delivered=0;try{({client}=await services.open(env,owner));await client.command('C1','SELECT INBOX');const search=await client.command('C2','UID SEARCH SINCE '+services.imapDate(new Date(now-600000))+' (OR FROM "nationallife.com" (OR FROM "mga360.com" (OR FROM "fiveringsfinancial.com" FROM "fiverings.com")))');const uids=(search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1]||'').trim().split(/\s+/).filter(x=>/^\d+$/.test(x)).slice(-20);let sequence=3;for(const uid of uids){const fetched=await client.command('C'+sequence++,'UID FETCH '+uid+' (BODY.PEEK[])'),raw=services.literal(fetched.bytes);if(!raw||raw.length>2000000)continue;const parsed=await services.parse(raw);const mail={...parsed,externalId:parsed.messageId||'icloud:'+owner+':'+uid};delivered+=await relayAccessCode(env,owner,mail,now);delivered+=await relayDiscussion(env,owner,mail);}return {delivered};}finally{if(client)await client.close();}
 }
 
 export async function assistantCodeNotices(env,assistant,now=Date.now()){

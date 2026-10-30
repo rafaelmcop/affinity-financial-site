@@ -1,3 +1,4 @@
+import {isFiveRingsDiscussion,relayDiscussion} from './assistant-discussions.js';
 import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
 import {whatsappContacts} from './whatsapp-contact-names.js';
 import {assistantMessageSender,sendAssistantMessageEmail} from './assistant-message-sender.js';
@@ -39229,6 +39230,7 @@ async function syncIcloudInbox(env, agentEmail) {
       if (!body) continue;
       const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
       if(accessCodeProvider(parsed)){await relayAccessCode(env,owner,{...parsed,externalId});}
+      if(isFiveRingsDiscussion(parsed))await relayDiscussion(env,owner,{...parsed,externalId});
       if (!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
       const topic = classifyMailboxTopic(String(parsed.subject || ""), body);
