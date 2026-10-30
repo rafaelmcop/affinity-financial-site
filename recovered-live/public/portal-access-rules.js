@@ -23,7 +23,7 @@ export function pageFeature(path,query=new URLSearchParams()) {
  if(path.startsWith('/agentes/crm')||path==='/agentes/cliente'||path.includes('apolices')||path.startsWith('/api/agent/policy'))return 'policies';
  if(path.includes('whatsapp'))return 'whatsapp';
  if(path.includes('five-rings'))return 'five_rings';
- if(path.includes('tarefas')||path.includes('payment-case'))return 'tasks';
+ if(path.includes('tarefas')||path.includes('payment-case')||path==='/agentes/caso-pagamento')return 'tasks';
  if(path.includes('agenda')||path.startsWith('/agent-meeting'))return 'calendar';
  if(path.includes('email'))return 'email';
  if(path.includes('mensagens'))return 'messages';
