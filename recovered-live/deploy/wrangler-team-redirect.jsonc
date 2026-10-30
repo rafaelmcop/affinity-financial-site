@@ -1,0 +1,8 @@
+{
+  "name":"affinity-team-web-redirect",
+  "main":"../worker/team-web-redirect.js",
+  "account_id":"d00b4fce2ba60918d8859e92dd98cf9e",
+  "compatibility_date":"2026-10-30",
+  "workers_dev":false,
+  "routes":[{"pattern":"team.affinityfc.org","custom_domain":true}]
+}

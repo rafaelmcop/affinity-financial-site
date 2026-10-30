@@ -1,0 +1,6 @@
+export function auditMessages(db,owner,cursor=0,targetPhone=null){
+ const after=Number.isSafeInteger(Number(cursor))&&Number(cursor)>=0?Number(cursor):0;
+ if(targetPhone){const target=String(targetPhone).replace(/\D/g,'');if(!/^\d{8,15}$/.test(target))return {messages:[],cursor:after,more:false};const rows=db.prepare("SELECT m.rowid AS cursor,m.id,m.chat,m.body,m.direction,m.stamp,m.ack,m.mime,m.filename,m.mediaKind,m.mediaState,coalesce(a.phone,m.chat) AS phone FROM messages m LEFT JOIN contactAliases a ON a.owner=m.owner AND a.lid=m.chat WHERE m.owner=? AND (m.chat=? OR a.phone=?) ORDER BY m.stamp DESC,m.rowid DESC LIMIT 200").all(owner,target+'@c.us',target+'@c.us');return {messages:rows,cursor:after,more:false};}
+ const rows=db.prepare("SELECT m.rowid AS cursor,m.id,m.chat,m.body,m.direction,m.stamp,m.ack,m.mime,m.filename,m.mediaKind,m.mediaState,coalesce(a.phone,CASE WHEN m.chat LIKE '%@c.us' THEN m.chat END) AS phone FROM messages m LEFT JOIN contactAliases a ON a.owner=m.owner AND a.lid=m.chat WHERE m.owner=? AND m.rowid>? AND (m.chat LIKE '%@c.us' OR m.chat LIKE '%@lid') ORDER BY m.rowid LIMIT 200").all(owner,after);
+ return {messages:rows,cursor:rows.at(-1)?.cursor||after,more:rows.length===200};
+}

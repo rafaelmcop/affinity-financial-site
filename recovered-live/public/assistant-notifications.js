@@ -1,0 +1,12 @@
+export function mountAssistantNotifications(open){
+ let ids=new Set(),busy=false,sequence=0,canSyncCodes=false,pollingCodes=false;
+ async function refresh(reset=false){if(reset){++sequence;for(const id of ids)window.affinityClearNotice?.(id);ids.clear();busy=false;}if(busy)return;busy=true;const ticket=++sequence;try{const response=await fetch('/api/assistants/notifications',{credentials:'same-origin',cache:'no-store'});if(!response.ok){if([401,403].includes(response.status)){for(const id of ids)window.affinityClearNotice?.(id);ids.clear();}return;}const data=await response.json();if(ticket!==sequence)return;canSyncCodes=data.canSyncCodes===true||data.canSyncPortalMessages===true;
+ const next=new Set();for(const item of data.payments||[]){const id='assistant-payment:'+data.owner+':'+item.id;next.add(id);window.affinityNotify?.({id,persistent:true,message:'Pagamento pendente · '+String(item.title||'').replace(/^\[Pagamento [^\]]+\]\s*/,''),label:'Abrir caso de pagamento',onOpen:()=>open('/agentes/caso-pagamento?task='+encodeURIComponent(item.id))});}
+ for(const item of data.codes||[]){const id='assistant-code:'+data.owner+':'+item.id;next.add(id);window.affinityNotify?.({id,persistent:true,message:item.title,label:'Ver código de acesso',onOpen:()=>open('/assistentes/email?category=codes&message='+encodeURIComponent(item.id))});}
+ for(const item of data.discussions||[]){const id='assistant-discussion:'+data.owner+':'+item.id;next.add(id);window.affinityNotify?.({id,persistent:true,message:item.title,label:'Abrir discussão Five Rings',onOpen:()=>open('/assistentes/email?category=fiverings&message='+encodeURIComponent(item.id))});}
+ for(const id of ids)if(!next.has(id))window.affinityClearNotice?.(id);ids=next;
+ }catch{}finally{if(ticket===sequence)busy=false;}}
+ async function syncCodes(){if(!canSyncCodes||pollingCodes)return;pollingCodes=true;try{const r=await fetch('/api/assistants/communications/sync-portal-notices',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:'{}'});if(r.ok)await refresh();}catch{}finally{pollingCodes=false;}}
+ setInterval(()=>void syncCodes(),20000);
+ window.addEventListener('focus',()=>void refresh().then(syncCodes));document.addEventListener('visibilitychange',()=>{if(!document.hidden)void refresh().then(syncCodes);});window.addEventListener('affinity-notifications-changed',()=>void refresh());setInterval(()=>{if(!document.hidden)void refresh();},30000);void refresh().then(syncCodes);return refresh;
+}

@@ -1,0 +1,23 @@
+name: Live portal security checks
+on:
+  pull_request:
+    paths: ['recovered-live/**', 'services/whatsapp/**', '.github/workflows/live-security.yml']
+  push:
+    branches: [main, agent/personalizar-mensagens-agentes]
+    paths: ['recovered-live/**', 'services/whatsapp/**', '.github/workflows/live-security.yml']
+permissions:
+  contents: read
+jobs:
+  verify-live-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --prefix recovered-live/dependencies
+      - run: npm audit --omit=dev --audit-level=moderate --prefix recovered-live/dependencies
+      - run: node --test recovered-live/*.test.mjs
+      - run: npm ci --ignore-scripts --prefix services/whatsapp
+      - run: npm audit --omit=dev --audit-level=moderate --prefix services/whatsapp

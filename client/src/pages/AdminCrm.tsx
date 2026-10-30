@@ -116,7 +116,7 @@ export default function AdminCrm({
 }: {
   agentMode?: boolean;
 }) {
-  const clientsQuery = trpc.crm.list.useQuery();
+  const clientsQuery = (trpc.crm.list as any).useQuery({ agentMode });
   const assigneesQuery = trpc.crm.assignees.useQuery();
   const createMutation = trpc.crm.create.useMutation();
   const updateMutation = trpc.crm.update.useMutation();
@@ -126,7 +126,12 @@ export default function AdminCrm({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [search, setSearch] = useState("");
-  const [crmView, setCrmView] = useState<"clients" | "automations" | "history">("clients");
+  const [historyFolder, setHistoryFolder] = useState("all");
+  const [historyRange, setHistoryRange] = useState("all");
+  const [crmView, setCrmView] = useState<"clients" | "followup" | "new_business" | "inforce" | "automations" | "history">(() => {
+    const section = new URLSearchParams(window.location.search).get("setor");
+    return section === "followup" || section === "new_business" || section === "inforce" ? section : "clients";
+  });
   const activitiesQuery = trpc.crm.activities.useQuery(
     { clientId: selectedId || 0 },
     { enabled: !!selectedId }
@@ -144,6 +149,22 @@ export default function AdminCrm({
     { clientId: selectedId || 0 },
     { enabled: agentMode && Boolean(selectedId), refetchInterval: 15000 }
   );
+  const filteredMessageHistory = useMemo(() => {
+    const now = Date.now();
+    const ranges: Record<string, number> = { day: 1, days7: 7, days30: 30, months6: 183, year: 365 };
+    const cutoff = historyRange === "all" ? 0 : now - (ranges[historyRange] || 0) * 86400000;
+    return (messageHistoryQuery.data || []).filter((item: any) => {
+      const text = `${item.title || ""} ${item.content || ""} ${item.subject || ""}`.toLowerCase();
+      const folder = historyFolder === "all" ||
+        (historyFolder === "welcome" && /(bem.vind|boas.vind)/.test(text)) ||
+        (historyFolder === "birthday" && /anivers/.test(text)) ||
+        (historyFolder === "monthly" && /(setembro|outubro|novembro|dezembro|janeiro|fevereiro|março|abril|maio|junho|julho|agosto|mensal|mês)/.test(text)) ||
+        (historyFolder === "payment" && /(pagamento|premium|devolvid|atras)/.test(text)) ||
+        (historyFolder === "other" && !/(bem.vind|boas.vind|anivers|pagamento|premium|devolvid|atras|mensal|mês)/.test(text));
+      const timestamp = new Date(String(item.createdAt || item.sentAt || "")).getTime();
+      return folder && (!cutoff || (Number.isFinite(timestamp) && timestamp >= cutoff));
+    });
+  }, [messageHistoryQuery.data, historyFolder, historyRange]);
   const tasksQuery = trpc.agent.listTasks.useQuery(undefined, {
     enabled: agentMode,
   });
@@ -152,7 +173,7 @@ export default function AdminCrm({
   );
   const [communication, setCommunication] = useState("");
   const clients = clientsQuery.data || [];
-  const selected = clients.find(client => client.id === selectedId);
+  const selected = clients.find((client: any) => client.id === selectedId);
   const selectedPolicies = (policiesQuery.data || []).filter(
     policy =>
       policy.clientId === selectedId ||
@@ -180,15 +201,27 @@ export default function AdminCrm({
       admin.email.toLowerCase() ===
       String(storedSession.email || "").toLowerCase()
   );
-  const filtered = useMemo(
-    () =>
-      clients.filter(client =>
+  const filtered = useMemo(() => {
+    const policies = policiesQuery.data || [];
+    return clients.filter((client: any) => {
+        const clientRecord = client as typeof client & { lastMeetingAt?: string | null; status: string };
+        const hasPolicy = policies.some(policy =>
+          Number(policy.clientId) === Number(client.id) ||
+          (!!client.email && policy.clientEmail?.toLowerCase() === client.email.toLowerCase())
+        );
+        const hasApplication = clientRecord.status === "proposal" || clientRecord.status === "followup_application";
+        const hasMeeting = Boolean(clientRecord.lastMeetingAt) || ["meeting", "first_meeting", "contacted", "followup_service", "followup_documents", "followup_review"].includes(clientRecord.status);
+        const belongs = crmView === "clients" ? true
+          : crmView === "inforce" ? hasPolicy
+          : crmView === "new_business" ? !hasPolicy && hasApplication
+          : crmView === "followup" ? !hasPolicy && !hasApplication && hasMeeting
+          : true;
+        return belongs &&
         `${client.name} ${client.email || ""} ${client.phone || ""}`
           .toLowerCase()
-          .includes(search.toLowerCase())
-      ),
-    [clients, search]
-  );
+          .includes(search.toLowerCase());
+      });
+  }, [clients, policiesQuery.data, search, crmView]);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -309,9 +342,10 @@ export default function AdminCrm({
         {agentMode && (
           <div className="flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2">
             {([
-              ["clients", "Clientes e histórico"],
-              ["automations", "Mensagens automáticas"],
-              ["history", "Registro de envios"],
+              ["clients", "Clientes"],
+              ["followup", "Follow-up"],
+              ["new_business", "New Business"],
+              ["inforce", "INFORCE"],
             ] as const).map(([value, label]) => (
               <Button
                 key={value}
@@ -324,7 +358,7 @@ export default function AdminCrm({
             ))}
           </div>
         )}
-        <div className={agentMode && crmView !== "clients" ? "hidden" : "contents"}>
+        <div className={agentMode && !["clients", "followup", "new_business", "inforce"].includes(crmView) ? "hidden" : "contents"}>
         <Card className="border-gold/20 bg-[#0b1524] p-4">
           <div className="grid gap-3 sm:grid-cols-2">
             <Input
@@ -493,7 +527,7 @@ export default function AdminCrm({
                 Nenhum cliente encontrado.
               </Card>
             )}
-            {filtered.map(client => {
+            {filtered.map((client: any) => {
               const status = statuses.find(
                 item => item.value === client.status
               )!;
@@ -789,8 +823,20 @@ export default function AdminCrm({
             <p className="mt-1 text-sm text-gray-400">
               Histórico geral das mensagens enviadas pelo CRM. Clique para abrir o cliente.
             </p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <label className="text-sm text-gray-300">Pasta
+                <select className="mt-1 h-10 w-full rounded-md border border-white/20 bg-black px-3" value={historyFolder} onChange={e => setHistoryFolder(e.target.value)}>
+                  <option value="all">Todas as mensagens</option><option value="welcome">Boas-vindas</option><option value="birthday">Aniversário</option><option value="monthly">Mensagens mensais</option><option value="payment">Pagamento devolvido/atrasado</option><option value="other">Outras mensagens</option>
+                </select>
+              </label>
+              <label className="text-sm text-gray-300">Período de envio
+                <select className="mt-1 h-10 w-full rounded-md border border-white/20 bg-black px-3" value={historyRange} onChange={e => setHistoryRange(e.target.value)}>
+                  <option value="all">Todo o histórico</option><option value="day">Último dia</option><option value="days7">Últimos 7 dias</option><option value="days30">Últimos 30 dias</option><option value="months6">Últimos 6 meses</option><option value="year">Último ano</option>
+                </select>
+              </label>
+            </div>
             <div className="mt-5 space-y-3">
-              {(messageHistoryQuery.data || []).map(item => (
+              {filteredMessageHistory.map(item => (
                 <button
                   key={item.id}
                   className="w-full rounded-xl border border-white/10 bg-black/25 p-4 text-left hover:border-gold/50"
@@ -804,7 +850,7 @@ export default function AdminCrm({
                   <span className="mt-2 block text-sm text-gray-300">{item.content}</span>
                 </button>
               ))}
-              {!messageHistoryQuery.data?.length && (
+              {!filteredMessageHistory.length && (
                 <p className="py-8 text-center text-sm text-gray-500">Nenhum envio registrado.</p>
               )}
             </div>

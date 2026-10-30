@@ -1,0 +1,16 @@
+/* Keep native category options and semantic labels legible in both themes. */
+html[data-agent-theme] body .main select,html[data-agent-theme] body .main select option {
+ color:var(--agent-text)!important;background:var(--agent-surface)!important;
+ border-color:var(--agent-border)!important;color-scheme:inherit;
+}
+html[data-agent-theme=light] body .main .topic {background:#e2e8f0!important;color:#1e293b!important;border:1px solid #94a3b8}
+html[data-agent-theme=light] body .main .topic.returned_payment {background:#fee2e2!important;color:#991b1b!important;border-color:#fca5a5}
+html[data-agent-theme=light] body .main .topic.exams {background:#ede9fe!important;color:#4c1d95!important;border-color:#c4b5fd}
+html[data-agent-theme=light] body .main .topic.extra_information {background:#e0f2fe!important;color:#075985!important;border-color:#7dd3fc}
+html[data-agent-theme=light] body .main .topic.documents {background:#f1f5f9!important;color:#334155!important;border-color:#94a3b8}
+html[data-agent-theme=light] body .main .topic.underwriting {background:#dcfce7!important;color:#14532d!important;border-color:#86efac}
+html[data-agent-theme=light] body .main .email-row:hover,html[data-agent-theme=light] body .main .email-row.active {background:#dce8f2!important;color:#172b3a!important}
+html[data-agent-theme] body .main .folder-picker label {color:var(--agent-muted)!important}
+html[data-agent-theme=light] body .main .toolbar button[data-folder] {background:#fff!important;color:#172b3a!important;border-color:#94a3b8!important}
+html[data-agent-theme=light] body .main .toolbar button[data-folder].primary {background:#dfb934!important;color:#17202e!important;border-color:#927712!important}
+html[data-agent-theme=light] body .main .toolbar button[data-folder]:focus-visible {outline:3px solid #1d4ed8;outline-offset:2px}

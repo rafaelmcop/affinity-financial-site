@@ -1,0 +1,9 @@
+(async()=>{
+if(location.pathname!=='/admin/usuarios'||document.getElementById('five-rings-requirements'))return;
+const call=async input=>{const r=await fetch('/api/trpc/admin.fiveRingsRequirements',{credentials:'same-origin',cache:'no-store',...(input?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({json:input})}:{})});const body=await r.json();if(!r.ok||body.error)throw Error('Não foi possível salvar a configuração.');return body.result.data.json;};
+const section=document.createElement('section');section.id='five-rings-requirements';section.style.cssText='padding:20px;margin:24px;background:#15283d;color:white;border:1px solid #d4af37;border-radius:12px';
+section.innerHTML='<h2>Exigência de acesso Five Rings</h2><p>Dispense os agentes que não terão Five Rings. Os demais podem adiar o cadastro por 15 dias.</p><div></div><p role="status"></p>';
+(document.querySelector('main')||document.body).append(section);
+async function load(){const rows=await call(),container=section.querySelector('div');container.replaceChildren();for(const row of rows){const label=document.createElement('label');label.style.cssText='display:block;padding:12px;border-top:1px solid #526170';const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=!!row.exempt;label.append(checkbox,document.createTextNode(' '+row.name+' · '+row.email+' — Não terá Five Rings'));container.append(label);checkbox.onchange=async()=>{checkbox.disabled=true;try{await call({email:row.email,exempt:checkbox.checked});section.querySelector('[role=status]').textContent='Configuração salva.';}catch(e){checkbox.checked=!checkbox.checked;section.querySelector('[role=status]').textContent=e.message;}finally{checkbox.disabled=false;}};}}
+try{await load();}catch(e){section.querySelector('[role=status]').textContent=e.message;}
+})();

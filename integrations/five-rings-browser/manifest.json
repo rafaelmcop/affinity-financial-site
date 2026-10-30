@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Affinity \u00b7 Conector Five Rings",
+  "version": "1.0.9",
+  "description": "Leitura de clientes, ap\u00f3lices e cr\u00e9ditos na sess\u00e3o Five Rings do pr\u00f3prio navegador.",
+  "host_permissions": [
+    "https://portal.fiveringsfinancial.com/*",
+    "https://www.affinityfc.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.affinityfc.org/*"
+      ],
+      "js": [
+        "affinity.js"
+      ]
+    },
+    {
+      "matches": [
+        "https://portal.fiveringsfinancial.com/*"
+      ],
+      "js": [
+        "five-rings.js"
+      ]
+    }
+  ],
+  "permissions": [
+    "scripting",
+    "storage"
+  ]
+}
