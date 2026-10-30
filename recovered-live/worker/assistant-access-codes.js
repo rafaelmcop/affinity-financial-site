@@ -1,11 +1,15 @@
+import {notificationSchema} from './notification-actions.js';
 import {readableMailboxBody} from './mailbox-body.js';
 export function accessCodeProvider(mail,now=Date.now()){
  const sender=String(mail.fromEmail||mail.from?.value?.[0]?.address||mail.from?.text||'').trim().toLowerCase().replace(/^.*<([^>]+)>.*$/,'$1'),domain=sender.split('@')[1]||'';
  const provider=/(^|\.)nationallife\.com$/.test(domain)?'National Life':/(^|\.)(fiveringsfinancial\.com|fiverings\.com|mga360\.com)$/.test(domain)?'Five Rings':null;
- const date=Date.parse(mail.sentAt||mail.date||''),text=String(mail.subject||'')+'\n'+readableMailboxBody(mail);
+ const rawDate=mail.sentAt||mail.date||'',date=Date.parse(typeof rawDate==='string'&&/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(rawDate)?rawDate.replace(' ','T')+'Z':rawDate),subject=String(mail.subject||''),body=readableMailboxBody(mail),text=subject+'\n'+body;
  if(!provider||!Number.isFinite(date)||now-date>10*60000||date>now+120000)return null;
  if(/reset.{0,25}password|password.{0,25}reset|redefini.{0,25}senha|change.{0,15}(?:email|password)/i.test(text))return null;
- if(!/(?:verification|security|one[- ]time|login|access|authentication|sign[- ]in|2[- ]step|two[- ]step|verifica[cç][aã]o|autentica[cç][aã]o)[\s\S]{0,50}(?:code|c[oó]digo)|c[oó]digo[\s\S]{0,40}(?:verifica|acesso|seguran|autentica)/i.test(text)||!/(?:code|c[oó]digo)[^0-9]{0,100}[0-9]{4,10}(?![0-9])/i.test(text))return null;
+ const verification=/(?:verification|security|one[- ]time|login|access|authentication|sign[- ]in|2[- ]step|two[- ]step|verifica[cç][aã]o|autentica[cç][aã]o)[\s\S]{0,50}(?:code|passcode|c[oó]digo)|c[oó]digo[\s\S]{0,40}(?:verifica|acesso|seguran|autentica)/i;
+ if(!verification.test(subject)&&(/policy|ap[oó]lice|docu.?sign|pc sheet|production|report|newsletter/i.test(subject)||!verification.test(body.slice(0,1200))))return null;
+ const head=body.slice(0,1200),inline=/(?:code|passcode|c[oó]digo)[^0-9]{0,100}(?<![0-9])[0-9]{4,10}(?![0-9])/i.test(head),standalone=/^\s*[0-9]{4,10}\s*$/m.test(head);
+ if(!inline&&!standalone)return null;
  return provider;
 }
 export async function codeRecipients(env,owner){
@@ -25,4 +29,11 @@ export async function pollAccessCodes(env,owner,services){
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS assistantCodePolls(owner TEXT PRIMARY KEY,checkedAt INTEGER NOT NULL)').run();const now=Date.now();
  const lease=await env.DB.prepare('INSERT INTO assistantCodePolls(owner,checkedAt) VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET checkedAt=excluded.checkedAt WHERE assistantCodePolls.checkedAt<?').bind(owner,now,now-20000).run();if(!Number(lease.meta?.changes))return {delivered:0,waiting:true};
  let client,delivered=0;try{({client}=await services.open(env,owner));await client.command('C1','SELECT INBOX');const search=await client.command('C2','UID SEARCH SINCE '+services.imapDate(new Date(now-600000))+' (OR FROM "nationallife.com" (OR FROM "mga360.com" (OR FROM "fiveringsfinancial.com" FROM "fiverings.com")))');const uids=(search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1]||'').trim().split(/\s+/).filter(x=>/^\d+$/.test(x)).slice(-20);let sequence=3;for(const uid of uids){const fetched=await client.command('C'+sequence++,'UID FETCH '+uid+' (BODY.PEEK[])'),raw=services.literal(fetched.bytes);if(!raw||raw.length>2000000)continue;const parsed=await services.parse(raw);delivered+=await relayAccessCode(env,owner,{...parsed,externalId:parsed.messageId||'icloud:'+owner+':'+uid},now);}return {delivered};}finally{if(client)await client.close();}
+}
+
+export async function assistantCodeNotices(env,assistant,now=Date.now()){
+ if(!assistant.permissions?.portal_codes?.includes('view'))return {canSyncCodes:false,codes:[]};
+ const allowed=(await codeRecipients(env,assistant.owner)).some(row=>Number(row.id)===Number(assistant.id));if(!allowed)return {canSyncCodes:false,codes:[]};await notificationSchema(env);const prefix='access-code|'+assistant.owner+'|';
+ const rows=(await env.DB.prepare("SELECT id,subject,sentAt FROM assistantMailbox m WHERE assistantId=? AND direction='received' AND substr(externalId,1,length(?))=? AND datetime(sentAt)>=datetime(?) AND NOT EXISTS(SELECT 1 FROM notificationStates n WHERE n.owner=? AND n.kind='code' AND n.itemKey=m.externalId) ORDER BY sentAt DESC,id DESC LIMIT 30").bind(assistant.id,prefix,prefix,new Date(now-600000).toISOString(),assistant.owner).all()).results||[];
+ return {canSyncCodes:true,codes:rows.map(row=>({id:row.id,title:String(row.subject||'Código de acesso').replace(/\b\d{4,10}\b/g,'[código oculto]'),sentAt:row.sentAt}))};
 }
