@@ -1,3 +1,4 @@
+import {whatsappContacts} from './whatsapp-contact-names.js';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'cache-control':'no-store'}});
 const encode=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function whatsappRoute(request,env,auth){
@@ -11,8 +12,7 @@ export async function whatsappRoute(request,env,auth){
     if(page)return env.ASSETS.fetch(new Request(new URL('/agent-whatsapp.html',url),request));
     const action=url.pathname.split('/').at(-1),method=request.method;
     if(action==='contacts'&&method==='GET'){
-      const rows=await env.DB.prepare('SELECT id,name,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name COLLATE NOCASE').bind(email.toLowerCase()).all();
-      return json(rows.results||[]);
+      return json(await whatsappContacts(env,email,auth.contactScopes));
     }
     if(action==='contact'&&method==='GET'){
       const id=Number(url.searchParams.get('clientId'));

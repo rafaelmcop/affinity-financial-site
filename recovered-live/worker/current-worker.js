@@ -1,5 +1,5 @@
 import patchedAddressParser from '../dependencies/node_modules/nodemailer/dist/esm/addressparser/index.js';
-import {linkedChatAssistants,canChatWithPeer} from './assistant-chat.js';
+import {linkedChatAssistants,canChatWithPeer,chatSummaries} from './assistant-chat.js';
 import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
@@ -43467,6 +43467,7 @@ Detalhes: ${details}` : ""}`;
   if (name.startsWith("careers.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
   if (name === "crm.presence") {
+    await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-30 seconds'))").bind(adminEmail.toLowerCase()).run();
     try {
       await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-2 minutes'))").bind(adminEmail.toLowerCase()).run();
     } catch (error) {
@@ -46621,7 +46622,7 @@ Affinity Financial Consulting`,
   }
   if (name === "crm.assignees") {
     const rows = await env.DB.prepare(
-      "SELECT id,email,name,contactEmail,phone,whatsapp,accountType,isActive FROM adminAccounts WHERE isActive=1 ORDER BY name"
+      "SELECT id,email,name,contactEmail,phone,whatsapp,accountType,isActive FROM adminAccounts WHERE isActive=1 AND status='approved' AND portalDeletedAt IS NULL ORDER BY name"
     ).all();
     return trpcResult(
       rows.results.map((row) => ({
@@ -46828,8 +46829,9 @@ Affinity Financial Consulting`,
     return trpcResult(rows.results.map((row) => ({ ...row, id: Number(row.id) })));
   }
   if (name === "crm.presence") {
-    const rows = await env.DB.prepare("SELECT email,name,accountType,presenceStatus,lastSeenAt FROM adminAccounts WHERE isActive=1 ORDER BY name").all();
-    return trpcResult({ currentEmail: adminEmail.toLowerCase(), users: [...rows.results,...await linkedChatAssistants(env,adminEmail.toLowerCase())] });
+    await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-30 seconds'))").bind(adminEmail.toLowerCase()).run();
+    const rows = await env.DB.prepare("SELECT email,name,accountType,presenceStatus,lastSeenAt FROM adminAccounts WHERE isActive=1 AND status='approved' AND portalDeletedAt IS NULL ORDER BY name").all();
+    return trpcResult({ currentEmail: adminEmail.toLowerCase(), conversations: await chatSummaries(env,adminEmail.toLowerCase()), users: [...rows.results.filter(row=>!row.portalDeletedAt),...await linkedChatAssistants(env,adminEmail.toLowerCase())] });
   }
   if (name === "crm.setPresence") {
     const status = String(input.status || "available");
@@ -48098,7 +48100,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=11"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=11"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
  }
  return response;
 };

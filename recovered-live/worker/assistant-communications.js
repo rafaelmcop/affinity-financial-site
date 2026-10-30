@@ -1,3 +1,4 @@
+import {hasAssistantAction} from './assistant-permissions.js';
 import {renderAssistantWhatsAppPage} from './assistant-whatsapp-page.js';
 import {notificationResolution,recentNotificationActions} from './notification-actions.js';
 import {codeRecipients} from './assistant-access-codes.js';
@@ -51,7 +52,7 @@ export async function assistantCommunicationsRoute(request,env,assistant,auth){
  }
  if(path.startsWith('/api/assistants/communications/whatsapp/')){
   const target=new URL('/api/agent/whatsapp/'+path.split('/').at(-1),url);target.search=url.search;
-  return auth.whatsapp(new Request(target,request),env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}})});
+  return auth.whatsapp(new Request(target,request),env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}}),contactScopes:{crmOwners:hasAssistantAction(assistant.permissions,'policies','view')?[assistant.owner]:[],leadOwners:hasAssistantAction(assistant.permissions,['queue','whatsapp_leads'],'view')?[assistant.owner]:[]}});
  }
  if(path==='/assistentes/email'){const response=await env.ASSETS.fetch(new Request(new URL('/assistant-email.html',url),request));const headers=new Headers(response.headers);headers.set('x-affinity-assistant-view','1');return new Response(response.body,{status:response.status,headers});}
  if(!path.startsWith('/api/assistants/communications/'))return null;
