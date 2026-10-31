@@ -22,6 +22,7 @@ export default {
     }
     try {
       const response = await fetch(target, init);
+      if(response.status===403&&!response.headers.get('content-type')?.includes('application/json')){const html=await response.clone().text();console.error(JSON.stringify({event:'whatsapp_origin_block',title:(html.match(/<title>([^<]*)/i)?.[1]||'').slice(0,160),code:html.match(/(?:error code:|Error code|error-code[^>]*>)\s*(\d+)/i)?.[1]||'',ray:response.headers.get('cf-ray')}));}
       console.log(JSON.stringify({event:'whatsapp_relay_response',method:request.method,path:incoming.pathname,status:response.status,type:response.headers.get('content-type')||'',length:response.headers.get('content-length')||''}));
       return response;
     } catch (error) {
