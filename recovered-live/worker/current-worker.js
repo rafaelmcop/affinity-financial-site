@@ -251,7 +251,7 @@ async function whatsappRoute(request, env, auth) {
     const upstreamHeaders = { authorization: "Bearer " + payload + "." + signature, "content-type": "application/json" };
     if (action === "media" && request.headers.get("range")) upstreamHeaders.range = request.headers.get("range");
     if(action==='send'&&request.headers.get('prefer')==='respond-async')upstreamHeaders.prefer='respond-async';
-    const response = await fetch(target, { method, headers: upstreamHeaders, ...method === "POST" ? { body: body || "{}" } : {}, redirect: "manual", signal: AbortSignal.timeout(["send", "media"].includes(action) ? 60000 : 20000) });
+    const response = await (env.WHATSAPP_RELAY?env.WHATSAPP_RELAY.fetch.bind(env.WHATSAPP_RELAY):fetch)(target, { method, headers: upstreamHeaders, ...method === "POST" ? { body: body || "{}" } : {}, redirect: "manual", signal: AbortSignal.timeout(["send", "media"].includes(action) ? 60000 : 20000) });
     if(action==='send'||action==='send-status')await afterWhatsAppReceipt(response,async()=>{const input=JSON.parse(body||'{}'),clients=(await env.DB.prepare('SELECT id,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(email.toLowerCase()).all()).results||[];const targetClient=String(input.chat||'').endsWith('@c.us')?matchedClient(clients,input.chat):null;await syncWhatsappAudit(env,email.toLowerCase(),targetClient);},auth.waitUntil);
     if (action === "connect" && response.ok) {
       await leadSchema(env);

@@ -22,7 +22,7 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
     const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoder.encode(requestId+':'+i)))).map(x=>x.toString(16).padStart(2,'0')).join('').slice(0,32);const id=hash.slice(0,8)+'-'+hash.slice(8,12)+'-'+hash.slice(12,16)+'-'+hash.slice(16,20)+'-'+hash.slice(20);
     const file=attachments[i],mime=file&&file.contentType;
     const body={manual:true,chat,text:i===0?input.message:'',requestId:id,...file?{media:{kind:mime.startsWith('image/')?'image':'file',mime,filename:file.filename,data:file.content}}:{}};
-    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',headers:{'content-type':'application/json',prefer:'respond-async'},authorization,body:JSON.stringify(body)});confirmedParts++;
+    await meetingSendTransport(new URL('/send',env.WHATSAPP_BRIDGE_URL),{method:'POST',fetcher:env.WHATSAPP_RELAY?env.WHATSAPP_RELAY.fetch.bind(env.WHATSAPP_RELAY):fetch,headers:{'content-type':'application/json',prefer:'respond-async'},authorization,body:JSON.stringify(body)});confirmedParts++;
    }
   }
   await env.DB.prepare("UPDATE meetingMessageDispatches SET status='sent' WHERE owner=? AND requestId=?").bind(owner,requestId).run();return {alreadySent:false};

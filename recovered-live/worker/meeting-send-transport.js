@@ -2,7 +2,7 @@
 // owner-scoped receipt; never repeat a POST after an ambiguous/network failure.
 export async function meetingSendTransport(url,options,wait=ms=>new Promise(resolve=>setTimeout(resolve,ms))){
  const headers=async()=>({...options.headers,...(options.authorization?{authorization:await options.authorization()}: {})});
- const request=async(target,init)=>{const response=await fetch(target,{...init,signal:AbortSignal.timeout(60000)});let result;try{result=await response.json();}catch{console.error('meeting_send_invalid_response',JSON.stringify({status:response.status,type:response.headers.get('content-type')||''}));throw Object.assign(Error('O serviço retornou uma resposta inválida. Confira o WhatsApp antes de tentar novamente.'),{code:'send_invalid_response',status:502});}return{response,result};};
+ const request=async(target,init)=>{const response=await (options.fetcher||fetch)(target,{...init,signal:AbortSignal.timeout(60000)});let result;try{result=await response.json();}catch{console.error('meeting_send_invalid_response',JSON.stringify({status:response.status,type:response.headers.get('content-type')||''}));throw Object.assign(Error('O serviço retornou uma resposta inválida. Confira o WhatsApp antes de tentar novamente.'),{code:'send_invalid_response',status:502});}return{response,result};};
  const validate=({response,result})=>{
   if(!response.ok||result.state!=='sent'){
    // A JSON preflight refusal happens before the bridge queues a message. A
@@ -13,7 +13,7 @@ export async function meetingSendTransport(url,options,wait=ms=>new Promise(reso
   }return result;
  };
  for(let attempt=0;;attempt++){
-  const {authorization,...init}=options;const receipt=await request(url,{...init,headers:await headers()});
+  const {authorization,fetcher,...init}=options;const receipt=await request(url,{...init,headers:await headers()});
   if(receipt.response.status===429&&attempt<3){await wait(3100);continue;}
   if(receipt.response.status===202&&receipt.result.state==='pending'){
    const id=JSON.parse(options.body).requestId,target=new URL('/send-status',url);target.searchParams.set('requestId',id);
