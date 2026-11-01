@@ -1,3 +1,4 @@
+import {whatsappDeliveryHistory} from './whatsapp-delivery-history.js';
 import {weeklyAutomationText} from './weekly-automation-copy.js';
 import {automationChannelsSchema,saveAutomationChannels,channelsForMessages,runWhatsappAutomations} from './whatsapp-automations.js';
 import {deliveryNotice,recordDeliveryNotice,purgeRecordedDeliveryReport,purgeQueuedDeliveryReports} from './mail-delivery-reason.js';
@@ -45185,8 +45186,7 @@ Affinity Financial Consulting`,
     const paymentDeliveries=(paymentSent.results||[]).map(row=>({id:'payment-sent-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente',recipientEmail:row.recipientEmail||null,status:'sent',date:row.sentAt,recipients:[{clientId:Number(row.clientId)||null,name:row.clientName||'Cliente',email:row.recipientEmail||null,sentAt:row.sentAt}],recipientCount:1}));
     const paymentReviews=(paymentPending.results||[]).map(row=>({id:'payment-review-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente ainda não identificado',status:'review',date:row.sentAt,errorMessage:row.actionDetail||'Verificar cliente e apólice antes do envio'}));
     await automationChannelsSchema(env);
-    const waRows=(await env.DB.prepare("SELECT d.*,m.title,m.subject,c.name clientName FROM whatsappAutomationDispatches d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE d.owner=? ORDER BY d.updatedAt DESC LIMIT 250").bind(owner).all()).results||[];
-    const waDeliveries=waRows.map(r=>({id:'wa-auto-'+r.messageId+'-'+r.cycleKey+'-'+r.phone,title:'WhatsApp · '+r.title,subject:'WhatsApp · '+r.title,clientId:Number(r.clientId)||null,clientName:r.clientName||'Contato',recipientEmail:'+'+r.phone,status:r.state==='sent'?'sent':r.state==='pending'?'review':'failed',deliveryUnconfirmed:r.state!=='sent',errorLabel:r.state==='pending'?'WhatsApp em processamento':'WhatsApp sem confirmação',errorMessage:r.state==='sent'?null:r.state==='pending'?'O envio aguarda confirmação do WhatsApp.':r.error,date:r.updatedAt}));
+    const waDeliveries=await whatsappDeliveryHistory(env,owner);
     return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries]);
   }
   if (name === "agent.scheduleMessage") {

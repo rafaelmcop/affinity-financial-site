@@ -6,6 +6,7 @@ export function filterDeliveries(rows,{status='all',period='all',now=Date.now()}
  else if(period!=='all')cutoff.setTime(now-Number(period)*86400000);
  const within=value=>{const time=timestamp(value);return Number.isFinite(time)&&time>=cutoff.getTime()&&time<=now;};
  return rows.flatMap(row=>{
+  if(row.groupedDelivery){const recipients=(row.recipients||[]).filter(r=>(status==='all'||r.status===status)&&(period==='all'||r.status==='sent'&&within(r.sentAt)));if(!recipients.length)return [];const sent=recipients.filter(r=>r.status==='sent').length,pending=recipients.filter(r=>r.status==='review').length,failed=recipients.length-sent-pending;const date=recipients.reduce((last,r)=>timestamp(r.sentAt)>timestamp(last)?r.sentAt:last,recipients[0].sentAt);return [{...row,recipients,date,recipientCount:recipients.length,clientName:recipients.length+' '+(recipients.length===1?'destinatário':'destinatários'),status:pending?'review':failed?'failed':'sent',statusSummary:sent+' enviado(s) · '+pending+' pendente(s) · '+failed+' sem confirmação'}];}
   if(status!=='all'&&row.status!==status)return [];
   if(period==='all')return [row];
   if(row.status!=='sent')return [];

@@ -1,3 +1,4 @@
+import {whatsappDeliveryHistory} from './worker/whatsapp-delivery-history.js';
 import {unresolvedDeliveryFailureSQL} from './worker/delivery-reconciliation.js';
 import {test} from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {readFileSync} from 'node:fs';
 test('delivery history groups welcome recipients and includes sent and pending payment notices per owner',async()=>{
@@ -13,7 +14,7 @@ test('delivery history groups welcome recipients and includes sent and pending p
  sqlite.exec('CREATE TABLE whatsappAutomationDispatches(messageId INTEGER,cycleKey TEXT,owner TEXT,phone TEXT,clientId INTEGER,requestId TEXT,state TEXT,error TEXT,updatedAt TEXT)');
  const db={prepare(sql){const stmt=sqlite.prepare(sql);let values=[];return {bind(...v){values=v;return this},async all(){return {results:stmt.all(...values)}}}},async batch(statements){return Promise.all(statements.map(s=>s.all()))}};
  const source=readFileSync(new URL('./worker/current-worker.js',import.meta.url),'utf8');const code=source.slice(source.indexOf('  if (name === "agent.deliveryLog")'),source.indexOf('  if (name === "agent.scheduleMessage")'));
- const invoke=new (Object.getPrototypeOf(async function(){}).constructor)('env','adminEmail','name','trpcResult','unresolvedDeliveryFailureSQL','automationChannelsSchema',code);
- const rows=await invoke({DB:db},'owner@example.test','agent.deliveryLog',x=>x,unresolvedDeliveryFailureSQL,async()=>{});const welcome=rows.filter(row=>row.title==='Boas-vindas à Affinity');assert.equal(welcome.length,1);assert.equal(welcome[0].recipients.length,2);assert.deepEqual(welcome[0].recipients.map(r=>r.sentAt),['2026-10-07 12:30:00','2026-10-08 12:30:00']);
+ const invoke=new (Object.getPrototypeOf(async function(){}).constructor)('env','adminEmail','name','trpcResult','unresolvedDeliveryFailureSQL','automationChannelsSchema','whatsappDeliveryHistory',code);
+ const rows=await invoke({DB:db},'owner@example.test','agent.deliveryLog',x=>x,unresolvedDeliveryFailureSQL,async()=>{},whatsappDeliveryHistory);const welcome=rows.filter(row=>row.title==='Boas-vindas à Affinity');assert.equal(welcome.length,1);assert.equal(welcome[0].recipients.length,2);assert.deepEqual(welcome[0].recipients.map(r=>r.sentAt),['2026-10-07 12:30:00','2026-10-08 12:30:00']);
  const payment=rows.filter(row=>row.title==='Pagamento devolvido');assert.equal(payment.length,2);assert.equal(payment.find(r=>r.status==='sent').clientId,1);assert.equal(payment.find(r=>r.status==='review').errorMessage,'Identificar cliente e apólice');sqlite.close();
 });

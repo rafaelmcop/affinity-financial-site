@@ -1,5 +1,5 @@
 import {shortWhatsappTemplate} from './whatsapp-automation-templates.js?v=2';
-import {filterDeliveries} from './message-list-utils.js?v=1';
+import {filterDeliveries} from './message-list-utils.js?v=2';
 import {
   c as I,
   j as e,
@@ -1019,9 +1019,9 @@ function J() {
             return e.jsx(
               "div",
               {
-                className: `rounded-xl border border-white/10 bg-black/25 p-3 ${i.status === "sent" ? "cursor-pointer hover:border-gold/40" : ""}`,
+                className: `rounded-xl border border-white/10 bg-black/25 p-3 ${(i.status === "sent" || i.groupedDelivery) ? "cursor-pointer hover:border-gold/40" : ""}`,
                 onClick: () =>
-                  i.status === "sent" &&
+                  (i.status === "sent" || i.groupedDelivery) &&
                   setExpandedId(current => (current === i.id ? null : i.id)),
                 children: e.jsxs("div", {
                   className: "flex items-start gap-3",
@@ -1041,11 +1041,11 @@ function J() {
                             e.jsx("span", {
                               className: `text-xs font-bold uppercase ${r}`,
                               children:
-                                i.status === "sent"
+                                i.statusSummary || (i.status === "sent"
                                   ? "Enviada"
                                   : i.status === "failed"
                                     ? (i.errorLabel || "Falha · verificar motivo")
-                                    : i.status === "review" ? (i.deliveryUnconfirmed ? "Envio não confirmado" : "Não enviada · Revisar") : "Programada",
+                                    : i.status === "review" ? (i.deliveryUnconfirmed ? "Envio não confirmado" : "Não enviada · Revisar") : "Programada"),
                             }),
                           ],
                         }),
@@ -1060,15 +1060,15 @@ function J() {
                           className: "mt-1 text-xs text-gray-500",
                           children: i.occasion==='birthday'&&i.clientId?'Envio no aniversário: '+birthdayLabel(i.birthDate)+' · 8:30 AM (Nova York)':b(i.date),
                         }),
-                        i.status === "sent" &&
+                        (i.status === "sent" || i.groupedDelivery) &&
                           e.jsx("p", {
                             className: "mt-2 text-xs font-semibold text-gold",
                             children:
                               expandedId === i.id
                                 ? "Ocultar destinatários"
-                                : "Clique para ver quem recebeu",
+                                : "Clique para ver os destinatários e os envios",
                           }),
-                        i.status === "sent" &&
+                        (i.status === "sent" || i.groupedDelivery) &&
                           expandedId === i.id &&
                           e.jsx("div", {
                             className:
@@ -1087,10 +1087,12 @@ function J() {
                                         children: e.jsxs(e.Fragment,{children:[e.jsx("span",{className:"mr-2 text-xs text-gray-400",children:b(recipient.sentAt)}),recipientLink(recipient.name,recipient.clientId)]}),
                                       }),
                                       recipient.birthDate&&e.jsx('p',{className:'mt-1 text-gray-400',children:'Aniversário: '+birthdayLabel(recipient.birthDate)}),
-                                      recipient.email &&
+                                      recipient.status && e.jsx("p",{className:"mt-1 text-xs",children:recipient.status==='sent'?'Enviado':recipient.status==='review'?'Em processamento':'Sem confirmação'}),
+                                      recipient.errorMessage && e.jsx("p",{className:"mt-1 text-xs",children:recipient.errorMessage}),
+                                      (recipient.email || recipient.phone) &&
                                         e.jsx("p", {
                                           className: "mt-0.5 text-gray-400",
-                                          children: recipient.email,
+                                          children: recipient.email || recipient.phone,
                                         }),
                                     ],
                                   },
