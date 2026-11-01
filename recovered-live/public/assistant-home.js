@@ -1,4 +1,4 @@
-import {mountEmailReviews} from '/email-review-panel.js?v=1';
+import {mountEmailReviews} from '/email-review-panel.js?v=2';
 let disposeEmailReviews;
 import {renderAssistantWeek} from '/assistant-week.js?v=1';
 const selectedWeeks=new WeakMap();

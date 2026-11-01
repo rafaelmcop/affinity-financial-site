@@ -1,5 +1,5 @@
 import {automationChannelsSchema,saveAutomationChannels,channelsForMessages,runWhatsappAutomations} from './whatsapp-automations.js';
-import {deliveryNotice,recordDeliveryNotice} from './mail-delivery-reason.js';
+import {deliveryNotice,recordDeliveryNotice,purgeRecordedDeliveryReport,purgeQueuedDeliveryReports} from './mail-delivery-reason.js';
 import {isFiveRingsDiscussion,relayDiscussion} from './assistant-discussions.js';
 import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
 import {whatsappContacts} from './whatsapp-contact-names.js';
@@ -39190,6 +39190,7 @@ async function syncIcloudInbox(env, agentEmail) {
     );
     const uidSet = /* @__PURE__ */ new Set();
     let sequence = 3;
+    await purgeQueuedDeliveryReports(env,owner,command=>client.command(`A${sequence++}`,command));
     const allInboxSearch = await client.command(
       `A${sequence++}`,
       `UID SEARCH SINCE ${imapDate(since)}`
@@ -39200,7 +39201,11 @@ async function syncIcloudInbox(env, agentEmail) {
       "SELECT imapUid FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='received' AND imapUid IS NOT NULL"
     ).bind(owner).all();
     const knownInboxUids = new Set(knownInbox.results.map((row) => String(row.imapUid)));
-    const uids = [...uidSet].filter((uid) => !knownInboxUids.has(String(uid))).slice(-20);
+    const deliverySearch=await client.command(`A${sequence++}`,`UID SEARCH SINCE ${imapDate(since)} OR FROM "mailer-daemon" OR FROM "postmaster" OR SUBJECT "Undeliverable" OR SUBJECT "Delivery" SUBJECT "Returned mail"`);
+    const deliveryLine=deliverySearch.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1]||"";
+    const deliveryUids=deliveryLine.trim().split(/\s+/).filter(uid=>/^\d+$/.test(uid)&&!knownInboxUids.has(uid));
+    const deliveryBatch=deliveryUids.slice(-15);
+    const uids = [...new Set([...deliveryBatch,...[...uidSet].filter((uid) => !knownInboxUids.has(String(uid))&&!deliveryBatch.includes(String(uid))).slice(-(20-deliveryBatch.length))])];
     for (const uid of uids) {
       const fetched = await client.command(
         `A${sequence++}`,
@@ -39234,7 +39239,7 @@ async function syncIcloudInbox(env, agentEmail) {
       if(accessCodeProvider(parsed)){await relayAccessCode(env,owner,{...parsed,externalId});}
       if(isFiveRingsDiscussion(parsed))await relayDiscussion(env,owner,{...parsed,externalId});
       const bounce=deliveryNotice(parsed);
-      if(bounce)await recordDeliveryNotice(env,owner,{...parsed,externalId},bounce);
+      if(bounce){await recordDeliveryNotice(env,owner,{...parsed,externalId},bounce);if(await purgeRecordedDeliveryReport(env,owner,externalId,uid,command=>client.command(`A${sequence++}`,command))){imported++;continue;}}
       if (!bounce&&!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
       const topic = bounce?"delivery":classifyMailboxTopic(String(parsed.subject || ""), body);
