@@ -1029,7 +1029,7 @@ function J() {
                                 i.status === "sent"
                                   ? "Enviada"
                                   : i.status === "failed"
-                                    ? "Falhou"
+                                    ? (i.errorLabel || "Falha · verificar motivo")
                                     : i.status === "review" ? (i.deliveryUnconfirmed ? "Envio não confirmado" : "Não enviada · Revisar") : "Programada",
                             }),
                           ],

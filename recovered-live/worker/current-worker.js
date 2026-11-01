@@ -1,3 +1,4 @@
+import {deliveryNotice,recordDeliveryNotice} from './mail-delivery-reason.js';
 import {isFiveRingsDiscussion,relayDiscussion} from './assistant-discussions.js';
 import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
 import {whatsappContacts} from './whatsapp-contact-names.js';
@@ -38862,7 +38863,7 @@ ${toEmail}`.toLowerCase();
   return /(national\s+life|\bnlg\b|five\s*rings|fiverings|mga360|corebridge|american\s+general|docusign|my\s*wfg|mywfg|\bwfg\b|world\s+financial\s+group)/i.test(text);
 }
 __name(isProfessionalMailboxMessage, "isProfessionalMailboxMessage");
-var PROFESSIONAL_MAILBOX_SQL = `(m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
+var PROFESSIONAL_MAILBOX_SQL = `(m.topic='delivery' OR m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
 function extractPolicyNumbers(subject, body) {
   const text = `${subject}
 ${body}`;
@@ -39206,7 +39207,7 @@ async function syncIcloudInbox(env, agentEmail) {
       );
       const source = extractLiteral(fetched.bytes);
       if (!source) continue;
-      const parsed = await (0, import_mailparser.simpleParser)(Buffer2.from(source));
+      const parsed = await (0, import_mailparser.simpleParser)(Buffer2.from(source),{keepDeliveryStatus:true});
       const from = cleanAddress(parsed.from?.text || "");
       if (!from) continue;
       let customer = customerByEmail.get(from);
@@ -39231,9 +39232,11 @@ async function syncIcloudInbox(env, agentEmail) {
       const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
       if(accessCodeProvider(parsed)){await relayAccessCode(env,owner,{...parsed,externalId});}
       if(isFiveRingsDiscussion(parsed))await relayDiscussion(env,owner,{...parsed,externalId});
-      if (!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
+      const bounce=deliveryNotice(parsed);
+      if(bounce)await recordDeliveryNotice(env,owner,{...parsed,externalId},bounce);
+      if (!bounce&&!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
-      const topic = classifyMailboxTopic(String(parsed.subject || ""), body);
+      const topic = bounce?"delivery":classifyMailboxTopic(String(parsed.subject || ""), body);
       await env.DB.prepare(
         "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,paymentStatus,actionStatus,actionDetail,topic) VALUES (?,?,?,?, 'received',?,?,?,?,?,?,?,?,?,?)"
       ).bind(
