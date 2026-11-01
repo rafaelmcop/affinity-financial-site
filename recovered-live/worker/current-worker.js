@@ -1,3 +1,4 @@
+import {weeklyAutomationText} from './weekly-automation-copy.js';
 import {automationChannelsSchema,saveAutomationChannels,channelsForMessages,runWhatsappAutomations} from './whatsapp-automations.js';
 import {deliveryNotice,recordDeliveryNotice,purgeRecordedDeliveryReport,purgeQueuedDeliveryReports} from './mail-delivery-reason.js';
 import {isFiveRingsDiscussion,relayDiscussion} from './assistant-discussions.js';
@@ -47978,7 +47979,7 @@ ${signatureLines.join("\n")}`.trim();
         escapeAutomationHtml(client.name)
       ), "personalize");
       const cycleDate=(cycle?.originDay||`${year}-${eastern.month}-${eastern.day}`).split('-').map(Number);
-      const automationMessage = occasion === "weekly_monday" ? mondayMessageVariation(cycleDate[0],cycleDate[1],cycleDate[2]) : automation.message;
+      const automationMessage = occasion === "weekly_monday" ? await weeklyAutomationText(env,String(automation.agentEmail).toLowerCase(),cycle?.originDay||`${year}-${eastern.month}-${eastern.day}`,'email',automation.message) : automation.message;
       const personalizedMessage = addPersonalSignature(automationMessage).replaceAll(
         "{nome}",
         escapeAutomationHtml(client.name)

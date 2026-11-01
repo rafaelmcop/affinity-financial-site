@@ -1,4 +1,4 @@
-import {shortWhatsappTemplate} from './whatsapp-automation-templates.js?v=1';
+import {shortWhatsappTemplate} from './whatsapp-automation-templates.js?v=2';
 import {filterDeliveries} from './message-list-utils.js?v=1';
 import {
   c as I,
@@ -225,7 +225,7 @@ function Q({
         message: a.message,
         emailEnabled: a.emailEnabled!==false,
         whatsappEnabled: a.whatsappEnabled===true,
-        whatsappMessage: a.whatsappMessage||shortWhatsappTemplate(a.occasion),
+        whatsappMessage: a.whatsappMessage||shortWhatsappTemplate(a.occasion,a.message,a),
         scheduledAt: a.scheduledAt ? String(a.scheduledAt).slice(0, 16) : "",
         deliveryMode: "scheduled",
         isActive: !!a.isActive,
@@ -643,9 +643,9 @@ function Q({
               value: t.message,
               onChange: a => n({ ...t, message: a.target.value }),
             }),
-            e.jsxs("label",{className:"md:col-span-2 font-bold",children:["WhatsApp · mensagem curta e pessoal",e.jsx("textarea",{className:"mt-2 min-h-32 w-full rounded-md border border-white/20 p-3",maxLength:2000,value:t.whatsappMessage||shortWhatsappTemplate(t.occasion),onChange:a=>n({...t,whatsappMessage:a.target.value}),"aria-label":"Mensagem automática do WhatsApp"})]}),
-            e.jsx(m,{type:"button",variant:"outline",onClick:()=>n({...t,whatsappMessage:shortWhatsappTemplate(t.occasion)}),children:"Usar sugestão curta do WhatsApp"}),
-            e.jsx("p",{className:"md:col-span-2 text-sm",children:"Use {nome} para o primeiro nome do cliente e {agente_primeiro_nome} para o primeiro nome do agente. Sem assinatura formal. O WhatsApp do agente precisa estar conectado."}),
+            e.jsxs("label",{className:"md:col-span-2 font-bold",children:["WhatsApp · mensagem curta e pessoal",e.jsx("textarea",{className:"mt-2 min-h-32 w-full rounded-md border border-white/20 p-3",maxLength:2000,value:t.whatsappMessage||shortWhatsappTemplate(t.occasion,t.message,t),onChange:a=>n({...t,whatsappMessage:a.target.value}),"aria-label":"Mensagem automática do WhatsApp"})]}),
+            e.jsx(m,{type:"button",variant:"outline",onClick:()=>n({...t,whatsappMessage:shortWhatsappTemplate(t.occasion,t.message,t)}),children:"Criar versão curta deste e-mail"}),
+            e.jsx("p",{className:"md:col-span-2 text-sm",children:"Use {nome} para o primeiro nome do cliente e {agente_primeiro_nome} para o primeiro nome do agente. {link_agenda} usa a agenda do agente; {mensagem_semana} recebe uma variação nova toda segunda-feira. O WhatsApp do agente precisa estar conectado."}),
             e.jsxs("label", {
               className: "flex items-center gap-2 text-sm",
               children: [
