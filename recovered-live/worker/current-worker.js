@@ -1,3 +1,4 @@
+import {automationChannelsSchema,saveAutomationChannels,channelsForMessages,runWhatsappAutomations} from './whatsapp-automations.js';
 import {deliveryNotice,recordDeliveryNotice} from './mail-delivery-reason.js';
 import {isFiveRingsDiscussion,relayDiscussion} from './assistant-discussions.js';
 import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
@@ -45122,7 +45123,7 @@ Affinity Financial Consulting`,
       "SELECT * FROM scheduledMessages WHERE lower(agentEmail)=? AND (title IS NOT NULL OR occasion='custom') ORDER BY scheduledAt"
     ).bind(adminEmail.toLowerCase()).all();
     return trpcResult(
-      rows.results.map((row) => ({ ...row, id: Number(row.id) }))
+      await channelsForMessages(env,owner,rows.results.map((row) => ({ ...row, id: Number(row.id) })))
     );
   }
   if (name === "agent.setAutomationSubscription" || name === "agent.automationSubscriptions") {
@@ -45177,15 +45178,19 @@ Affinity Financial Consulting`,
     const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, clientId:Number(row.clientId)||null,title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, date: row.attemptedAt, ...deliveryFailurePresentation(row) }));
     const paymentDeliveries=(paymentSent.results||[]).map(row=>({id:'payment-sent-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente',recipientEmail:row.recipientEmail||null,status:'sent',date:row.sentAt,recipients:[{clientId:Number(row.clientId)||null,name:row.clientName||'Cliente',email:row.recipientEmail||null,sentAt:row.sentAt}],recipientCount:1}));
     const paymentReviews=(paymentPending.results||[]).map(row=>({id:'payment-review-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente ainda não identificado',status:'review',date:row.sentAt,errorMessage:row.actionDetail||'Verificar cliente e apólice antes do envio'}));
-    return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews]);
+    await automationChannelsSchema(env);
+    const waRows=(await env.DB.prepare("SELECT d.*,m.title,m.subject,c.name clientName FROM whatsappAutomationDispatches d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE d.owner=? ORDER BY d.updatedAt DESC LIMIT 250").bind(owner).all()).results||[];
+    const waDeliveries=waRows.map(r=>({id:'wa-auto-'+r.messageId+'-'+r.cycleKey+'-'+r.phone,title:'WhatsApp · '+r.title,subject:'WhatsApp · '+r.title,clientId:Number(r.clientId)||null,clientName:r.clientName||'Contato',recipientEmail:'+'+r.phone,status:r.state==='sent'?'sent':r.state==='pending'?'review':'failed',deliveryUnconfirmed:r.state!=='sent',errorLabel:r.state==='pending'?'WhatsApp em processamento':'WhatsApp sem confirmação',errorMessage:r.state==='sent'?null:r.state==='pending'?'O envio aguarda confirmação do WhatsApp.':r.error,date:r.updatedAt}));
+    return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries]);
   }
   if (name === "agent.scheduleMessage") {
+    if(String(input.whatsappMessage||'').length>2000)return trpcError("A mensagem de WhatsApp deve ter até 2.000 caracteres.");
     const occasion = String(input.occasion);
     const monthNumber = Number(input.monthNumber || 0);
     const audience = String(input.audience ?? "individual");
     const selectedClientIds = audience === "all" && occasion !== "custom" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
     if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
-    await env.DB.prepare(
+    const savedMessage=await env.DB.prepare(
       "INSERT INTO scheduledMessages (agentEmail,clientId,occasion,channel,title,subject,audience,recipientGroup,selectedClientIds,message,scheduledAt,monthNumber) VALUES (?,?,?,'email',?,?,?,?,?,?,?,?)"
     ).bind(
       adminEmail.toLowerCase(),
@@ -45200,15 +45205,19 @@ Affinity Financial Consulting`,
       occasion === "monthly" ? null : input.scheduledAt || null,
       occasion === "monthly" ? monthNumber : null
     ).run();
-    if (input.deliveryMode === "immediate") await runMessageAutomations(env);
+    await saveAutomationChannels(env,adminEmail.toLowerCase(),Number(savedMessage.meta.last_row_id),input);
+    if (input.deliveryMode === "immediate") {await runMessageAutomations(env);await runWhatsappAutomations(env);}
     return trpcResult({ success: true });
   }
   if (name === "agent.updateMessage") {
+    if(String(input.whatsappMessage||'').length>2000)return trpcError("A mensagem de WhatsApp deve ter até 2.000 caracteres.");
     const occasion = String(input.occasion);
     const monthNumber = Number(input.monthNumber || 0);
     const audience = String(input.audience ?? "individual");
     const selectedClientIds = audience === "all" && occasion !== "custom" ? null : Array.isArray(input.selectedClientIds) ? JSON.stringify(input.selectedClientIds.map(Number)) : null;
     if (occasion === "monthly" && (!Number.isInteger(monthNumber) || monthNumber < 1 || monthNumber > 12)) return trpcError("Selecione o m\xEAs de refer\xEAncia da mensagem");
+    const ownMessage=await env.DB.prepare("SELECT id FROM scheduledMessages WHERE id=? AND lower(agentEmail)=?").bind(Number(input.id),adminEmail.toLowerCase()).first();
+    if(!ownMessage)return trpcError("Automação não encontrada.");
     await env.DB.prepare(
       "UPDATE scheduledMessages SET clientId=?,occasion=?,channel='email',title=?,subject=?,audience=?,recipientGroup=?,selectedClientIds=?,message=?,scheduledAt=?,monthNumber=?,isActive=? WHERE id=? AND lower(agentEmail)=?"
     ).bind(
@@ -45226,7 +45235,8 @@ Affinity Financial Consulting`,
       Number(input.id),
       adminEmail.toLowerCase()
     ).run();
-    if (input.deliveryMode === "immediate") await runMessageAutomations(env);
+    await saveAutomationChannels(env,adminEmail.toLowerCase(),Number(input.id),input);
+    if (input.deliveryMode === "immediate") {await runMessageAutomations(env);await runWhatsappAutomations(env);}
     return trpcResult({ success: true });
   }
   if (name === "agent.deleteMessage") {
@@ -47482,6 +47492,7 @@ var cloudflare_staging_default = {
     }
     if (controller.cron === "*/5 * * * *") {
       ctx.waitUntil(runMessageAutomations(env));
+      ctx.waitUntil(runWhatsappAutomations(env));
       ctx.waitUntil(syncAllWhatsappAudit(env));
       return;
     }
@@ -47686,6 +47697,7 @@ __name(ensureAgentMessageSignatureColumn, "ensureAgentMessageSignatureColumn");
 __name2(ensureAgentMessageSignatureColumn, "ensureAgentMessageSignatureColumn");
 async function runMessageAutomations(env) {
   await ensureAgentMessageSignatureColumn(env);
+  await automationChannelsSchema(env);
   const now = /* @__PURE__ */ new Date();
   const eastern = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/New_York",
@@ -47733,7 +47745,7 @@ async function runMessageAutomations(env) {
       )
     ]);
   const automations = await env.DB.prepare(
-    "SELECT * FROM scheduledMessages WHERE isActive=1 AND lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND channel='email' ORDER BY CASE occasion WHEN 'weekly_monday' THEN 0 WHEN 'monthly' THEN 1 WHEN 'birthday' THEN 2 WHEN 'thanksgiving' THEN 3 WHEN 'christmas' THEN 3 WHEN 'new_year' THEN 3 WHEN 'custom' THEN 4 WHEN 'policy_anniversary' THEN 5 ELSE 6 END,id"
+    "SELECT * FROM scheduledMessages WHERE isActive=1 AND lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND channel='email' AND NOT EXISTS(SELECT 1 FROM automationChannels ac WHERE ac.messageId=scheduledMessages.id AND ac.emailEnabled=0) ORDER BY CASE occasion WHEN 'weekly_monday' THEN 0 WHEN 'monthly' THEN 1 WHEN 'birthday' THEN 2 WHEN 'thanksgiving' THEN 3 WHEN 'christmas' THEN 3 WHEN 'new_year' THEN 3 WHEN 'custom' THEN 4 WHEN 'policy_anniversary' THEN 5 ELSE 6 END,id"
   ).all();
   let deliveryBudget = 20;
   for (const automation of automations.results) {

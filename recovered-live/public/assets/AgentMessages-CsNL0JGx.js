@@ -1,3 +1,4 @@
+import {shortWhatsappTemplate} from './whatsapp-automation-templates.js?v=1';
 import {filterDeliveries} from './message-list-utils.js?v=1';
 import {
   c as I,
@@ -62,6 +63,9 @@ Affinity Financial Consulting
     recipientGroup: "client",
     selectedClientIds: [],
     message: "Olá {nome},",
+    emailEnabled: true,
+    whatsappEnabled: false,
+    whatsappMessage: shortWhatsappTemplate("custom"),
     scheduledAt: "",
     deliveryMode: "default",
     isActive: !0,
@@ -109,6 +113,7 @@ function Q({
     ),
     w = a =>
       String(a || "")
+        .replaceAll("{agente_primeiro_nome}",String(j?.name||y.name||"Agente").trim().split(/\s+/)[0])
         .replaceAll("{agente_nome}", j?.name || y.name || "Nome do agente")
         .replaceAll(
           "{agente_telefone}",
@@ -148,8 +153,8 @@ function Q({
         occasion: s === "collective" ? "thanksgiving" : "custom",
       }),
     D = async () => {
-      if (!t?.title.trim() || !t.subject.trim() || !t.message.trim())
-        return h.error("Preencha título, assunto e mensagem");
+      if (!t?.title.trim() || (t.emailEnabled!==false&&(!t.subject.trim() || !t.message.trim())) || (t.whatsappEnabled&&!t.whatsappMessage?.trim()))
+        return h.error("Preencha o título e o texto dos canais selecionados");
       if (t.audience === "individual" && !t.clientId)
         return h.error("Selecione um cliente");
       try {
@@ -177,7 +182,7 @@ function Q({
           n(null),
           h.success(
             t.occasion === "custom" && t.deliveryMode === "immediate"
-              ? "Envio iniciado. Todos os selecionados com e-mail serão processados em lotes; acompanhe o histórico."
+              ? "Envio iniciado. Os selecionados com dados válidos para cada canal serão processados em lotes; acompanhe o histórico."
               : "Automação salva"
           ));
       } catch (a) {
@@ -208,7 +213,7 @@ function Q({
           : (o.data || [])
               .filter(
                 l =>
-                  l.email &&
+                  (l.email||l.phone||l.whatsapp) &&
                   (a.audience !== "group" ||
                     (a.recipientGroup === "leads"
                       ? ["new", "contacted", "meeting", "proposal"].includes(
@@ -218,6 +223,9 @@ function Q({
               )
               .map(l => l.id),
         message: a.message,
+        emailEnabled: a.emailEnabled!==false,
+        whatsappEnabled: a.whatsappEnabled===true,
+        whatsappMessage: a.whatsappMessage||shortWhatsappTemplate(a.occasion),
         scheduledAt: a.scheduledAt ? String(a.scheduledAt).slice(0, 16) : "",
         deliveryMode: "scheduled",
         isActive: !!a.isActive,
@@ -249,7 +257,7 @@ function Q({
               e.jsxs("p", {
                 className: "mt-2 text-sm text-gray-400",
                 children: [
-                  "Crie mensagens sob demanda ou automáticas, individuais, em grupo ou coletivas. Os envios programados usam 8:30 AM como horário padrão pelo e-mail particular configurado no portal. Use ",
+                  "Crie mensagens sob demanda ou automáticas, individuais, em grupo ou coletivas. Os envios programados usam 8:30 AM como horário padrão pelos canais selecionados e conectados no portal. Use ",
                   e.jsx("b", { children: "{nome}" }),
                   " para o cliente. Nos modelos de revisão Flex Life, use também ",
                   e.jsx("b", { children: "{apolice numero}" }),
@@ -380,7 +388,7 @@ function Q({
                         l === "individual" ||
                         (l === "all" && t.occasion !== "custom")
                           ? []
-                          : (o.data || []).filter(d => d.email).map(d => d.id),
+                          : (o.data || []).filter(d => d.email||d.phone||d.whatsapp).map(d => d.id),
                     });
                   },
                   children: [
@@ -414,11 +422,11 @@ function Q({
                     children: [
                       e.jsx("option", { value: "", children: "Selecione" }),
                       (o.data || [])
-                        .filter(a => a.email)
+                        .filter(a => a.email||a.phone||a.whatsapp)
                         .map(a =>
                           e.jsxs(
                             "option",
-                            { value: a.id, children: [a.name, " — ", a.email] },
+                            { value: a.id, children: [a.name, " — ", a.email||a.whatsapp||a.phone] },
                             a.id
                           )
                         ),
@@ -443,7 +451,7 @@ function Q({
                         selectedClientIds: (o.data || [])
                           .filter(
                             d =>
-                              d.email &&
+                              (d.email||d.phone||d.whatsapp) &&
                               (l === "leads"
                                 ? [
                                     "new",
@@ -519,7 +527,7 @@ function Q({
                           n({
                             ...t,
                             selectedClientIds: (o.data || [])
-                              .filter(a => a.email)
+                              .filter(a => a.email||a.phone||a.whatsapp)
                               .map(a => a.id),
                           }),
                         children: "Selecionar todos",
@@ -536,7 +544,7 @@ function Q({
                   e.jsx("div", {
                     className: "grid gap-2 sm:grid-cols-2",
                     children: (o.data || [])
-                      .filter(a => a.email)
+                      .filter(a => a.email||a.phone||a.whatsapp)
                       .map(a =>
                         e.jsxs(
                           "label",
@@ -626,12 +634,18 @@ function Q({
                     }),
                 ],
               }),
+            e.jsxs("label", {className:"md:col-span-2",children:["Como enviar",e.jsx("select",{className:"mt-2 w-full rounded-md border border-white/20 p-3",value:t.emailEnabled!==false?(t.whatsappEnabled?"both":"email"):(t.whatsappEnabled?"whatsapp":"none"),onChange:a=>n({...t,emailEnabled:["both","email"].includes(a.target.value),whatsappEnabled:["both","whatsapp"].includes(a.target.value)}),children:[e.jsx("option",{value:"both",children:"E-mail + WhatsApp"}),e.jsx("option",{value:"email",children:"Somente e-mail"}),e.jsx("option",{value:"whatsapp",children:"Somente WhatsApp"}),e.jsx("option",{value:"none",children:"Não enviar"})]} )]}),
+            e.jsx("p",{className:"md:col-span-2 text-sm",children:"Os canais usam a mesma programação, com textos próprios e confirmação independente. Salvar com WhatsApp autoriza os próximos envios automáticos; mensagens anteriores não serão reenviadas."}),
+            e.jsx("label",{className:"md:col-span-2 font-bold",children:"✉️ Mensagem do e-mail"}),
             e.jsx("textarea", {
               className:
                 "min-h-32 rounded-md border border-white/20 bg-black p-3 md:col-span-2",
               value: t.message,
               onChange: a => n({ ...t, message: a.target.value }),
             }),
+            e.jsxs("label",{className:"md:col-span-2 font-bold",children:["WhatsApp · mensagem curta e pessoal",e.jsx("textarea",{className:"mt-2 min-h-32 w-full rounded-md border border-white/20 p-3",maxLength:2000,value:t.whatsappMessage||shortWhatsappTemplate(t.occasion),onChange:a=>n({...t,whatsappMessage:a.target.value}),"aria-label":"Mensagem automática do WhatsApp"})]}),
+            e.jsx(m,{type:"button",variant:"outline",onClick:()=>n({...t,whatsappMessage:shortWhatsappTemplate(t.occasion)}),children:"Usar sugestão curta do WhatsApp"}),
+            e.jsx("p",{className:"md:col-span-2 text-sm",children:"Use {nome} para o primeiro nome do cliente e {agente_primeiro_nome} para o primeiro nome do agente. Sem assinatura formal. O WhatsApp do agente precisa estar conectado."}),
             e.jsxs("label", {
               className: "flex items-center gap-2 text-sm",
               children: [
@@ -741,6 +755,7 @@ function Q({
                         : `Grupo ${a.recipientGroup || "selecionado"}`,
                   ],
                 }),
+                e.jsx("p",{className:"mt-2 text-xs font-bold",children:a.emailEnabled!==false?(a.whatsappEnabled?"✉️ E-mail + WhatsApp":"✉️ Somente e-mail"):(a.whatsappEnabled?"WhatsApp":"Não enviar")}),
                 a.occasion==='birthday'&&a.clientId&&e.jsx('p',{className:'mt-2 text-sm',children:'Envio no aniversário: '+birthdayLabel((o.data||[]).find(client=>client.id===a.clientId)?.birthDate)+' · 8:30 AM (Nova York)'}),
                 e.jsx("p", {
                   className: "mt-2 line-clamp-2 whitespace-pre-wrap text-xs text-gray-300",
