@@ -1,3 +1,4 @@
+import {MeetingReminderSettings} from './MeetingReminderSettings.js?v=1';
 import {shortWhatsappTemplate} from './whatsapp-automation-templates.js?v=2';
 import {filterDeliveries} from './message-list-utils.js?v=2';
 import {
@@ -1146,6 +1147,7 @@ function oe() {
               "mb-6 flex flex-wrap gap-2 rounded-xl border border-white/10 bg-[#0b1524] p-2",
             children: [
               ["automations", "Mensagens e automações"],
+              ["meeting-reminders", "Reuniões agendadas"],
               ["history", "Histórico"],
             ].map(([value, label]) =>
               e.jsx(
@@ -1167,7 +1169,7 @@ function oe() {
                 paymentTemplateCard: e.jsx(B, {}),
                 showHistory: !1,
               })
-            : e.jsx(J, {}),
+            : tab === "meeting-reminders" ? e.jsx(MeetingReminderSettings,{}) : e.jsx(J, {}),
         ],
       }),
     ],

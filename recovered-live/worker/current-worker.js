@@ -1,3 +1,5 @@
+import {meetingReminderSchema,getMeetingReminderSettings,saveMeetingReminderSettings,enrollMeetingReminder,runMeetingReminders,meetingReminderHistory} from './meeting-reminders.js';
+import {ensureMeetingWebhook,meetingWebhookRoute} from './meeting-reminder-webhooks.js';
 import {whatsappDeliveryHistory} from './whatsapp-delivery-history.js';
 import {weeklyAutomationText} from './weekly-automation-copy.js';
 import {automationChannelsSchema,saveAutomationChannels,channelsForMessages,runWhatsappAutomations} from './whatsapp-automations.js';
@@ -42771,14 +42773,14 @@ __name(schedulePolicyWelcome, "schedulePolicyWelcome");
 __name2(schedulePolicyWelcome, "schedulePolicyWelcome");
 async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   await ensureCalendlyTables(env);
-  let phonesUpdated = await backfillStoredCalendlyPhones(env, agentEmail);
-  await mergeClientSourcesForAgent(env, agentEmail);
+  let phonesUpdated = options.reminders?0:await backfillStoredCalendlyPhones(env, agentEmail);
+  if(!options.reminders)await mergeClientSourcesForAgent(env, agentEmail);
   const connection = await env.DB.prepare("SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first();
   if (!connection) throw new Error("Calendly ainda n\xE3o foi conectado");
   const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
   const now = Date.now();
   const day = 864e5;
-  const ranges = options.backfill ? [[-365, -5], [-5, 350]] : [[-1, 350]];
+  const ranges = options.reminders?[[0,3]]:options.backfill ? [[-365, -5], [-5, 350]] : [[-1, 350]];
   const eventRows = [];
   let successfulRanges = 0;
   for (const [startDay, endDay] of ranges) {
@@ -42848,13 +42850,15 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
       const location = event.location || {};
       const meetingUrl = String(location.join_url || location.location || "");
       await env.DB.prepare("INSERT INTO calendlyMeetings (agentEmail,eventUri,inviteeUri,eventName,inviteeName,inviteeEmail,inviteePhone,startTime,endTime,status,locationType,meetingUrl,cancelUrl,rescheduleUrl,clientId,questionsJson,lastSyncedAt,updatedAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) ON CONFLICT(agentEmail,eventUri,inviteeUri) DO UPDATE SET eventName=excluded.eventName,inviteeName=excluded.inviteeName,inviteeEmail=excluded.inviteeEmail,inviteePhone=COALESCE(NULLIF(excluded.inviteePhone,''),calendlyMeetings.inviteePhone),startTime=excluded.startTime,endTime=excluded.endTime,status=CASE WHEN calendlyMeetings.status IN ('no_show','completed') AND excluded.status NOT IN ('canceled','cancelled') THEN calendlyMeetings.status ELSE excluded.status END,locationType=excluded.locationType,meetingUrl=excluded.meetingUrl,cancelUrl=excluded.cancelUrl,rescheduleUrl=excluded.rescheduleUrl,clientId=coalesce(calendlyMeetings.clientId,excluded.clientId),questionsJson=CASE WHEN excluded.questionsJson='[]' THEN calendlyMeetings.questionsJson ELSE excluded.questionsJson END,lastSyncedAt=CURRENT_TIMESTAMP,updatedAt=CURRENT_TIMESTAMP").bind(agentEmail.toLowerCase(), String(event.uri), String(invitee.uri || ""), String(event.name || "Reuni\xE3o"), String(invitee.name || "Cliente"), email || null, phone || null, String(event.start_time || ""), String(event.end_time || ""), String(["canceled","cancelled"].includes(event.status)?event.status:invitee.status || event.status || "active"), String(location.type || ""), meetingUrl || null, String(invitee.cancel_url || ""), String(invitee.reschedule_url || ""), Number(client?.id || 0) || null, JSON.stringify(answers)).run();
+      const reminderMeeting=await env.DB.prepare('SELECT id,startTime FROM calendlyMeetings WHERE agentEmail=? AND eventUri=? AND inviteeUri=?').bind(agentEmail.toLowerCase(),String(event.uri),String(invitee.uri||'')).first();
+      if(reminderMeeting)await enrollMeetingReminder(env,agentEmail.toLowerCase(),reminderMeeting,invitee.created_at);
       if(canceledNow&&client&&!['canceled','cancelled'].includes(previousMeeting?.status))await env.DB.prepare("INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,'status',?,?)").bind(Number(client.id),'Compromisso cancelado no Calendly; atendimento não realizado. Agendamento: '+String(event.start_time||'')+'. Contato e histórico preservados para follow-up.',agentEmail.toLowerCase()).run();
       saved += 1;
     }
   }
   await env.DB.prepare("UPDATE agentCalendlyConnections SET status='connected',lastSyncAt=CURRENT_TIMESTAMP,lastError=NULL,updatedAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).run();
-  const merged = await mergeClientSourcesForAgent(env, agentEmail);
-  await env.DB.prepare(`UPDATE crmClients
+  const merged = options.reminders?{}:await mergeClientSourcesForAgent(env, agentEmail);
+  if(!options.reminders)await env.DB.prepare(`UPDATE crmClients
     SET status=CASE
       WHEN EXISTS (SELECT 1 FROM agentPolicies p WHERE p.clientId=crmClients.id AND lower(p.agentEmail)=lower(crmClients.assignedAdminEmail)) THEN 'client'
       WHEN status='client' THEN 'new'
@@ -44956,6 +44960,13 @@ Detalhes: ${details}` : ""}`;
     ]);
     return trpcResult({ success: true });
   }
+  if(name==='agent.getMeetingReminderSettings'||name==='agent.saveMeetingReminderSettings'){
+    const owner=adminEmail.toLowerCase();await meetingReminderSchema(env);
+    if(name==='agent.saveMeetingReminderSettings'){if(request.method!=='POST')return trpcError('Método inválido');try{return trpcResult(await saveMeetingReminderSettings(env,owner,input));}catch(error){return trpcError(error.message);}}
+    const config=await getMeetingReminderSettings(env,owner);let mode='Avisos de reunião independentes dos outros disparos automáticos de WhatsApp.';
+    const exists=await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meetingReminderWebhooks'").first();if(exists){const hook=await env.DB.prepare('SELECT state FROM meetingReminderWebhooks WHERE owner=?').bind(owner).first();mode=hook?.state==='connected'?'Calendly conectado em tempo real.':hook?.state==='polling'?'Agenda conferida a cada 5 minutos; lembretes verificados a cada minuto.':mode;}
+    return trpcResult({...config,deliveryMode:mode});
+  }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
     await env.DB.prepare("UPDATE scheduledMessages SET selectedClientIds=NULL,recipientGroup=NULL WHERE lower(agentEmail)=? AND audience='all' AND occasion<>'custom'").bind(owner).run();
@@ -45187,7 +45198,7 @@ Affinity Financial Consulting`,
     const paymentReviews=(paymentPending.results||[]).map(row=>({id:'payment-review-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente ainda não identificado',status:'review',date:row.sentAt,errorMessage:row.actionDetail||'Verificar cliente e apólice antes do envio'}));
     await automationChannelsSchema(env);
     const waDeliveries=await whatsappDeliveryHistory(env,owner);
-    return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries]);
+    return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries,...await meetingReminderHistory(env,owner)]);
   }
   if (name === "agent.scheduleMessage") {
     if(String(input.whatsappMessage||'').length>2000)return trpcError("A mensagem de WhatsApp deve ter até 2.000 caracteres.");
@@ -47488,6 +47499,8 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    if(controller.cron==='* * * * *'){ctx.waitUntil(runMeetingReminders(env,meetingReminderServices(env)).catch(()=>console.error('meeting_reminders_pending')));return;}
+
     ctx.waitUntil(Promise.resolve().then(()=>{init_icloud_email();return recoverEmailAttachments(env,{open:openAgentImap,quote:quoteImap,literal:extractLiteral,parse:source=>import_mailparser.simpleParser(Buffer2.from(source))});}).then(()=>readPendingEmailDocuments(env)).catch(()=>console.error('email_attachment_maintenance_failed')));
 
     ctx.waitUntil(syncPolicyLeadLinks(env));
@@ -47497,6 +47510,7 @@ var cloudflare_staging_default = {
       return;
     }
     if (controller.cron === "*/5 * * * *") {
+      ctx.waitUntil(syncMeetingReminderCalendars(env));
       ctx.waitUntil(runMessageAutomations(env));
       ctx.waitUntil(runWhatsappAutomations(env));
       ctx.waitUntil(syncAllWhatsappAudit(env));
@@ -48102,6 +48116,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(/(?:^|\/)(?:\.git|\.env(?:\.[^/]*)?|\.dev\.vars|private)(?:\/|$)/i.test(url.pathname))return new Response('Não encontrado',{status:404,headers:{'cache-control':'no-store'}});
  if(!/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname))await accessSchema(env);
  const featureAuth={email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId};
+ const meetingWebhook=await meetingWebhookRoute(request,env,ctx,{sync:owner=>syncCalendlyForAgent(env,owner,{reminders:true}),run:owner=>runMeetingReminders(env,meetingReminderServices(env),{owner})});if(meetingWebhook)return meetingWebhook;
  const domainEmailResponse=await domainEmailRoute(request,env,{email:getAdminEmail,access:getAdminAccess,validEmail,encrypt:encryptSmtpPassword,decrypt:decryptSmtpPassword});if(domainEmailResponse&&url.pathname.startsWith('/api/'))return secureResponse(domainEmailResponse,{privateData:true});
  const rolesResponse=await userRolesRoute(request,env,{email:getAdminEmail,access:getAdminAccess});if(rolesResponse)return secureResponse(rolesResponse,{privateData:true});
  if(request.method==='GET'){const destination=legacyPortalDestination(url);if(destination)return Response.redirect(new URL(destination,url),302);}
@@ -48156,3 +48171,9 @@ he/he.js:
   (*! https://mths.be/he v1.2.0 by @mathias | MIT license *)
 */
 //# sourceMappingURL=current-worker.js.map
+function meetingReminderServices(env){return{
+ async validate(owner,meeting){const connection=await env.DB.prepare('SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?').bind(owner).first();if(!connection)return null;const token=await decryptSmtpPassword(connection.encryptedToken,env.JWT_SECRET);const eventId=calendlyUuid(meeting.eventUri),inviteeId=calendlyUuid(meeting.inviteeUri);if(!eventId||!inviteeId)return null;const event=(await calendlyRequest(token,'/scheduled_events/'+encodeURIComponent(eventId),{signal:AbortSignal.timeout(12000)})).resource;const invitee=(await calendlyRequest(token,'/scheduled_events/'+encodeURIComponent(eventId)+'/invitees/'+encodeURIComponent(inviteeId),{signal:AbortSignal.timeout(12000)})).resource;if(!event||!invitee||!event.event_memberships?.some(member=>member.user===connection.userUri))return null;if(event.status!=='active'||invitee.status!=='active'){await env.DB.prepare("UPDATE calendlyMeetings SET status='canceled',updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(meeting.id,owner).run();return null;}return{status:'active',startTime:event.start_time,meetingUrl:event.location?.join_url||event.location?.location||'',inviteeName:invitee.name||meeting.inviteeName,inviteeEmail:invitee.email||meeting.inviteeEmail,inviteePhone:invitee.text_reminder_number||calendlyPhoneFromAnswers(invitee.questions_and_answers||[])||calendlyPhoneFrom(invitee)||meeting.inviteePhone};},
+ async email(owner,options){if(await mailAutomationBlocked(env,owner))throw Object.assign(Error('A automação desta conta de e-mail está pausada por falha de autenticação.'),{code:'EAUTH',command:'AUTH'});init_icloud_email();return sendAgentEmail(env,owner,{...options,html:clientEmailHtml('<p>'+escapeAutomationHtml(options.text).replace(/https:\/\/[^\s<>]+/g,url=>'<a href="'+url+'">'+url+'</a>').replaceAll('\n','<br>')+'</p>')});},
+ async record(owner,meeting,delivery){if(!meeting.clientId)return;const own=await env.DB.prepare('SELECT id FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?').bind(meeting.clientId,owner).first();if(!own)return;if(delivery.channel==='email')await env.DB.prepare("INSERT INTO clientEmails(agentEmail,clientId,direction,externalId,subject,body,fromEmail,toEmail,sentAt,visibility) VALUES(?,?,'sent',?,?,?,?,?,CURRENT_TIMESTAMP,'automation')").bind(owner,meeting.clientId,delivery.sent?.messageId||null,delivery.subject,delivery.message,delivery.sent?.fromEmail||owner,delivery.recipient).run();await env.DB.prepare('INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,?,?,?)').bind(meeting.clientId,delivery.channel==='email'?'email':'whatsapp','Aviso automático de reunião: '+delivery.stage+' · '+delivery.message,owner).run();}
+};}
+async function syncMeetingReminderCalendars(env){await meetingReminderSchema(env);const owners=(await env.DB.prepare("SELECT c.* FROM agentCalendlyConnections c JOIN meetingReminderSettings s ON s.owner=lower(c.agentEmail) JOIN adminAccounts a ON lower(a.email)=s.owner WHERE s.enabled=1 AND c.status='connected' AND a.isActive=1 AND a.status='approved' AND a.portalDeletedAt IS NULL ORDER BY coalesce(c.lastSyncAt,'1970-01-01') LIMIT 10").all()).results||[];for(const connection of owners){const owner=String(connection.agentEmail).toLowerCase();try{const token=await decryptSmtpPassword(connection.encryptedToken,env.JWT_SECRET);await ensureMeetingWebhook(env,owner,connection,(path,options)=>calendlyRequest(token,path,options));await syncCalendlyForAgent(env,owner,{reminders:true});await runMeetingReminders(env,meetingReminderServices(env),{owner});}catch{console.error('meeting_calendar_refresh_pending');}}}

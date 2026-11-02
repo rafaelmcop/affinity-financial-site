@@ -1,5 +1,5 @@
 import {unresolvedDeliveryFailureSQL,deliveryFailurePresentation} from './delivery-reconciliation.js';
-export const personalActivityPredicate="type<>'automation' AND content NOT LIKE 'E-mail automático enviado:%' AND content NOT LIKE 'Aviso de pagamento encaminhado automaticamente%' AND content NOT LIKE 'Mensagem de boas-vindas programada%'";
+export const personalActivityPredicate="type<>'automation' AND content NOT LIKE 'Aviso automático de reunião:%' AND content NOT LIKE 'E-mail automático enviado:%' AND content NOT LIKE 'Aviso de pagamento encaminhado automaticamente%' AND content NOT LIKE 'Mensagem de boas-vindas programada%'";
 export const automaticEmailPredicate="(e.direction='sent' AND (coalesce(e.visibility,'client')='automation' OR coalesce(e.subject,'') LIKE 'Automático · %' OR EXISTS(SELECT 1 FROM crmActivities a WHERE a.clientId=e.clientId AND a.content LIKE 'Aviso de pagamento encaminhado automaticamente%' AND length(coalesce(e.externalId,''))>0 AND instr(a.content,e.externalId)>0)))";
 export const personalEmailPredicate="coalesce(e.visibility,'client')='client' AND NOT "+automaticEmailPredicate;
 export async function clientAutomations(db,clientId,owner){

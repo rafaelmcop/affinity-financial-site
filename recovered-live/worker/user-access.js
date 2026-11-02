@@ -43,7 +43,7 @@ export function procedureFeature(name){
  if(/PublicProfile/.test(op))return 'public_profile';
  if(['listDirectContacts','markDirectContactRead'].includes(op))return 'direct_contacts';
  if(['sendPaymentCaseEmail','paymentCase','resolvePaymentCase'].includes(op))return 'tasks';
- if(['listMessages','messageHistory','deliveryLog','scheduleMessage','updateMessage','deleteMessage','automationSubscriptions'].includes(op))return 'messages';
+ if(['getMeetingReminderSettings','saveMeetingReminderSettings','listMessages','messageHistory','deliveryLog','scheduleMessage','updateMessage','deleteMessage','automationSubscriptions'].includes(op))return 'messages';
  if(['listApplications','getApplication','getApplicationDocument','applicationAgentDetails'].includes(op))return ['application_create','applications','policies'];
  if(op==='savePcSheet')return 'policies';
  if(/Application|PcSheet/.test(op))return op==='requestApplicationDeletion'?['application_create','applications','policies']:'application_create';
