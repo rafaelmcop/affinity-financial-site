@@ -42780,9 +42780,10 @@ async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   const token = await decryptSmtpPassword(String(connection.encryptedToken), env.JWT_SECRET);
   const now = Date.now();
   const day = 864e5;
-  const ranges = options.reminders?[[0,3]]:options.backfill ? [[-365, -5], [-5, 350]] : [[-1, 350]];
+  const ranges = options.eventUri?[]:options.reminders?[[0,350]]:options.backfill ? [[-365, -5], [-5, 350]] : [[-1, 350]];
   const eventRows = [];
   let successfulRanges = 0;
+  if(options.eventUri){if(!/^https:\/\/api\.calendly\.com\/scheduled_events\/[^/]+$/.test(String(options.eventUri)))throw Error('Evento Calendly inválido.');const event=(await calendlyRequest(token,'/scheduled_events/'+encodeURIComponent(calendlyUuid(options.eventUri)))).resource;if(!event?.event_memberships?.some(member=>member.user===connection.userUri))throw Error('Evento não pertence à agenda conectada.');eventRows.push(event);successfulRanges=1;}
   for (const [startDay, endDay] of ranges) {
     const baseParams = new URLSearchParams({ user: String(connection.userUri), min_start_time: new Date(now + startDay * day).toISOString(), max_start_time: new Date(now + endDay * day).toISOString(), count: "100", sort: "start_time:desc" });
     let nextPageToken = "";
@@ -48116,7 +48117,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(/(?:^|\/)(?:\.git|\.env(?:\.[^/]*)?|\.dev\.vars|private)(?:\/|$)/i.test(url.pathname))return new Response('Não encontrado',{status:404,headers:{'cache-control':'no-store'}});
  if(!/\.(js|css|svg|png|jpg|jpeg|webp|ico|woff2?)$/.test(url.pathname))await accessSchema(env);
  const featureAuth={email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId};
- const meetingWebhook=await meetingWebhookRoute(request,env,ctx,{sync:owner=>syncCalendlyForAgent(env,owner,{reminders:true}),run:owner=>runMeetingReminders(env,meetingReminderServices(env),{owner})});if(meetingWebhook)return meetingWebhook;
+ const meetingWebhook=await meetingWebhookRoute(request,env,ctx,{sync:(owner,eventUri)=>syncCalendlyForAgent(env,owner,{reminders:true,eventUri}),run:owner=>runMeetingReminders(env,meetingReminderServices(env),{owner})});if(meetingWebhook)return meetingWebhook;
  const domainEmailResponse=await domainEmailRoute(request,env,{email:getAdminEmail,access:getAdminAccess,validEmail,encrypt:encryptSmtpPassword,decrypt:decryptSmtpPassword});if(domainEmailResponse&&url.pathname.startsWith('/api/'))return secureResponse(domainEmailResponse,{privateData:true});
  const rolesResponse=await userRolesRoute(request,env,{email:getAdminEmail,access:getAdminAccess});if(rolesResponse)return secureResponse(rolesResponse,{privateData:true});
  if(request.method==='GET'){const destination=legacyPortalDestination(url);if(destination)return Response.redirect(new URL(destination,url),302);}
