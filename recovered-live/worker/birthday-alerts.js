@@ -1,3 +1,4 @@
+import {birthdayRecipientConflict,birthdayRecipientStatus} from './birthday-recipient-guard.js';
 import {birthdayIdentitySafe,personBirthDate} from './person-identity.js';
 const holdReady=new WeakSet();
 export async function birthdayHoldSchema(env){if(holdReady.has(env.DB))return;await env.DB.prepare('CREATE TABLE IF NOT EXISTS birthdayIdentityHolds(owner TEXT NOT NULL,clientId INTEGER NOT NULL,day TEXT NOT NULL,reason TEXT NOT NULL,createdAt TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,clientId,day))').run();holdReady.add(env.DB);}
@@ -19,18 +20,21 @@ export async function birthdayAlerts(env,owner,now=new Date()){
  const policies=(await env.DB.prepare('SELECT clientId,clientName,birthDate FROM agentPolicies WHERE lower(agentEmail)=?').bind(owner).all()).results||[];
  const applications=(await env.DB.prepare('SELECT clientName,birthDate FROM agentApplications WHERE lower(agentEmail)=?').bind(owner).all()).results||[];
  const holds=(await env.DB.prepare("SELECT clientId,day,reason FROM birthdayIdentityHolds WHERE owner=? AND day IN (?,'*')").bind(owner,parts.year+'-'+parts.month+'-'+parts.day).all()).results||[];
- const contacts=(await env.DB.prepare('SELECT id,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[];
+ const contacts=(await env.DB.prepare('SELECT id,name,email,birthDate,phone,whatsapp FROM crmClients WHERE lower(assignedAdminEmail)=?').bind(owner).all()).results||[];
  const phoneKey=value=>String(value||'').replace(/\D/g,'').slice(-10);
  const result=[];
  for(const c of clients){
  if(!birthdayIdentitySafe(c,policies,applications)||holds.some(row=>Number(row.clientId)===Number(c.id)&&row.day==='*'))continue;
+ const sameEmail=contacts.filter(row=>String(c.email||'').trim()&&String(row.email||'').trim().toLowerCase()===String(c.email).trim().toLowerCase());
+ const emailConflict=birthdayRecipientConflict(sameEmail,parts.year+'-'+parts.month+'-'+parts.day);
  const hold=holds.find(row=>Number(row.clientId)===Number(c.id));
  const sharedPhone=!!phoneKey(c.whatsapp||c.phone)&&contacts.some(row=>Number(row.id)!==Number(c.id)&&phoneKey(row.whatsapp||row.phone)===phoneKey(c.whatsapp||c.phone));
- const sent=await env.DB.prepare("SELECT d.sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE lower(m.agentEmail)=? AND m.occasion='birthday' AND d.clientId=? AND d.sentKey=? ORDER BY d.sentAt DESC LIMIT 1").bind(owner,c.id,'birthday-'+parts.year).first();
+ const recipientState=await birthdayRecipientStatus(env,owner,c.email,parts.year+'-'+parts.month+'-'+parts.day);
+ const sent=await env.DB.prepare("SELECT d.sentAt FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId WHERE lower(m.agentEmail)=? AND m.occasion='birthday' AND (d.clientId=? OR d.clientId IN (SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? AND trim(coalesce(email,''))<>'')) AND d.sentKey=? ORDER BY d.sentAt DESC LIMIT 1").bind(owner,c.id,owner,String(c.email||'').trim().toLowerCase(),'birthday-'+parts.year).first()||(recipientState?.state==='sent'?recipientState:null);
  const failed=await env.DB.prepare("SELECT l.errorMessage FROM crmDeliveryLogs l JOIN scheduledMessages m ON m.id=l.messageId WHERE lower(l.agentEmail)=? AND m.occasion='birthday' AND l.clientId=? AND l.status='failed' AND date(l.attemptedAt,?)=? ORDER BY l.attemptedAt DESC LIMIT 1").bind(owner,c.id,offset,parts.year+'-'+parts.month+'-'+parts.day).first();
  const disabled=await env.DB.prepare("SELECT 1 FROM crmAutomationSubscriptions WHERE lower(agentEmail)=? AND clientId=? AND occasion='birthday' AND isActive=0").bind(owner,c.id).first();
  const eligible=messages.some(m=>{if(m.clientId&&Number(m.clientId)!==Number(c.id))return false;if(m.selectedClientIds){try{if(!JSON.parse(m.selectedClientIds).map(Number).includes(Number(c.id)))return false;}catch{return false;}}if(m.audience==='group'&&m.recipientGroup&&!m.selectedClientIds)return m.recipientGroup==='leads'?['new','contacted','meeting','proposal','first_meeting','followup_documents','followup_service','followup_application','followup_review'].includes(c.status):m.recipientGroup===c.status;return true;});
- result.push({id:c.id,name:c.name,phone:c.whatsapp||c.phone,birthDate:personBirthDate(c.birthDate),sharedPhone,emailReviewReason:hold?.reason||null,emailStatus:hold?'identity_review':sent?'sent':!emailConfigured?'not_configured':!c.email?'no_email':disabled?'disabled':failed?'failed':eligible?'scheduled':'not_scheduled',sentAt:hold?null:sent?.sentAt||null,whatsappMessage:birthdayWhatsapp(c,agent,parts.year)});
+ result.push({id:c.id,name:c.name,phone:c.whatsapp||c.phone,birthDate:personBirthDate(c.birthDate),sharedPhone,sharedEmail:sameEmail.length>1,emailReviewReason:emailConflict?'Mesmo e-mail e aniversário em cadastros com nomes diferentes; confirme a identidade antes de enviar.':hold?.reason||null,emailStatus:emailConflict?'shared_email_review':recipientState?.state==='claimed'?'delivery_review':hold?'identity_review':sent?'sent':!emailConfigured?'not_configured':!c.email?'no_email':disabled?'disabled':failed?'failed':eligible?'scheduled':'not_scheduled',sentAt:hold?null:sent?.sentAt||null,whatsappMessage:birthdayWhatsapp(c,agent,parts.year)});
  }
  return result;
 }

@@ -1,3 +1,4 @@
+import {claimBirthdayRecipient,settleBirthdayRecipient} from './birthday-recipient-guard.js';
 import {meetingReminderSchema,getMeetingReminderSettings,saveMeetingReminderSettings,enrollMeetingReminder,runMeetingReminders,meetingReminderHistory} from './meeting-reminders.js';
 import {ensureMeetingWebhook,meetingWebhookRoute} from './meeting-reminder-webhooks.js';
 import {whatsappDeliveryHistory} from './whatsapp-delivery-history.js';
@@ -48001,6 +48002,8 @@ ${signatureLines.join("\n")}`.trim();
       );
       try {
         if(await mailAutomationBlocked(env,String(automation.agentEmail)))break;
+        const birthdayDay=`${year}-${eastern.month}-${eastern.day}`;
+        if(occasion==='birthday'&&!await claimBirthdayRecipient(env,String(automation.agentEmail),String(client.email),birthdayDay,Number(client.id)))continue;
         deliveryBudget -= 1;
         const sentMail = await sendAgentEmail(
           env,
@@ -48014,6 +48017,7 @@ ${signatureLines.join("\n")}`.trim();
           }
         );
         await env.DB.prepare("INSERT OR IGNORE INTO automationDeliveries (messageId,clientId,sentKey) VALUES (?,?,?)").bind(Number(automation.id),Number(client.id),sentKey).run();
+        if(occasion==='birthday')await settleBirthdayRecipient(env,String(automation.agentEmail),String(client.email),birthdayDay,'sent');
         const statements = [];
         statements.push(
           env.DB.prepare(
@@ -48145,7 +48149,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=11"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=11"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
  }
  return response;
 };
