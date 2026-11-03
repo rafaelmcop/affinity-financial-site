@@ -1,3 +1,5 @@
+import {crmBoard} from './crm-board.js';
+import {meetingCrm} from './meeting-crm.js';
 import {claimBirthdayRecipient,settleBirthdayRecipient} from './birthday-recipient-guard.js';
 import {meetingReminderSchema,getMeetingReminderSettings,saveMeetingReminderSettings,enrollMeetingReminder,runMeetingReminders,meetingReminderHistory} from './meeting-reminders.js';
 import {ensureMeetingWebhook,meetingWebhookRoute} from './meeting-reminder-webhooks.js';
@@ -45748,6 +45750,14 @@ Affinity Financial Consulting`,
       return trpcError(String(error?.message || error));
     }
   }
+  if(['agent.getCrmBoard','agent.moveCrmBoardClient','agent.createCrmBoardColumn','agent.createCrmBoardContact'].includes(name)){
+    if(name!=='agent.getCrmBoard'&&request.method!=='POST')return trpcError('Use POST.','METHOD_NOT_SUPPORTED',405);
+    try{await ensureCalendlyTables(env);return trpcResult(await crmBoard(env,adminEmail.toLowerCase(),input,({'agent.moveCrmBoardClient':'move','agent.createCrmBoardColumn':'column','agent.createCrmBoardContact':'contact'})[name]||'get',delegation?.actorEmail||adminEmail));}catch(error){return trpcError(error.message,error.status===404?'NOT_FOUND':'BAD_REQUEST',error.status||400);}
+  }
+  if(name==='agent.getMeetingCrm'||name==='agent.saveMeetingCrm'){
+    if(name==='agent.saveMeetingCrm'&&request.method!=='POST')return trpcError('Use POST.','METHOD_NOT_SUPPORTED',405);
+    try{await ensureCalendlyTables(env);return trpcResult(await meetingCrm(env,adminEmail.toLowerCase(),input,delegation?.actorEmail||adminEmail,name==='agent.saveMeetingCrm'));}catch(error){return trpcError(error.message,error.status===404?'NOT_FOUND':'BAD_REQUEST',error.status||400);}
+  }
   if(name==='agent.weekMeetings'||name==='agent.meetingDetail'){
     try{await ensureCalendlyTables(env);if(name==='agent.weekMeetings')return trpcResult(await weeklyMeetings(env,adminEmail,input));const meeting=await ownMeeting(env,adminEmail,input.id);if(meeting)meeting.responsibleAgent=await env.DB.prepare('SELECT name,email,contactEmail,phone,whatsapp,messageSignature FROM adminAccounts WHERE lower(email)=?').bind(adminEmail.toLowerCase()).first();return trpcResult(meeting);}catch(error){return trpcError(error.message);}
   }
@@ -47383,6 +47393,7 @@ var cloudflare_staging_default = {
       }
     }
     if(url.pathname==='/admin/relatorio-seguranca'){url.pathname='/admin-security-report.html';return secureResponse(await env.ASSETS.fetch(new Request(url.toString(),request)),{privateData:true});}
+    if(url.pathname==='/agentes/crm/quadro'){url.pathname='/agent-crm-board.html';return secureResponse(await env.ASSETS.fetch(new Request(url.toString(),request)),{privateData:true});}
     if (url.pathname === "/agentes/email") {
       url.pathname = "/agent-email.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
@@ -48149,7 +48160,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=11"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261013-assistants-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261013-assistants-10');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=12"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261103-crm-board-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261103-crm-board-1');}}).transform(response);
  }
  return response;
 };

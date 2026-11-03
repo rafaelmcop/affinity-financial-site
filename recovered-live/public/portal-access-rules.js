@@ -15,6 +15,7 @@ export function pageFeature(path,query=new URLSearchParams()) {
  if(path==='/agentes/novo-cliente'||path==='/agentes/pcsheet'||path==='/agentes/tarefas')return 'policies';
  if(path==='/agentes/clientes')return 'policies';
  if(path.startsWith('/agent-application')||path.startsWith('/api/agent/application'))return query.get('nova')==='1'||query.has('meetingId')?'application_create':'applications';
+ if(path==='/agent-crm-board.html')return 'policies';
  if(path==='/agent-crm-client.html')return 'policies';
  if(path==='/agent-direct-contacts.html')return 'direct_contacts';
  if(path.startsWith('/agent-public-profile'))return 'public_profile';

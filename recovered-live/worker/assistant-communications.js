@@ -54,7 +54,7 @@ export async function assistantCommunicationsRoute(request,env,assistant,auth){
  }
  if(path.startsWith('/api/assistants/communications/whatsapp/')){
   const target=new URL('/api/agent/whatsapp/'+path.split('/').at(-1),url);target.search=url.search;
-  let outgoing=new Request(target,request);if(path.endsWith('/send')&&request.method==='POST'){const input=await boundedJson(request,11500000);if(input.includeSignature!==false){const signature=await assistantSignature(env,assistant);input.text=appendAssistantSignature(input.text,signature.text);}outgoing=new Request(target,{method:'POST',headers:request.headers,body:JSON.stringify(input)});}
+  let outgoing=new Request(target,request);if(path.endsWith('/send')&&request.method==='POST'){const input=await boundedJson(request,11500000);outgoing=new Request(target,{method:'POST',headers:request.headers,body:JSON.stringify(input)});}
   return auth.whatsapp(outgoing,env,{email:async()=>assistant.email,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}}),contactScopes:{crmOwners:hasAssistantAction(assistant.permissions,'policies','view')?[assistant.owner]:[],leadOwners:hasAssistantAction(assistant.permissions,['queue','whatsapp_leads'],'view')?[assistant.owner]:[]}});
  }
  if(path==='/assistentes/email'){const response=await env.ASSETS.fetch(new Request(new URL('/assistant-email.html',url),request));const headers=new Headers(response.headers);headers.set('x-affinity-assistant-view','1');return new Response(response.body,{status:response.status,headers});}
