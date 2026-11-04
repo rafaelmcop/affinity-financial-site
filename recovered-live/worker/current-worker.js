@@ -45750,9 +45750,9 @@ Affinity Financial Consulting`,
       return trpcError(String(error?.message || error));
     }
   }
-  if(['agent.getCrmBoard','agent.moveCrmBoardClient','agent.createCrmBoardColumn','agent.createCrmBoardContact'].includes(name)){
+  if(['agent.getCrmBoard','agent.reorderCrmBoardColumns','agent.moveCrmBoardClient','agent.createCrmBoardColumn','agent.createCrmBoardContact'].includes(name)){
     if(name!=='agent.getCrmBoard'&&request.method!=='POST')return trpcError('Use POST.','METHOD_NOT_SUPPORTED',405);
-    try{await ensureCalendlyTables(env);return trpcResult(await crmBoard(env,adminEmail.toLowerCase(),input,({'agent.moveCrmBoardClient':'move','agent.createCrmBoardColumn':'column','agent.createCrmBoardContact':'contact'})[name]||'get',delegation?.actorEmail||adminEmail));}catch(error){return trpcError(error.message,error.status===404?'NOT_FOUND':'BAD_REQUEST',error.status||400);}
+    try{await ensureCalendlyTables(env);return trpcResult(await crmBoard(env,adminEmail.toLowerCase(),input,({'agent.reorderCrmBoardColumns':'order','agent.moveCrmBoardClient':'move','agent.createCrmBoardColumn':'column','agent.createCrmBoardContact':'contact'})[name]||'get',delegation?.actorEmail||adminEmail));}catch(error){return trpcError(error.message,error.status===404?'NOT_FOUND':'BAD_REQUEST',error.status||400);}
   }
   if(name==='agent.getMeetingCrm'||name==='agent.saveMeetingCrm'){
     if(name==='agent.saveMeetingCrm'&&request.method!=='POST')return trpcError('Use POST.','METHOD_NOT_SUPPORTED',405);

@@ -6,9 +6,14 @@ async function columns(env,owner){await boardSchema(env);await env.DB.batch(boar
 export function classifyBoardClient(client,{policies=[],applications=[],meetings=[],now=new Date()}={}){
  if(policies.some(p=>Number(p.clientId)===Number(client.id)&&p.policyNumber&&['active','inforce','in_force','issued'].includes(String(p.status||'').toLowerCase())&&(!p.clientName||samePersonRecord(client,p))))return 'issued';
  if(applications.some(p=>samePersonRecord(client,p)&&['submitted','completed','complete','concluida','concluido'].includes(String(p.status||'').toLowerCase())))return 'application_submitted';
- const mapped={followup_documents:'closed_documents_pending',followup_application:'follow_up',followup_service:'follow_up',followup_review:'follow_up',follow_up:'follow_up',not_interested:'not_interested',no_interest:'not_interested',already_insured:'already_insured',insurer_declined:'insurer_declined',first_meeting:'attended',proposal:'proposal_sent',closed:'closed',client:'closed'}[client.status];if(mapped)return mapped;
+ const mapped={followup_documents:'closed_documents_pending',followup_application:'follow_up',followup_service:'follow_up',followup_review:'follow_up',follow_up:'follow_up',not_interested:'not_interested',no_interest:'not_interested',already_insured:'already_insured',insurer_declined:'insurer_declined',proposal:'proposal_sent',no_show:'no_show'}[client.status];if(mapped)return mapped;
  if(client.nextFollowUpAt)return 'follow_up';
- if(meetings.some(m=>Number(m.clientId)===Number(client.id)&&!['canceled','cancelled','no_show','completed'].includes(String(m.status||'').toLowerCase())&&new Date(m.startTime)>=now))return 'scheduled';
+ const ownMeetings=meetings.filter(m=>Number(m.clientId)===Number(client.id));
+ if(ownMeetings.some(m=>!['canceled','cancelled','no_show','completed'].includes(String(m.status||'').toLowerCase())&&new Date(m.startTime)>=now))return 'scheduled';
+ const recorded=ownMeetings.filter(m=>['completed','no_show'].includes(String(m.status||'').toLowerCase())&&new Date(m.startTime)<=now).sort((a,b)=>Date.parse(b.startTime)-Date.parse(a.startTime));
+ if(recorded.length)return String(recorded[0].status).toLowerCase()==='no_show'?'no_show':'proposal_sent';
+ if(['first_meeting','attended','completed'].includes(String(client.status)))return 'proposal_sent';
+ if(['closed','client'].includes(String(client.status)))return 'closed';
  if(client.status==='meeting')return 'scheduled';return 'new';
 }
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
@@ -17,6 +22,10 @@ export async function crmBoard(env,owner,input={},operation='get',actor=owner){
  if(operation==='column'){
  const label=String(input.label||'').trim().replace(/\s+/g,' ');if(!label||label.length>60)throw fail('Dê um nome de até 60 caracteres para a coluna.');if(available.length>=43)throw fail('Limite de 30 colunas personalizadas atingido.');if(available.some(c=>c.label.toLowerCase()===label.toLowerCase()))throw fail('Já existe uma coluna com esse nome.');
  const columnKey='custom-'+crypto.randomUUID();await env.DB.prepare('INSERT INTO crmBoardColumns(owner,columnKey,label,position) VALUES(?,?,?,?)').bind(owner,columnKey,label,available.length).run();return {columnKey,label};
+ }
+ if(operation==='order'){
+ const keys=input.columnKeys;if(!Array.isArray(keys)||keys.length!==available.length||keys.some(key=>typeof key!=='string')||new Set(keys).size!==keys.length||keys.some(key=>!available.some(c=>c.columnKey===key)))throw fail('As colunas mudaram. Atualize o quadro e tente novamente.');
+ await env.DB.batch(keys.map((key,index)=>env.DB.prepare('UPDATE crmBoardColumns SET position=? WHERE owner=? AND columnKey=?').bind(index,owner,key)));return {success:true};
  }
  if(operation==='contact'){
  const name=String(input.name||'').trim(),email=String(input.email||'').trim().toLowerCase(),rawPhone=String(input.phone||'').trim(),digits=rawPhone.replace(/\D/g,''),phone=digits.length===10?'+1'+digits:digits?'+'+digits:'';
