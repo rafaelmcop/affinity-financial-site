@@ -1,3 +1,4 @@
+import {fiveRingsStatus,enrichFiveRingsRecords,uniqueFiveRingsRecords,assertFiveRingsPolicyCoverage,fiveRingsWelcomeEligible} from './five-rings-record-integrity.js';
 import {contactSegmentation} from './contact-segmentation.js';
 import {crmBoard} from './crm-board.js';
 import {meetingCrm} from './meeting-crm.js';
@@ -41814,12 +41815,12 @@ __name2(fiveRingsPolicyNumber, "fiveRingsPolicyNumber");
 function normalizeFiveRingsRecord(row) {
   const firstName = fiveRingsValue(row, [/^first.?name$/, /^firstname$/]);
   const lastName = fiveRingsValue(row, [/^last.?name$/, /^lastname$/]);
-  const clientName = fiveRingsValue(row, [/^entity.?name$/, /^clients?$/, /^client.?(?:name)?$/, /policy.?holder/, /insured/, /policy.?owner/, /applicant/, /^name$/]) || `${firstName} ${lastName}`.trim();
+  const clientName = fiveRingsValue(row, [/^entity.?name$/, /^clients?$/, /^clients?(?:[ ._-]*names?)?$/, /policy.?holder/, /insured/, /policy.?owner/, /applicant/, /^name$/]) || `${firstName} ${lastName}`.trim();
   const email = fiveRingsValue(row, [/e-?mail/]).toLowerCase();
   const phone = fiveRingsValue(row, [/phone/, /mobile/, /cell/, /telephone/]);
   const policyNumber = fiveRingsPolicyNumber(fiveRingsValue(row, [/policy.*(?:number|no\.?|#)/, /contract.*(?:number|no\.?|#)/, /latest.?policy/, /^policy$/, /^number$/]));
-  const rawStatus = fiveRingsValue(row, [/policy status/, /^status$/]).toLowerCase();
-  const status = /lapse/.test(rawStatus) ? "lapse" : /surrender|resgat/.test(rawStatus) ? "surrendered" : /declin|reject|recus/.test(rawStatus) ? "declined" : /cancel|terminat/.test(rawStatus) ? "cancelled" : /active|in.?force|vigente/.test(rawStatus) ? "active" : "inactive";
+  const rawStatus = (fiveRingsValue(row, [/policy status/]) || fiveRingsValue(row, [/^status$/])).toLowerCase();
+  const status = fiveRingsStatus(rawStatus);
   const annualPremium = fiveRingsMoney(fiveRingsValue(row, [/annual.?premium/]));
   const absoluteLinks = Object.values(row).flatMap((value) => [...String(value || "").matchAll(/href=["']([^"']+)/gi)].map((match) => {
     try {
@@ -41836,6 +41837,7 @@ function normalizeFiveRingsRecord(row) {
     phone,
     policyNumber,
     status,
+    statusKnown: Boolean(rawStatus.trim()),
     product: fiveRingsValue(row, [/product/, /policy.?type/, /plan/]),
     premiumAmount: fiveRingsMoney(fiveRingsValue(row, [/modal.?premium/, /monthly.?premium/, /premium.?amount/])),
     annualPremium,
@@ -41876,7 +41878,7 @@ async function fiveRingsDataTableRecords(path, cookies,fetchPortal=fiveRingsFetc
   }, 2e4);
   if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) return [];
   const payload = await response.json();
-  return fiveRingsJsonValueRecords(payload.data || []).map((row) => normalizeFiveRingsRecord(row));
+  return fiveRingsJsonValueRecords(payload.data || []).map((row) => ({...normalizeFiveRingsRecord(row),sourceKind:path==="policies"?"policy":"client"}));
 }
 __name(fiveRingsDataTableRecords, "fiveRingsDataTableRecords");
 __name2(fiveRingsDataTableRecords, "fiveRingsDataTableRecords");
@@ -41925,7 +41927,7 @@ async function readFiveRingsRecords(session, sections,fetchPortal=fiveRingsFetch
     } catch {
       rows = [];
     }
-    return rows.map((row) => normalizeFiveRingsRecord(row));
+    return rows.map((row) => ({...normalizeFiveRingsRecord(row),sourceKind:/\/account\/policies(?:\/|$)/.test(page.url)?"policy":"client"}));
   })];
   const detailItems = all.filter((record) => !record.email || !record.phone || !record.birthDate || !record.address || record.policyNumber && (!record.coverageAmount || !record.premiumAmount || !record.product)).flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => ({ record, url }))).filter((item, index, entries) => entries.findIndex((other) => other.url === item.url) === index);
   const selectedDetails = [
@@ -41934,40 +41936,13 @@ async function readFiveRingsRecords(session, sections,fetchPortal=fiveRingsFetch
   ];
   const details = await Promise.allSettled(selectedDetails.map(async ({ record, url }) => {
     const response = await fetchPortal(url, { headers: { cookie: session.cookies }, redirect: "follow" }, 12e3);
-    if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return record;
-    const detail = normalizeFiveRingsRecord(fiveRingsDataListRecord(await response.text()));
-    return { ...record, ...Object.fromEntries(Object.entries(detail).filter(([, value]) => value !== "" && value !== 0)), detailUrl: record.detailUrl, clientDetailUrl: record.clientDetailUrl };
+    if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return null;
+    return {url,record:normalizeFiveRingsRecord(fiveRingsDataListRecord(await response.text()))};
   }));
-  const enriched = details.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
-  if (enriched.length) {
-    const byUrl = new Map(enriched.flatMap((record) => [record.detailUrl, record.clientDetailUrl].filter(Boolean).map((url) => [url, record])));
-    all = all.map((record) => byUrl.get(record.detailUrl) || byUrl.get(record.clientDetailUrl) || record);
-  }
-  const clientDetails = /* @__PURE__ */ new Map();
-  for (const record of all) {
-    const nameKey = String(record.clientName || "").trim().toLowerCase();
-    if (!nameKey) continue;
-    const current = clientDetails.get(nameKey) || {};
-    clientDetails.set(nameKey, { ...current, ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0)) });
-  }
-  all = all.map((record) => {
-    const client = clientDetails.get(String(record.clientName || "").trim().toLowerCase());
-    if (!client) return record;
-    return { ...client, ...record, ...Object.fromEntries(Object.entries(client).filter(([key2, value]) => ["email", "phone", "birthDate", "address", "beneficiaries", "clientDetailUrl"].includes(key2) && value !== "" && value !== 0)) };
-  });
-  const unique = /* @__PURE__ */ new Map();
-  for (const record of all) {
-    if (!record.clientName) continue;
-    const key2 = record.policyNumber || record.email || `${record.clientName.toLowerCase()}|${record.phone}`;
-    if (!key2) continue;
-    const current = unique.get(key2);
-    if (!current) unique.set(key2, record);
-    else unique.set(key2, {
-      ...current,
-      ...Object.fromEntries(Object.entries(record).filter(([, value]) => value !== "" && value !== 0))
-    });
-  }
-  return [...unique.values()];
+  const enriched = details.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
+  const records=uniqueFiveRingsRecords(enrichFiveRingsRecords(all,enriched));
+  assertFiveRingsPolicyCoverage(directRecords.filter(r=>r.sourceKind==='policy').map(r=>r.policyNumber),records);
+  return records;
 }
 __name(readFiveRingsRecords, "readFiveRingsRecords");
 __name2(readFiveRingsRecords, "readFiveRingsRecords");
@@ -45408,7 +45383,7 @@ Affinity Financial Consulting`,
         creditStatus=await optionalFiveRingsCredits(()=>refreshFiveRingsCredits(env, owner, activeSession, captured?.fetch||fiveRingsFetch));
         if(captured){browserClaim=await claimBrowserChunk(env,owner,input.browserSnapshot,records2.length);if(browserClaim.busy)return trpcResult({success:false,processing:true,retryAfter:2});}
         let importedClients2 = 0, importedPolicies2 = 0, updatedPolicies2 = 0;
-        const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+        const knownPolicies2 = await env.DB.prepare("SELECT id,clientId,policyNumber,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
         for (const record of (browserClaim?records2.slice(browserClaim.start,browserClaim.end):records2)) {
           const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
           const existingPolicy = canonicalPolicyNumber ? (knownPolicies2.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
@@ -45425,12 +45400,12 @@ Affinity Financial Consulting`,
           const existing = existingPolicy;
           const targetPremium = record.targetPremium || (record.premiumAmount ? record.premiumAmount * 12 : 0), points = Math.max(0, Math.round(targetPremium));
           if (existing) {
-            await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
+            await env.DB.prepare("UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(clientId, record.clientName, record.email || null, record.phone || null, record.statusKnown===false?(existing?.status||"inactive"):record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
             updatedPolicies2 += 1;
           } else {
-            const insertedPolicy = await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, canonicalPolicyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+            const insertedPolicy = await env.DB.prepare("INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(owner, clientId, record.clientName, record.email || null, record.phone || null, canonicalPolicyNumber, record.statusKnown===false?(existing?.status||"inactive"):record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
             knownPolicies2.results.push({ id: Number(insertedPolicy.meta.last_row_id), clientId, policyNumber: canonicalPolicyNumber });
-            await schedulePolicyWelcome(env, owner, clientId, record.clientName, record.policyNumber);
+            if(fiveRingsWelcomeEligible(record))await schedulePolicyWelcome(env, owner, clientId, record.clientName, record.policyNumber);
             importedPolicies2 += 1;
           }
         }
@@ -45451,7 +45426,7 @@ Affinity Financial Consulting`,
       const records = await readFiveRingsRecords(login.session, login.sections);
       await refreshFiveRingsCredits(env, owner, login.session, fiveRingsFetch);
       let importedClients = 0, importedPolicies = 0, updatedPolicies = 0;
-      const knownPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
+      const knownPolicies = await env.DB.prepare("SELECT id,clientId,policyNumber,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner).all();
       for (const record of records) {
         const canonicalPolicyNumber = normalizePolicyNumber(record.policyNumber);
         const existingPolicy = canonicalPolicyNumber ? (knownPolicies.results || []).find((policy) => normalizePolicyNumber(policy.policyNumber) === canonicalPolicyNumber) || null : null;
@@ -45475,14 +45450,14 @@ Affinity Financial Consulting`,
         if (existing) {
           await env.DB.prepare(
             "UPDATE agentPolicies SET clientId=COALESCE(clientId,?),clientName=COALESCE(NULLIF(clientName,''),?),clientEmail=COALESCE(NULLIF(clientEmail,''),?),clientPhone=COALESCE(NULLIF(clientPhone,''),?),status=?,product=COALESCE(NULLIF(product,''),?),issuedAt=COALESCE(issuedAt,?),premiumAmount=CASE WHEN COALESCE(premiumAmount,0)=0 THEN ? ELSE premiumAmount END,targetPremium=CASE WHEN COALESCE(targetPremium,0)=0 THEN ? ELSE targetPremium END,points=CASE WHEN COALESCE(points,0)=0 THEN ? ELSE points END,coverageAmount=CASE WHEN COALESCE(coverageAmount,0)=0 THEN ? ELSE coverageAmount END,beneficiaries=COALESCE(NULLIF(beneficiaries,''),?),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?"
-          ).bind(clientId, record.clientName, record.email || null, record.phone || null, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
+          ).bind(clientId, record.clientName, record.email || null, record.phone || null, record.statusKnown===false?(existing?.status||"inactive"):record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null, Number(existing.id), owner).run();
           updatedPolicies += 1;
         } else {
           const insertedPolicy = await env.DB.prepare(
             "INSERT INTO agentPolicies (agentEmail,clientId,clientName,clientEmail,clientPhone,policyNumber,status,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
-          ).bind(owner, clientId, record.clientName, record.email || null, record.phone || null, canonicalPolicyNumber, record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
+          ).bind(owner, clientId, record.clientName, record.email || null, record.phone || null, canonicalPolicyNumber, record.statusKnown===false?(existing?.status||"inactive"):record.status, record.product || null, record.issuedAt || null, record.premiumAmount, targetPremium, points, record.coverageAmount, record.beneficiaries || null).run();
           knownPolicies.results.push({ id: Number(insertedPolicy.meta.last_row_id), clientId, policyNumber: canonicalPolicyNumber });
-          await schedulePolicyWelcome(env, owner, clientId, record.clientName, record.policyNumber);
+          if(fiveRingsWelcomeEligible(record))await schedulePolicyWelcome(env, owner, clientId, record.clientName, record.policyNumber);
           importedPolicies += 1;
         }
       }

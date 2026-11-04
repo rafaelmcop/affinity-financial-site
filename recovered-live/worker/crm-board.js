@@ -1,3 +1,4 @@
+import {isActiveClientPolicy} from './crm-stage.js';
 import {samePersonRecord,samePersonName} from './person-identity.js';
 export const boardColumns=[['new','Novos'],['scheduled','Reuniões marcadas'],['attended','Atendimento realizado'],['follow_up','Follow-up'],['proposal_sent','Proposta enviada'],['closed','Fechado'],['closed_documents_pending','Faltando documentos'],['application_submitted','Aplicação submetida'],['issued','InForce'],['not_interested','Sem interesse'],['already_insured','Já tem seguro'],['insurer_declined','Recusado pela seguradora'],['no_show','Não compareceu']];
 const ready=new WeakSet();
@@ -45,5 +46,6 @@ export async function crmBoard(env,owner,input={},operation='get',actor=owner){
  }
  const queries=await env.DB.batch([env.DB.prepare('SELECT id,name,email,phone,status,source,birthDate,nextFollowUpAt FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY name COLLATE NOCASE,id').bind(owner),env.DB.prepare('SELECT clientId,columnKey FROM crmBoardCards WHERE owner=?').bind(owner),env.DB.prepare('SELECT clientId,clientName,birthDate,policyNumber,status FROM agentPolicies WHERE lower(agentEmail)=?').bind(owner),env.DB.prepare('SELECT clientName,birthDate,status FROM agentApplications WHERE lower(agentEmail)=?').bind(owner),env.DB.prepare('SELECT clientId,startTime,status FROM calendlyMeetings WHERE lower(agentEmail)=?').bind(owner)]);
  const [clients,cards,policies,applications,meetings]=queries.map(q=>q.results||[]),saved=new Map(cards.map(c=>[Number(c.clientId),c.columnKey]));
- return {columns:available,clients:clients.map(c=>({...c,columnKey:saved.get(Number(c.id))||classifyBoardClient(c,{policies,applications,meetings})}))};
+ const activePolicies=policies.filter(isActiveClientPolicy);
+ return {policyStats:{total:policies.length,active:activePolicies.length,activeClients:new Set(activePolicies.map(p=>Number(p.clientId)).filter(Boolean)).size},columns:available,clients:clients.map(c=>({...c,columnKey:saved.get(Number(c.id))||classifyBoardClient(c,{policies,applications,meetings})}))};
 }

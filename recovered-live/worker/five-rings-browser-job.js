@@ -1,6 +1,6 @@
 export async function claimBrowserChunk(env,owner,snapshot,total,now=Date.now()){
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS fiveRingsBrowserSyncJobs(owner TEXT NOT NULL,fingerprint TEXT NOT NULL,cursor INTEGER NOT NULL DEFAULT 0,total INTEGER NOT NULL,lease TEXT,leaseUntil INTEGER NOT NULL DEFAULT 0,updatedAt INTEGER NOT NULL,PRIMARY KEY(owner,fingerprint))').run();
- const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(snapshot)))),b=>b.toString(16).padStart(2,'0')).join('');
+ const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify({parserVersion:'policy-identities-v2',snapshot})))),b=>b.toString(16).padStart(2,'0')).join('');
  await env.DB.prepare('DELETE FROM fiveRingsBrowserSyncJobs WHERE updatedAt<?').bind(now-86400000).run();
  await env.DB.prepare('INSERT OR IGNORE INTO fiveRingsBrowserSyncJobs(owner,fingerprint,total,updatedAt) VALUES(?,?,?,?)').bind(owner,fingerprint,total,now).run();
  const token=crypto.randomUUID(),claimed=await env.DB.prepare('UPDATE fiveRingsBrowserSyncJobs SET lease=?,leaseUntil=?,updatedAt=? WHERE owner=? AND fingerprint=? AND leaseUntil<=?').bind(token,now+120000,now,owner,fingerprint,now).run();
