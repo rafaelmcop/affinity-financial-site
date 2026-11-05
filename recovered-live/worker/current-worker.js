@@ -43415,6 +43415,11 @@ Detalhes: ${details}` : ""}`;
       return trpcResult([]);
     }
   }
+  if (name === "calendly.publicAgents") {
+    await ensureCalendlyTables(env);
+    const rows = await env.DB.prepare("SELECT p.slug,a.name FROM agentPublicProfiles p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.isPublished=1 AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both') ORDER BY a.name COLLATE NOCASE,p.slug LIMIT 500").all();
+    return trpcResult(rows.results || []);
+  }
   if (name === "calendly.publicProfile") {
     await ensureCalendlyTables(env);
     const slug = String(input.slug || "").trim().toLowerCase();
