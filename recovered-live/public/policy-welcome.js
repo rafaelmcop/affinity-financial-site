@@ -11,7 +11,7 @@
    const phone=String(agent.phone||'').replace(/[^+0-9]/g,''),email=String(agent.email||'');
    const target=phone?'tel:'+phone:/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?'mailto:'+email:'';
    contact.hidden=!target;if(target){contact.href=target;contact.textContent=phone?`Ligar para ${agent.name}`:`Enviar e-mail para ${agent.name}`;}
-   nav.href='#meu-agente';
+   nav.href='#meu-agente';if(agent.reassigned)status.textContent='A equipe administrativa da Affinity está à disposição para acompanhar sua apólice.';
   }catch{status.textContent='O contato deste agente não está disponível. Consulte os dados impressos na sua etiqueta.';}
   return;
  }

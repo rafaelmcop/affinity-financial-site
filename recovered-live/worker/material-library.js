@@ -6,9 +6,16 @@ export async function policyAgentPage(request,env){
  if(request.method!=='GET')return Response.json({error:'Método inválido.'},{status:405});
  const id=url.searchParams.get('id')||'';if(!/^[a-f0-9-]{36}$/.test(id))return Response.json({error:'Agente não encontrado.'},{status:404});
  await env.DB.prepare(policySchema).run();
- const row=await env.DB.prepare("SELECT a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.id=? AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(id).first();
- if(!row)return Response.json({error:'Agente não disponível.'},{status:404});
- return Response.json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||''},{headers:{'cache-control':'no-store'}});
+ let row=await env.DB.prepare("SELECT a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.id=? AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(id).first();
+ let reassigned=false;
+ if(!row){
+  const known=await env.DB.prepare('SELECT id FROM policyAgentPages WHERE id=?').bind(id).first();
+  if(!known)return Response.json({error:'Agente não encontrado.'},{status:404});
+  row=await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail FROM adminAccounts WHERE isActive=1 AND status='approved' AND accountType IN ('both','admin') AND (trim(coalesce(phone,''))<>'' OR trim(coalesce(whatsapp,''))<>'' OR trim(coalesce(contactEmail,''))<>'') ORDER BY CASE WHEN lower(email)=lower(?) THEN 0 WHEN accountType='both' THEN 1 ELSE 2 END,lower(email) LIMIT 1").bind(String(env.ADMIN_EMAIL||'')).first();
+  if(!row)return Response.json({error:'Atendimento não disponível no momento.'},{status:404});
+  reassigned=true;
+ }
+ return Response.json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',...(reassigned?{reassigned:true}:{})},{headers:{'cache-control':'no-store'}});
 }
 const json=(data,status=200)=>Response.json(data,{status});
 export function validateMaterial(body){
