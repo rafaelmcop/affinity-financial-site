@@ -1,3 +1,4 @@
+import {projectCrmProgress,persistLegacyProgress,legacyStage,storedCrmStatus} from './crm-progress.js';
 import {fiveRingsStatus,enrichFiveRingsRecords,uniqueFiveRingsRecords,assertFiveRingsPolicyCoverage,fiveRingsWelcomeEligible} from './five-rings-record-integrity.js';
 import {contactSegmentation} from './contact-segmentation.js';
 import {crmBoard} from './crm-board.js';
@@ -44264,7 +44265,7 @@ Detalhes: ${details}` : ""}`;
     const clientName = String(input.name ?? "").trim();
     const email = String(input.email ?? "").trim().toLowerCase();
     const status = String(input.status ?? "client");
-    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "first_meeting", "followup_documents", "followup_service", "followup_application", "followup_review", "completed", "client", "closed", "agent"].includes(
+    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "first_meeting", "followup_documents", "followup_service", "followup_application", "followup_review", "completed", "client", "closed", "agent", "follow_up", "lapsed"].includes(
       status
     ))
       return trpcError("Revise os dados do cliente");
@@ -44274,7 +44275,7 @@ Detalhes: ${details}` : ""}`;
       String(input.phone ?? "").trim() || null,
       String(input.whatsapp ?? "").trim() || null,
       String(input.birthDate ?? "").trim() || null,
-      status,
+      storedCrmStatus(legacyStage(status),status),
       String(input.source ?? "").trim() || null,
       owner,
       String(input.notes ?? "").trim() || null
@@ -44283,6 +44284,7 @@ Detalhes: ${details}` : ""}`;
       const result2 = await env.DB.prepare(
         "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail,notes) VALUES (?,?,?,?,?,?,?,?,?)"
       ).bind(...values).run();
+      await persistLegacyProgress(env,owner,Number(result2.meta.last_row_id),status,delegation?.actorEmail||owner,input.nextFollowUpAt);
       return trpcResult({ success: true, id: Number(result2.meta.last_row_id) });
     }
     const result = await env.DB.prepare(
@@ -44290,6 +44292,7 @@ Detalhes: ${details}` : ""}`;
     ).bind(...values, id, owner).run();
     if (!result.meta.changes)
       return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
+    await persistLegacyProgress(env,owner,id,status,delegation?.actorEmail||owner,input.nextFollowUpAt);
     return trpcResult({ success: true });
   }
   if (name === "agent.requestClientDeletion") {
@@ -46611,7 +46614,7 @@ Affinity Financial Consulting`,
   }
   if (name === "crm.getClient") {
     const row=await crmClientDetail(env,adminEmail.toLowerCase(),input.clientId);
-    return row?trpcResult(row):trpcError("Cliente não encontrado nesta conta", "NOT_FOUND", 404);
+    return row?trpcResult((await projectCrmProgress(env,[row]))[0]):trpcError("Cliente não encontrado nesta conta", "NOT_FOUND", 404);
   }
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
@@ -46631,8 +46634,7 @@ Affinity Financial Consulting`,
       { results: [] }
     ];
     const matchesClient = /* @__PURE__ */ __name((record, client) => Number(record.clientId || 0) === Number(client.id) || sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email) || sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp) || sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name), "matchesClient");
-    return trpcResult(
-      rows.results.filter(row=>!agentView||["client","completed","active","agent"].includes(row.status)||!blockedPhones.has(sourcePhone(row.phone||row.whatsapp))).map((row) => {
+    const listed=rows.results.filter(row=>!agentView||["client","completed","active","agent"].includes(row.status)||!blockedPhones.has(sourcePhone(row.phone||row.whatsapp))).map((row) => {
         const policies = (policyStages.results || []).filter((record) => matchesClient(record, row));
         const applications = (applicationStages.results || []).filter((record) => !record.matchedPolicyId && matchesClient(record, row));
         return {
@@ -46647,8 +46649,8 @@ Affinity Financial Consulting`,
           hasDraftApplication: applications.some((record) => record.status === "draft"),
           hasCompletedApplication: applications.some((record) => record.status === "submitted")
         };
-      })
-    );
+      });
+    return trpcResult(await projectCrmProgress(env,listed,policyStages.results||[],applicationStages.results||[]));
   }
   if (name === "crm.assignees") {
     const rows = await env.DB.prepare(
@@ -46669,16 +46671,16 @@ Affinity Financial Consulting`,
     if (!validEmail(owner)) return trpcError("Selecione um agente");
     const [clients, policies, applications] = await portfolioRows(env,owner);
     const matches = /* @__PURE__ */ __name((record, client) => Number(record.clientId || 0) === Number(client.id) || sourceEmail(record.clientEmail) && sourceEmail(record.clientEmail) === sourceEmail(client.email) || sourcePhone(record.clientPhone) && sourcePhone(record.clientPhone) === sourcePhone(client.phone || client.whatsapp) || sourceName(record.clientName) && sourceName(record.clientName) === sourceName(client.name), "matches");
-    const portfolioClients = clients.results.map((row) => {
+    const portfolioClients = (await projectCrmProgress(env,clients.results,policies.results,applications.results)).map((row) => {
       const linkedPolicies = policies.results.filter((record) => matches(record, row));
       const linkedApplications = applications.results.filter((record) => !record.matchedPolicyId && matches(record, row));
       const attended = Boolean(row.lastMeetingAt) || ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(row.status);
-      const sector = linkedPolicies.length ? "inforce" : linkedApplications.length ? "applications" : attended ? "followup" : "leads";
+      const sector = row.crmStage==="issued"?"inforce":row.crmStage==="lapsed"?"lapsed":row.crmStage==="application_submitted"?"applications":row.crmFollowUp||["follow_up","closed_documents_pending","proposal_sent","attended","no_show"].includes(row.crmStage)?"followup":"leads";
       return { ...row, id: Number(row.id), sector, hasCompletedApplication: linkedApplications.some((application) => application.status === "submitted"), applicationCount: linkedApplications.length, policyCount: linkedPolicies.length };
     });
     return trpcResult({
       clients: portfolioClients,
-      sectorCounts: Object.fromEntries(["leads", "followup", "applications", "inforce"].map((sector) => [sector, portfolioClients.filter((client) => client.sector === sector).length])),
+      sectorCounts: Object.fromEntries(["leads", "followup", "applications", "inforce", "lapsed"].map((sector) => [sector, portfolioClients.filter((client) => client.sector === sector).length])),
       policies: policies.results.map((row) => ({
         ...row,
         id: Number(row.id),
@@ -46958,7 +46960,7 @@ Affinity Financial Consulting`,
     const clientName = String(input.name ?? "").trim();
     const email = String(input.email ?? "").trim().toLowerCase();
     const status = String(input.status ?? "new");
-    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "client", "closed", "agent"].includes(
+    if (!clientName || email && !validEmail(email) || !["new", "contacted", "meeting", "proposal", "client", "closed", "agent", "first_meeting", "followup_documents", "followup_service", "followup_application", "followup_review", "completed", "follow_up", "lapsed"].includes(
       status
     ))
       return trpcError("Revise os dados do cliente");
@@ -46969,7 +46971,7 @@ Affinity Financial Consulting`,
       String(input.phone ?? "").trim() || null,
       String(input.whatsapp ?? "").trim() || null,
       String(input.birthDate ?? "").trim() || null,
-      status,
+      storedCrmStatus(legacyStage(status),status),
       String(input.source ?? "").trim() || null,
       assignedEmail,
       String(input.nextFollowUpAt ?? "").trim() || null,
@@ -46979,6 +46981,7 @@ Affinity Financial Consulting`,
       const result = await env.DB.prepare(
         "INSERT INTO crmClients (name,email,phone,whatsapp,birthDate,status,source,assignedAdminEmail,nextFollowUpAt,notes) VALUES (?,?,?,?,?,?,?,?,?,?)"
       ).bind(...values).run();
+      await persistLegacyProgress(env,assignedEmail,Number(result.meta.last_row_id),status,delegation?.actorEmail||adminEmail,input.nextFollowUpAt);
       return trpcResult({ success: true, id: Number(result.meta.last_row_id) });
     }
     const id = Number(input.id);
@@ -46998,6 +47001,7 @@ Affinity Financial Consulting`,
     await env.DB.prepare(
       "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
     ).bind(...values, id).run();
+    await persistLegacyProgress(env,assignedEmail,id,status,delegation?.actorEmail||adminEmail,input.nextFollowUpAt);
     return trpcResult({ success: true });
   }
   if(name==='crm.clientAutomations'){

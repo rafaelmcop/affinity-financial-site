@@ -1,3 +1,4 @@
+import {clientInCrmSector} from '/crm-stage-rules.js?v=1';
 import {ClientAutomationStatus} from './ClientAutomationStatus.js?v=1';
 import {
   t as c,
@@ -44,6 +45,7 @@ const D = {
     notes: "",
   },
   I = [
+    {value:"lapsed",label:"Lapsada",color:"bg-orange-500/15 text-orange-300"},
     {value:"agent",label:"Agente",color:"bg-slate-500/15 text-slate-300"},
     {
       value: "new",
@@ -92,7 +94,7 @@ const D = {
     },
     {
       value: "client",
-      label: "Cliente",
+      label: "InForce",
       color: "bg-green-500/15 text-green-300",
     },
     {
@@ -145,7 +147,7 @@ function ue(a) {
   return i ? `${i[3]}-${i[1].padStart(2, "0")}-${i[2].padStart(2, "0")}` : a;
 }
 function Le({ agentMode: a = !1 }) {
-  const i = c.crm.list.useQuery({ agentMode: a }),
+  const i = c.crm.list.useQuery({ agentMode: a },{staleTime:0,refetchOnMount:"always",refetchOnWindowFocus:true}),
     m = c.crm.assignees.useQuery(),
     J = c.crm.create.useMutation(),
     G = c.crm.update.useMutation(),
@@ -161,7 +163,7 @@ function Le({ agentMode: a = !1 }) {
     [sortMode, setSortMode] = p.useState("name_asc"),
     [dateFrom,setDateFrom]=p.useState(""),[dateTo,setDateTo]=p.useState(""),[statusFilter,setStatusFilter]=p.useState(""),
     [b, M] = p.useState(() =>
-      ["all", "clients", "leads", "followup", "new_business", "inforce"].includes(
+      ["all", "clients", "leads", "followup", "new_business", "inforce", "lapsed"].includes(
         new URLSearchParams(location.search).get("setor")
       )
         ? new URLSearchParams(location.search).get("setor")
@@ -226,16 +228,7 @@ function Le({ agentMode: a = !1 }) {
     W = p.useMemo(() => {
       return S.filter(
         l => {
-          const meetingTime = l.lastMeetingAt ? new Date(l.lastMeetingAt).getTime() : 0,
-            hasPastMeeting = meetingTime > 0 && meetingTime <= Date.now(),
-            manuallyFollowedUp = ["meeting", "first_meeting", "followup_service", "followup_documents", "followup_review"].includes(l.status),
-            wasAttended = hasPastMeeting || manuallyFollowedUp,
-            belongs = b === "leads" ? !["agent","client","completed","active"].includes(l.status) && !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && !wasAttended
-              : b === "clients" ? l.hasPolicy || ["client","completed","active"].includes(l.status)
-              : b === "inforce" ? l.hasInforcePolicy
-              : b === "new_business" ? !l.hasInforcePolicy && (l.hasCompletedApplication||l.hasPendingPolicy)
-              : b === "followup" ? !l.hasPolicy && !l.hasDraftApplication && !l.hasCompletedApplication && wasAttended
-              : true;
+          const belongs=clientInCrmSector(l,b);
           const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
           const search=[l.name,l.email,l.phone,...(l.policyNumbers||[]),l.status,...(l.policyStatuses||[])].join(' ');
           const dates=(l.policyDates?.length?l.policyDates:[l.lastMeetingAt||l.createdAt]).filter(Boolean).map(value=>String(value).slice(0,10));
@@ -387,7 +380,7 @@ function Le({ agentMode: a = !1 }) {
                     e.jsxs("p", { children: ["Telefone: ", e.jsx("strong", { children: t.phone || "Não informado" })] }),
                     e.jsxs("p", { children: ["WhatsApp: ", e.jsx("strong", { children: t.whatsapp || "Não informado" })] }),
                     e.jsxs("p", { children: ["Nascimento: ", e.jsx("strong", { children: U(t.birthDate) })] }),
-                    e.jsxs("p", { children: ["Etapa: ", e.jsx("strong", { children: t.hasInforcePolicy ? "InForce" : (I.find(s => s.value === t.status)?.label || t.status) })] }),
+                    e.jsxs("p", { children: ["Etapa: ", e.jsx("strong", { children: t.hasInforcePolicy ? "InForce" : t.crmStageLabel || (I.find(s => s.value === t.status)?.label || t.status) })] }),
                     e.jsxs("p", { children: ["Próximo acompanhamento: ", e.jsx("strong", { children: j(t.nextFollowUpAt) })] }),
                   ],
                 }),
@@ -605,7 +598,7 @@ function Le({ agentMode: a = !1 }) {
                 ["followup", "Follow-up"],
                 ["new_business", "New Business"],
                 
-                ["inforce", "InForce"],
+                ["inforce", "InForce"],["lapsed", "Lapsadas"],
               ].map(([s, l]) =>
                 e.jsx(
                   d,
@@ -621,7 +614,7 @@ function Le({ agentMode: a = !1 }) {
             }),
           e.jsxs("div", {
             className:
-              a && !["all", "clients", "leads", "followup", "new_business", "inforce"].includes(b) ? "hidden" : "contents",
+              a && !["all", "clients", "leads", "followup", "new_business", "inforce", "lapsed"].includes(b) ? "hidden" : "contents",
             children: [
               e.jsx(u, {
                 className: "border-gold/20 bg-[#0b1524] p-4",
@@ -871,7 +864,7 @@ function Le({ agentMode: a = !1 }) {
                           children: "Nenhum cliente encontrado.",
                         }),
                       pageRows.map(s => {
-                        const l = s.hasInforcePolicy ? {label:"InForce",color:"bg-green-500/15 text-green-300"} : (I.find($ => $.value === s.status)||{label:s.status,color:""}),
+                        const l = s.hasInforcePolicy ? {label:"InForce",color:"bg-green-500/15 text-green-300"} : s.crmStageLabel?{label:s.crmStageLabel,color:s.crmStage==="lapsed"?"bg-orange-500/15 text-orange-300":"bg-cyan-500/15 text-cyan-300"} : (I.find($ => $.value === s.status)||{label:s.status,color:""}),
                           o =
                             s.nextFollowUpAt &&
                             new Date(String(s.nextFollowUpAt)).getTime() <
@@ -1067,7 +1060,7 @@ function Le({ agentMode: a = !1 }) {
                                     " ",
                                     e.jsx("strong", {
                                       children:
-                                        t.hasInforcePolicy ? "InForce" : (I.find(s => s.value === t.status)
+                                        t.hasInforcePolicy ? "InForce" : t.crmStageLabel || (I.find(s => s.value === t.status)
                                           ?.label || t.status),
                                     }),
                                   ],

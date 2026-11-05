@@ -3,5 +3,5 @@ export async function crmClientDetail(env,owner,value){const id=Number(value);if
  const email=String(row.email||'').trim().toLowerCase(),digits=String(row.phone||row.whatsapp||'').replace(/\D/g,''),phone=digits.length>=10?digits.slice(-10):'';
  const policies=(await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status,policyNumber FROM agentPolicies WHERE lower(agentEmail)=? AND (clientId=? OR (coalesce(clientId,0)=0 AND ((?<>'' AND lower(trim(clientEmail))=?) OR (?<>'' AND substr(replace(replace(replace(replace(replace(coalesce(clientPhone,''),'+',''),'(',''),')',''),'-',''),' ',''),-10)=?))))").bind(owner,id,email,email,phone,phone).all()).results||[];
  const inforce=policies.some(p=>['active','ativa','ativo','inforce','issued'].includes(String(p.status||'').trim().toLowerCase().replace(/[\s_-]+/g,'')));
- return {...row,id:Number(row.id),hasPolicy:policies.length>0,hasInforcePolicy:inforce,policyNumbers:policies.map(p=>p.policyNumber).filter(Boolean)};
+ return {...row,id:Number(row.id),hasPolicy:policies.length>0,hasInforcePolicy:inforce,hasLapsedPolicy:policies.some(p=>['inactive','lapse','lapsed','inativa','inativo'].includes(String(p.status||'').trim().toLowerCase())),policyNumbers:policies.map(p=>p.policyNumber).filter(Boolean)};
 }
