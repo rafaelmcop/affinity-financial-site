@@ -1,8 +1,10 @@
+import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {contactBridge} from './affiliate-whatsapp.js';
 export async function auditSchema(db){await db.batch([db.prepare("CREATE TABLE IF NOT EXISTS whatsappAuditCursors(owner TEXT PRIMARY KEY,cursor INTEGER DEFAULT 0,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)"),db.prepare("CREATE TABLE IF NOT EXISTS whatsappClientAudit(id INTEGER PRIMARY KEY AUTOINCREMENT,owner TEXT NOT NULL,messageId TEXT NOT NULL,clientId INTEGER NOT NULL,phone TEXT NOT NULL,direction TEXT NOT NULL,body TEXT NOT NULL,sentAt TEXT NOT NULL,mediaKind TEXT,filename TEXT,mediaState TEXT,recordedAt TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(owner,messageId))"),db.prepare("CREATE INDEX IF NOT EXISTS whatsappAuditClient ON whatsappClientAudit(clientId,sentAt)")]);}
 const phone=value=>{const n=String(value||'').replace(/@.*$/,'').replace(/\D/g,'');return n.length===10?'1'+n:n;};
 export function matchedClient(clients,value){const number=phone(value);if(number.length<8)return null;const matches=clients.filter(client=>[client.phone,client.whatsapp].some(value=>phone(value)===number));return matches.length===1?matches[0]:null;}
 export async function syncWhatsappAudit(env,owner,client=null){
+ if(!await portalWhatsappAllowed(env,owner))return {imported:0};
  if(!env.WHATSAPP_BRIDGE_URL||!env.WHATSAPP_BRIDGE_SECRET)return {imported:0};
  owner=owner.toLowerCase();await auditSchema(env.DB);
  const state=await env.DB.prepare('SELECT cursor FROM whatsappAuditCursors WHERE owner=?').bind(owner).first();
@@ -23,6 +25,6 @@ export async function syncWhatsappAudit(env,owner,client=null){
 }
 export async function syncAllWhatsappAudit(env){
  await auditSchema(env.DB);
- const owners=await env.DB.prepare("SELECT owner FROM (SELECT DISTINCT lower(a.email) AS owner FROM adminAccounts a JOIN crmClients c ON lower(c.assignedAdminEmail)=lower(a.email) WHERE a.isActive=1 AND a.status='approved' AND a.portalDeletedAt IS NULL UNION SELECT DISTINCT lower(p.email) AS owner FROM portalAssistants p JOIN assistantAgentAccess l ON l.assistantId=p.id JOIN adminAccounts a ON lower(a.email)=lower(l.owner) JOIN crmClients c ON lower(c.assignedAdminEmail)=lower(l.owner) WHERE p.active=1 AND p.deletedAt IS NULL AND l.active=1 AND a.isActive=1 AND a.status='approved' AND a.portalDeletedAt IS NULL) owners ORDER BY coalesce((SELECT updatedAt FROM whatsappAuditCursors w WHERE w.owner=owners.owner),'1970-01-01') LIMIT 20").all();
+ const owners=await env.DB.prepare(`SELECT owner FROM (SELECT DISTINCT lower(a.email) AS owner FROM adminAccounts a JOIN crmClients c ON lower(c.assignedAdminEmail)=lower(a.email) WHERE a.isActive=1 AND a.status='approved' AND a.portalDeletedAt IS NULL UNION SELECT DISTINCT lower(p.email) AS owner FROM portalAssistants p JOIN assistantAgentAccess l ON l.assistantId=p.id JOIN adminAccounts a ON lower(a.email)=lower(l.owner) JOIN crmClients c ON lower(c.assignedAdminEmail)=lower(l.owner) WHERE p.active=1 AND p.deletedAt IS NULL AND l.active=1 AND a.isActive=1 AND a.status='approved' AND a.portalDeletedAt IS NULL) owners ${env.WHATSAPP_PORTAL_ACCESS_MODE==='restricted'?"WHERE EXISTS(SELECT 1 FROM portalWhatsappGrants g WHERE g.email=owners.owner AND g.enabled=1)":''} ORDER BY coalesce((SELECT updatedAt FROM whatsappAuditCursors w WHERE w.owner=owners.owner),'1970-01-01') LIMIT 20`).all();
  for(const {owner} of owners.results||[])try{await syncWhatsappAudit(env,owner);}catch{console.error('whatsapp_audit_sync_failed');}
 }

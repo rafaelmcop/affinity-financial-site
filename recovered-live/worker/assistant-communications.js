@@ -1,3 +1,4 @@
+import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {discussionRecipients,readDiscussion} from './assistant-discussions.js';
 import {assistantSignature,appendAssistantSignature} from './assistant-signature.js';
 import {hasAssistantAction} from './assistant-permissions.js';
@@ -48,7 +49,9 @@ export async function receiveAssistantEmail(message,env,parse){
 }
 export async function assistantCommunicationsRoute(request,env,assistant,auth){
  const url=new URL(request.url),path=url.pathname;
+ if(path==='/api/assistants/communications/portal-whatsapp-access')return json({allowed:await portalWhatsappAllowed(env,assistant.email)});
  if(path==='/assistentes/whatsapp'){
+  if(!await portalWhatsappAllowed(env,assistant.email))return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>WhatsApp no aplicativo</title><body><h1>Use o WhatsApp no seu computador</h1><p>A integração com o portal ainda não foi liberada.</p><a href="whatsapp://">Abrir no WhatsApp</a></body></html>',{headers:{'content-type':'text/html;charset=utf-8'}});
   let theme='light';try{theme=(await auth.appearance?.(assistant.owner))?.theme||'light';}catch{}
   return new Response(renderAssistantWhatsAppPage(theme),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store','x-affinity-assistant-view':'1'}});
  }

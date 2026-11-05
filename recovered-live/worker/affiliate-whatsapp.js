@@ -1,8 +1,10 @@
+import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {sharedAgentImport} from './staff-whatsapp-reuse.js';
 import {storeCentralContacts,leadSchema,leadFlowRoute,backfill,protectInternalContacts,visibleLeadSQL} from './lead-flow.js';
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
 const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function contactBridge(env,owner,action,method='GET',body={},options={}){
+ if(!await portalWhatsappAllowed(env,owner))return json({error:'WhatsApp do portal não liberado. Use o aplicativo.',code:'PORTAL_WHATSAPP_DISABLED'},403);
  if(!env.WHATSAPP_BRIDGE_URL||!env.WHATSAPP_BRIDGE_SECRET)return json({error:'Serviço de WhatsApp indisponível.'},503);
  const payload=encoded(new TextEncoder().encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+60}))),key=await crypto.subtle.importKey('raw',new TextEncoder().encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']),signature=encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(payload))));
  return (env.WHATSAPP_RELAY?env.WHATSAPP_RELAY.fetch.bind(env.WHATSAPP_RELAY):fetch)(new URL('/'+action,env.WHATSAPP_BRIDGE_URL),{method,headers:{authorization:'Bearer '+payload+'.'+signature,'content-type':'application/json',...(options.async?{prefer:'respond-async'}:{})},...(method==='POST'?{body:JSON.stringify(body)}:{}),redirect:'manual',signal:options.signal||AbortSignal.timeout(action==='send'?60000:20000)});

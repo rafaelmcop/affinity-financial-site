@@ -1,3 +1,4 @@
+import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
 export {pageFeature};
 export const accessFeatures=featureCatalog.map(([key,label])=>[key,label]);
@@ -26,7 +27,7 @@ async function initializeAccessSchema(env){
   env.DB.prepare("INSERT OR IGNORE INTO portalFeatureAccessMeta(version) VALUES('rollout-v1')")
  ]);
 }
-export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];try{features=JSON.parse(row?.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}return {features,available:featureCatalog.map(([key,label,group])=>({key,label,group})),updatedAt:row?.updatedAt||null};}
+export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];try{features=JSON.parse(row?.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}if(!await portalWhatsappAllowed(env,email))features=features.filter(f=>f!=='whatsapp');else if(env.WHATSAPP_PORTAL_ACCESS_MODE==='restricted'&&!features.includes('whatsapp'))features.push('whatsapp');return {features,available:featureCatalog.map(([key,label,group])=>({key,label,group})),updatedAt:row?.updatedAt||null};}
 export async function hasFeature(env,email,feature){
  const features=(await userAccess(env,email)).features;
  const allowed=f=>features.includes(f==='crm'?'policies':f);
@@ -37,7 +38,7 @@ export function procedureFeature(name){
  const [role,op]=name.split('.');if(role==='affiliate')return op==='submitLead'?'referrals':null;
  if(role==='crm')return 'crm';if(role!=='agent')return null;
  if(['getContactSegments','saveContactTags','saveCrmSmartList','deleteCrmSmartList','getCrmBoard','reorderCrmBoardColumns','moveCrmBoardClient','createCrmBoardColumn','createCrmBoardContact'].includes(op))return 'policies';
- if(['login','register','dashboard','pendingCounts','getProfile','updateProfile'].includes(op))return null;
+ if(['login','register','dashboard','pendingCounts','getProfile','updateProfile','getEmailSettings','saveEmailSettings','getFiveRingsConnection','saveFiveRingsConnection'].includes(op))return null;
  if(/FiveRings|fiveRings/.test(op))return 'five_rings';
  if(/Calendly|calendly|Meeting|meeting/.test(op))return 'calendar';
  if(['logSyncStatus','logPortalInteraction'].includes(op))return null;

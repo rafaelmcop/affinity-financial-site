@@ -1,3 +1,4 @@
+import {resolvePolicyAgent} from './agent-hierarchy.js';
 const schema=[`CREATE TABLE IF NOT EXISTS portalMaterials(id TEXT PRIMARY KEY,title TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',filename TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,createdBy TEXT NOT NULL,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,`CREATE TABLE IF NOT EXISTS portalMaterialChunks(materialId TEXT NOT NULL,part INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(materialId,part))`];
 export async function ensureMaterials(db){for(const sql of schema)await db.prepare(sql).run();}
 const policySchema=`CREATE TABLE IF NOT EXISTS policyAgentPages(id TEXT PRIMARY KEY,agentEmail TEXT NOT NULL UNIQUE,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`;
@@ -9,9 +10,9 @@ export async function policyAgentPage(request,env){
  let row=await env.DB.prepare("SELECT a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.id=? AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(id).first();
  let reassigned=false;
  if(!row){
-  const known=await env.DB.prepare('SELECT id FROM policyAgentPages WHERE id=?').bind(id).first();
+  const known=await env.DB.prepare('SELECT id,agentEmail FROM policyAgentPages WHERE id=?').bind(id).first();
   if(!known)return Response.json({error:'Agente não encontrado.'},{status:404});
-  row=await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail FROM adminAccounts WHERE isActive=1 AND status='approved' AND accountType IN ('both','admin') AND (trim(coalesce(phone,''))<>'' OR trim(coalesce(whatsapp,''))<>'' OR trim(coalesce(contactEmail,''))<>'') ORDER BY CASE WHEN lower(email)=lower(?) THEN 0 WHEN accountType='both' THEN 1 ELSE 2 END,lower(email) LIMIT 1").bind(String(env.ADMIN_EMAIL||'')).first();
+  row=await resolvePolicyAgent(env,known.agentEmail);
   if(!row)return Response.json({error:'Atendimento não disponível no momento.'},{status:404});
   reassigned=true;
  }
@@ -46,7 +47,7 @@ export async function materialLibrary(request,env,auth){
   return json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',url:'https://www.affinityfc.org/minha-apolice?agente='+row.id});
  }
  await ensureMaterials(env.DB);
- if(path==='/api/materials'&&request.method==='GET'){const rows=await env.DB.prepare('SELECT id,title,category,description,filename,mime,size,createdAt FROM portalMaterials ORDER BY title COLLATE NOCASE').all();return json({items:rows.results||[],canManage:admin});}
+ if(path==='/api/materials'&&request.method==='GET'){const rows=await env.DB.prepare("SELECT id,title,category,description,filename,mime,size,createdAt FROM portalMaterials WHERE id<>'73a536f7-4949-4893-9bee-e38e05768713' ORDER BY title COLLATE NOCASE").all();return json({items:rows.results||[],canManage:admin});}
  const match=path.match(/^\/api\/materials\/([a-f0-9-]{36})$/);
  if(match&&request.method==='GET'){
   const row=await env.DB.prepare('SELECT * FROM portalMaterials WHERE id=?').bind(match[1]).first();if(!row)return json({error:'Material não encontrado.'},404);

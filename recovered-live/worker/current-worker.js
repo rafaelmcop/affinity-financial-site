@@ -1,3 +1,5 @@
+import {portalWhatsappAllowed,whatsappAccessRoute} from './whatsapp-portal-access.js';
+import {hierarchyRoute,registrationUpline} from './agent-hierarchy.js';
 import {materialLibrary,policyAgentPage} from './material-library.js';
 import {projectCrmProgress,persistLegacyProgress,legacyStage,storedCrmStatus} from './crm-progress.js';
 import {fiveRingsStatus,enrichFiveRingsRecords,uniqueFiveRingsRecords,assertFiveRingsPolicyCoverage,fiveRingsWelcomeEligible} from './five-rings-record-integrity.js';
@@ -43,7 +45,7 @@ import {unresolvedDeliveryFailureSQL,deliveryFailurePresentation} from './delive
 import {copySettings,copyRecipients,sendMeetingCopies,allowsMeetingCopies} from './meeting-copy.js';
 import {Buffer as AssistantMailBuffer} from 'node:buffer';
 import {provisionAssistantEmail,receiveAssistantEmail} from './assistant-communications.js';
-import {sendCorporateEmail,corporateFromEmail} from './corporate-email.js';
+import {sendCorporateEmail,corporateFromEmail,corporateSender} from './corporate-email.js';
 import {domainEmailRoute} from './domain-email.js';
 import {optionalFiveRingsCredits} from './five-rings-credit-status.js';
 import {claimBrowserChunk,finishBrowserChunk} from './five-rings-browser-job.js';
@@ -216,6 +218,7 @@ async function whatsappRoute(request, env, auth) {
     if (!email) return page ? Response.redirect(new URL("/agentes/login", url), 302) : json2({ error: "Entre novamente no portal." }, 401);
     const { account } = await auth.access(email, env);
     if (!account || !Number(account.isActive) || account.status !== "approved" || !["agent", "both"].includes(account.accountType)) return json2({ error: "Acesso restrito ao agente." }, 403);
+    if(!await portalWhatsappAllowed(env,email))return page?Response.redirect(new URL('/agentes/materiais',url),302):json2({error:'WhatsApp do portal não liberado. Use o aplicativo do seu computador.',code:'PORTAL_WHATSAPP_DISABLED'},403);
     if (page) return new Response(agentWhatsAppPage(), { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
     const action = url.pathname.split("/").at(-1), method = request.method;
     if (action === "contacts" && method === "GET") {
@@ -42942,19 +42945,20 @@ async function runProcedure(name, input, request, env, delegation=null) {
     const email = String(input.email ?? "").trim().toLowerCase(), applicantName = String(input.name ?? "").trim(), phone = String(input.phone ?? "").trim(), password = String(input.password ?? "");
     if (!validEmail(email) || applicantName.length < 2 || !validStrongPassword(password))
       return trpcError("Revise os dados e use uma senha forte");
+    let selectedUpline;try{selectedUpline=await registrationUpline(env,input.uplineId);}catch(error){return trpcError(error.message);}
     const existing = await env.DB.prepare(
       "SELECT id FROM adminAccounts WHERE lower(email)=?"
     ).bind(email).first();
     if (existing)
       return trpcError("Este e-mail j\xE1 est\xE1 cadastrado", "CONFLICT", 409);
-    await env.DB.prepare(
+    await env.DB.batch([env.DB.prepare(
       "INSERT INTO adminAccounts (email,name,phone,accountType,adminRole,passwordHash,status,isActive) VALUES (?,?,?,'agent','standard',?,'pending',0)"
     ).bind(
       email,
       applicantName,
       phone || null,
       await bcryptjs_default.hash(password, 12)
-    ).run();
+    ),env.DB.prepare('INSERT INTO agentHierarchy(agentEmail,uplineEmail) VALUES(?,?)').bind(email,selectedUpline.email.toLowerCase())]);
     await sendEmailIfConfigured(env, {
       to: env.ADMIN_EMAIL,
       subject: "Nova conta de agente aguardando aprova\xE7\xE3o",
@@ -45626,6 +45630,10 @@ Affinity Financial Consulting`,
     const owner = adminEmail.toLowerCase(), current = await env.DB.prepare(
       "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
     ).bind(owner).first(), clear = String(input.password ?? "").replace(/\s/g, ""), password = clear ? await encryptSmtpPassword(clear, env.JWT_SECRET) : String(current?.password ?? "");
+    const requestedFrom=String(input.fromEmail||'').trim().toLowerCase();
+    if(/@(?:team\.)?affinityfc\.org$/.test(requestedFrom)&&requestedFrom!==String(current?.fromEmail||'').toLowerCase()){
+      const assigned=await corporateSender(env,owner);if(assigned?.address?.toLowerCase()!==requestedFrom)return trpcError('Somente o Admin pode criar e atribuir um e-mail corporativo. Configure sua conta pessoal ou solicite a atribuição ao Admin.','FORBIDDEN',403);
+    }
     if (!String(input.host ?? "").trim() || !validEmail(String(input.user ?? "")) || !validEmail(String(input.fromEmail ?? "")) || !password.startsWith("v1."))
       return trpcError(
         "Informe todos os dados e uma senha espec\xEDfica de aplicativo"
@@ -47264,6 +47272,10 @@ __name2(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async email(message,env,ctx){await receiveAssistantEmail(message,env,async raw=>require_mailparser().simpleParser(AssistantMailBuffer.from(raw)));},
   async fetch(request, env, ctx) {
+    const whatsappAccessResponse=await whatsappAccessRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
+    if(whatsappAccessResponse)return secureResponse(whatsappAccessResponse,{privateData:true});
+    const hierarchyResponse=await hierarchyRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
+    if(hierarchyResponse)return secureResponse(hierarchyResponse,{privateData:true});
     const policyAgentResponse=await policyAgentPage(request,env);
     if(policyAgentResponse)return secureResponse(policyAgentResponse);
     const materialsResponse=await materialLibrary(request,env,{email:getAdminEmail,access:getAdminAccess});
@@ -48155,11 +48167,11 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
 
  if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=12" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=13" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=12"></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261105-materials-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261105-materials-1');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=1" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261105-materials-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261105-materials-1');}}).transform(response);
  }
  return response;
 };
