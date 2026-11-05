@@ -2,6 +2,19 @@
 (async()=>{
  const select=document.getElementById('policy-agent'),status=document.getElementById('agent-status'),contact=document.getElementById('agent-contact'),nav=document.getElementById('agent-nav'),share=document.getElementById('agent-share'),link=document.getElementById('agent-page-link');
  if(!select)return;
+ const directId=new URLSearchParams(location.search).get('agente');
+ if(/^[a-f0-9-]{36}$/.test(directId||'')){
+  select.hidden=true;document.querySelector('label[for="policy-agent"]').hidden=true;share.hidden=true;
+  try{const r=await fetch('/api/policy-agent?id='+encodeURIComponent(directId));if(!r.ok)throw Error();const agent=await r.json();
+   document.getElementById('agent-heading').textContent=`Conte com ${agent.name}`;
+   document.getElementById('agent-description').textContent=[agent.name,agent.phone,agent.email].filter(Boolean).join(' · ');
+   const phone=String(agent.phone||'').replace(/[^+0-9]/g,''),email=String(agent.email||'');
+   const target=phone?'tel:'+phone:/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?'mailto:'+email:'';
+   contact.hidden=!target;if(target){contact.href=target;contact.textContent=phone?`Ligar para ${agent.name}`:`Enviar e-mail para ${agent.name}`;}
+   nav.href='#meu-agente';
+  }catch{status.textContent='O contato deste agente não está disponível. Consulte os dados impressos na sua etiqueta.';}
+  return;
+ }
  try{
   const response=await fetch('/api/trpc/calendly.publicAgents');if(!response.ok)throw Error();
   const payload=await response.json(),agents=payload?.result?.data?.json;if(!Array.isArray(agents))throw Error();

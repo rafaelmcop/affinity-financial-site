@@ -1,5 +1,15 @@
 const schema=[`CREATE TABLE IF NOT EXISTS portalMaterials(id TEXT PRIMARY KEY,title TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',filename TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,createdBy TEXT NOT NULL,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,`CREATE TABLE IF NOT EXISTS portalMaterialChunks(materialId TEXT NOT NULL,part INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(materialId,part))`];
 export async function ensureMaterials(db){for(const sql of schema)await db.prepare(sql).run();}
+const policySchema=`CREATE TABLE IF NOT EXISTS policyAgentPages(id TEXT PRIMARY KEY,agentEmail TEXT NOT NULL UNIQUE,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`;
+export async function policyAgentPage(request,env){
+ const url=new URL(request.url);if(url.pathname!=='/api/policy-agent')return null;
+ if(request.method!=='GET')return Response.json({error:'Método inválido.'},{status:405});
+ const id=url.searchParams.get('id')||'';if(!/^[a-f0-9-]{36}$/.test(id))return Response.json({error:'Agente não encontrado.'},{status:404});
+ await env.DB.prepare(policySchema).run();
+ const row=await env.DB.prepare("SELECT a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.id=? AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(id).first();
+ if(!row)return Response.json({error:'Agente não disponível.'},{status:404});
+ return Response.json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||''},{headers:{'cache-control':'no-store'}});
+}
 const json=(data,status=200)=>Response.json(data,{status});
 export function validateMaterial(body){
  const title=String(body.title||'').trim(),category=String(body.category||'Outros').trim(),description=String(body.description||'').trim(),filename=String(body.filename||'').replace(/[\x00-\x1f\x7f\/\\"]/g,'_').slice(0,180);
@@ -21,6 +31,13 @@ export async function materialLibrary(request,env,auth){
  const admin=['admin','both'].includes(account.accountType);
  if(path==='/admin/materiais'&&!admin)return json({error:'Somente Admin.'},403);
  if(['/agentes/materiais','/admin/materiais','/material-library.html'].includes(path))return env.ASSETS.fetch(new Request(new URL('/material-library.html',url),request));
+ if(path==='/api/materials/personalization'&&request.method==='GET'){
+  if(!['agent','both'].includes(account.accountType))return json({error:'Entre com uma conta de agente para gerar a própria etiqueta.'},403);
+  await env.DB.prepare(policySchema).run();
+  await env.DB.prepare('INSERT OR IGNORE INTO policyAgentPages(id,agentEmail) VALUES(?,?)').bind(crypto.randomUUID(),email.toLowerCase()).run();
+  const row=await env.DB.prepare("SELECT p.id,a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE lower(p.agentEmail)=?").bind(email.toLowerCase()).first();
+  return json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',url:'https://www.affinityfc.org/minha-apolice?agente='+row.id});
+ }
  await ensureMaterials(env.DB);
  if(path==='/api/materials'&&request.method==='GET'){const rows=await env.DB.prepare('SELECT id,title,category,description,filename,mime,size,createdAt FROM portalMaterials ORDER BY title COLLATE NOCASE').all();return json({items:rows.results||[],canManage:admin});}
  const match=path.match(/^\/api\/materials\/([a-f0-9-]{36})$/);

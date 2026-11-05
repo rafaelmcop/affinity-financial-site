@@ -1,4 +1,4 @@
-import {materialLibrary} from './material-library.js';
+import {materialLibrary,policyAgentPage} from './material-library.js';
 import {projectCrmProgress,persistLegacyProgress,legacyStage,storedCrmStatus} from './crm-progress.js';
 import {fiveRingsStatus,enrichFiveRingsRecords,uniqueFiveRingsRecords,assertFiveRingsPolicyCoverage,fiveRingsWelcomeEligible} from './five-rings-record-integrity.js';
 import {contactSegmentation} from './contact-segmentation.js';
@@ -47264,6 +47264,8 @@ __name2(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async email(message,env,ctx){await receiveAssistantEmail(message,env,async raw=>require_mailparser().simpleParser(AssistantMailBuffer.from(raw)));},
   async fetch(request, env, ctx) {
+    const policyAgentResponse=await policyAgentPage(request,env);
+    if(policyAgentResponse)return secureResponse(policyAgentResponse);
     const materialsResponse=await materialLibrary(request,env,{email:getAdminEmail,access:getAdminAccess});
     if(materialsResponse)return secureResponse(materialsResponse,{privateData:true});
     const preferenceResponse = await preferenceRoute(request, env);
