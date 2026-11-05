@@ -47390,6 +47390,7 @@ var cloudflare_staging_default = {
       url.pathname = "/agent-email-settings.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)), { privateData: true });
     }
+    if(url.pathname==='/minha-apolice'||url.pathname==='/minha-apolice/'){url.pathname='/minha-apolice.html';return secureResponse(await env.ASSETS.fetch(new Request(url.toString(),request)));}
     if (url.pathname === "/agendar") {
       url.pathname = "/schedule.html";
       return secureResponse(await env.ASSETS.fetch(new Request(url.toString(), request)));

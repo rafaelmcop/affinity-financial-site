@@ -1,0 +1,1 @@
+(()=>{const logo=document.getElementById('company-logo');if(!logo)return;fetch('/api/site-branding').then(r=>r.ok?r.json():null).then(data=>{const src=data?.images?.logo;if(!/^\/site-brand\/image\/logo\?v=[a-f0-9-]+$/.test(src||''))return;const image=new Image();image.onload=()=>{logo.src=src;};image.src=src;}).catch(()=>{});})();
