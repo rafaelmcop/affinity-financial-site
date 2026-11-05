@@ -45889,10 +45889,12 @@ Affinity Financial Consulting`,
   if (name === "agent.markCalendlyAttendance") {
     await ensureCalendlyTables(env);
     const owner = adminEmail.toLowerCase(), id = Number(input.id || 0), status = input.status === "completed" ? "completed" : "no_show";
-    const meeting = await env.DB.prepare("SELECT id FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
+    const meeting = await env.DB.prepare("SELECT id,clientId FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
     if (!meeting) return trpcError("Reuni\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
     const crmCurrent=await meetingCrm(env,owner,{meetingId:id}),crmTarget=status==='completed'?'proposal_sent':'no_show';
-    if(crmCurrent.progress.stage!==crmTarget)await meetingCrm(env,owner,{meetingId:id,stage:crmTarget,followUpDate:crmCurrent.progress.followUpDate||'',notes:crmCurrent.progress.notes||''},delegation?.actorEmail||owner,true);
+    const crmCard=meeting.clientId?await env.DB.prepare('SELECT columnKey FROM crmBoardCards WHERE owner=? AND clientId=?').bind(owner,meeting.clientId).first():null;
+    const preserveProgress=status==='completed'&&(!['scheduled','attended','no_show'].includes(crmCurrent.progress.stage)||crmCard&&!['new','scheduled','attended','no_show'].includes(crmCard.columnKey));
+    if(!preserveProgress&&crmCurrent.progress.stage!==crmTarget)await meetingCrm(env,owner,{meetingId:id,stage:crmTarget,followUpDate:crmCurrent.progress.followUpDate||'',notes:crmCurrent.progress.notes||''},delegation?.actorEmail||owner,true);
     await env.DB.prepare("UPDATE calendlyMeetings SET status=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?").bind(status, id, owner).run();
     return trpcResult({ success: true });
   }
