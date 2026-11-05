@@ -274,7 +274,7 @@ function E() {
                 className: "mb-2 ml-5 space-y-1 border-l border-gold/25 pl-3",
                 children: [
                   ["Perfil e dados pessoais", "/agentes/configuracoes#perfil"],
-                  ["Agenda e Calendly", "/agentes/configuracoes-agenda"],
+                  ["Conectar minha agenda", "/agentes/conectar-agenda"],
                   ["Página pública do agente", "/agentes/pagina-publica"],
                   ["E-mail", "/agentes/configuracoes#email"],
                   ["Five Rings", "/agentes/configuracoes#five-rings"],
@@ -314,7 +314,7 @@ function E() {
           e.jsxs("div", { className: "border-b border-white/10 px-3 py-3", children: [e.jsx("p", { className: "font-bold text-gold", children: profileName }), e.jsx("p", { className: "text-xs text-gray-400", children: Q.data?.email || "Portal do Agente" })] }),
           e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes?view=profile"), className: "mt-2 w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Perfil" }),
           e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes?view=settings"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Configurações" }),
-          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/configuracoes-agenda"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Agenda e Calendly" }),
+          e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/conectar-agenda"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Conectar minha agenda" }),
           e.jsx("button", { type: "button", onClick: () => window.location.assign("/agentes/pagina-publica"), className: "w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-white/10", children: "Página pública do agente" }),
           portalAccess.data?.accountType === "both" && e.jsx("button", { type: "button", onClick: () => { localStorage.setItem("adminSession", JSON.stringify(portalAccess.data)); window.location.assign("/admin/dashboard"); }, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-gold hover:bg-white/10", children: "Painel administrativo" }),
           e.jsx("button", { type: "button", onClick: logoutToHome, className: "w-full rounded-lg px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10", children: "Sair" })
