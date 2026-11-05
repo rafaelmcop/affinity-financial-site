@@ -1,3 +1,4 @@
+import {relayPaymentMail,backfillAssistantPaymentMail} from './assistant-payment-mail.js';
 import {transientApplicationMail} from './transient-application-mail.js';
 import {emailOAuthRoute,emailOAuthToken,disconnectEmailOAuth} from './email-oauth.js';
 import {enqueueApplicationLifecycle,runApplicationLifecycle,retentionForApplication} from './application-lifecycle.js';
@@ -39267,6 +39268,7 @@ async function syncIcloudInbox(env, agentEmail) {
       if(bounce){await recordDeliveryNotice(env,owner,{...parsed,externalId},bounce);if(await purgeRecordedDeliveryReport(env,owner,externalId,uid,command=>client.command(`A${sequence++}`,command))){imported++;continue;}}
       if (!bounce&&!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
+      await relayPaymentMail(env,owner,{...parsed,externalId});
       const topic = bounce?"delivery":classifyMailboxTopic(String(parsed.subject || ""), body);
       await env.DB.prepare(
         "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,paymentStatus,actionStatus,actionDetail,topic) VALUES (?,?,?,?, 'received',?,?,?,?,?,?,?,?,?,?)"
@@ -39372,6 +39374,7 @@ async function syncAllIcloudInboxes(env) {
   ).all();
   await Promise.all((rows.results || []).map(async (row) => {
     try {
+      await backfillAssistantPaymentMail(env,String(row.agentEmail));
       await syncIcloudInbox(env, String(row.agentEmail));
     } catch (error) {
       console.error("icloud_sync_failed", row.agentEmail, error);
