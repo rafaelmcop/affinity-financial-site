@@ -11,6 +11,13 @@
    const phone=String(agent.phone||'').replace(/[^+0-9]/g,''),email=String(agent.email||'');
    const target=phone?'tel:'+phone:/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)?'mailto:'+email:'';
    contact.hidden=!target;if(target){contact.href=target;contact.textContent=phone?`Ligar para ${agent.name}`:`Enviar e-mail para ${agent.name}`;}
+   if(agent.business?.affinityTeam===false){
+    const company=agent.business.company||agent.name;const logo=document.getElementById('company-logo');if(logo){const text=document.createElement('strong');text.textContent=company;text.style.fontSize='24px';logo.replaceWith(text);}
+    document.querySelector('.intro').textContent='Obrigado pela confiança. Acompanhe sua apólice pelo aplicativo e conte com '+agent.name+' para orientar seus próximos passos.';
+    const footer=document.querySelector('footer a');if(footer){footer.textContent=company;footer.href='#meu-agente';}
+    document.querySelector('.welcome-tip>span').textContent=location.href;document.querySelector('.welcome-help .eyebrow').textContent='CONTE COM SEU AGENTE';
+    for(const a of document.querySelectorAll('.welcome-nav a[href="/"]'))a.href='#acesso';
+   }
    nav.href='#meu-agente';if(agent.reassigned)status.textContent='A equipe administrativa da Affinity está à disposição para acompanhar sua apólice.';
   }catch{status.textContent='O contato deste agente não está disponível. Consulte os dados impressos na sua etiqueta.';}
   return;

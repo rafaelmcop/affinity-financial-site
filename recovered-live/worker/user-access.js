@@ -38,7 +38,7 @@ export function procedureFeature(name){
  const [role,op]=name.split('.');if(role==='affiliate')return op==='submitLead'?'referrals':null;
  if(role==='crm')return 'crm';if(role!=='agent')return null;
  if(['getContactSegments','saveContactTags','saveCrmSmartList','deleteCrmSmartList','getCrmBoard','reorderCrmBoardColumns','moveCrmBoardClient','createCrmBoardColumn','createCrmBoardContact'].includes(op))return 'policies';
- if(['login','register','dashboard','pendingCounts','getProfile','updateProfile','getEmailSettings','saveEmailSettings','getFiveRingsConnection','saveFiveRingsConnection'].includes(op))return null;
+ if(['login','register','dashboard','pendingCounts','getProfile','updateProfile','getEmailSettings','saveEmailSettings','verifyEmailConnection','getFiveRingsConnection','saveFiveRingsConnection'].includes(op))return null;
  if(/FiveRings|fiveRings/.test(op))return 'five_rings';
  if(/Calendly|calendly|Meeting|meeting/.test(op))return 'calendar';
  if(['logSyncStatus','logPortalInteraction'].includes(op))return null;

@@ -92,7 +92,7 @@ const confirmPortalMessage=message=>import('/portal-interactions.js?v=12').then(
       let personalSignature = meetingAgentSignature(profile);
       if(document.documentElement.dataset.assistant==='true'){const r=await fetch('/api/assistants/signature',{credentials:'same-origin',cache:'no-store'});if(!r.ok)throw Error('Não foi possível carregar sua assinatura. Abra Minha assinatura e tente novamente.');personalSignature=(await r.json()).text;}
       const agentName = String(profile?.name || "").trim();
-      const meetingHost = agentName ? `${agentName} da Affinity Financial Consulting` : "a equipe da Affinity Financial Consulting";
+      const meetingHost = profile.business?.affinityTeam===false?agentName+(profile.business.company&&profile.business.company!==agentName?" de "+profile.business.company:""):agentName ? `${agentName} da Affinity Financial Consulting` : "a equipe da Affinity Financial Consulting";
       const dayFormat = new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'});
       const meetingWhen = dayFormat.format(new Date(meeting.startTime)) === dayFormat.format(new Date()) ? 'de hoje' : 'do dia '+new Intl.DateTimeFormat('pt-BR',{timeZone:'America/New_York',day:'2-digit',month:'2-digit'}).format(new Date(meeting.startTime));
       const firstMessage = `Olá, ${firstName}!\n\nPassando para lembrar da nossa reunião ${meetingWhen}, às ${time(meeting.startTime)} (horário de Nova York), com ${meetingHost}.${zoom ? `\n\nAcesse a reunião pelo Zoom:\n${zoom}` : ""}\n\nNos vemos em breve!\n\n${personalSignature}`;

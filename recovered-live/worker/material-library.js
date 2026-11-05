@@ -1,3 +1,4 @@
+import {agentBusiness} from './agent-business.js';
 import {resolvePolicyAgent} from './agent-hierarchy.js';
 const schema=[`CREATE TABLE IF NOT EXISTS portalMaterials(id TEXT PRIMARY KEY,title TEXT NOT NULL,category TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',filename TEXT NOT NULL,mime TEXT NOT NULL,size INTEGER NOT NULL,sha256 TEXT NOT NULL,createdBy TEXT NOT NULL,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,`CREATE TABLE IF NOT EXISTS portalMaterialChunks(materialId TEXT NOT NULL,part INTEGER NOT NULL,data TEXT NOT NULL,PRIMARY KEY(materialId,part))`];
 export async function ensureMaterials(db){for(const sql of schema)await db.prepare(sql).run();}
@@ -7,7 +8,7 @@ export async function policyAgentPage(request,env){
  if(request.method!=='GET')return Response.json({error:'Método inválido.'},{status:405});
  const id=url.searchParams.get('id')||'';if(!/^[a-f0-9-]{36}$/.test(id))return Response.json({error:'Agente não encontrado.'},{status:404});
  await env.DB.prepare(policySchema).run();
- let row=await env.DB.prepare("SELECT a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.id=? AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(id).first();
+ let row=await env.DB.prepare("SELECT a.email AS owner,a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE p.id=? AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(id).first();
  let reassigned=false;
  if(!row){
   const known=await env.DB.prepare('SELECT id,agentEmail FROM policyAgentPages WHERE id=?').bind(id).first();
@@ -16,7 +17,7 @@ export async function policyAgentPage(request,env){
   if(!row)return Response.json({error:'Atendimento não disponível no momento.'},{status:404});
   reassigned=true;
  }
- return Response.json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',...(reassigned?{reassigned:true}:{})},{headers:{'cache-control':'no-store'}});
+ const business=row.owner?await agentBusiness(env,row.owner):null;return Response.json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',...(business?{business:{affinityTeam:business.affinityTeam,company:business.company,website:business.website}}:{}),...(reassigned?{reassigned:true}:{})},{headers:{'cache-control':'no-store'}});
 }
 const json=(data,status=200)=>Response.json(data,{status});
 export function validateMaterial(body){
@@ -44,7 +45,7 @@ export async function materialLibrary(request,env,auth){
   await env.DB.prepare(policySchema).run();
   await env.DB.prepare('INSERT OR IGNORE INTO policyAgentPages(id,agentEmail) VALUES(?,?)').bind(crypto.randomUUID(),email.toLowerCase()).run();
   const row=await env.DB.prepare("SELECT p.id,a.name,a.phone,a.whatsapp,a.contactEmail FROM policyAgentPages p JOIN adminAccounts a ON lower(a.email)=lower(p.agentEmail) WHERE lower(p.agentEmail)=?").bind(email.toLowerCase()).first();
-  return json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',url:'https://www.affinityfc.org/minha-apolice?agente='+row.id});
+  const business=await agentBusiness(env,email);return json({name:row.name,phone:row.phone||row.whatsapp||'',email:row.contactEmail||'',affinityTeam:business.affinityTeam,company:business.company,website:business.website,url:(business.affinityTeam?'https://www.affinityfc.org':'https://portal.affinityfc.org')+'/minha-apolice?agente='+row.id});
  }
  await ensureMaterials(env.DB);
  if(path==='/api/materials'&&request.method==='GET'){const rows=await env.DB.prepare("SELECT id,title,category,description,filename,mime,size,createdAt FROM portalMaterials WHERE id<>'73a536f7-4949-4893-9bee-e38e05768713' ORDER BY title COLLATE NOCASE").all();return json({items:rows.results||[],canManage:admin});}

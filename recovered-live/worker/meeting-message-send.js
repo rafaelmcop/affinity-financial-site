@@ -1,3 +1,4 @@
+import {agentBusiness,businessText} from './agent-business.js';
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {emailDefinitelyNotSent} from './smtp-runtime.js';
 import {meetingSendTransport} from './meeting-send-transport.js';
@@ -5,6 +6,7 @@ export async function sendMeetingMessage(env,owner,meeting,input,attachments,sen
  if(input.confirmed!==true)throw Object.assign(Error('Confirme o envio antes de continuar.'),{status:400});
  const requestId=String(input.requestId||'');if(!/^[a-f0-9-]{36}$/.test(requestId))throw Object.assign(Error('Identificador de envio inválido.'),{status:400});
  const channel=input.channel==='whatsapp'?'whatsapp':'email';
+ if(channel==='whatsapp')input={...input,message:businessText(input.message,await agentBusiness(env,transport.sender||owner))};
  if(channel==='whatsapp'&&!await portalWhatsappAllowed(env,transport.sender||owner))throw Object.assign(Error('WhatsApp do portal não liberado. Abra a mensagem no aplicativo.'),{status:403});
  if(channel==='whatsapp'&&(String(input.message||'').length>4000||attachments.some(f=>f.content.length>11200000)))throw Object.assign(Error('Use uma mensagem de até 4.000 caracteres e arquivos de até 7 MB para WhatsApp.'),{status:400});
  if(channel==='whatsapp'&&(!env.WHATSAPP_BRIDGE_URL||String(env.WHATSAPP_BRIDGE_SECRET||'').length<32))throw Object.assign(Error('A conexão de WhatsApp não está configurada.'),{status:503});

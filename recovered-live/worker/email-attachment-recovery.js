@@ -1,3 +1,4 @@
+import {transientApplicationMail} from './transient-application-mail.js';
 import {emailArchiveSchema,archiveRecoveredAttachments,messageKey} from './email-attachment-archive.js';
 import {enrichArchivedDocuments} from './email-document-facts.js';
 export async function recoverEmailAttachments(env,services){
@@ -10,7 +11,7 @@ export async function recoverEmailAttachments(env,services){
    const search=await client.command('EA'+sequence++,`UID SEARCH HEADER Message-ID ${services.quote('<'+key+'>')}`),line=search.text.match(/(?:^|\r\n)\* SEARCH([^\r\n]*)/i)?.[1]||'';
    for(const uid of line.trim().split(/\s+/).filter(x=>/^\d+$/.test(x)).slice(-3)){
     const fetched=await client.command('EA'+sequence++,`UID FETCH ${uid} (BODY.PEEK[])`),source=services.literal(fetched.bytes);if(!source)continue;
-    const parsed=await services.parse(source);if(messageKey(parsed.messageId)!==key)continue;
+    const parsed=await services.parse(source);if(transientApplicationMail(parsed)){found=true;break;}if(messageKey(parsed.messageId)!==key)continue;
     const files=(parsed.attachments||[]).filter(file=>file.contentDisposition!=='inline');if(!files.length)continue;
     await archiveRecoveredAttachments(env,job.owner,key,job.clientId,files);found=true;await enrichArchivedDocuments(env,job.owner,key);break;
    }if(found)break;

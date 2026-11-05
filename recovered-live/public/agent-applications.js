@@ -362,7 +362,7 @@ function describeApplicationParent(row,parent,feminine=false){
     if (!p?.result?.data || !("json" in p.result.data))
       throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
     const data = p.result?.data?.json;
-    if (name === "agent.submitApplication" && data?.reviewInvite)
+    if (name === "agent.submitApplication" && data?.reviewInvite&&!data.reviewEmailScheduled)
       setTimeout(
         async () => {
           try {
@@ -792,6 +792,9 @@ function describeApplicationParent(row,parent,feminine=false){
   async function edit(row = {}) {
     try {
       if (row.id) row = await api("agent.getApplication", { id: row.id });
+      document.getElementById('application-retention-current')?.remove();
+      if(row.retention){const warning=document.createElement('p');warning.id='application-retention-current';warning.setAttribute('role','status');warning.style.cssText='padding:14px;background:#fff6db;color:#14233b;border:1px solid #b98b26;border-radius:8px';warning.textContent=row.retention.label+' · Restam '+row.retention.daysRemaining+' dia(s). Exclusão: '+new Date(row.retention.expiresAt).toLocaleString('pt-BR',{timeZone:'America/New_York'})+' (Nova York).';document.getElementById('form-card')?.prepend(warning);}
+
       if (
         row.personalWeeklyExpenses == null &&
         row.personalMonthlyExpenses != null
@@ -1009,7 +1012,7 @@ function describeApplicationParent(row,parent,feminine=false){
       storedPdfPages;
     w.document.open();
     w.document.write(
-      `<!doctype html><meta charset="utf-8"><title>Ficha cadastral — ${esc(row.clientName)}</title><style>body{font:12px Arial;margin:34px;color:#111}header{border-bottom:3px solid #d8b22f;margin-bottom:20px;padding-bottom:12px}h1{color:#17345c;margin:0}h2{color:#17345c;margin:22px 0 7px;page-break-after:avoid}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top}th{width:34%;background:#eef2f6}.document-page{page-break-before:always;text-align:center}.document-page img{max-width:100%;max-height:900px;object-fit:contain}footer{margin-top:24px;border-top:1px solid #bbb;padding-top:10px}.pdf-actions{position:sticky;bottom:10px;text-align:right}.pdf-actions button{background:#d8b22f;border:0;border-radius:8px;padding:12px 18px;font-weight:700}@media print{.pdf-actions{display:none}}</style><header><h1>Affinity Financial Consulting — Ficha cadastral</h1><p>Cliente: <b>${esc(row.clientName)}</b></p></header>${html}<footer>Agente responsável: <b>${esc(session.name || session.agentName || "Não informado")}</b></footer><div class="pdf-actions"><button onclick="window.print()">Salvar como PDF</button></div>`
+      `<!doctype html><meta charset="utf-8"><title>Ficha cadastral — ${esc(row.clientName)}</title><style>body{font:12px Arial;margin:34px;color:#111}header{border-bottom:3px solid #d8b22f;margin-bottom:20px;padding-bottom:12px}h1{color:#17345c;margin:0}h2{color:#17345c;margin:22px 0 7px;page-break-after:avoid}table{width:100%;border-collapse:collapse;page-break-inside:avoid}th,td{border:1px solid #bbb;padding:7px;text-align:left;vertical-align:top}th{width:34%;background:#eef2f6}.document-page{page-break-before:always;text-align:center}.document-page img{max-width:100%;max-height:900px;object-fit:contain}footer{margin-top:24px;border-top:1px solid #bbb;padding-top:10px}.pdf-actions{position:sticky;bottom:10px;text-align:right}.pdf-actions button{background:#d8b22f;border:0;border-radius:8px;padding:12px 18px;font-weight:700}@media print{.pdf-actions{display:none}}</style><header><h1>${esc(row.business?.company||"Affinity Financial Consulting")} — Ficha cadastral</h1><p>Cliente: <b>${esc(row.clientName)}</b></p></header>${html}<footer>Agente responsável: <b>${esc(session.name || session.agentName || "Não informado")}</b></footer><div class="pdf-actions"><button onclick="window.print()">Salvar como PDF</button></div>`
     );
     w.document.close();
     // Printing on a fixed timer could run before large passport pages had been
@@ -1058,7 +1061,7 @@ function describeApplicationParent(row,parent,feminine=false){
     const addPage = () => {
       page = pdfDocument.addPage(pageSize);
       y = 750;
-      page.drawText("Affinity Financial Consulting - Ficha cadastral", { x: margin, y, size: 16, font: bold, color: rgb(0.09, 0.2, 0.36) });
+      page.drawText((row.business?.company||"Affinity Financial Consulting")+" - Ficha cadastral", { x: margin, y, size: 16, font: bold, color: rgb(0.09, 0.2, 0.36) });
       y -= 25;
       page.drawText(pdfText(`Cliente: ${row.clientName || "Não informado"}`), { x: margin, y, size: 10, font: bold });
       y -= 26;
@@ -1403,7 +1406,7 @@ function describeApplicationParent(row,parent,feminine=false){
       ? data
           .map(
             r =>
-              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}<div class="actions"><button data-access-feature="application_create" data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button data-access-feature="application_create" class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
+              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}${r.retention?`<p class="application-retention" role="status" style="padding:12px;border:1px solid #b98b26;border-radius:8px;background:#fff6db;color:#14233b">${esc(r.retention.label)} · Restam ${Number(r.retention.daysRemaining)} dia(s). Exclusão prevista: ${esc(new Date(r.retention.expiresAt).toLocaleString('pt-BR',{timeZone:'America/New_York'}))}.</p>`:""}<div class="actions"><button data-access-feature="application_create" data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button data-access-feature="application_create" class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
       : '<div class="empty">'+(query?'Nenhuma aplicação encontrada para esta busca.':'Nenhuma aplicação nesta categoria.')+'</div>';
@@ -1572,7 +1575,7 @@ function describeApplicationParent(row,parent,feminine=false){
       if(newApplicationView) $("applications-page-title").textContent="Aplicação concluída";
       await load();
       notice(
-        "Aplicação concluída e PDF gerado. O link da avaliação também foi criado."
+        "Aplicação concluída e PDF gerado. O pedido de avaliação por e-mail foi programado pela plataforma."
       );
     } catch (error) {
       notice(error.message, true);

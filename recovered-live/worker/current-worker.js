@@ -1,3 +1,8 @@
+import {transientApplicationMail} from './transient-application-mail.js';
+import {emailOAuthRoute,emailOAuthToken,disconnectEmailOAuth} from './email-oauth.js';
+import {enqueueApplicationLifecycle,runApplicationLifecycle,retentionForApplication} from './application-lifecycle.js';
+import {publicAgentLabels,reviewAttributionRoute} from './review-attribution.js';
+import {businessRoute,businessSchema,externalUplineInput,externalReviewPending,agentBusiness,businessMail,businessSignature} from './agent-business.js';
 import {portalWhatsappAllowed,whatsappAccessRoute} from './whatsapp-portal-access.js';
 import {hierarchyRoute,registrationUpline} from './agent-hierarchy.js';
 import {materialLibrary,policyAgentPage} from './material-library.js';
@@ -606,22 +611,26 @@ async function sendEmail(env, options) {
     requireTLS: port === 587
   });
   await transporter.sendMail({
-    from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
+    from: `"${String(platformMail?"Affinity Portal":config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
     ...options
   });
 }
 __name(sendEmail, "sendEmail");
+async function agentSmtpAuth(env,owner,config){return await emailOAuthToken(env,owner,{open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET)})||{user:String(config.user),pass:await decryptSmtpPassword(String(config.password),env.JWT_SECRET)};}
+async function agentImapCommand(env,owner,config,password){const auth=await emailOAuthToken(env,owner,{open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET)});return auth?'AUTHENTICATE XOAUTH2 '+Buffer2.from('user='+auth.user+'\x01auth=Bearer '+auth.accessToken+'\x01\x01').toString('base64'):`LOGIN ${quoteImap(String(config.imapUser||config.user))} ${quoteImap(password)}`;}
 async function sendAgentEmail(env, agentEmail, options) {
-  const owner=agentEmail.toLowerCase(),{historyClientId,assistantIdentity,...mailOptions}=options;
+  const owner=agentEmail.toLowerCase(),{historyClientId,assistantIdentity,platformMail,transientAttachments,...mailOptions}=options;
+  Object.assign(mailOptions,await businessMail(env,owner,mailOptions));
   let clientId=Number(historyClientId)||null;if(mailOptions.attachments?.length&&!clientId&&typeof mailOptions.to==='string'){const customers=(await env.DB.prepare('SELECT id FROM crmClients WHERE lower(assignedAdminEmail)=? AND lower(trim(email))=? LIMIT 2').bind(owner,mailOptions.to.trim().toLowerCase()).all()).results;if(customers.length===1)clientId=Number(customers[0].id);}
-  const archiveIds=await reserveEmailAttachments(env,owner,mailOptions.attachments,clientId);
+  const archiveIds=transientAttachments?[]:await reserveEmailAttachments(env,owner,mailOptions.attachments,clientId);
   const finish=async sent=>{sent={...sent,messageId:sent.messageId||('portal:'+crypto.randomUUID())};if(archiveIds.length){try{await finalizeEmailAttachments(env,owner,archiveIds,sent.messageId,clientId);}catch{sent.attachmentArchivePending=true;console.error('email_attachment_reading_pending');}}return sent;};
   if(assistantIdentity)return finish(await sendAssistantMessageEmail(env,owner,assistantIdentity,mailOptions));
-  const corporate=await sendCorporateEmail(env,agentEmail,mailOptions);if(corporate)return finish(corporate);
+  const corporate=platformMail?null:await sendCorporateEmail(env,agentEmail,mailOptions);if(corporate)return finish(corporate);
   const config = await env.DB.prepare(
     "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
   ).bind(agentEmail.toLowerCase()).first();
   if (!config) throw new Error("Configura\xE7\xE3o de e-mail do agente incompleta");
+  if(platformMail&&!/@(?:team\.)?affinityfc\.org$/i.test(String(config.fromEmail||"")))throw new Error("Configure um remetente da Affinity para as mensagens da plataforma.");
   const password = await decryptSmtpPassword(
     String(config.password),
     env.JWT_SECRET
@@ -630,9 +639,10 @@ async function sendAgentEmail(env, agentEmail, options) {
   const transporter = import_nodemailer.default.createTransport({
     ...runtimeSmtpOptions(config),
     disableFileAccess: true, disableUrlAccess: true,
-    auth: { user: String(config.user), pass: password },
+    auth: await agentSmtpAuth(env,owner,config),
     requireTLS: port === 587
   });
+  const identity=await agentBusiness(env,owner),displayName=(platformMail?'Affinity Portal':!identity.affinityTeam&&(!config.fromName||/Affinity Financial/i.test(config.fromName))?identity.name:config.fromName||'Affinity Financial').replace(/[\r\n"]/g,' ');
   return finish(await transporter.sendMail({
     from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
     ...mailOptions
@@ -647,6 +657,7 @@ async function appendAgentEmailSignature(env, owner, body) {
   await ensureAgentMessageSignatureColumn(env);
   const profile = await env.DB.prepare("SELECT name,phone,whatsapp,contactEmail,email,messageSignature FROM adminAccounts WHERE lower(email)=? LIMIT 1").bind(owner.toLowerCase()).first();
   if (!profile) throw new Error("Perfil do remetente n\xE3o encontrado");
+  const identity=await agentBusiness(env,owner);if(!identity.affinityTeam){const signature=businessSignature(identity),text=String(body||'').trim();return text.endsWith(signature)?text:[text,signature].filter(Boolean).join('\n\n');}
   const signatureEmail=await corporateFromEmail(env,owner,profile.contactEmail||profile.email||"");
   const signature = String(profile.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE).replaceAll("{agente_nome}", String(profile.name || "")).replaceAll("{agente}", String(profile.name || "")).replaceAll("{agente_telefone}", String(profile.phone || profile.whatsapp || "")).replaceAll("{telefone do agente}", String(profile.phone || profile.whatsapp || "")).replaceAll("{agente_whatsapp}", String(profile.whatsapp || profile.phone || "")).replaceAll("{agente_email}", String(signatureEmail)).replaceAll("{email do agente}", String(signatureEmail)).trim();
   const text = String(body || "").trim();
@@ -39106,7 +39117,7 @@ async function openAgentImap(env, owner) {
   const socket = connect({ hostname: String(config.imapHost || "imap.mail.me.com"), port: Number(config.imapPort || 993) }, { secureTransport: "on" });
   const client = new ImapConnection(socket);
   await client.open();
-  await client.command("F1", `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`);
+  await client.command("F1", await agentImapCommand(env,owner,config,password));
   return { client, config };
 }
 __name(openAgentImap, "openAgentImap");
@@ -39184,7 +39195,7 @@ async function syncIcloudInbox(env, agentEmail) {
     await client.open();
     await client.command(
       "A1",
-      `LOGIN ${quoteImap(String(config.imapUser || config.user))} ${quoteImap(password)}`
+      await agentImapCommand(env,owner,config,password)
     );
     await client.command("A2", "SELECT INBOX");
     try {
@@ -39336,7 +39347,7 @@ async function syncIcloudInbox(env, agentEmail) {
         if (!isProfessionalMailboxMessage(subject, body, config.fromEmail || owner, recipient, Boolean(customer))) continue;
         const externalId = parsed.messageId || `icloud-sent:${owner}:${uid}`;
         const topic = classifyMailboxTopic(subject, body);
-        if(parsed.attachments?.length)await archiveRecoveredAttachments(env,owner,externalId,customer?Number(customer.id):null,parsed.attachments.filter(file=>file.contentDisposition!=='inline'));
+        if(!transientApplicationMail(parsed)&&parsed.attachments?.length)await archiveRecoveredAttachments(env,owner,externalId,customer?Number(customer.id):null,parsed.attachments.filter(file=>file.contentDisposition!=='inline'));
         await env.DB.prepare(
           "INSERT OR IGNORE INTO agentMailboxEmails (agentEmail,clientId,externalId,imapUid,direction,fromEmail,toEmail,subject,body,htmlBody,sentAt,readAt,actionStatus,actionDetail,topic) VALUES (?,?,?,?,'sent',?,?,?,?,?,?,CURRENT_TIMESTAMP,'sent','Sincronizado da pasta Enviados',?)"
         ).bind(owner, customer ? Number(customer.id) : null, externalId, String(uid), String(config.fromEmail || owner), recipient, subject, body, htmlBody, (parsed.date || /* @__PURE__ */ new Date()).toISOString(), topic).run();
@@ -39429,7 +39440,7 @@ var init_icloud_email = __esm({
           new RegExp(`(?:^|\\r\\n)${tag} (OK|NO|BAD)[^\\r\\n]*`, "i")
         );
         if (!status || status[1].toUpperCase() !== "OK")
-          throw new Error(status?.[0]?.trim() || `IMAP ${command} falhou`);
+          throw new Error(status?.[0]?.trim() || `IMAP ${String(command).split(" ")[0]} falhou`);
         return { bytes, text };
       }
       async close() {
@@ -42163,6 +42174,7 @@ async function getAdminEmail(request, env) {
   if(session?.type!=="admin"||typeof session.email!=="string")return null;
   const active=await env.DB.prepare("SELECT * FROM adminAccounts WHERE lower(email)=?").bind(session.email.toLowerCase()).first();
   if(active&&(active.portalDeletedAt||!Number(active.isActive)||active.status!=="approved"))return null;
+  if(active&&await externalReviewPending(env,session.email))return null;
   return active||session.email.toLowerCase()===String(env.ADMIN_EMAIL).toLowerCase()?session.email:null;
 }
 __name(getAdminEmail, "getAdminEmail");
@@ -42945,7 +42957,7 @@ async function runProcedure(name, input, request, env, delegation=null) {
     const email = String(input.email ?? "").trim().toLowerCase(), applicantName = String(input.name ?? "").trim(), phone = String(input.phone ?? "").trim(), password = String(input.password ?? "");
     if (!validEmail(email) || applicantName.length < 2 || !validStrongPassword(password))
       return trpcError("Revise os dados e use uma senha forte");
-    let selectedUpline;try{selectedUpline=await registrationUpline(env,input.uplineId);}catch(error){return trpcError(error.message);}
+    let selectedUpline,externalUpline;try{if(input.uplineId==='external'){await businessSchema(env);externalUpline=externalUplineInput(input.externalUpline);}else selectedUpline=await registrationUpline(env,input.uplineId);}catch(error){return trpcError(error.message);}
     const existing = await env.DB.prepare(
       "SELECT id FROM adminAccounts WHERE lower(email)=?"
     ).bind(email).first();
@@ -42958,7 +42970,7 @@ async function runProcedure(name, input, request, env, delegation=null) {
       applicantName,
       phone || null,
       await bcryptjs_default.hash(password, 12)
-    ),env.DB.prepare('INSERT INTO agentHierarchy(agentEmail,uplineEmail) VALUES(?,?)').bind(email,selectedUpline.email.toLowerCase())]);
+    ),selectedUpline?env.DB.prepare('INSERT INTO agentHierarchy(agentEmail,uplineEmail) VALUES(?,?)').bind(email,selectedUpline.email.toLowerCase()):env.DB.prepare('INSERT INTO agentExternalUplines(agentEmail,name,email,phone) VALUES(?,?,?,?)').bind(email,externalUpline.name,externalUpline.email,externalUpline.phone)]);
     await sendEmailIfConfigured(env, {
       to: env.ADMIN_EMAIL,
       subject: "Nova conta de agente aguardando aprova\xE7\xE3o",
@@ -42976,6 +42988,7 @@ async function runProcedure(name, input, request, env, delegation=null) {
     ).bind(email).first();
     if (!account)
       return trpcError("Credenciais inv\xE1lidas", "UNAUTHORIZED", 401);
+    if(await externalReviewPending(env,email))return trpcError('Seu upline está aguardando verificação do Admin.','FORBIDDEN',403);
     const status = String(account.status || "approved");
     if (status === "pending")
       return trpcError(
@@ -43019,7 +43032,7 @@ async function runProcedure(name, input, request, env, delegation=null) {
     const result = await env.DB.prepare(
       "SELECT "+publicTestimonialColumns+" FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
     ).all();
-    return trpcResult(result.results.map(publicTestimonial));
+    return trpcResult((await publicAgentLabels(env,result.results)).map(publicTestimonial));
   }
   if (name === "testimonials.getLocalized") {
     const languageValue = String(input.language ?? "pt");
@@ -43029,7 +43042,7 @@ async function runProcedure(name, input, request, env, delegation=null) {
       "SELECT "+publicTestimonialColumns+" FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
     ).all();
     return trpcResult(
-      (await localizeTestimonials(result.results, languageValue, env)).map(publicTestimonial)
+      (await publicAgentLabels(env,await localizeTestimonials(result.results, languageValue, env))).map(publicTestimonial)
     );
   }
   if (name === "testimonials.submitReview") {
@@ -43814,7 +43827,7 @@ Detalhes: ${details}` : ""}`;
         (SELECT accessCode FROM reviewInvites r WHERE r.applicationId=a.id AND r.usedAt IS NULL ORDER BY r.id DESC LIMIT 1) AS reviewAccessCode
         FROM agentApplications a LEFT JOIN agentPolicies p ON p.id=a.matchedPolicyId
         WHERE lower(a.agentEmail)=? ORDER BY CASE a.status WHEN 'submitted' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,a.updatedAt DESC`).bind(owner).all();
-      return trpcResult(rows.results.map((row) => {
+      const identity=await agentBusiness(env,owner);return trpcResult(rows.results.map((row) => {
         let extra = {};
         try {
           extra = JSON.parse(String(row.applicationData || "{}"));
@@ -43822,7 +43835,7 @@ Detalhes: ${details}` : ""}`;
         }
         delete row.sensitiveData;
         delete row.applicationData;
-        return { ...row, ...extra, applicationDate:applicationDay(row.createdAt), id: Number(row.id) };
+        return { ...row, ...extra,retention:retentionForApplication(row,!identity.affinityTeam),business:identity, applicationDate:applicationDay(row.createdAt), id: Number(row.id) };
       }));
     }
     if (name === "agent.getApplication") {
@@ -43856,7 +43869,7 @@ Detalhes: ${details}` : ""}`;
       }
       delete row.applicationData;
       delete row.sensitiveData;
-      await leadSchema(env);return trpcResult({ ...row, ...extra, ...sensitive, applicationDate:applicationDay(row.createdAt), agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
+      await leadSchema(env);return trpcResult({ ...row, ...extra, ...sensitive, applicationDate:applicationDay(row.createdAt), business:await agentBusiness(env,owner),retention:retentionForApplication(row,!(await agentBusiness(env,owner)).affinityTeam),agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
     }
     if (name === "agent.saveApplication") {
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
@@ -43930,7 +43943,9 @@ Detalhes: ${details}` : ""}`;
         await env.DB.prepare("INSERT INTO reviewInvites (agentEmail,clientName,clientEmail,token,accessCode,city,state,applicationId) VALUES (?,?,?,?,NULL,?,?,?)").bind(owner, String(all.clientName || "Cliente"), String(all.clientEmail || "").toLowerCase() || null, token, String(all.city || "") || null, String(all.state || "").toUpperCase() || null, id).run();
         invite = { token };
       }
-      return trpcResult({ success: true, reviewInvite: { link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${invite.token}`, token: invite.token } });
+      const finalized=await env.DB.prepare('SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?').bind(id,owner).first();
+      await enqueueApplicationLifecycle(env,finalized,`${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${invite.token}`);
+      return trpcResult({ success: true,reviewEmailScheduled:env.PORTAL_MULTITENANT_MODE==='enabled', reviewInvite: { link: `${env.VITE_FRONTEND_URL}/avaliacao-convite.html?token=${invite.token}`, token: invite.token } });
     }
     if (name === "agent.requestApplicationDeletion") {
       const id = Number(input.id || 0), reason = String(input.reason || "").trim();
@@ -44854,6 +44869,7 @@ Detalhes: ${details}` : ""}`;
     return trpcResult(result.results.map(normalizeTestimonial));
   }
   if (name === "agent.decideAssignedReview") {
+    if(!["admin","both"].includes(accountType))return trpcError("Somente o Admin pode aprovar ou recusar avaliações.","FORBIDDEN",403);
     const id = Number(input.id), decision = String(input.decision || "");
     if (!id || !["approved", "rejected"].includes(decision)) return trpcError("Decis\xE3o inv\xE1lida.");
     const finalDecision = accountType === "both";
@@ -45261,7 +45277,7 @@ Affinity Financial Consulting`,
     ).bind(adminEmail.toLowerCase()).first();
     return trpcResult(
       row ? {
-        provider: /gmail\.com$/i.test(String(row.imapHost || "")) ? "gmail" : /mail\.me\.com$/i.test(String(row.imapHost || "")) ? "icloud" : "custom",
+        provider: /gmail\.com$/i.test(String(row.imapHost || "")) ? "gmail" : /mail\.me\.com$/i.test(String(row.imapHost || "")) ? "icloud" : /outlook\.office365\.com$/i.test(String(row.imapHost||""))?"outlook":"custom",
         host: row.host,
         port: Number(row.port),
         secure: Number(row.secure) === 1,
@@ -45660,7 +45676,12 @@ Affinity Financial Consulting`,
       await ensureAgentMessageSignatureColumn(env);
       await env.DB.prepare("UPDATE adminAccounts SET messageSignature=?,updatedAt=CURRENT_TIMESTAMP WHERE lower(email)=?").bind(input.messageSignature.trim().slice(0, 2e3) || DEFAULT_AGENT_MESSAGE_SIGNATURE, owner).run();
     }
+    if(clear)await disconnectEmailOAuth(env,owner);
     return trpcResult({ success: true });
+  }
+  if (name === "agent.verifyEmailConnection") {
+    const owner=adminEmail.toLowerCase(),config=await env.DB.prepare('SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first();if(!config)return trpcError('Configure seu e-mail primeiro.');
+    let transport;try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET);transport=import_nodemailer.default.createTransport({...runtimeSmtpOptions(config),auth:await agentSmtpAuth(env,owner,config)});await transport.verify();const {client}=await openAgentImap(env,owner);await client.close();return trpcResult({verified:true,message:'Envio e recebimento autenticados. Nenhum e-mail foi enviado neste teste.'});}catch(error){return trpcResult({verified:false,message:/office365|outlook/i.test(config.host)?'A Microsoft pode exigir OAuth ou liberação de SMTP pelo administrador da organização. A senha normal da conta não deve ser usada.':'Confira a senha de aplicativo e se o provedor permite acesso SMTP/IMAP. Sua senha normal não deve ser usada.'});}finally{transport?.close?.();}
   }
   if (name === "agent.testEmailSettings") {
     const email = String(input.email ?? "");
@@ -45683,7 +45704,7 @@ Affinity Financial Consulting`,
     const row = await env.DB.prepare(
       "SELECT a.email,a.name,a.phone,a.contactEmail,a.whatsapp,a.address,a.messageSignature,p.photoUrl FROM adminAccounts a LEFT JOIN agentPublicProfiles p ON lower(p.agentEmail)=lower(a.email) WHERE lower(a.email)=?"
     ).bind(adminEmail.toLowerCase()).first();
-    return trpcResult(row ? { ...row, messageSignature: String(row.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE) } : null);
+    const identity=await agentBusiness(env,adminEmail);return trpcResult(row ? { ...row, business:identity,messageSignature:identity.affinityTeam?String(row.messageSignature || DEFAULT_AGENT_MESSAGE_SIGNATURE):businessSignature(identity) } : null);
   }
   if (name === "agent.getCalendly") {
     await ensureCalendlyTables(env);
@@ -47272,6 +47293,12 @@ __name2(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async email(message,env,ctx){await receiveAssistantEmail(message,env,async raw=>require_mailparser().simpleParser(AssistantMailBuffer.from(raw)));},
   async fetch(request, env, ctx) {
+    const oauthResponse=await emailOAuthRoute(request,env,{email:getAdminEmail,access:getAdminAccess,open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET)});
+    if(oauthResponse)return secureResponse(oauthResponse,{privateData:true});
+    const reviewAttributionResponse=await reviewAttributionRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
+    if(reviewAttributionResponse)return secureResponse(reviewAttributionResponse,{privateData:true});
+    const businessResponse=await businessRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
+    if(businessResponse)return secureResponse(businessResponse,{privateData:true});
     const whatsappAccessResponse=await whatsappAccessRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
     if(whatsappAccessResponse)return secureResponse(whatsappAccessResponse,{privateData:true});
     const hierarchyResponse=await hierarchyRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
@@ -47295,6 +47322,8 @@ var cloudflare_staging_default = {
     init_paymentNotice();
     init_icloud_email();
     const url = new URL(request.url);
+    if(url.pathname==='/agentes/conectar-email'){const owner=await getAdminEmail(request,env);if(!owner)return Response.redirect(new URL('/agentes/login',url),302);url.pathname='/agent-email-connect.html';return secureResponse(await env.ASSETS.fetch(new Request(url,request)),{privateData:true});}
+    if(url.hostname==='portal.affinityfc.org'&&url.pathname==='/'){url.pathname='/portal-home.html';return secureResponse(await env.ASSETS.fetch(new Request(url,request)));}
     if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
       const origin = request.headers.get("Origin");
       const headers = { "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "Content-Type,Authorization", "Vary": "Origin" };
@@ -47523,6 +47552,7 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runApplicationLifecycle(env,{decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:(owner,mail)=>sendAgentEmail(env,owner,{...mail,platformMail:true,transientAttachments:true}),definitelyNotSent:emailDefinitelyNotSent,alert:details=>sendEmailIfConfigured(env,{to:'info@affinityfc.org',subject:'Affinity Portal · Application processing needs attention',html:'<p>Application #'+Number(details.applicationId)+' · '+escapeAutomationHtml(details.code)+'</p>'})}).catch(()=>console.error('application_lifecycle_pending')));
     if(controller.cron==='* * * * *'){ctx.waitUntil(runMeetingReminders(env,meetingReminderServices(env)).catch(()=>console.error('meeting_reminders_pending')));return;}
 
     ctx.waitUntil(Promise.resolve().then(()=>{init_icloud_email();return recoverEmailAttachments(env,{open:openAgentImap,quote:quoteImap,literal:extractLiteral,parse:source=>import_mailparser.simpleParser(Buffer2.from(source))});}).then(()=>readPendingEmailDocuments(env)).catch(()=>console.error('email_attachment_maintenance_failed')));
@@ -48164,14 +48194,14 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300&&outcome.httpStatus!==202){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar','/assistentes/login','/assistant-login.html']);
- if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2">',{html:true});}}).transform(response);
+ if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2"><script src="/portal-business.js?v=1" defer></script><script src="/email-setup-reminder.js?v=1" defer></script>',{html:true});}}).transform(response);
 
  if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=13" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=14" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=1" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261105-materials-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261105-materials-1');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=1" defer></script><script src="/portal-business.js?v=1" defer></script><script src="/email-setup-reminder.js?v=1" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261105-business-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261105-business-1');}}).transform(response);
  }
  return response;
 };
