@@ -5,5 +5,5 @@ import puppeteer from '../../services/whatsapp/node_modules/puppeteer/lib/puppet
 export async function launchBrowser() {
   const localChrome = '/Users/minimac/Library/Application Support/AffinityWhatsApp/runtime/browser/Google Chrome.app/Contents/MacOS/Google Chrome';
   const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || (!process.env.CI && existsSync(localChrome) ? localChrome : await puppeteer.executablePath());
-  return puppeteer.launch({executablePath, headless:true, pipe:true});
+  return puppeteer.launch({executablePath, headless:true, pipe:true, dumpio:!!process.env.CI});
 }

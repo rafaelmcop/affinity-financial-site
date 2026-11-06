@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify-live-runtime:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -26,4 +26,4 @@ jobs:
       - name: Install matching test browser
         run: node services/whatsapp/node_modules/puppeteer/lib/puppeteer/node/cli.js browsers install chrome
       - name: Verify portal and WhatsApp isolation, security and browser behavior
-        run: node --test recovered-live/*.test.mjs services/whatsapp/*.test.mjs
+        run: node --test --test-concurrency=2 recovered-live/*.test.mjs services/whatsapp/*.test.mjs
