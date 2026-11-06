@@ -1,5 +1,5 @@
 (()=>{
- const target='/agent-five-rings-sync.html?manual=1';
+ const target='https://www.affinityfc.org/agent-five-rings-sync.html?manual=1';
  document.addEventListener('click',event=>{
   if(location.pathname!=='/agentes/configuracoes')return;
   const button=event.target.closest?.('button');

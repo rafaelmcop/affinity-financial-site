@@ -1,6 +1,6 @@
 @media screen {
 html[data-agent-theme]{--agent-bg:#f3f6f8;--agent-surface:#fff;--agent-inset:#eaf0f5;--agent-text:#172b3a;--agent-muted:#526779;--agent-border:#cbd7e1;--agent-accent:#805e08;--agent-sent:#dcf4e7;color-scheme:light;--background:210 30% 97%;--foreground:208 40% 16%;--card:0 0% 100%;--card-foreground:208 40% 16%;--popover:0 0% 100%;--popover-foreground:208 40% 16%;--muted:210 30% 93%;--muted-foreground:208 20% 38%;--border:210 25% 82%;--input:210 25% 82%}
-html[data-agent-theme=dark]{--agent-bg:#08121f;--agent-surface:#102238;--agent-inset:#162d45;--agent-text:#eef4fa;--agent-muted:#b1c0cf;--agent-border:#40566d;--agent-accent:#eccb60;--agent-sent:#153f35;color-scheme:dark;--background:214 58% 8%;--foreground:210 55% 96%;--card:214 55% 14%;--card-foreground:210 55% 96%;--popover:214 55% 14%;--popover-foreground:210 55% 96%;--muted:214 45% 20%;--muted-foreground:210 25% 75%;--border:214 30% 34%;--input:214 30% 34%}
+
 html[data-agent-theme]{--bg:var(--agent-bg);--panel:var(--agent-surface);--soft:var(--agent-inset);--text:var(--agent-text);--sent:var(--agent-sent);--line:var(--agent-border)}
 html[data-agent-theme],html[data-agent-theme] body{background:var(--agent-bg)!important;color:var(--agent-text)!important}
 html[data-agent-theme] :is(main,.main,.layout,.chat,.app,[class*="min-h-screen"]){background:var(--agent-bg)!important;color:var(--agent-text)!important}
