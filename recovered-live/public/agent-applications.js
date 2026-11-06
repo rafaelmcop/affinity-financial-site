@@ -1522,7 +1522,7 @@ function describeApplicationParent(row,parent,feminine=false){
       if(result.applicationDate) $("applicationDate").value=result.applicationDate;
       unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id }) !== JSON.stringify({...snapshot,applicationDate:result.applicationDate||snapshot.applicationDate});
       if (!silent) {
-        notice("Rascunho salvo com segurança.");
+        notice(result.crm?.review?"Rascunho salvo. Há divergência de identidade ou data de nascimento com o CRM; revise a ficha antes de atualizar esse dado.":"Rascunho salvo com segurança.",result.crm?.review===true);
       }
       return true;
     } catch (e) {

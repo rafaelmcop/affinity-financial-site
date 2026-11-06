@@ -9,12 +9,12 @@ export async function meetingSendTransport(url,options,wait=ms=>new Promise(reso
    // previously pending/uncertain receipt is different: never retry that POST.
    const preflight=[400,403,409,413].includes(response.status)&&!result.state;
    const status=[400,403,409,413,429].includes(response.status)?response.status:502;
-   throw Object.assign(Error(result.error||'Não foi possível confirmar o envio do WhatsApp.'),{status,code:preflight?'send_preflight_refused':response.status===429?'send_busy':response.status===401?'send_auth_rejected':'send_unconfirmed',notSent:preflight||response.status===429||response.status===401});
+   throw Object.assign(Error(result.error||'Não foi possível confirmar o envio do WhatsApp.'),{status,code:/^automation_(daily_limit|duplicate|expired|not_allowed)$/.test(result.code||'')?result.code:preflight?'send_preflight_refused':response.status===429?'send_busy':response.status===401?'send_auth_rejected':'send_unconfirmed',notSent:preflight||response.status===429||response.status===401});
   }return result;
  };
  for(let attempt=0;;attempt++){
   const {authorization,fetcher,...init}=options;const receipt=await request(url,{...init,headers:await headers()});
-  if(receipt.response.status===429&&attempt<3){await wait(3100);continue;}
+  if(receipt.response.status===429&&!/^automation_/.test(receipt.result.code||'')&&attempt<3){await wait(3100);continue;}
   if(receipt.response.status===202&&receipt.result.state==='pending'){
    const id=JSON.parse(options.body).requestId,target=new URL('/send-status',url);target.searchParams.set('requestId',id);
    for(let poll=0;poll<120;poll++){await wait(1000);const state=await request(target,{method:'GET',headers:await headers()});if(state.response.ok&&state.result.state==='pending')continue;return validate(state);}
