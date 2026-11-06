@@ -47029,7 +47029,7 @@ Affinity Financial Consulting`,
       ).bind(id, adminEmail.toLowerCase()).first();
       if (!owned) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
     }
-    if (status === "client") {
+    if (input.crmColumnKey !== undefined ? input.crmColumnKey === "issued" : status === "client") {
       const existing = await env.DB.prepare("SELECT id,email,phone,whatsapp,assignedAdminEmail FROM crmClients WHERE id=?").bind(id).first();
       if (!existing) return trpcError("Cliente n\xE3o encontrado", "NOT_FOUND", 404);
       const candidates = await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(String(existing.assignedAdminEmail || "").toLowerCase()).all();
