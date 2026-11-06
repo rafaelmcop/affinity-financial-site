@@ -6,8 +6,8 @@ Status checked 2026-11-06 in Google Cloud project affinity-portal-513823:
   Verificar marca. Google returned a verified result, then Publicar branding was
   completed. The console confirmed: "Sua marca foi verificada e está aparecendo
   para os usuários."
-- Data-access verification has not been approved. A real consent/use demonstration
-  is still required; no data-access submission or approval is claimed.
+- Data-access verification was submitted on 2026-11-06. The Google console
+  confirmed: "O acesso aos dados do seu app está em análise." Approval is pending.
 
 ## Existing branding
 
@@ -69,9 +69,15 @@ Reviewed demonstration (synthetic event only, read-only link):
 https://drive.google.com/file/d/1KXXq1CGh6Y_nVdC-xiPs5-gwsnZ0Sffq/view?usp=sharing
 Anonymous retrieval returned HTTP 200 with the correct movie title. The temporary
 portal account was disabled after disconnect; no active Google tokens remain.
-The Data Access submission is not yet confirmed: Google Cloud subsequently
-returned "Falha ao carregar" for /auth/scopes. Do not equate completed brand
-verification or a working integration with approved data-access verification.
+Google Cloud initially returned "Falha ao carregar"; the console later recovered.
+The form required YouTube and rejected the Drive URL. The reviewed movie was
+uploaded as Unlisted (confirmed "Vídeo publicado" and "Não listado"):
+https://youtube.com/watch?v=27W1lHN2Tr8
+Both Calendar scope justification and this video URL were saved. The submission
+questionnaire was completed for an external production application, and Google
+confirmed "O acesso aos dados do seu app está em análise." No approval is claimed.
+Reviewer access coordination uses us.rafael@icloud.com; no production credentials
+or active user Google sessions were supplied.
 
 ## Submission evidence requirements
 
