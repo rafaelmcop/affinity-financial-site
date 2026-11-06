@@ -313,7 +313,7 @@ function parseMailAttachments(input) {
     if (total > MAX_ATTACHMENT_BYTES) throw Error("Os anexos devem somar no m\xE1ximo 10 MB.");
     const filename = file.filename.split(/[\\/]/).pop().replace(/[\x00-\x1f\x7f]/g, "").slice(0, 180);
     if (!filename) throw Error("Nome do anexo inv\xE1lido.");
-    return { filename, content: file.content, encoding: "base64", contentType: "application/octet-stream" };
+    return { filename, content: file.content, encoding: "base64", contentType: /\.pdf$/i.test(filename)?"application/pdf":"application/octet-stream" };
   });
 }
 __name(parseMailAttachments, "parseMailAttachments");
