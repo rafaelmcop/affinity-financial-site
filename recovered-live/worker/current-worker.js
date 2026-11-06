@@ -17,10 +17,10 @@ import {businessRoute,businessSchema,externalUplineInput,externalReviewPending,a
 import {portalWhatsappAllowed,whatsappAccessRoute} from './whatsapp-portal-access.js';
 import {hierarchyRoute,registrationUpline,hierarchyUserGroups} from './agent-hierarchy.js';
 import {materialLibrary,policyAgentPage} from './material-library.js';
-import {projectCrmProgress,persistLegacyProgress,legacyStage,storedCrmStatus} from './crm-progress.js';
+import {projectCrmProgress,persistLegacyProgress,legacyStage,storedCrmStatus,clientStageStatements} from './crm-progress.js';
 import {fiveRingsStatus,enrichFiveRingsRecords,uniqueFiveRingsRecords,assertFiveRingsPolicyCoverage,fiveRingsWelcomeEligible} from './five-rings-record-integrity.js';
 import {contactSegmentation} from './contact-segmentation.js';
-import {crmBoard} from './crm-board.js';
+import {crmBoard,columns as crmBoardColumnsForOwner} from './crm-board.js';
 import {meetingCrm} from './meeting-crm.js';
 import {claimBirthdayRecipient,settleBirthdayRecipient} from './birthday-recipient-guard.js';
 import {meetingReminderSchema,getMeetingReminderSettings,saveMeetingReminderSettings,enrollMeetingReminder,runMeetingReminders,meetingReminderHistory} from './meeting-reminders.js';
@@ -46647,7 +46647,7 @@ Affinity Financial Consulting`,
   }
   if (name === "crm.getClient") {
     const row=await crmClientDetail(env,adminEmail.toLowerCase(),input.clientId);
-    return row?trpcResult((await projectCrmProgress(env,[row]))[0]):trpcError("Cliente não encontrado nesta conta", "NOT_FOUND", 404);
+    return row?trpcResult({...((await projectCrmProgress(env,[row]))[0]),crmColumns:await crmBoardColumnsForOwner(env,String(row.assignedAdminEmail).toLowerCase())}):trpcError("Cliente não encontrado nesta conta", "NOT_FOUND", 404);
   }
   if (name === "crm.list") {
     const crmOwner = adminEmail.toLowerCase();
@@ -47035,10 +47035,15 @@ Affinity Financial Consulting`,
       const candidates = await env.DB.prepare("SELECT agentEmail,clientId,clientEmail,clientPhone,status FROM agentPolicies WHERE lower(agentEmail)=?").bind(String(existing.assignedAdminEmail || "").toLowerCase()).all();
       if (!(candidates.results || []).some((policy) => policyBelongsToCrmClient(policy, existing) && isActiveClientPolicy(policy))) return trpcError("A etapa Cliente \xE9 destinada a quem possui uma ap\xF3lice ativa vinculada. Use Fechado ou Follow-up enquanto a ap\xF3lice n\xE3o estiver ativa.");
     }
-    await env.DB.prepare(
+    let stageUpdates=null;
+    if(input.crmColumnKey!==undefined){
+      try{stageUpdates=await clientStageStatements(env,assignedEmail,id,String(input.crmColumnKey),delegation?.actorEmail||adminEmail,String(input.nextFollowUpAt||'').trim());}catch(error){return trpcError(error.message);}
+    }
+    const update=env.DB.prepare(
       "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
-    ).bind(...values, id).run();
-    await persistLegacyProgress(env,assignedEmail,id,status,delegation?.actorEmail||adminEmail,input.nextFollowUpAt);
+    ).bind(...values, id);
+    if(stageUpdates)await env.DB.batch([update,...stageUpdates]);
+    else{await update.run();await persistLegacyProgress(env,assignedEmail,id,status,delegation?.actorEmail||adminEmail,input.nextFollowUpAt);}
     return trpcResult({ success: true });
   }
   if(name==='crm.clientAutomations'){
