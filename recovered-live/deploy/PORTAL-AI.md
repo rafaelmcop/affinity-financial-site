@@ -29,3 +29,9 @@ model output and responsive browser UI with no live customer mutations.
 
 Model API reference:
 https://developers.cloudflare.com/workers-ai/models/glm-4.7-flash/
+
+2026-11-06: All 458 tests passed. A real authenticated synthetic account
+opened the top-bar assistant and queried the live AI binding. Its own test
+appointment was returned with the correct details link. No client messages or
+calendar writes were performed. The fixture was disabled after validation. The
+Rafael pilot feature grant was recorded in the administrative permission audit.
