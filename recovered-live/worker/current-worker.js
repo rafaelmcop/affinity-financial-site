@@ -1,3 +1,4 @@
+import {testAccountAutomationsDisabled} from './test-account-automations.js';
 import {microsoftMailboxClient,sendMicrosoftMail} from './microsoft-mailbox.js';
 import {mailboxConnectionMessage} from './mailbox-connection-error.js';
 import {approvalMailForAccount} from './agent-approval-mail.js';
@@ -45201,6 +45202,7 @@ Affinity Financial Consulting`,
     const waDeliveries=await whatsappDeliveryHistory(env,owner);
     return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries,...await meetingReminderHistory(env,owner)]);
   }
+  if(['agent.scheduleMessage','agent.updateMessage','agent.setAutomationSubscription'].includes(name)&&testAccountAutomationsDisabled(adminEmail))return trpcError('Esta conta é reservada para testes e não permite automações de mensagens.');
   if (name === "agent.scheduleMessage") {
     if(String(input.whatsappMessage||'').length>2000)return trpcError("A mensagem de WhatsApp deve ter até 2.000 caracteres.");
     const occasion = String(input.occasion);
