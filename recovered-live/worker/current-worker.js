@@ -44281,9 +44281,8 @@ Detalhes: ${details}` : ""}`;
     const rows = await env.DB.prepare(
       "SELECT * FROM crmClients WHERE lower(assignedAdminEmail)=? ORDER BY updatedAt DESC"
     ).bind(owner).all();
-    return trpcResult(
-      rows.results.map((row) => ({ ...row, id: Number(row.id) }))
-    );
+    const [policies,applications]=await Promise.all([env.DB.prepare('SELECT clientId,clientName,clientEmail,clientPhone,policyNumber,status,agentEmail FROM agentPolicies WHERE lower(agentEmail)=?').bind(owner).all(),env.DB.prepare('SELECT clientName,clientEmail,clientPhone,status,agentEmail FROM agentApplications WHERE lower(agentEmail)=?').bind(owner).all()]);
+    return trpcResult(await projectCrmProgress(env,rows.results.map(row=>({...row,id:Number(row.id)})),policies.results||[],applications.results||[]));
   }
   if (name === "agent.saveClient") {
     const owner = adminEmail.toLowerCase();
@@ -47010,6 +47009,8 @@ Affinity Financial Consulting`,
     ))
       return trpcError("Revise os dados do cliente");
     const assignedEmail = accountType === "agent" ? adminEmail.toLowerCase() : String(input.assignedAdminEmail ?? "").trim().toLowerCase() || null;
+    const priorFollowUp=name==='crm.update'&&input.nextFollowUpAt===undefined?await env.DB.prepare('SELECT nextFollowUpAt FROM crmClients WHERE id=?'+(accountType==='agent'?' AND lower(assignedAdminEmail)=?':'')).bind(Number(input.id)||0,...(accountType==='agent'?[adminEmail.toLowerCase()]:[])).first():null;
+    const followUpDate=input.nextFollowUpAt===undefined?priorFollowUp?.nextFollowUpAt:input.nextFollowUpAt;
     const values = [
       clientName,
       email || null,
@@ -47019,7 +47020,7 @@ Affinity Financial Consulting`,
       storedCrmStatus(legacyStage(status),status),
       String(input.source ?? "").trim() || null,
       assignedEmail,
-      String(input.nextFollowUpAt ?? "").trim() || null,
+      String(followUpDate ?? "").trim() || null,
       String(input.notes ?? "").trim() || null
     ];
     if (name === "crm.create") {
@@ -47045,7 +47046,7 @@ Affinity Financial Consulting`,
     }
     let stageUpdates=null;
     if(input.crmColumnKey!==undefined){
-      try{stageUpdates=await clientStageStatements(env,assignedEmail,id,String(input.crmColumnKey),delegation?.actorEmail||adminEmail,String(input.nextFollowUpAt||'').trim());}catch(error){return trpcError(error.message);}
+      try{stageUpdates=await clientStageStatements(env,assignedEmail,id,String(input.crmColumnKey),delegation?.actorEmail||adminEmail,String(followUpDate||'').trim());}catch(error){return trpcError(error.message);}
     }
     const update=env.DB.prepare(
       "UPDATE crmClients SET name=?,email=?,phone=?,whatsapp=?,birthDate=?,status=?,source=?,assignedAdminEmail=?,nextFollowUpAt=?,notes=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?"
