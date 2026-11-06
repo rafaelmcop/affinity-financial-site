@@ -57,13 +57,25 @@ function render(){
  const select=document.getElementById('portal-language-select');if(select)select.value=language;
 }
 function start(){
- const style=document.createElement('style');style.textContent='[data-portal-language]{position:fixed;top:16px;right:80px;z-index:10000;display:flex;align-items:center;gap:6px;background:#fff;color:#14233b;border:1px solid #9aaec3;border-radius:10px;padding:7px 10px;box-shadow:0 2px 8px #10243d18;font:14px Arial,sans-serif}[data-portal-language] select{color:#14233b;background:#fff;border:0;font:inherit;max-width:120px}[data-portal-language] select:focus-visible{outline:2px solid #2365aa}@media print{[data-portal-language]{display:none}}';document.head.append(style);
+ const style=document.createElement('style');style.textContent='[data-portal-language]{position:static;display:flex;align-items:center;gap:6px;background:#fff;color:#14233b;border:1px solid #9aaec3;border-radius:10px;padding:7px 10px;box-shadow:0 2px 8px #10243d18;font:14px Arial,sans-serif}[data-portal-language] select{color:#14233b;background:#fff;border:0;font:inherit;max-width:120px}[data-portal-language] select:focus-visible{outline:2px solid #2365aa}@media print{[data-portal-language]{display:none}}';document.head.append(style);
  const label=document.createElement('label');label.dataset.portalLanguage='';label.setAttribute('translate','no');label.append(document.createTextNode('🌐 '));
  const select=document.createElement('select');select.id='portal-language-select';select.setAttribute('aria-label','Language / Idioma');
- for(const [value,text]of [['pt','Português'],['en','English'],['es','Español']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option)}label.append(select);document.body.append(label);
+ for(const [value,text]of [['pt','Português'],['en','English'],['es','Español']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option)}label.append(select);
+ const container=document.createElement('section');container.id='portal-language-panel';container.setAttribute('translate','no');container.style.cssText='box-sizing:border-box;padding:12px 20px;display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap;background:var(--agent-panel,#fff);color:var(--agent-text,#14233b);border-bottom:1px solid #9aaec3';
+ const caption=document.createElement('span');caption.style.fontWeight='700';container.append(caption,label);
+ function place(){
+  const path=location.pathname,privateArea=/^\/(agentes|admin|afiliados|assistentes)(?:\/|$)|^\/agent-/.test(path)&&!/(?:login|registrar|register)(?:\/|$)/.test(path);
+  const settings=/\/configuracoes$|^\/admin\/smtp-config$/.test(path)&&(!new URLSearchParams(location.search).has('view')||new URLSearchParams(location.search).get('view')==='settings');
+  const title=language==='en'?'Language':'Idioma';if(caption.textContent!==title)caption.textContent=title;
+  if(privateArea&&!settings){if(container.isConnected)container.remove();return;}
+  const target=privateArea?document.querySelector('main'):document.body;
+  if(target&&container.parentElement!==target)target.prepend(container);
+  const alignment=privateArea?'flex-start':'flex-end';if(container.style.justifyContent!==alignment)container.style.justifyContent=alignment;
+ }
+ place();window.addEventListener('popstate',place);
  select.addEventListener('change',()=>{language=select.value;try{localStorage.setItem('affinity-language',language)}catch{}window.dispatchEvent(new CustomEvent('affinity-language-change',{detail:language}));render()});
  window.addEventListener('affinity-language-change',event=>{if(supported.includes(event.detail)){language=event.detail;render()}});
- let pending=false;const observer=new MutationObserver(()=>{if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;render()})});observer.observe(document.body,{subtree:true,childList:true,characterData:true});render();
+ let pending=false;const observer=new MutationObserver(()=>{if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;place();render()})});observer.observe(document.body,{subtree:true,childList:true,characterData:true});render();
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
