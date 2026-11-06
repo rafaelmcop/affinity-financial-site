@@ -4,7 +4,7 @@ const text=(value,n=200)=>String(value??'').replace(/[\u0000-\u001f]/g,' ').slic
 export const aiDomains=Object.freeze({board:'policies',materials:null,assistants:null,marketing:'marketing',queue:'queue',messages:'messages',inbox:'email',applications:'applications',policies:'policies',payments:'tasks',whatsapp:'whatsapp',integrations:'five_rings',credits:'five_rings',reviews:'reviews',profile:'public_profile'});
 export async function aiPortalRecords(env,{owner,actor,permissions},plan,{allowed,read,now=new Date()}){
  const domain=plan.intent;if(!Object.hasOwn(aiDomains,domain))return null;const feature=aiDomains[domain];
- let granted=feature?await allowed(feature):!permissions;if(domain==='applications')granted=granted||await allowed('application_create');if(domain==='integrations')granted=granted||await allowed('email')||await allowed('calendar');
+ let granted=feature?await allowed(feature):!permissions;if(domain==='applications')granted=granted||await allowed('application_create');if(domain==='integrations')granted=granted||await allowed('email')||await allowed('calendar');if(domain==='messages'&&plan.state==='sent')granted=granted||await allowed('email');
  if(!granted)throw Object.assign(Error('O acesso a este módulo não está liberado para esta conta.'),{status:403});
  const records=[],sources=[],search=text(plan.search,80).trim().toLocaleLowerCase();let rows=[],href='/agentes/apps',limited=false;
  const query=async(sql,...params)=>(await env.DB.prepare(sql).bind(...params).all()).results||[];
@@ -21,7 +21,7 @@ export async function aiPortalRecords(env,{owner,actor,permissions},plan,{allowe
  }else if(domain==='queue'){
   rows=await query('SELECT l.name,o.stage status,o.createdAt date,o.attempts FROM centralLeadOutcomes o JOIN centralLeads l ON l.phone=o.phone WHERE lower(o.agent)=? AND l.suppressed=0 ORDER BY o.id DESC LIMIT 101',owner);href='/agentes/fila-leads';
  }else if(domain==='messages'){
-  rows=await service('agent.deliveryLog',{});if(plan.state==='sent'&&await allowed('email')){try{const mail=await service('agent.mailbox',{folder:'sent',search});rows.push(...(mail?.items||[]).map(r=>({subject:r.subject,status:'sent',date:r.sentAt,channel:'email',href:'/agentes/email?messageId='+Number(r.id)})));}catch{sources.push({module:'email',status:'indisponível',shown:0});}}href='/agentes/mensagens';
+  rows=await allowed('messages')?await service('agent.deliveryLog',{}):[];if(plan.state==='sent'&&await allowed('email')){try{const mail=await service('agent.mailbox',{folder:'sent',search});rows.push(...(mail?.items||[]).map(r=>({subject:r.subject,status:'sent',date:r.sentAt,channel:'email',href:'/agentes/email?messageId='+Number(r.id)})));}catch{sources.push({module:'email',status:'indisponível',shown:0});}}href='/agentes/mensagens';
   const state=['scheduled','sent','failed','review'].includes(plan.state)?plan.state:null;
   rows=rows.filter(r=>(!state||r.status===state)&&(!['email','whatsapp'].includes(plan.channel)||(r.channel||'email')===plan.channel));
   rows=rows.map(r=>({title:r.subject||r.title,name:r.clientName,status:r.status,date:r.date,channel:r.channel||'email',summary:r.statusSummary,href:r.href,recipientCount:r.recipientCount,recipientsLimited:(r.recipients||[]).length>20,recipients:(Array.isArray(r.recipients)?r.recipients:[]).slice(0,20).map(p=>({name:text(p.name),status:text(p.status||p.state||r.status,40),date:text(p.sentAt||p.date,60)}))}));
