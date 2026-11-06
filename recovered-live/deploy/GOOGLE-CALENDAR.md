@@ -27,7 +27,8 @@ unverified-user limits still apply independently of portal availability.
 affinity-portal-513823. The two read-only scopes were added and the Google Cloud
 console confirmed that data-access changes were saved. The Google app is now
 in production with a visible unverified-user limit of 100; verification has not
-been approved. Gmail portal enrollment remains restricted to its preexisting
+been approved for data access. Brand identity was separately verified and
+published on 2026-11-06; this does not approve calendar data scopes. Gmail portal enrollment remains restricted to its preexisting
 test owner. Real mailbox-owner
 consent and an end-to-end Google event capture still need validation; fixture
 and browser tests do not establish that a real Google calendar is connected.

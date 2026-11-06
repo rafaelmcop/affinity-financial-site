@@ -2,9 +2,12 @@
 
 Status checked 2026-11-06 in Google Cloud project affinity-portal-513823:
 - Publishing status is production; this does not constitute Google verification.
-- Verification Center reports that branding has not been verified/published.
-- Data-access verification has not been approved; it requires verified branding.
-- No verification submission or approval is claimed by this document.
+- Brand verification was initiated through Branding > Informações e resumo >
+  Verificar marca. Google returned a verified result, then Publicar branding was
+  completed. The console confirmed: "Sua marca foi verificada e está aparecendo
+  para os usuários."
+- Data-access verification has not been approved. A real consent/use demonstration
+  is still required; no data-access submission or approval is claimed.
 
 ## Existing branding
 
