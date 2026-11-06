@@ -68,8 +68,11 @@ Registration checklist for the authenticated platform owner:
 - Support organizational accounts in any directory and personal Microsoft accounts.
 - Register exactly the two HTTPS callbacks listed above.
 - Use delegated scopes openid, email, profile, offline_access,
-  https://outlook.office.com/IMAP.AccessAsUser.All and
-  https://outlook.office.com/SMTP.Send, matching worker/email-oauth.js.
+  https://graph.microsoft.com/Mail.ReadWrite and
+  https://graph.microsoft.com/Mail.Send, matching worker/email-oauth.js.
+  Microsoft uses Graph for mailbox access, folders, attachments and sending.
+  Existing legacy IMAP tokens remain unchanged until the user reconnects; new
+  connections are stored as microsoft_graph. Google/iCloud keep SMTP/IMAP.
 - Store client ID and encrypted secret through the master Admin page.
 - Start with Testing and an explicitly chosen portal login allowlist.
 - The individual mailbox owner must authorize the connection; app registration

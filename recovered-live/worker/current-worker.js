@@ -1,3 +1,4 @@
+import {microsoftMailboxClient,sendMicrosoftMail} from './microsoft-mailbox.js';
 import {mailboxConnectionMessage} from './mailbox-connection-error.js';
 import {approvalMailForAccount} from './agent-approval-mail.js';
 import {calendarProviderRoute,calendarConnection,syncFeedCalendar,calendarProviderSchema} from './calendar-providers.js';
@@ -639,6 +640,8 @@ async function sendAgentEmail(env, agentEmail, options) {
     String(config.password),
     env.JWT_SECRET
   );
+  const mailboxAuth=await agentSmtpAuth(env,owner,config);
+  if(mailboxAuth.provider==='microsoft_graph')return finish(await sendMicrosoftMail(env,owner,mailboxAuth,mailOptions));
   const port = Number(config.port);
   const transporter = import_nodemailer.default.createTransport({
     ...runtimeSmtpOptions(config),
@@ -39117,12 +39120,12 @@ __name(sanitizeMailboxHtml, "sanitizeMailboxHtml");
 async function openAgentImap(env, owner) {
   const config = await env.DB.prepare("SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?").bind(owner).first();
   if (!config) throw new Error("Configure o e-mail do agente primeiro");
+  const auth=await agentSmtpAuth(env,owner,config),graphClient=microsoftMailboxClient(env,owner,auth);
+  if(graphClient){await graphClient.open();return {client:graphClient,config:{...config,mailboxProtocol:'graph'}};}
   const password = await decryptSmtpPassword(String(config.password), env.JWT_SECRET);
   const socket = connect({ hostname: String(config.imapHost || "imap.mail.me.com"), port: Number(config.imapPort || 993) }, { secureTransport: "on" });
   const client = new ImapConnection(socket);
-  await client.open();
-  await client.command("F1", await agentImapCommand(env,owner,config,password));
-  return { client, config };
+  try{await client.open();await client.command("F1",await agentImapCommand(env,owner,config,password));return {client,config};}catch(error){await client.close().catch(()=>{});throw error;}
 }
 __name(openAgentImap, "openAgentImap");
 function parseImapFolders(text) {
@@ -39178,29 +39181,9 @@ async function moveIcloudEmail(env, agentEmail, uid, sourceFolder, destinationFo
 __name(moveIcloudEmail, "moveIcloudEmail");
 async function syncIcloudInbox(env, agentEmail) {
   const owner = agentEmail.toLowerCase();
-  const config = await env.DB.prepare(
-    "SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?"
-  ).bind(owner).first();
-  if (!config) throw new Error("Configure o e-mail do agente primeiro");
-  const password = await decryptSmtpPassword(
-    String(config.password),
-    env.JWT_SECRET
-  );
-  const socket = connect(
-    {
-      hostname: String(config.imapHost || "imap.mail.me.com"),
-      port: Number(config.imapPort || 993)
-    },
-    { secureTransport: "on" }
-  );
-  const client = new ImapConnection(socket);
+  const {client,config}=await openAgentImap(env,owner);
   let imported = 0;
   try {
-    await client.open();
-    await client.command(
-      "A1",
-      await agentImapCommand(env,owner,config,password)
-    );
     await client.command("A2", "SELECT INBOX");
     try {
       await syncIcloudFolderList(env, owner, client, "A2F");
@@ -39264,6 +39247,7 @@ async function syncIcloudInbox(env, agentEmail) {
         }
       }
       const externalId = parsed.messageId || `icloud:${owner}:${uid}`;
+      if(config.mailboxProtocol==='graph')await env.DB.prepare("UPDATE agentMailboxEmails SET imapUid=? WHERE lower(agentEmail)=? AND externalId=? AND direction='received'").bind(String(uid),owner,externalId).run();
       const body = readableMailboxBody(parsed);
       if (!body) continue;
       const htmlBody = sanitizeMailboxHtml(parsed.html, parsed.attachments);
@@ -39353,6 +39337,7 @@ async function syncIcloudInbox(env, agentEmail) {
         const subject = String(parsed.subject || "Sem assunto");
         if (!isProfessionalMailboxMessage(subject, body, config.fromEmail || owner, recipient, Boolean(customer))) continue;
         const externalId = parsed.messageId || `icloud-sent:${owner}:${uid}`;
+        if(config.mailboxProtocol==='graph')await env.DB.prepare("UPDATE agentMailboxEmails SET imapUid=? WHERE lower(agentEmail)=? AND externalId=? AND direction='sent'").bind(String(uid),owner,externalId).run();
         const topic = classifyMailboxTopic(subject, body);
         if(!transientApplicationMail(parsed)&&parsed.attachments?.length)await archiveRecoveredAttachments(env,owner,externalId,customer?Number(customer.id):null,parsed.attachments.filter(file=>file.contentDisposition!=='inline'));
         await env.DB.prepare(
@@ -45688,7 +45673,7 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.verifyEmailConnection") {
     const owner=adminEmail.toLowerCase(),config=await env.DB.prepare('SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first();if(!config)return trpcError('Configure seu e-mail primeiro.');
-    let transport;try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET);transport=import_nodemailer.default.createTransport({...runtimeSmtpOptions(config),auth:await agentSmtpAuth(env,owner,config)});await transport.verify();const {client}=await openAgentImap(env,owner);await client.close();return trpcResult({verified:true,message:'Envio e recebimento autenticados. Nenhum e-mail foi enviado neste teste.'});}catch(error){return trpcResult({verified:false,message:mailboxConnectionMessage(error,config)});}finally{transport?.close?.();}
+    let transport;try{const mailboxAuth=await agentSmtpAuth(env,owner,config);if(mailboxAuth.provider==='microsoft_graph'){const {client}=await openAgentImap(env,owner);await client.close();return trpcResult({verified:true,message:'Envio e recebimento autorizados pela API Microsoft. Nenhum e-mail foi enviado neste teste.'});}const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET);transport=import_nodemailer.default.createTransport({...runtimeSmtpOptions(config),auth:await agentSmtpAuth(env,owner,config)});await transport.verify();const {client}=await openAgentImap(env,owner);await client.close();return trpcResult({verified:true,message:'Envio e recebimento autenticados. Nenhum e-mail foi enviado neste teste.'});}catch(error){return trpcResult({verified:false,message:mailboxConnectionMessage(error,config)});}finally{transport?.close?.();}
   }
   if (name === "agent.testEmailSettings") {
     const email = String(input.email ?? "");
