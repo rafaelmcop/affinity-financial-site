@@ -37,9 +37,24 @@ authorization. Do not describe this setup as production-verified or mail-tested.
 ## Microsoft registration pending
 
 Microsoft requires a platform app registration before each agent can individually
-authorize Outlook.com, Hotmail or Microsoft 365. No Microsoft administrative
-session was available on 2026-11-05. The Microsoft provider must remain unavailable
-until an owned application and its secret are configured and validated.
+authorize Outlook.com, Hotmail or Microsoft 365. On 2026-11-05 (New York), the owner completed Azure free-account setup and the
+owned Default Directory became accessible. The Microsoft provider must remain
+unavailable until the remaining configuration and individual validation succeed.
+
+Verified registration progress:
+- Directory tenant: `444c38a8-f7b5-4630-aa3c-3b575515db06`.
+- Existing app: Affinity Portal, client ID `005837a5-c3c5-491f-8ebb-9c9436cb8d88`.
+- Organizational and personal Microsoft account support confirmed.
+- Both HTTPS OAuth callback URLs above confirmed on the Web platform.
+- Only the initial delegated User.Read permission was verified as saved.
+- Required OIDC/IMAP/SMTP delegated permissions, homepage and privacy branding
+  remain pending. Browser automation repeatedly failed to persist permissions;
+  do not infer completion from checkbox interactions.
+- No client secret was created or transferred; Microsoft enrollment remains
+  disabled. No mailbox was authorized or tested and no email was sent.
+
+Reuse this registration; do not create another app. Resume at API permissions.
+Do not enable paid resources or change the existing Google/iCloud configuration.
 
 Registration checklist for the authenticated platform owner:
 - Register Affinity Portal as a Web application in Microsoft Entra.
