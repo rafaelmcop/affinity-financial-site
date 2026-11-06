@@ -1,3 +1,4 @@
+import {marketingParticipation} from './marketing-participation.js';
 export const MARKETING_START_DATE='2026-10-09';
 export const MARKETING_START_UTC='2026-10-09 04:00:00'; // Midnight in America/New_York on the start date.
 export function policyMarketingDate(value){
@@ -12,9 +13,13 @@ export function policyMarketingDate(value){
 }
 export function policyMarketingEligible(value){const date=policyMarketingDate(value);return !!date&&date>=MARKETING_START_DATE;}
 export async function marketingEligibility(env,phone,payer){
+ const participation=await marketingParticipation(env,payer);if(!participation.required)return {eligible:false,reason:'exempt_agent'};
+ const previous=await env.DB.prepare('SELECT status FROM marketingObligations WHERE phone=? AND lower(payer)=lower(?)').bind(phone,payer).first();if(previous?.status==='exempt_agent')return {eligible:false,reason:'exempt_agent'};
+ const recordedClosure=await env.DB.prepare('SELECT confirmedAt FROM centralLeadClosures WHERE phone=? AND lower(agent)=lower(?)').bind(phone,payer).first();if(participation.eligibleSince&&recordedClosure&&String(recordedClosure.confirmedAt)<participation.eligibleSince)return {eligible:false,reason:'exempt_agent'};
+
  const policies=(await env.DB.prepare('SELECT p.issuedAt FROM centralPolicyLeadLinks l JOIN agentPolicies p ON p.id=l.policyId WHERE l.phone=? AND lower(l.agent)=lower(?)').bind(phone,payer).all()).results;
  if(policies.length){if(policies.some(p=>policyMarketingEligible(p.issuedAt)))return {eligible:true};return {eligible:false,reason:policies.every(p=>policyMarketingDate(p.issuedAt))?'ineligible_before_start':'awaiting_issue_date'};}
- const closure=await env.DB.prepare('SELECT confirmedAt FROM centralLeadClosures WHERE phone=? AND lower(agent)=lower(?)').bind(phone,payer).first();
+ const closure=recordedClosure;
  return {eligible:!!closure&&String(closure.confirmedAt)>=MARKETING_START_UTC,reason:'ineligible_before_start'};
 }
-export async function assertMarketingEligible(env,phone,payer){const eligibility=await marketingEligibility(env,phone,payer);if(!eligibility.eligible)throw Error(eligibility.reason==='awaiting_issue_date'?'Confirme a data de emissão da apólice antes de gerar obrigação de marketing.':'Apólice anterior a 09/10/2026: não elegível para obrigação de marketing.');}
+export async function assertMarketingEligible(env,phone,payer){const eligibility=await marketingEligibility(env,phone,payer);if(!eligibility.eligible)throw Error(eligibility.reason==='exempt_agent'?'Este agente está dispensado da obrigação de marketing para este fechamento.':eligibility.reason==='awaiting_issue_date'?'Confirme a data de emissão da apólice antes de gerar obrigação de marketing.':'Apólice anterior a 09/10/2026: não elegível para obrigação de marketing.');}

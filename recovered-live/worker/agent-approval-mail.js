@@ -23,6 +23,6 @@ export function agentApprovalMail({account,upline,features=[],external=false}){
  return {subject:'Seu acesso ao Affinity Portal foi aprovado',text,html,replyTo:'info@affinityfc.org',headers:{'Auto-Submitted':'auto-generated','X-Auto-Response-Suppress':'All'}};
 }
 export async function approvalMailForAccount(env,account){
- await businessSchema(env);const [parent,external,access,identity]=await Promise.all([env.DB.prepare('SELECT u.name FROM agentHierarchy h JOIN adminAccounts u ON lower(u.email)=lower(h.uplineEmail) WHERE lower(h.agentEmail)=?').bind(account.email.toLowerCase()).first(),env.DB.prepare('SELECT name FROM agentExternalUplines WHERE agentEmail=?').bind(account.email.toLowerCase()).first(),userAccess(env,account.email),agentBusiness(env,account.email)]);
+ await businessSchema(env);const [parent,external,access,identity]=await Promise.all([env.DB.prepare('SELECT coalesce(u.name,d.name) name FROM agentHierarchy h LEFT JOIN adminAccounts u ON lower(u.email)=lower(h.uplineEmail) LEFT JOIN agentUplineDirectory d ON d.nodeKey=h.uplineEmail WHERE lower(h.agentEmail)=?').bind(account.email.toLowerCase()).first(),env.DB.prepare('SELECT name FROM agentExternalUplines WHERE agentEmail=?').bind(account.email.toLowerCase()).first(),userAccess(env,account.email),agentBusiness(env,account.email)]);
  return agentApprovalMail({account,upline:parent||external,features:access.features,external:!identity.affinityTeam});
 }

@@ -42971,7 +42971,7 @@ async function runProcedure(name, input, request, env, delegation=null) {
       applicantName,
       phone || null,
       await bcryptjs_default.hash(password, 12)
-    ),selectedUpline?env.DB.prepare('INSERT INTO agentHierarchy(agentEmail,uplineEmail) VALUES(?,?)').bind(email,selectedUpline.email.toLowerCase()):env.DB.prepare('INSERT INTO agentExternalUplines(agentEmail,name,email,phone) VALUES(?,?,?,?)').bind(email,externalUpline.name,externalUpline.email,externalUpline.phone)]);
+    ),selectedUpline?env.DB.prepare('INSERT INTO agentHierarchy(agentEmail,uplineEmail) VALUES(?,?)').bind(email,String(selectedUpline.key||selectedUpline.email).toLowerCase()):env.DB.prepare('INSERT INTO agentExternalUplines(agentEmail,name,email,phone) VALUES(?,?,?,?)').bind(email,externalUpline.name,externalUpline.email,externalUpline.phone)]);
     await sendEmailIfConfigured(env, {
       to: env.ADMIN_EMAIL,
       subject: "Nova conta de agente aguardando aprova\xE7\xE3o",

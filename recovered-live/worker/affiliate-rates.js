@@ -1,3 +1,4 @@
+import {marketingParticipationSchema} from './marketing-participation.js';
 import {marketingEligibility} from './marketing-eligibility.js';
 export const referenceBands = [
   { key: 'term30', product: 'Term', label: 'Menos de US$ 30', min: 1, max: 2999 },
@@ -19,6 +20,7 @@ export function classifySale(input) {
   return { band, cents };
 }
 export async function ratesSchema(env) {
+  await marketingParticipationSchema(env);
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS affiliateReferenceRates(bandKey TEXT PRIMARY KEY,payoutCents INTEGER,updatedBy TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
   await env.DB.prepare('CREATE TABLE IF NOT EXISTS centralLeadClosures(phone TEXT PRIMARY KEY,agent TEXT NOT NULL,product TEXT NOT NULL,monthlyPremiumCents INTEGER NOT NULL,bandKey TEXT NOT NULL,referencePayoutCents INTEGER,confirmedAt TEXT DEFAULT CURRENT_TIMESTAMP)').run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS marketingObligations(phone TEXT PRIMARY KEY,payer TEXT NOT NULL,beneficiaryOwner TEXT,beneficiaryName TEXT,beneficiaryEmail TEXT,beneficiaryKind TEXT,amountCents INTEGER,annualPremiumCents INTEGER NOT NULL,rule TEXT NOT NULL DEFAULT 'awaiting_admin',status TEXT NOT NULL DEFAULT 'awaiting_admin',decidedBy TEXT,decidedAt TEXT,paidAt TEXT,paymentReference TEXT,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP)").run();
