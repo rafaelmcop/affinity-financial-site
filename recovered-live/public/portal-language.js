@@ -61,8 +61,8 @@ function start(){
  const label=document.createElement('label');label.dataset.portalLanguage='';label.setAttribute('translate','no');label.append(document.createTextNode('🌐 '));
  const select=document.createElement('select');select.id='portal-language-select';select.setAttribute('aria-label','Language / Idioma');
  for(const [value,text]of [['pt','Português'],['en','English'],['es','Español']]){const option=document.createElement('option');option.value=value;option.textContent=text;select.append(option)}label.append(select);
- const container=document.createElement('section');container.id='portal-language-panel';container.setAttribute('translate','no');container.style.cssText='box-sizing:border-box;padding:12px 20px;display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap;background:var(--agent-panel,#fff);color:var(--agent-text,#14233b);border-bottom:1px solid #9aaec3';
- const caption=document.createElement('span');caption.style.fontWeight='700';container.append(caption,label);
+ const container=document.getElementById('portal-language-panel')||document.createElement('section');container.id='portal-language-panel';container.setAttribute('translate','no');container.style.cssText='box-sizing:border-box;padding:12px 20px;display:flex;gap:12px;align-items:center;justify-content:flex-end;flex-wrap:wrap;background:var(--agent-panel,#fff);color:var(--agent-text,#14233b);border-bottom:1px solid #9aaec3';
+ const caption=document.createElement('span');caption.style.fontWeight='700';container.replaceChildren(caption,label);
  function place(){
   const path=location.pathname,privateArea=/^\/(agentes|admin|afiliados|assistentes)(?:\/|$)|^\/agent-/.test(path)&&!/(?:login|registrar|register)(?:\/|$)/.test(path);
   const settings=/\/configuracoes$|^\/admin\/smtp-config$/.test(path)&&(!new URLSearchParams(location.search).has('view')||new URLSearchParams(location.search).get('view')==='settings');

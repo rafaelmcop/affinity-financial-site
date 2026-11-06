@@ -48225,7 +48225,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
   if(unexpectedSpaPage(url.pathname,html))response=new Response('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width"><title>Page not found | Affinity Financial</title><main><h1>Page not found</h1><p>The address may have changed.</p><a href="/">Return to Affinity Financial</a></main></html>',{status:404,headers:{'content-type':'text/html; charset=utf-8'}});
  }
  if(usesPublicAppearance(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('html',{element(el){el.setAttribute('data-public-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/public-theme.css?v=1">',{html:true});}}).transform(response);
- if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=3" defer></script>',{html:true});}}).transform(response);
+ if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=4" defer></script>',{html:true});}}).transform(response);
  return perimeterHeaders(response,url.pathname);
 };
 export {
