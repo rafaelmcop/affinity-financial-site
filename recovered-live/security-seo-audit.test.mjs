@@ -26,7 +26,7 @@ test('unknown SPA fallback is a real not-found without breaking valid routes or 
 function schemaFixture(){let runs=0,fail=false,features=['calendar'];const DB={prepare(sql){return {bind(){return this},async run(){runs++;if(fail){fail=false;throw Error('transient initialization')}return {meta:{changes:0}}},async first(){return sql.includes('SELECT featuresJson')?{featuresJson:JSON.stringify(features)}:{version:'installed'}}}},async batch(q){return Promise.all(q.map(s=>s.run()))}};return {env:{DB},get runs(){return runs},setFail(){fail=true},features(value){features=value}};}
 test('concurrent requests initialize schema once while permission revocations remain immediate',async()=>{
  const f=schemaFixture();await Promise.all([accessSchema(f.env),accessSchema(f.env),accessSchema(f.env)]);const runs=f.runs;
- assert.deepEqual((await userAccess(f.env,'a@example.invalid')).features,['calendar']);f.features([]);assert.deepEqual((await userAccess(f.env,'a@example.invalid')).features,[]);assert.equal(f.runs,runs);
+ assert.deepEqual((await userAccess(f.env,'a@example.invalid')).features,['calendar','ai']);f.features([]);assert.deepEqual((await userAccess(f.env,'a@example.invalid')).features,['ai']);assert.equal(f.runs,runs);
 });
 test('failed schema initialization is retryable and a different database is initialized independently',async()=>{
  const f=schemaFixture();f.setFail();await assert.rejects(accessSchema(f.env));await accessSchema(f.env);const other=schemaFixture();await accessSchema(other.env);assert(other.runs>0);

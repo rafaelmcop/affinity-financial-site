@@ -1,3 +1,5 @@
+import {adminPortalAi} from './portal-ai-admin.js';
+import {aiHistory} from './portal-ai-memory.js';
 import {portalAi} from './portal-ai.js';
 import {googleCalendarRoute} from './google-calendar.js';
 import {chatPanelRole} from './chat-panel-role.js';
@@ -42880,6 +42882,39 @@ async function syncAllCalendlyConnections(env) {
 }
 __name(syncAllCalendlyConnections, "syncAllCalendlyConnections");
 __name2(syncAllCalendlyConnections, "syncAllCalendlyConnections");
+
+async function portalAiDeliveryLog(env,owner){
+    const [future, deliveries, failures,paymentSent,paymentPending] = await env.DB.batch([
+      env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail,c.birthDate FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
+      env.DB.prepare("SELECT MIN(d.id) AS id,MIN(m.id) AS messageId,m.title,CASE WHEN m.occasion='custom' AND m.title='Boas-vindas à Affinity' THEN 'Boas-vindas às novas apólices' ELSE m.subject END AS subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt,json_group_array(json_object('clientId',d.clientId,'name',coalesce(c.name,''),'email',c.email,'sentAt',d.sentAt,'birthDate',c.birthDate)) AS recipients FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? GROUP BY CASE WHEN m.occasion='custom' AND m.title='Boas-vindas à Affinity' THEN 'welcome' ELSE CAST(m.id AS TEXT) END,m.title,CASE WHEN m.occasion='custom' AND m.title='Boas-vindas à Affinity' THEN 'welcome' ELSE m.subject END,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
+      env.DB.prepare("SELECT id,clientId,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' AND "+unresolvedDeliveryFailureSQL+" AND id IN (SELECT max(id) FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' GROUP BY messageId,clientId,recipientEmail,subject) ORDER BY attemptedAt DESC LIMIT 100").bind(owner,owner),
+      env.DB.prepare("SELECT e.id,e.clientId,e.subject,e.sentAt,c.name AS clientName,c.email AS recipientEmail FROM clientEmails e LEFT JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='sent' AND EXISTS(SELECT 1 FROM crmActivities a WHERE a.clientId=e.clientId AND a.content LIKE 'Aviso de pagamento encaminhado automaticamente%' AND length(coalesce(e.externalId,''))>0 AND instr(a.content,e.externalId)>0) ORDER BY e.sentAt DESC,e.id DESC LIMIT 250").bind(owner),
+      env.DB.prepare("SELECT m.id,m.clientId,m.subject,m.sentAt,m.actionDetail,c.name AS clientName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.direction='received' AND m.paymentStatus='attention' AND coalesce(m.actionStatus,'')<>'sent' ORDER BY m.sentAt DESC,m.id DESC LIMIT 100").bind(owner)
+    ]);
+    const upcoming = (future.results || []).map((row) => {
+      let recipientCount = row.clientId ? 1 : null;
+      if (row.selectedClientIds) try {
+        recipientCount = JSON.parse(String(row.selectedClientIds)).length;
+      } catch {
+        recipientCount = null;
+      }
+      const monthNames = ["", "janeiro", "fevereiro", "mar\xE7o", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+      const monthlyDate = Number(row.monthNumber) >= 1 && Number(row.monthNumber) <= 12 ? `Todo dia 1\xBA de ${monthNames[Number(row.monthNumber)]}, 8:30 AM` : "M\xEAs de refer\xEAncia pendente";
+      const recurring = { birthday: "Em cada anivers\xE1rio, 8:30 AM", thanksgiving: "No Dia de A\xE7\xE3o de Gra\xE7as, 8:30 AM", christmas: "Em 25 de dezembro, 8:30 AM", new_year: "Em 1\xBA de janeiro, 8:30 AM", policy_anniversary: "15 dias antes da revis\xE3o Flex Life, 8:30 AM", monthly: monthlyDate };
+      return { id: `scheduled-${row.id}`, clientId:Number(row.clientId)||null,birthDate:row.birthDate||null,occasion:row.occasion, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : recipientCount ? `${recipientCount} destinat\xE1rio(s)` : String(row.audience) === "all" ? "Todos os clientes eleg\xEDveis" : "Grupo selecionado", recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "scheduled", date: row.scheduledAt || recurring[String(row.occasion)] || "Programa\xE7\xE3o autom\xE1tica", errorMessage: null };
+    });
+    const sentAutomation = (deliveries.results || []).map((row) => {
+      const count = Number(row.recipientCount || 0);
+      let recipients=[];try{recipients=JSON.parse(row.recipients||'[]').map(recipient=>({...recipient,name:recipient.name||'Contato'}));}catch{}
+      return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, recipients, status: "sent", date: row.sentAt, firstSentAt: row.firstSentAt, errorMessage: null };
+    });
+    const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, clientId:Number(row.clientId)||null,title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, date: row.attemptedAt, ...deliveryFailurePresentation(row) }));
+    const paymentDeliveries=(paymentSent.results||[]).map(row=>({id:'payment-sent-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente',recipientEmail:row.recipientEmail||null,status:'sent',date:row.sentAt,recipients:[{clientId:Number(row.clientId)||null,name:row.clientName||'Cliente',email:row.recipientEmail||null,sentAt:row.sentAt}],recipientCount:1}));
+    const paymentReviews=(paymentPending.results||[]).map(row=>({id:'payment-review-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente ainda não identificado',status:'review',date:row.sentAt,errorMessage:row.actionDetail||'Verificar cliente e apólice antes do envio'}));
+    await automationChannelsSchema(env);
+    const waDeliveries=await whatsappDeliveryHistory(env,owner);
+    return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries,...await meetingReminderHistory(env,owner)]);
+}
 async function runProcedure(name, input, request, env, delegation=null) {
   await accessSchema(env);
   const feature=procedureFeature(name);
@@ -43491,12 +43526,26 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
   if (name.startsWith("careers.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-  if(name==='agent.portalAssistant'){
+  if(name==='admin.portalAssistant'||name==='admin.portalAssistantHistory'){
+    if(request.method!=='POST')return trpcError('Use POST.','METHOD_NOT_SUPPORTED',405);
+    if(delegation||!['admin','both'].includes(accountType)||!adminAccess.account?.isActive||adminAccess.account.status!=='approved')return trpcError('Somente Admin.','FORBIDDEN',403);
+    const actor=adminEmail.toLowerCase();
+    try{if(name==='admin.portalAssistantHistory')return trpcResult(await aiHistory(env,{owner:'admin:'+actor,actor},input));
+      return trpcResult(await adminPortalAi(env,actor,input,{bankSummary:async(id,owner)=>{const row=await env.DB.prepare('SELECT sensitiveData FROM agentApplications WHERE id=? AND lower(agentEmail)=?').bind(id,owner).first();if(!row)return null;try{const data=JSON.parse(await decryptSmtpPassword(row.sensitiveData||'',env.JWT_SECRET)),digits=String(data.accountNumber||'').replace(/\D/g,'');return {name:String(data.bankName||'').slice(0,120),last4:digits.length>=4?digits.slice(-4):null};}catch{return null;}},readFor:async(owner,procedure,args)=>{
+       if(procedure==='agent.deliveryLog')return portalAiDeliveryLog(env,owner);
+       if(procedure==='agent.listTasks')return trpcResult(await paymentTasks(env,owner));
+       if(procedure==='agent.getCrmBoard')return trpcResult(await crmBoard(env,owner,{},'get',actor));
+       if(procedure==='agent.mailbox'){const items=(await env.DB.prepare("SELECT m.id,m.subject,m.sentAt,m.direction,m.topic FROM agentMailboxEmails m WHERE lower(m.agentEmail)=? AND m.deletedAt IS NULL AND m.direction=? AND "+PROFESSIONAL_MAILBOX_SQL+" ORDER BY m.sentAt DESC LIMIT 300").bind(owner,args.folder==='sent'?'sent':'received').all()).results||[];return trpcResult({items});}
+       throw Error('Leitura não permitida');
+      }}));
+    }catch(error){return trpcError(error.status>=500?'Não foi possível consultar a IA agora.':error.message,'BAD_REQUEST',error.status||400);}
+  }
+  if(name==='agent.portalAssistant'||name==='agent.portalAssistantHistory'){
     if(request.method!=='POST')return trpcError('Use POST.','METHOD_NOT_SUPPORTED',405);
     if(!adminAccess.account?.isActive||adminAccess.account.status!=='approved')return trpcError('Acesso bloqueado.','FORBIDDEN',403);
     let permissions;
     if(delegation){const link=await env.DB.prepare('SELECT permissionsJson FROM assistantAgentAccess WHERE assistantId=? AND owner=? AND active=1').bind(delegation.assistantId,adminEmail.toLowerCase()).first();if(!link)return trpcError('Vínculo da assistente indisponível.','FORBIDDEN',403);try{permissions=JSON.parse(link.permissionsJson);}catch{return trpcError('Permissões inválidas.','FORBIDDEN',403);}}
-    try{return trpcResult(await portalAi(env,{owner:adminEmail,actor:delegation?.actorEmail||adminEmail,permissions},input,{hasFeature:key=>hasFeature(env,adminEmail,key),read:(procedure,args)=>{if(!['agent.deliveryLog','agent.mailbox','agent.listTasks','agent.getCrmBoard'].includes(procedure))throw Error('Leitura não permitida');return runProcedure(procedure,args,request,env,delegation);}}));}catch(error){return trpcError(error.status>=500?'A assistente de IA não conseguiu responder agora. Tente novamente; nenhuma ação foi executada.':error.message,error.status===403?'FORBIDDEN':'BAD_REQUEST',error.status||400);}
+    try{if(name==='agent.portalAssistantHistory')return trpcResult(await aiHistory(env,{owner:adminEmail,actor:delegation?.actorEmail||adminEmail},input));return trpcResult(await portalAi(env,{owner:adminEmail,actor:delegation?.actorEmail||adminEmail,permissions},input,{hasFeature:key=>hasFeature(env,adminEmail,key),bankSummary:async(id,owner)=>{const row=await env.DB.prepare('SELECT sensitiveData FROM agentApplications WHERE id=? AND lower(agentEmail)=?').bind(id,owner).first();if(!row)return null;try{const data=JSON.parse(await decryptSmtpPassword(row.sensitiveData||'',env.JWT_SECRET));const digits=String(data.accountNumber||'').replace(/\D/g,'');return {name:String(data.bankName||'').slice(0,120),last4:digits.length>=4?digits.slice(-4):null};}catch{return null;}},read:(procedure,args)=>{if(!['agent.deliveryLog','agent.mailbox','agent.listTasks','agent.getCrmBoard'].includes(procedure))throw Error('Leitura não permitida');return runProcedure(procedure,args,request,env,delegation);}}));}catch(error){return trpcError(error.status>=500?'A assistente de IA não conseguiu responder agora. Tente novamente; nenhuma ação foi executada.':error.message,error.status===403?'FORBIDDEN':'BAD_REQUEST',error.status||400);}
   }
   const auditedActions = {
     "agent.saveApplication": "Criou ou alterou uma aplicação",
@@ -45174,39 +45223,7 @@ Affinity Financial Consulting`,
       }))
     );
   }
-  if (name === "agent.deliveryLog") {
-    const owner = adminEmail.toLowerCase();
-    const [future, deliveries, failures,paymentSent,paymentPending] = await env.DB.batch([
-      env.DB.prepare("SELECT m.id,m.title,m.subject,m.audience,m.scheduledAt,m.occasion,m.monthNumber,m.selectedClientIds,m.clientId,c.name AS clientName,c.email AS recipientEmail,c.birthDate FROM scheduledMessages m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.isActive=1 ORDER BY COALESCE(m.scheduledAt,m.createdAt) ASC").bind(owner),
-      env.DB.prepare("SELECT MIN(d.id) AS id,MIN(m.id) AS messageId,m.title,CASE WHEN m.occasion='custom' AND m.title='Boas-vindas à Affinity' THEN 'Boas-vindas às novas apólices' ELSE m.subject END AS subject,d.sentKey,COUNT(*) AS recipientCount,MIN(d.sentAt) AS firstSentAt,MAX(d.sentAt) AS sentAt,json_group_array(json_object('clientId',d.clientId,'name',coalesce(c.name,''),'email',c.email,'sentAt',d.sentAt,'birthDate',c.birthDate)) AS recipients FROM automationDeliveries d JOIN scheduledMessages m ON m.id=d.messageId LEFT JOIN crmClients c ON c.id=d.clientId WHERE lower(m.agentEmail)=? GROUP BY CASE WHEN m.occasion='custom' AND m.title='Boas-vindas à Affinity' THEN 'welcome' ELSE CAST(m.id AS TEXT) END,m.title,CASE WHEN m.occasion='custom' AND m.title='Boas-vindas à Affinity' THEN 'welcome' ELSE m.subject END,d.sentKey ORDER BY MAX(d.sentAt) DESC LIMIT 250").bind(owner),
-      env.DB.prepare("SELECT id,clientId,subject,clientName,recipientEmail,attemptedAt,errorMessage FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' AND "+unresolvedDeliveryFailureSQL+" AND id IN (SELECT max(id) FROM crmDeliveryLogs WHERE lower(agentEmail)=? AND status='failed' GROUP BY messageId,clientId,recipientEmail,subject) ORDER BY attemptedAt DESC LIMIT 100").bind(owner,owner),
-      env.DB.prepare("SELECT e.id,e.clientId,e.subject,e.sentAt,c.name AS clientName,c.email AS recipientEmail FROM clientEmails e LEFT JOIN crmClients c ON c.id=e.clientId WHERE lower(e.agentEmail)=? AND e.direction='sent' AND EXISTS(SELECT 1 FROM crmActivities a WHERE a.clientId=e.clientId AND a.content LIKE 'Aviso de pagamento encaminhado automaticamente%' AND length(coalesce(e.externalId,''))>0 AND instr(a.content,e.externalId)>0) ORDER BY e.sentAt DESC,e.id DESC LIMIT 250").bind(owner),
-      env.DB.prepare("SELECT m.id,m.clientId,m.subject,m.sentAt,m.actionDetail,c.name AS clientName FROM agentMailboxEmails m LEFT JOIN crmClients c ON c.id=m.clientId WHERE lower(m.agentEmail)=? AND m.direction='received' AND m.paymentStatus='attention' AND coalesce(m.actionStatus,'')<>'sent' ORDER BY m.sentAt DESC,m.id DESC LIMIT 100").bind(owner)
-    ]);
-    const upcoming = (future.results || []).map((row) => {
-      let recipientCount = row.clientId ? 1 : null;
-      if (row.selectedClientIds) try {
-        recipientCount = JSON.parse(String(row.selectedClientIds)).length;
-      } catch {
-        recipientCount = null;
-      }
-      const monthNames = ["", "janeiro", "fevereiro", "mar\xE7o", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-      const monthlyDate = Number(row.monthNumber) >= 1 && Number(row.monthNumber) <= 12 ? `Todo dia 1\xBA de ${monthNames[Number(row.monthNumber)]}, 8:30 AM` : "M\xEAs de refer\xEAncia pendente";
-      const recurring = { birthday: "Em cada anivers\xE1rio, 8:30 AM", thanksgiving: "No Dia de A\xE7\xE3o de Gra\xE7as, 8:30 AM", christmas: "Em 25 de dezembro, 8:30 AM", new_year: "Em 1\xBA de janeiro, 8:30 AM", policy_anniversary: "15 dias antes da revis\xE3o Flex Life, 8:30 AM", monthly: monthlyDate };
-      return { id: `scheduled-${row.id}`, clientId:Number(row.clientId)||null,birthDate:row.birthDate||null,occasion:row.occasion, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: row.clientName ? String(row.clientName) : recipientCount ? `${recipientCount} destinat\xE1rio(s)` : String(row.audience) === "all" ? "Todos os clientes eleg\xEDveis" : "Grupo selecionado", recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, status: "scheduled", date: row.scheduledAt || recurring[String(row.occasion)] || "Programa\xE7\xE3o autom\xE1tica", errorMessage: null };
-    });
-    const sentAutomation = (deliveries.results || []).map((row) => {
-      const count = Number(row.recipientCount || 0);
-      let recipients=[];try{recipients=JSON.parse(row.recipients||'[]').map(recipient=>({...recipient,name:recipient.name||'Contato'}));}catch{}
-      return { id: `automation-${row.messageId}-${row.sentKey}`, title: String(row.title || "Automa\xE7\xE3o"), subject: String(row.subject || row.title || "Mensagem"), clientName: `${count} ${count === 1 ? "contato recebeu" : "contatos receberam"}`, recipientEmail: null, recipientCount: count, recipients, status: "sent", date: row.sentAt, firstSentAt: row.firstSentAt, errorMessage: null };
-    });
-    const failed = (failures.results || []).map((row) => ({ id: `failed-${row.id}`, clientId:Number(row.clientId)||null,title: "Falha no envio", subject: String(row.subject || "Mensagem"), clientName: row.clientName ? String(row.clientName) : null, recipientEmail: row.recipientEmail ? String(row.recipientEmail) : null, date: row.attemptedAt, ...deliveryFailurePresentation(row) }));
-    const paymentDeliveries=(paymentSent.results||[]).map(row=>({id:'payment-sent-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente',recipientEmail:row.recipientEmail||null,status:'sent',date:row.sentAt,recipients:[{clientId:Number(row.clientId)||null,name:row.clientName||'Cliente',email:row.recipientEmail||null,sentAt:row.sentAt}],recipientCount:1}));
-    const paymentReviews=(paymentPending.results||[]).map(row=>({id:'payment-review-'+row.id,title:'Pagamento devolvido',subject:row.subject,clientId:Number(row.clientId)||null,clientName:row.clientName||'Cliente ainda não identificado',status:'review',date:row.sentAt,errorMessage:row.actionDetail||'Verificar cliente e apólice antes do envio'}));
-    await automationChannelsSchema(env);
-    const waDeliveries=await whatsappDeliveryHistory(env,owner);
-    return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries,...await meetingReminderHistory(env,owner)]);
-  }
+  if(name==='agent.deliveryLog')return portalAiDeliveryLog(env,adminEmail.toLowerCase());
   if(['agent.scheduleMessage','agent.updateMessage','agent.setAutomationSubscription'].includes(name)&&testAccountAutomationsDisabled(adminEmail))return trpcError('Esta conta é reservada para testes e não permite automações de mensagens.');
   if (name === "agent.scheduleMessage") {
     if(String(input.whatsappMessage||'').length>2000)return trpcError("A mensagem de WhatsApp deve ter até 2.000 caracteres.");
@@ -48219,11 +48236,11 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2"><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});}}).transform(response);
 
  if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=15" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=15" defer></script><script src="/portal-ai.js?v=5" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261105-nlg-number-1" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=3"></script><script src="/portal-ai.js?v=4" defer></script><script src="/portal-notifications.js?v=3" defer></script><script src="/portal-home-notices.js?v=2" defer></script><script src="/internal-messenger.js?v=4" defer></script><script src="/five-rings-background.js?v=9" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261106-account-avatar-9" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261106-account-avatar-9');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=3"></script><script src="/portal-ai.js?v=5" defer></script><script src="/portal-notifications.js?v=3" defer></script><script src="/portal-home-notices.js?v=2" defer></script><script src="/internal-messenger.js?v=4" defer></script><script src="/five-rings-background.js?v=9" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261106-integrations-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261106-integrations-10');}}).transform(response);
  }
  return response;
 };

@@ -1,7 +1,7 @@
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
 export {pageFeature};
-export const newAgentFeatures=Object.freeze(['application_create','applications','email','messages','calendar','policies','tasks','reviews','public_profile','five_rings']);
+export const newAgentFeatures=Object.freeze(['ai','application_create','applications','email','messages','calendar','policies','tasks','reviews','public_profile','five_rings']);
 export const accessFeatures=featureCatalog.map(([key,label])=>[key,label]);
 const keys=accessFeatures.map(([key])=>key),all=JSON.stringify(keys);
 const schemaInitializations=new WeakMap();
@@ -20,6 +20,11 @@ async function initializeAccessSchema(env){
   const split=[['policies','applications'],['policies','application_create'],['crm','policies'],['messages','direct_contacts'],['reviews','public_profile']];
   await env.DB.batch([...split.map(([oldKey,newKey])=>env.DB.prepare("UPDATE portalFeatureAccess SET featuresJson=json_insert(featuresJson,'$[#]',?) WHERE EXISTS(SELECT 1 FROM json_each(featuresJson) WHERE value=?) AND NOT EXISTS(SELECT 1 FROM json_each(featuresJson) WHERE value=?) AND NOT EXISTS(SELECT 1 FROM portalFeatureAccessMeta WHERE version='menu-granular-v2')").bind(newKey,oldKey,newKey)),env.DB.prepare("INSERT OR IGNORE INTO portalFeatureAccessMeta(version) VALUES('menu-granular-v2')")]);
  }
+ if(!await env.DB.prepare("SELECT version FROM portalFeatureAccessMeta WHERE version='national-life-access-v1'").first()){
+  const exists=await env.DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agentNationalLifeConnections'").first();
+  if(exists)await env.DB.prepare("UPDATE portalFeatureAccess SET featuresJson=json_insert(featuresJson,'$[#]','national_life') WHERE EXISTS(SELECT 1 FROM agentNationalLifeConnections n WHERE lower(n.agentEmail)=portalFeatureAccess.email) AND NOT EXISTS(SELECT 1 FROM json_each(featuresJson) WHERE value='national_life')").run();
+  await env.DB.prepare("INSERT OR IGNORE INTO portalFeatureAccessMeta(version) VALUES('national-life-access-v1')").run();
+ }
  if(await env.DB.prepare("SELECT version FROM portalFeatureAccessMeta WHERE version='rollout-v1'").first())return;
  // Snapshot once; subsequent registrations start with core profile/settings only.
  await env.DB.batch([
@@ -28,20 +33,20 @@ async function initializeAccessSchema(env){
   env.DB.prepare("INSERT OR IGNORE INTO portalFeatureAccessMeta(version) VALUES('rollout-v1')")
  ]);
 }
-export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];if(!row){const account=await env.DB.prepare("SELECT accountType FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both')").bind(String(email).toLowerCase()).first();if(account)features=[...newAgentFeatures];}try{if(row)features=JSON.parse(row.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}const whatsappAllowed=await portalWhatsappAllowed(env,email);if(!whatsappAllowed)features=features.filter(f=>f!=='whatsapp');else if(env.WHATSAPP_PORTAL_ACCESS_MODE==='restricted'&&!features.includes('whatsapp'))features.push('whatsapp');return {features,available:featureCatalog.map(([key,label,group])=>({key,label:key==='whatsapp'&&!whatsappAllowed?'WhatsApp — em construção':label,group,unavailable:key==='whatsapp'&&!whatsappAllowed})),updatedAt:row?.updatedAt||null};}
+export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];if(!row){const account=await env.DB.prepare("SELECT accountType FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both')").bind(String(email).toLowerCase()).first();if(account)features=[...newAgentFeatures];}try{if(row)features=JSON.parse(row.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}if(!features.includes('ai'))features.push('ai');const whatsappAllowed=await portalWhatsappAllowed(env,email);if(!whatsappAllowed)features=features.filter(f=>f!=='whatsapp');else if(env.WHATSAPP_PORTAL_ACCESS_MODE==='restricted'&&!features.includes('whatsapp'))features.push('whatsapp');return {features,available:featureCatalog.filter(([key])=>key!=='ai').map(([key,label,group])=>({key,label:key==='whatsapp'&&!whatsappAllowed?'WhatsApp — em construção':label,group,unavailable:key==='whatsapp'&&!whatsappAllowed})),updatedAt:row?.updatedAt||null};}
 export async function hasFeature(env,email,feature){
  const features=(await userAccess(env,email)).features;
  const allowed=f=>features.includes(f==='crm'?'policies':f);
  return !feature||(Array.isArray(feature)?feature.some(allowed):feature==='contacts'?allowed('whatsapp')||allowed('queue'):allowed(feature));
 }
 export function procedureFeature(name){
- if(name==='agent.portalAssistant')return 'ai';
+ if(name==='agent.portalAssistant'||name==='agent.portalAssistantHistory')return 'ai';
  if(['crm.presence','crm.setPresence','crm.internalMessages','crm.sendInternalMessage','crm.markInternalMessagesRead','crm.internalUnreadCount'].includes(name))return null;
  const [role,op]=name.split('.');if(role==='agent'&&op==='homeNotices')return ['email','tasks'];if(role==='affiliate')return op==='submitLead'?'referrals':null;
  if(role==='crm')return 'crm';if(role!=='agent')return null;
  if(['getContactSegments','saveContactTags','saveCrmSmartList','deleteCrmSmartList','getCrmBoard','reorderCrmBoardColumns','moveCrmBoardClient','createCrmBoardColumn','renameCrmBoardColumn','deleteCrmBoardColumn','createCrmBoardContact'].includes(op))return 'policies';
  if(['login','register','dashboard','pendingCounts','getProfile','updateProfile','getEmailSettings','saveEmailSettings','verifyEmailConnection','getFiveRingsConnection','saveFiveRingsConnection'].includes(op))return null;
- if(/FiveRings|fiveRings/.test(op))return 'five_rings';
+ if(/FiveRings|fiveRings/.test(op))return 'five_rings';if(/NationalLife/.test(op))return 'national_life';
  if(/Calendly|calendly|Meeting|meeting/.test(op))return 'calendar';
  if(['logSyncStatus','logPortalInteraction'].includes(op))return null;
  if(/PublicProfile/.test(op))return 'public_profile';

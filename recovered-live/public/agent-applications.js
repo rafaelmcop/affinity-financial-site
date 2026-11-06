@@ -1598,6 +1598,9 @@ function describeApplicationParent(row,parent,feminine=false){
     return {clientName:meeting.inviteeName || "",clientEmail:meeting.inviteeEmail || "",clientPhone:meeting.inviteePhone || "",originMeetingId:Number(meeting.id || 0),serviceDate:parts ? `${part("year")}-${part("month")}-${part("day")}` : ""};
   }
   async function openMeetingApplication() {
+    const applicationId=Number(new URLSearchParams(location.search).get('applicationId'));
+    if(Number.isSafeInteger(applicationId)&&applicationId>0){try{await edit(await api('agent.getApplication',{id:applicationId}));}catch(error){notice(error.message,true);}return;}
+
     const meetingId = Number(new URLSearchParams(location.search).get("meetingId") || 0);
     if (!Number.isSafeInteger(meetingId) || meetingId <= 0) {
       if (new URLSearchParams(location.search).get("nova") === "1") { await edit(); }
