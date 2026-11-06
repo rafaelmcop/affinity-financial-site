@@ -1,7 +1,7 @@
 (()=>{let pending=false;
 async function send(message){return await chrome.runtime.sendMessage(message);}
 window.addEventListener('message',async event=>{
- if(event.source!==window||event.origin!=='https://www.affinityfc.org'||event.data?.type!=='affinity-five-rings-request'||typeof event.data.id!=='string'||!['open','collect','ping','backgroundStart','backgroundFinish'].includes(event.data.action)||pending)return;
+ if(event.source!==window||!['https://www.affinityfc.org','https://portal.affinityfc.org'].includes(event.origin)||event.origin!==location.origin||event.data?.type!=='affinity-five-rings-request'||typeof event.data.id!=='string'||!['open','collect','ping','backgroundStart','backgroundFinish'].includes(event.data.action)||pending)return;
  pending=true;const id=event.data.id;
  try{
   let result;

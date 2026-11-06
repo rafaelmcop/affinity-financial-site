@@ -33,3 +33,25 @@ the user's chosen Gmail address and the corresponding portal login email, add
 the Gmail address to Google's test-user list and the portal login to the Admin
 Testing allowlist. The mailbox owner must then complete their individual OAuth
 authorization. Do not describe this setup as production-verified or mail-tested.
+
+## Microsoft registration pending
+
+Microsoft requires a platform app registration before each agent can individually
+authorize Outlook.com, Hotmail or Microsoft 365. No Microsoft administrative
+session was available on 2026-11-05. The Microsoft provider must remain unavailable
+until an owned application and its secret are configured and validated.
+
+Registration checklist for the authenticated platform owner:
+- Register Affinity Portal as a Web application in Microsoft Entra.
+- Support organizational accounts in any directory and personal Microsoft accounts.
+- Register exactly the two HTTPS callbacks listed above.
+- Use delegated scopes openid, email, profile, offline_access,
+  https://outlook.office.com/IMAP.AccessAsUser.All and
+  https://outlook.office.com/SMTP.Send, matching worker/email-oauth.js.
+- Store client ID and encrypted secret through the master Admin page.
+- Start with Testing and an explicitly chosen portal login allowlist.
+- The individual mailbox owner must authorize the connection; app registration
+  does not itself connect or authorize the administrative mailbox.
+- Validate tokens and SMTP/IMAP authentication without sending real email.
+
+Reference: https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth

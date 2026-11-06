@@ -72,3 +72,6 @@ Screenshots: integrations/five-rings-store/assets/screenshot-data-access.png and
 6. Open the extension icon and disable synchronization to prevent new jobs. Existing imported portal data is retained until an authorized administrator removes it.
 
 The review decision and timing are controlled by Google. Do not label the extension published until the dashboard confirms it, and do not replace the portal's installation link with a guessed store ID.
+
+
+Version 1.0.10: adds portal.affinityfc.org to the existing Affinity-domain permissions and separates incognito execution from regular browsing. Incognito remains opt-in through Chrome settings. Background jobs stay on the initiating Affinity origin; reader tabs remain in the same browsing mode. No password, cookie or verification-code extraction.

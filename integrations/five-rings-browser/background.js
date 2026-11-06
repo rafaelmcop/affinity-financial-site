@@ -1,3 +1,6 @@
+const affinityOrigins=new Set(['https://www.affinityfc.org','https://portal.affinityfc.org']);
+const privateContext=Boolean(chrome.extension?.inIncognitoContext);
+const tabWindow=windowId=>Number.isInteger(windowId)?{windowId}:{};
 const base='https://portal.fiveringsfinancial.com';
 // Read the parameters used by the portal's own loaded DataTables. No credentials
 // or arbitrary page code are exported or evaluated.
@@ -38,16 +41,16 @@ async function nativeTableQueryOnce(type,tab){
 async function nativeTableQuery(type,tab){try{return await nativeTableQueryOnce(type,tab);}catch(error){if(!/back.?forward cache|message channel|receiving end|port.*closed/i.test(error.message||''))throw error;return await nativeTableQueryOnce(type,tab);}}
 const jobs=new Map(),backgroundTasks=new Map(),activeReaders=new Map();let memoryCheckpoint=null;
 async function checkpoint(owner,value){
- const key='affinity-five-rings-checkpoint';
+ const key='affinity-five-rings-checkpoint:'+(privateContext?'incognito':'regular');
  if(value!==undefined){memoryCheckpoint=value;try{if(chrome.storage?.session){if(value)await chrome.storage.session.set({[key]:value});else await chrome.storage.session.remove(key);}}catch{}return;}
  let saved=memoryCheckpoint;try{if(chrome.storage?.session)saved=(await chrome.storage.session.get(key))[key]||saved;}catch{}
  if(saved?.owner===owner&&Date.now()-saved.capturedAt>=0&&Date.now()-saved.capturedAt<600000)return saved;
  await checkpoint(owner,null);return null;
 }
 async function collectSnapshot(message,job){
- const tabs=await chrome.tabs.query({url:base+'/*'});
+ const tabs=(await chrome.tabs.query({url:base+'/*'})).filter(tab=>Boolean(tab.incognito)===Boolean(job.incognito));
  if(tabs.length>1)throw Error('Deixe apenas uma aba Five Rings aberta, na conta correta.');
- const reader=tabs[0]||await chrome.tabs.create({url:base+'/account/dashboard',active:false});
+ const reader=tabs[0]||await chrome.tabs.create({url:base+'/account/dashboard',active:false,...tabWindow(job.windowId)});
  activeReaders.set(reader.id,job);
  const original=tabs[0]?.url?(()=>{const u=new URL(tabs[0].url);return /^\/account\/(?:dashboard|clients|policies)(?:\/[0-9a-f-]+)?$/.test(u.pathname)?base+u.pathname:base+'/account/dashboard';})():null;
  try{
@@ -66,7 +69,8 @@ async function collectSnapshot(message,job){
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
  if(message.action==='readProgress'){const job=activeReaders.get(sender.tab?.id);if(!job||!sender.tab?.url?.startsWith(base+'/')||!['dashboard','clients','policies','details'].includes(message.progress?.stage))return;job.progress={stage:message.progress.stage,processed:Math.max(0,Math.min(20000,Number(message.progress.processed)||0)),total:Math.max(0,Math.min(20000,Number(message.progress.total)||0))};reply({ok:true});return;}
- if(!sender.tab?.url?.startsWith('https://www.affinityfc.org/')||!['open','collectStart','collectStatus','ping','backgroundStart','backgroundFinish'].includes(message.action))return;
+ let origin;try{origin=new URL(sender.tab?.url).origin;}catch{return;}
+ if(!affinityOrigins.has(origin)||Boolean(sender.tab.incognito)!==privateContext||!['open','collectStart','collectStatus','ping','backgroundStart','backgroundFinish'].includes(message.action))return;
  (async()=>{
   for(const [id,job]of jobs)if(Date.now()-job.started>600000)jobs.delete(id);
   if(message.action==='ping')return {ok:true,version:chrome.runtime.getManifest().version};
@@ -77,18 +81,18 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
    await chrome.tabs.remove(task.tab).catch(()=>{});return {ok:true};
   }
   if(message.action==='backgroundStart'){
-   const owner=String(message.owner||'').trim().toLowerCase();if(!owner)throw Error('Entre novamente no portal.');
-   const existing=backgroundTasks.get(owner);
-   if(existing&&!existing.finished){const current=await chrome.tabs.get(existing.tab).catch(()=>null);if(!current||!current.url?.startsWith('https://www.affinityfc.org/agent-five-rings-sync.html')||Date.now()-existing.started>480000){existing.finished=Date.now();existing.error='A leitura foi interrompida. Verifique sua conexão Five Rings.';if(current)await chrome.tabs.remove(existing.tab).catch(()=>{});}}
+   const owner=String(message.owner||'').trim().toLowerCase(),taskKey=origin+'|'+owner;if(!owner)throw Error('Entre novamente no portal.');
+   const existing=backgroundTasks.get(taskKey);
+   if(existing&&!existing.finished){const current=await chrome.tabs.get(existing.tab).catch(()=>null);if(!current||!(current.url&&new URL(current.url).origin===origin&&new URL(current.url).pathname==='/agent-five-rings-sync.html'&&Boolean(current.incognito)===privateContext)||Date.now()-existing.started>480000){existing.finished=Date.now();existing.error='A leitura foi interrompida. Verifique sua conexão Five Rings.';if(current)await chrome.tabs.remove(existing.tab).catch(()=>{});}}
    if(existing&&(!existing.finished||Date.now()-(existing.finished||existing.started)<(/etapas concluídas|retomar/i.test(existing.error||'')?60000:900000)))return {ok:true,processing:!existing.finished,error:existing.error||''};
-   const task={started:Date.now(),finished:0,error:'',tab:null};backgroundTasks.set(owner,task);
-   try{const tab=await chrome.tabs.create({url:'https://www.affinityfc.org/agent-five-rings-sync.html?background=1',active:false});task.tab=tab.id;}catch(error){backgroundTasks.delete(owner);throw error;}
+   const task={started:Date.now(),finished:0,error:'',tab:null};backgroundTasks.set(taskKey,task);
+   try{const tab=await chrome.tabs.create({url:origin+'/agent-five-rings-sync.html?background=1',active:false,...tabWindow(sender.tab.windowId)});task.tab=tab.id;}catch(error){backgroundTasks.delete(taskKey);throw error;}
    return {ok:true,processing:true};
   }
-  if(message.action==='open'){const tabs=await chrome.tabs.query({url:base+'/*'});if(tabs.length===1)await chrome.tabs.update(tabs[0].id,{active:true});else await chrome.tabs.create({url:base+'/account/dashboard'});return {ok:true};}
+  if(message.action==='open'){const tabs=(await chrome.tabs.query({url:base+'/*'})).filter(tab=>Boolean(tab.incognito)===privateContext);if(tabs.length>1)throw Error('Mantenha apenas uma aba Five Rings aberta neste modo de navegação.');if(tabs.length===1)await chrome.tabs.update(tabs[0].id,{active:true});else await chrome.tabs.create({url:base+'/account/dashboard',...tabWindow(sender.tab.windowId)});return {ok:true};}
   if(message.action==='collectStart'){
    if([...jobs.values()].some(j=>!j.result))throw Error('Uma leitura já está em andamento. Aguarde antes de tentar novamente.');
-   const id=crypto.randomUUID(),job={tab:sender.tab.id,document:sender.documentId,started:Date.now(),result:null};jobs.set(id,job);
+   const id=crypto.randomUUID(),job={tab:sender.tab.id,document:sender.documentId,incognito:privateContext,windowId:sender.tab.windowId,started:Date.now(),result:null};jobs.set(id,job);
    collectSnapshot(message,job).then(result=>job.result=result&&typeof result.ok==='boolean'?result:{ok:false,error:'O canal de leitura não respondeu. Recarregue o Five Rings e tente novamente.'}).catch(error=>job.result={ok:false,error:error.message||'Leitura interrompida. Tente novamente.'});
    return {ok:true,jobId:id};
   }
