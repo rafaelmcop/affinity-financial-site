@@ -75,3 +75,7 @@ The review decision and timing are controlled by Google. Do not label the extens
 
 
 Version 1.0.10: adds portal.affinityfc.org to the existing Affinity-domain permissions and separates incognito execution from regular browsing. Incognito remains opt-in through Chrome settings. Background jobs stay on the initiating Affinity origin; reader tabs remain in the same browsing mode. No password, cookie or verification-code extraction.
+
+## Submission status — November 6, 2026
+
+Version 1.0.10 was uploaded to the existing item `mgpnjfokklkcbgpmkcfhiadldijhapic` through the authenticated local Firefox publisher dashboard. The package page confirmed draft version 1.0.10 alongside published version 1.0.9. Submission was completed with automatic publication after review enabled; the dashboard confirmed “Seu item (extensão) foi enviado para revisão”. Google review is pending; do not describe 1.0.10 as already available in the store. Existing 1.0.9 users can synchronize through https://www.affinityfc.org/agent-five-rings-sync.html?manual=1 until the update is approved.
