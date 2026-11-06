@@ -3,7 +3,7 @@
  document.addEventListener('click',event=>{
   if(location.pathname!=='/agentes/configuracoes')return;
   const button=event.target.closest?.('button');
-  if(!button||!['Sincronizar clientes e apólices','Apenas verificar conexão'].includes(button.textContent.trim()))return;
+  if(!button||!['Sincronizar clientes e apólices','Apenas verificar conexão','Reiniciar e enviar por e-mail','Verificar pelo navegador','Sincronizar pelo navegador'].includes(button.textContent.trim()))return;
   event.preventDefault();event.stopImmediatePropagation();location.assign(target);
  },true);
  let busy=false;
