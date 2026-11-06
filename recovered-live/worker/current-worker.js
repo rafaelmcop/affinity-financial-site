@@ -1,3 +1,4 @@
+import {mailboxConnectionMessage} from './mailbox-connection-error.js';
 import {approvalMailForAccount} from './agent-approval-mail.js';
 import {calendarProviderRoute,calendarConnection,syncFeedCalendar,calendarProviderSchema} from './calendar-providers.js';
 import {relayPaymentMail,backfillAssistantPaymentMail} from './assistant-payment-mail.js';
@@ -38883,8 +38884,8 @@ ${body}`.toLowerCase();
   return "general";
 }
 __name(classifyMailboxTopic, "classifyMailboxTopic");
-function isProfessionalMailboxMessage(subject, body, fromEmail, toEmail, isKnownClient = false) {
-  if (isKnownClient) return true;
+function isProfessionalMailboxMessage(subject, body, fromEmail, toEmail, isKnownClient = false, isContacted = false) {
+  if (isKnownClient || isContacted) return true;
   const text = `${subject}
 ${body}
 ${fromEmail}
@@ -38892,7 +38893,7 @@ ${toEmail}`.toLowerCase();
   return /(national\s+life|\bnlg\b|five\s*rings|fiverings|mga360|corebridge|american\s+general|docusign|my\s*wfg|mywfg|\bwfg\b|world\s+financial\s+group)/i.test(text);
 }
 __name(isProfessionalMailboxMessage, "isProfessionalMailboxMessage");
-var PROFESSIONAL_MAILBOX_SQL = `(m.topic='delivery' OR m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
+var PROFESSIONAL_MAILBOX_SQL = `(m.direction='sent' OR EXISTS (SELECT 1 FROM agentMailboxEmails sent WHERE lower(sent.agentEmail)=lower(m.agentEmail) AND sent.direction='sent' AND lower(trim(sent.toEmail))=lower(trim(m.fromEmail))) OR m.topic='delivery' OR m.clientId IS NOT NULL OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%national life%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%nlg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%five rings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%fiverings%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mga360%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%corebridge%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%american general%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%docusign%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%mywfg%' OR lower(coalesce(m.subject,'') || ' ' || coalesce(m.body,'') || ' ' || coalesce(m.fromEmail,'') || ' ' || coalesce(m.toEmail,'')) LIKE '%world financial group%')`;
 function extractPolicyNumbers(subject, body) {
   const text = `${subject}
 ${body}`;
@@ -39216,6 +39217,8 @@ async function syncIcloudInbox(env, agentEmail) {
     const customerByEmail = new Map(
       customers.results.map((row) => [cleanAddress(String(row.email)), row])
     );
+    const contactedRows=await env.DB.prepare("SELECT DISTINCT toEmail FROM agentMailboxEmails WHERE lower(agentEmail)=? AND direction='sent' AND toEmail IS NOT NULL").bind(owner).all();
+    const contactedAddresses=new Set(contactedRows.results.map(row=>cleanAddress(String(row.toEmail||''))));
     const uidSet = /* @__PURE__ */ new Set();
     let sequence = 3;
     await purgeQueuedDeliveryReports(env,owner,command=>client.command(`A${sequence++}`,command));
@@ -39268,7 +39271,7 @@ async function syncIcloudInbox(env, agentEmail) {
       if(isFiveRingsDiscussion(parsed))await relayDiscussion(env,owner,{...parsed,externalId});
       const bounce=deliveryNotice(parsed);
       if(bounce){await recordDeliveryNotice(env,owner,{...parsed,externalId},bounce);if(await purgeRecordedDeliveryReport(env,owner,externalId,uid,command=>client.command(`A${sequence++}`,command))){imported++;continue;}}
-      if (!bounce&&!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer))) continue;
+      if (!bounce&&!isProfessionalMailboxMessage(parsed.subject || "", body, from, config.fromEmail || owner, Boolean(customer), contactedAddresses.has(cleanAddress(from)))) continue;
       const paymentKind = classifyPaymentNotice(String(parsed.subject || ""), body);
       await relayPaymentMail(env,owner,{...parsed,externalId});
       const topic = bounce?"delivery":classifyMailboxTopic(String(parsed.subject || ""), body);
@@ -39299,9 +39302,9 @@ async function syncIcloudInbox(env, agentEmail) {
             await env.DB.prepare(
               "UPDATE agentMailboxEmails SET clientId=COALESCE(clientId,?),policyNumber=?,actionStatus=?,actionDetail=? WHERE lower(agentEmail)=? AND externalId=? AND direction='received'"
             ).bind(paymentResult.clientId || null, paymentResult.policyNumber || null, paymentResult.actionStatus, paymentResult.actionDetail, owner, externalId).run();
-            imported++;
           }
         }
+        imported++;
         continue;
       }
       await env.DB.prepare(
@@ -44690,10 +44693,8 @@ Detalhes: ${details}` : ""}`;
       return trpcResult(await syncIcloudInbox2(env, adminEmail));
     } catch (error) {
       console.error("icloud_manual_sync_failed", adminEmail, error);
-      const detail = error instanceof Error ? error.message : String(error);
-      return trpcError(
-        `N\xE3o foi poss\xEDvel sincronizar o iCloud: ${detail.slice(0, 180)}`
-      );
+      const config=await env.DB.prepare('SELECT host,imapHost FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(adminEmail.toLowerCase()).first();
+      return trpcError(mailboxConnectionMessage(error,config||{}));
     }
   }
   if (name === "agent.savePcSheet") {
@@ -45687,7 +45688,7 @@ Affinity Financial Consulting`,
   }
   if (name === "agent.verifyEmailConnection") {
     const owner=adminEmail.toLowerCase(),config=await env.DB.prepare('SELECT * FROM agentEmailSettings WHERE lower(agentEmail)=?').bind(owner).first();if(!config)return trpcError('Configure seu e-mail primeiro.');
-    let transport;try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET);transport=import_nodemailer.default.createTransport({...runtimeSmtpOptions(config),auth:await agentSmtpAuth(env,owner,config)});await transport.verify();const {client}=await openAgentImap(env,owner);await client.close();return trpcResult({verified:true,message:'Envio e recebimento autenticados. Nenhum e-mail foi enviado neste teste.'});}catch(error){return trpcResult({verified:false,message:/office365|outlook/i.test(config.host)?'A Microsoft pode exigir OAuth ou liberação de SMTP pelo administrador da organização. A senha normal da conta não deve ser usada.':'Confira a senha de aplicativo e se o provedor permite acesso SMTP/IMAP. Sua senha normal não deve ser usada.'});}finally{transport?.close?.();}
+    let transport;try{const password=await decryptSmtpPassword(String(config.password),env.JWT_SECRET);transport=import_nodemailer.default.createTransport({...runtimeSmtpOptions(config),auth:await agentSmtpAuth(env,owner,config)});await transport.verify();const {client}=await openAgentImap(env,owner);await client.close();return trpcResult({verified:true,message:'Envio e recebimento autenticados. Nenhum e-mail foi enviado neste teste.'});}catch(error){return trpcResult({verified:false,message:mailboxConnectionMessage(error,config)});}finally{transport?.close?.();}
   }
   if (name === "agent.testEmailSettings") {
     const email = String(input.email ?? "");
