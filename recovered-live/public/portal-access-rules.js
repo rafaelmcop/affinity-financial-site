@@ -1,4 +1,5 @@
 export const featureCatalog = [
+ ['ai','Assistente IA','Conta e integrações'],
  ['queue','Fila de atendimento','Prospecção'],['whatsapp_leads','Leads do WhatsApp','Prospecção'],['marketing','Obrigações de marketing','Prospecção'],
  ['application_create','Aplicação nova','Aplicações'],['applications','Em andamento','Aplicações'],
  ['email','E-mail','Comunicação'],['whatsapp','WhatsApp — conversas e mensagens','Comunicação'],

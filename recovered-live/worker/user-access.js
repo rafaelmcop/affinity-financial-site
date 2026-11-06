@@ -35,6 +35,7 @@ export async function hasFeature(env,email,feature){
  return !feature||(Array.isArray(feature)?feature.some(allowed):feature==='contacts'?allowed('whatsapp')||allowed('queue'):allowed(feature));
 }
 export function procedureFeature(name){
+ if(name==='agent.portalAssistant')return 'ai';
  if(['crm.presence','crm.setPresence','crm.internalMessages','crm.sendInternalMessage','crm.markInternalMessagesRead','crm.internalUnreadCount'].includes(name))return null;
  const [role,op]=name.split('.');if(role==='agent'&&op==='homeNotices')return ['email','tasks'];if(role==='affiliate')return op==='submitLead'?'referrals':null;
  if(role==='crm')return 'crm';if(role!=='agent')return null;
