@@ -36,7 +36,7 @@ export async function hasFeature(env,email,feature){
 }
 export function procedureFeature(name){
  if(['crm.presence','crm.setPresence','crm.internalMessages','crm.sendInternalMessage','crm.markInternalMessagesRead','crm.internalUnreadCount'].includes(name))return null;
- const [role,op]=name.split('.');if(role==='affiliate')return op==='submitLead'?'referrals':null;
+ const [role,op]=name.split('.');if(role==='agent'&&op==='homeNotices')return ['email','tasks'];if(role==='affiliate')return op==='submitLead'?'referrals':null;
  if(role==='crm')return 'crm';if(role!=='agent')return null;
  if(['getContactSegments','saveContactTags','saveCrmSmartList','deleteCrmSmartList','getCrmBoard','reorderCrmBoardColumns','moveCrmBoardClient','createCrmBoardColumn','renameCrmBoardColumn','deleteCrmBoardColumn','createCrmBoardContact'].includes(op))return 'policies';
  if(['login','register','dashboard','pendingCounts','getProfile','updateProfile','getEmailSettings','saveEmailSettings','verifyEmailConnection','getFiveRingsConnection','saveFiveRingsConnection'].includes(op))return null;

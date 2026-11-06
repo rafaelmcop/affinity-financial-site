@@ -4,5 +4,5 @@
  function display(stats){if(!stats)return;for(const[key,label,href]of categories){const count=Number(stats[key]||0),id='admin-'+key;if(count>0)window.affinityNotify({id,message:count+' · '+label,href,label:'Abrir pendências',persistent:true});else window.affinityClearNotice(id);}const root=document.getElementById('portal-notifications');if(root)root.style.zIndex='200';}
  async function refresh(){if(document.hidden)return;try{const response=await fetch('/api/trpc/admin.getStats',{credentials:'same-origin',cache:'no-store'});if(!response.ok)return;const payload=await response.json();display(payload?.result?.data?.json);}catch{}}
  function start(){document.addEventListener('affinity-admin-stats',event=>display(event.detail));if(window.affinityAdminStats)display(window.affinityAdminStats);else refresh();setInterval(refresh,60000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});}
- if(window.affinityNotify)start();else{const script=document.createElement('script');script.src='/portal-notifications.js?v=2';script.onload=start;document.head.append(script);}
+ if(window.affinityNotify)start();else{const script=document.createElement('script');script.src='/portal-notifications.js?v=3';script.onload=start;document.head.append(script);}
 })();

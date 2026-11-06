@@ -39,9 +39,9 @@ test('patched mail runtime builds PDF attachment mail locally and blocks filesys
  await assert.rejects(transport.sendMail({from:'a@example.invalid',to:'b@example.invalid',attachments:[{path:'/etc/passwd'}]}),/File access rejected/);
  await assert.rejects(transport.sendMail({from:'a@example.invalid',to:'b@example.invalid',attachments:[{path:'https://example.invalid/file'}]}),/Url access rejected/);
 });
-test('homepage has crawlable initial text, valid structured data and accurate language alternatives',()=>{
+test('homepage retains a no-script alternative and structured data without flashing fallback copy',()=>{
  const html=fs.readFileSync(new URL('./public/index.html',import.meta.url),'utf8');
- assert.match(html,/<div id="root"><main/);assert.match(html,/<h1>Seguro de vida nos EUA/);assert.match(html,/href="\/seguro-de-vida-para-brasileiros-nos-eua.html"/);
+ assert.match(html,/<div id="root"><\/div><noscript><main/);assert.match(html,/<h1>Seguro de vida nos EUA/);assert.match(html,/href="\/seguro-de-vida-para-brasileiros-nos-eua.html"/);
  assert.doesNotMatch(html,/hreflang="(?:en-US|es-US)"/);assert.doesNotMatch(html,/maximum-scale=1/);
  for(const [,json] of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g))assert.equal(JSON.parse(json)['@context'],'https://schema.org');
  assert.match(html,/index-BIU-6RMI.js\?v=20261009-setup-1/);
