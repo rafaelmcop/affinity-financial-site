@@ -41,19 +41,31 @@ Calendar tokens are encrypted separately from email tokens. Calendar connection
 never changes existing mailbox credentials. Administrators have audit access;
 assigned assistants have access only to authorized owners and functions.
 
-## Separate existing Gmail requirement
+## Gmail enrollment separated from Calendar review
 
-The same project currently also declares https://mail.google.com/ for the
-existing optional Gmail SMTP/IMAP integration. That restricted scope has its own
-Google verification/assessment requirements. Do not silently remove it or claim
-that it is a calendar permission. Portal Gmail enrollment remains limited to the
-existing test owner. Calendar requests do not request the Gmail scope.
+On 2026-11-06, production D1 contained zero Google email OAuth connections.
+New Google email OAuth enrollment was paused (portalEmailOAuthRollout google
+mode=disabled); existing manual SMTP accounts, Microsoft connections and iCloud
+were not changed. The unused mail.google.com scope was removed from the Google
+Data Access configuration. Calendar remains enabled with its two read-only
+scopes and identity scopes. Gmail OAuth requires its separate restricted-scope
+review before enrollment is enabled again.
 
-If a dedicated Calendar production project is chosen to separate those review
-requirements, register separate credentials and callbacks first and preserve the
-existing Gmail configuration. Do not replace functioning credentials blindly.
+## Actual Calendar demonstration
 
-## Real demonstration still required
+The owner completed Google authorization on 2026-11-06. An isolated temporary
+portal account selected a secondary calendar containing one synthetic event.
+The actual event appeared in the portal calendar, and Disconnect removed the
+Google connection while preserving appointment history. No client messages were
+sent. The production calendar-route gate was corrected to recognize Google and
+feed calendars independently of Calendly; 450 tests passed for that release.
+
+The initial selection mistakenly read the primary calendar into the isolated
+account. Those imported scratch copies were removed from that account only;
+Google originals and all other agents were untouched. The final demonstration
+uses only the secondary synthetic calendar and contains no customer events.
+
+## Submission evidence requirements
 
 Google requests a real end-to-end demonstration, not a mocked test recording:
 1. Log into Affinity as a consenting test professional.
