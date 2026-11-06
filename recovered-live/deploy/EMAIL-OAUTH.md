@@ -34,27 +34,34 @@ the Gmail address to Google's test-user list and the portal login to the Admin
 Testing allowlist. The mailbox owner must then complete their individual OAuth
 authorization. Do not describe this setup as production-verified or mail-tested.
 
-## Microsoft registration pending
+## Microsoft registration and selected-user rollout
 
-Microsoft requires a platform app registration before each agent can individually
-authorize Outlook.com, Hotmail or Microsoft 365. On 2026-11-05 (New York), the owner completed Azure free-account setup and the
-owned Default Directory became accessible. The Microsoft provider must remain
-unavailable until the remaining configuration and individual validation succeed.
+Verified on 2026-11-05 (New York):
+- Owned tenant: `444c38a8-f7b5-4630-aa3c-3b575515db06`.
+- Existing Affinity Portal client ID: `005837a5-c3c5-491f-8ebb-9c9436cb8d88`.
+- Organizational and personal Microsoft accounts supported; both exact Web
+  callbacks above confirmed.
+- Application secret saved through the authenticated Master Admin form;
+  independent D1 metadata query confirmed credential present and rollout Testing,
+  allowlisted portal login `rafaelmcop@hotmail.com` only. No secrets in this repo.
+- Browser cleanup reported one remaining application secret, removing unused
+  credentials from earlier attempts. Do not regenerate without need.
+- No mailbox has yet completed OAuth or SMTP/IMAP validation. No test email sent.
+- The authorization-code flow requests delegated permissions dynamically using
+  the Outlook scope URLs below. Do not confuse the documentation's app-only
+  Exchange service-principal setup with this per-user delegated flow; do not
+  grant application permissions or tenant-wide consent as a workaround.
+- Personal Microsoft tenant uses smtp-mail.outlook.com; organizational Microsoft
+  365 uses smtp.office365.com. Selection uses the validated ID-token tenant only.
+- New Gmail enrollment remains disabled. User selected rafaelmcop@gmail.com for
+  the next Gmail test; it still needs Google's Testing test-user registration.
+- User authorized a test email to rafaelmcop@icloud.com after mailbox connection.
+  This authorization is not evidence of delivery and does not authorize client mail.
 
-Verified registration progress:
-- Directory tenant: `444c38a8-f7b5-4630-aa3c-3b575515db06`.
-- Existing app: Affinity Portal, client ID `005837a5-c3c5-491f-8ebb-9c9436cb8d88`.
-- Organizational and personal Microsoft account support confirmed.
-- Both HTTPS OAuth callback URLs above confirmed on the Web platform.
-- Only the initial delegated User.Read permission was verified as saved.
-- Required OIDC/IMAP/SMTP delegated permissions, homepage and privacy branding
-  remain pending. Browser automation repeatedly failed to persist permissions;
-  do not infer completion from checkbox interactions.
-- No client secret was created or transferred; Microsoft enrollment remains
-  disabled. No mailbox was authorized or tested and no email was sent.
-
-Reuse this registration; do not create another app. Resume at API permissions.
-Do not enable paid resources or change the existing Google/iCloud configuration.
+Reuse this app. Outstanding: validate the selected user's actual Microsoft OAuth
+connection, SMTP/IMAP authentication and the authorized test email. The browser
+wallet became insufficient before Gmail setup/real mailbox validation; do not
+claim production readiness from credential storage alone.
 
 Registration checklist for the authenticated platform owner:
 - Register Affinity Portal as a Web application in Microsoft Entra.
