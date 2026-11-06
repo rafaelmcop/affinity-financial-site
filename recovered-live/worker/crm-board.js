@@ -26,6 +26,12 @@ export async function crmBoard(env,owner,input={},operation='get',actor=owner){
  const label=String(input.label||'').trim().replace(/\s+/g,' ');if(!label||label.length>60)throw fail('Dê um nome de até 60 caracteres para a coluna.');if(available.length>=43)throw fail('Limite de 30 colunas personalizadas atingido.');if(available.some(c=>c.label.toLowerCase()===label.toLowerCase()))throw fail('Já existe uma coluna com esse nome.');
  const columnKey='custom-'+crypto.randomUUID();await env.DB.prepare('INSERT INTO crmBoardColumns(owner,columnKey,label,position) VALUES(?,?,?,?)').bind(owner,columnKey,label,available.length).run();return {columnKey,label};
  }
+ if(operation==='rename'){
+ const key=String(input.columnKey||''),target=available.find(c=>c.columnKey===key),label=String(input.label||'').trim().replace(/\s+/g,' ');if(!target)throw fail('Coluna não encontrada.',404);if(!label||label.length>60)throw fail('Dê um nome de até 60 caracteres para a coluna.');if(available.some(c=>c.columnKey!==key&&c.label.toLowerCase()===label.toLowerCase()))throw fail('Já existe uma coluna com esse nome.');await env.DB.prepare('UPDATE crmBoardColumns SET label=? WHERE owner=? AND columnKey=?').bind(label,owner,key).run();return {success:true};
+ }
+ if(operation==='delete'){
+ const key=String(input.columnKey||'');if(!available.some(c=>c.columnKey===key))throw fail('Coluna não encontrada.',404);if(!key.startsWith('custom-'))throw fail('Esta etapa é usada pela classificação automática. Você pode renomeá-la, mas não excluí-la.');if(input.confirmed!==true)throw fail('Confirme a exclusão da coluna.');const snapshot=await crmBoard(env,owner,{},'get',actor);if(snapshot.clients.some(c=>c.columnKey===key))throw fail('Mova os contatos para outra coluna antes de excluir.');await env.DB.batch([env.DB.prepare('DELETE FROM crmBoardCards WHERE owner=? AND columnKey=?').bind(owner,key),env.DB.prepare('DELETE FROM crmBoardColumns WHERE owner=? AND columnKey=?').bind(owner,key)]);return {success:true};
+ }
  if(operation==='order'){
  const keys=input.columnKeys;if(!Array.isArray(keys)||keys.length!==available.length||keys.some(key=>typeof key!=='string')||new Set(keys).size!==keys.length||keys.some(key=>!available.some(c=>c.columnKey===key)))throw fail('As colunas mudaram. Atualize o quadro e tente novamente.');
  await env.DB.batch(keys.map((key,index)=>env.DB.prepare('UPDATE crmBoardColumns SET position=? WHERE owner=? AND columnKey=?').bind(index,owner,key)));return {success:true};
