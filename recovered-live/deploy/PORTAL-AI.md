@@ -1,6 +1,6 @@
 # Portal AI — initial assisted workflow
 
-The top toolbar is enabled by the Admin's `ai` feature grant. New registrations
+The compact icon beside notifications and the user avatar is enabled by the Admin's `ai` feature grant. New registrations
 do not receive this feature automatically. Assigned assistants need `ai:view`
 and the relevant calendar, policies or email access; each read rechecks the
 owner's released functions. No cross-owner IDs or SQL from the model are used.
@@ -35,3 +35,8 @@ opened the top-bar assistant and queried the live AI binding. Its own test
 appointment was returned with the correct details link. No client messages or
 calendar writes were performed. The fixture was disabled after validation. The
 Rafael pilot feature grant was recorded in the administrative permission audit.
+
+2026-11-06 visual refinement: removed the full-width toolbar and its 72px
+page spacing. The launcher is now a 42px circular sparkle icon (36px on mobile),
+with a hover/focus label and pressed state. The existing conversation and access
+checks are unchanged. Responsive browser interaction checks passed.
