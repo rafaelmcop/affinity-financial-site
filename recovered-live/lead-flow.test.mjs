@@ -152,11 +152,11 @@ test('Admin quantity distribution adds exact new leads per agent, skips duplicat
  assert.equal((await call('admin','central-leads/assign',{...input,count:1001},'admin@example.test')).status,400);
  assert.equal((await call('admin','central-leads/assign',input)).status,401);db.close();
 });
-test('feature permissions preserve existing users, start new registrations basic, and can only be saved by Admin',async()=>{
+test('feature permissions preserve existing users, start new registrations with workspace features, and can only be saved by Admin',async()=>{
  const {db,env,auth}=fixture();const {accessSchema,userAccess,hasFeature,accessRoute,saveUserAccess,procedureFeature,pageFeature}=await import('./worker/user-access.js');await accessSchema(env);
  assert(await hasFeature(env,'agent1@example.test','whatsapp'));
  db.prepare('INSERT INTO adminAccounts VALUES(?,?,?,?,?,?,?,?,?)').run(9,'new@example.test','New','','agent','approved',1,'hash','');
- assert.deepEqual((await userAccess(env,'new@example.test')).features,[]);
+ assert.deepEqual((await userAccess(env,'new@example.test')).features,['application_create','applications','email','messages','calendar','policies','reviews']);assert(!await hasFeature(env,'new@example.test','queue'));assert(!await hasFeature(env,'new@example.test','whatsapp_leads'));assert(!await hasFeature(env,'new@example.test','five_rings'));assert(!await hasFeature(env,'new@example.test','whatsapp'));
  const request=(who,input)=>new Request('https://www.affinityfc.org/api/admin/user-access',{method:'POST',headers:{'x-user':who,origin:'https://www.affinityfc.org','content-type':'application/json'},body:JSON.stringify(input)});
  assert.equal((await accessRoute(request('agent1@example.test',{email:'new@example.test',features:['crm']}),env,auth)).status,403);
  assert.equal((await accessRoute(request('admin@example.test',{email:'new@example.test',features:['crm','queue']}),env,auth)).status,200);

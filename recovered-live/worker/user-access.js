@@ -1,6 +1,7 @@
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
 export {pageFeature};
+export const newAgentFeatures=Object.freeze(['application_create','applications','email','messages','calendar','policies','reviews']);
 export const accessFeatures=featureCatalog.map(([key,label])=>[key,label]);
 const keys=accessFeatures.map(([key])=>key),all=JSON.stringify(keys);
 const schemaInitializations=new WeakMap();
@@ -27,7 +28,7 @@ async function initializeAccessSchema(env){
   env.DB.prepare("INSERT OR IGNORE INTO portalFeatureAccessMeta(version) VALUES('rollout-v1')")
  ]);
 }
-export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];try{features=JSON.parse(row?.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}if(!await portalWhatsappAllowed(env,email))features=features.filter(f=>f!=='whatsapp');else if(env.WHATSAPP_PORTAL_ACCESS_MODE==='restricted'&&!features.includes('whatsapp'))features.push('whatsapp');return {features,available:featureCatalog.map(([key,label,group])=>({key,label,group})),updatedAt:row?.updatedAt||null};}
+export async function userAccess(env,email){await accessSchema(env);const row=await env.DB.prepare('SELECT featuresJson,updatedAt FROM portalFeatureAccess WHERE email=?').bind(String(email).toLowerCase()).first();let features=[];if(!row){const account=await env.DB.prepare("SELECT accountType FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both')").bind(String(email).toLowerCase()).first();if(account)features=[...newAgentFeatures];}try{if(row)features=JSON.parse(row.featuresJson||'[]').filter(f=>keys.includes(f))}catch{}if(!await portalWhatsappAllowed(env,email))features=features.filter(f=>f!=='whatsapp');else if(env.WHATSAPP_PORTAL_ACCESS_MODE==='restricted'&&!features.includes('whatsapp'))features.push('whatsapp');return {features,available:featureCatalog.map(([key,label,group])=>({key,label,group})),updatedAt:row?.updatedAt||null};}
 export async function hasFeature(env,email,feature){
  const features=(await userAccess(env,email)).features;
  const allowed=f=>features.includes(f==='crm'?'policies':f);

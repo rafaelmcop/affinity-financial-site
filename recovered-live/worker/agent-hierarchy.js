@@ -14,3 +14,9 @@ export async function hierarchyRoute(request,env,auth){const url=new URL(request
  if(request.method!=='POST'||request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403});
  try{const body=await request.json();let owner=email;if(path==='/api/admin/hierarchy'){const row=await env.DB.prepare("SELECT email FROM adminAccounts WHERE id=? AND accountType IN ('agent','both')").bind(Number(body.agentId)||0).first();if(!row)throw Error('Agente não encontrado.');owner=row.email;}else{const current=await env.DB.prepare('SELECT agentEmail FROM agentHierarchy WHERE lower(agentEmail)=?').bind(email.toLowerCase()).first();if(current)throw Error('Somente o Admin pode alterar seu upline.');}
  const upline=await registrationUpline(env,body.uplineId);await setUpline(env,owner,upline.email);return Response.json({ok:true});}catch(e){return Response.json({error:e.message||'Não foi possível salvar.'},{status:400});}}
+
+export function classifyHierarchyUsers(accounts,rootEmail,links){
+ const root=String(rootEmail||'').toLowerCase(),parents=new Map(links.map(row=>[String(row.agentEmail).toLowerCase(),String(row.uplineEmail||'').toLowerCase()]));
+ return accounts.map(account=>{if(!['agent','both'].includes(account.accountType))return {...account,agentGroup:null};let cursor=String(account.email).toLowerCase(),team=false;const seen=new Set();while(cursor&&!seen.has(cursor)){if(cursor===root&&root){team=true;break}seen.add(cursor);cursor=parents.get(cursor)||'';}return {...account,agentGroup:team?'affinity':'alien'};});
+}
+export async function hierarchyUserGroups(env,accounts){await ensureHierarchy(env);const root=await hierarchyRoot(env),links=await env.DB.prepare('SELECT agentEmail,uplineEmail FROM agentHierarchy').all();return classifyHierarchyUsers(accounts,root?.email,links.results||[]);}
