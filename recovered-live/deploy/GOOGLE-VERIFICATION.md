@@ -65,6 +65,14 @@ account. Those imported scratch copies were removed from that account only;
 Google originals and all other agents were untouched. The final demonstration
 uses only the secondary synthetic calendar and contains no customer events.
 
+Reviewed demonstration (synthetic event only, read-only link):
+https://drive.google.com/file/d/1KXXq1CGh6Y_nVdC-xiPs5-gwsnZ0Sffq/view?usp=sharing
+Anonymous retrieval returned HTTP 200 with the correct movie title. The temporary
+portal account was disabled after disconnect; no active Google tokens remain.
+The Data Access submission is not yet confirmed: Google Cloud subsequently
+returned "Falha ao carregar" for /auth/scopes. Do not equate completed brand
+verification or a working integration with approved data-access verification.
+
 ## Submission evidence requirements
 
 Google requests a real end-to-end demonstration, not a mocked test recording:
