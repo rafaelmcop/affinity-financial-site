@@ -156,7 +156,7 @@ test('feature permissions preserve existing users, start new registrations with 
  const {db,env,auth}=fixture();const {accessSchema,userAccess,hasFeature,accessRoute,saveUserAccess,procedureFeature,pageFeature}=await import('./worker/user-access.js');await accessSchema(env);
  assert(await hasFeature(env,'agent1@example.test','whatsapp'));
  db.prepare('INSERT INTO adminAccounts VALUES(?,?,?,?,?,?,?,?,?)').run(9,'new@example.test','New','','agent','approved',1,'hash','');
- assert.deepEqual((await userAccess(env,'new@example.test')).features,['application_create','applications','email','messages','calendar','policies','reviews']);assert(!await hasFeature(env,'new@example.test','queue'));assert(!await hasFeature(env,'new@example.test','whatsapp_leads'));assert(!await hasFeature(env,'new@example.test','five_rings'));assert(!await hasFeature(env,'new@example.test','whatsapp'));
+ assert.deepEqual((await userAccess(env,'new@example.test')).features,['application_create','applications','email','messages','calendar','policies','tasks','reviews','public_profile','five_rings']);assert(!await hasFeature(env,'new@example.test','queue'));assert(!await hasFeature(env,'new@example.test','whatsapp_leads'));assert(await hasFeature(env,'new@example.test','five_rings'));assert(!await hasFeature(env,'new@example.test','whatsapp'));
  const request=(who,input)=>new Request('https://www.affinityfc.org/api/admin/user-access',{method:'POST',headers:{'x-user':who,origin:'https://www.affinityfc.org','content-type':'application/json'},body:JSON.stringify(input)});
  assert.equal((await accessRoute(request('agent1@example.test',{email:'new@example.test',features:['crm']}),env,auth)).status,403);
  assert.equal((await accessRoute(request('admin@example.test',{email:'new@example.test',features:['crm','queue']}),env,auth)).status,200);
@@ -174,7 +174,7 @@ test('a new basic user must pair WhatsApp and automatic import does not depend o
  globalThis.fetch=async url=>{const path=new URL(url).pathname;return Response.json(path==='/status'?{state:connected?'ready':'disconnected'}:path==='/all-contacts'?{contacts:[{phone:'+16175550111',name:'Fixture'}],total:1,nextCursor:null}:{ok:true})};
  try{
   assert.equal((await call('agent','onboarding/profile',{phone:'+16175550144',avatar:'/staff-avatar-1.svg'},'new@example.test')).status,200);
-  let data=await(await call('agent','onboarding/status',null,'new@example.test')).json();assert.equal(data.completed,false);assert.equal(data.whatsappRequired,true);assert.equal(data.fiveRingsReminderDue,false);
+  let data=await(await call('agent','onboarding/status',null,'new@example.test')).json();assert.equal(data.completed,false);assert.equal(data.whatsappRequired,true);assert.equal(data.fiveRingsReminderDue,true);
   connected=true;data=await(await call('agent','onboarding/status',null,'new@example.test')).json();assert.equal(data.completed,true);assert.equal(data.needsImport,true);
   assert.equal((await call('agent','contact-import/sync',{},'new@example.test')).status,200);
   assert.equal(db.prepare("SELECT count(*) n FROM centralLeadSources WHERE owner='agent:new@example.test'").get().n,1);
