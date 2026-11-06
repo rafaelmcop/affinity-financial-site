@@ -1,3 +1,4 @@
+import {chatPanelRole} from './chat-panel-role.js';
 import {homeNotices} from './home-notices.js';
 import {profilePhotoRoute} from './profile-photo-link.js';
 import {ensureAgentPersonalPage} from './agent-personal-page.js';
@@ -32,7 +33,7 @@ import {assistantSignature,appendAssistantSignature} from './assistant-signature
 import {whatsappContacts} from './whatsapp-contact-names.js';
 import {assistantMessageSender,sendAssistantMessageEmail} from './assistant-message-sender.js';
 import patchedAddressParser from '../dependencies/node_modules/nodemailer/dist/esm/addressparser/index.js';
-import {linkedChatAssistants,canChatWithPeer,chatSummaries} from './assistant-chat.js';
+import {assistantChatSchema,linkedChatAssistants,canChatWithPeer,chatSummaries} from './assistant-chat.js';
 import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
@@ -43488,14 +43489,6 @@ Detalhes: ${details}` : ""}`;
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
   if (name.startsWith("careers.") && !["admin", "both"].includes(accountType))
     return trpcError("Acesso restrito ao administrador", "FORBIDDEN", 403);
-  if (name === "crm.presence") {
-    await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-30 seconds'))").bind(adminEmail.toLowerCase()).run();
-    try {
-      await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-2 minutes'))").bind(adminEmail.toLowerCase()).run();
-    } catch (error) {
-      console.warn("Presence heartbeat unavailable", error instanceof Error ? error.message : String(error));
-    }
-  }
   const auditedActions = {
     "agent.saveApplication": "Criou ou alterou uma aplicação",
     "agent.submitApplication": "Concluiu uma aplicação",
@@ -46900,9 +46893,11 @@ Affinity Financial Consulting`,
     return trpcResult(rows.results.map((row) => ({ ...row, id: Number(row.id) })));
   }
   if (name === "crm.presence") {
+    await assistantChatSchema(env);let mode;try{mode=chatPanelRole(accountType,input.mode);}catch(error){return trpcError(error.message,'FORBIDDEN',403);}
     await env.DB.prepare("UPDATE adminAccounts SET lastSeenAt=CURRENT_TIMESTAMP WHERE lower(email)=? AND (lastSeenAt IS NULL OR lastSeenAt < datetime('now','-30 seconds'))").bind(adminEmail.toLowerCase()).run();
-    const rows = await env.DB.prepare("SELECT email,name,accountType,presenceStatus,lastSeenAt FROM adminAccounts WHERE isActive=1 AND status='approved' AND portalDeletedAt IS NULL ORDER BY name").all();
-    return trpcResult({ currentEmail: adminEmail.toLowerCase(), conversations: await chatSummaries(env,adminEmail.toLowerCase()), users: [...rows.results.filter(row=>!row.portalDeletedAt),...await linkedChatAssistants(env,adminEmail.toLowerCase())] });
+    await env.DB.prepare("INSERT INTO portalChatPresence(owner,mode) VALUES(?,?) ON CONFLICT(owner) DO UPDATE SET mode=excluded.mode,lastSeenAt=CURRENT_TIMESTAMP WHERE portalChatPresence.mode<>excluded.mode OR portalChatPresence.lastSeenAt<datetime('now','-30 seconds')").bind(adminEmail.toLowerCase(),mode).run();
+    const rows=await env.DB.prepare("SELECT a.email,a.name,a.accountType,a.presenceStatus,a.lastSeenAt,CASE WHEN a.accountType='both' THEN coalesce(p.mode,'agent') ELSE a.accountType END AS chatRole FROM adminAccounts a LEFT JOIN portalChatPresence p ON p.owner=lower(a.email) WHERE a.isActive=1 AND a.status='approved' AND a.portalDeletedAt IS NULL ORDER BY a.name").all();
+    return trpcResult({currentEmail:adminEmail.toLowerCase(),currentRole:mode,conversations:await chatSummaries(env,adminEmail.toLowerCase()),users:[...rows.results,...await linkedChatAssistants(env,adminEmail.toLowerCase())]});
   }
   if (name === "crm.setPresence") {
     const status = String(input.status || "available");
@@ -46917,7 +46912,9 @@ Affinity Financial Consulting`,
     "crm.internalUnreadCount",
     "crm.deleteInternalMessage"
   ].includes(name)) {
+    await assistantChatSchema(env);
     const mode = String(input.mode || "agent");
+    if(!['agent','admin'].includes(mode))return trpcError('Painel inválido.');
     const allowed = mode === "agent" ? ["agent", "both"].includes(accountType) : ["admin", "both"].includes(accountType);
     if (!allowed) return trpcError("Acesso n\xE3o permitido", "FORBIDDEN", 403);
     const agentEmail = mode === "agent" ? adminEmail.toLowerCase() : String(input.agentEmail || "").trim().toLowerCase();
@@ -46932,14 +46929,14 @@ Affinity Financial Consulting`,
         if (!peer)
           return trpcError("Agente destinat\xE1rio inv\xE1lido", "NOT_FOUND", 404);
         const rows2 = await env.DB.prepare(
-          "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND lower(recipientEmail)=?) OR (lower(senderEmail)=? AND lower(recipientEmail)=?)) ORDER BY sentAt ASC,id ASC"
+          "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND senderMode<>'admin' AND ((lower(senderEmail)=? AND lower(recipientEmail)=?) OR (lower(senderEmail)=? AND lower(recipientEmail)=?)) ORDER BY sentAt ASC,id ASC"
         ).bind(agentEmail, peerEmail, peerEmail, agentEmail).all();
         return trpcResult(
           rows2.results.map((row) => ({ ...row, id: Number(row.id) }))
         );
       }
       const rows = await env.DB.prepare(
-        "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND recipientEmail='__admin__') OR (lower(recipientEmail)=? AND lower(senderEmail) IN (SELECT lower(email) FROM adminAccounts WHERE accountType IN ('admin','both')))) ORDER BY sentAt ASC,id ASC"
+        "SELECT * FROM portalMessages WHERE deletedAt IS NULL AND ((lower(senderEmail)=? AND recipientEmail='__admin__') OR (lower(recipientEmail)=? AND senderMode='admin')) ORDER BY sentAt ASC,id ASC"
       ).bind(agentEmail, agentEmail).all();
       return trpcResult(
         rows.results.map((row) => ({ ...row, id: Number(row.id) }))
@@ -46958,16 +46955,16 @@ Affinity Financial Consulting`,
           return trpcError("Agente destinat\xE1rio inv\xE1lido", "NOT_FOUND", 404);
       }
       await env.DB.prepare(
-        "INSERT INTO portalMessages (senderEmail,recipientEmail,body) VALUES (?,?,?)"
-      ).bind(adminEmail.toLowerCase(), recipient, body).run();
+        "INSERT INTO portalMessages (senderEmail,recipientEmail,body,senderMode) VALUES (?,?,?,?)"
+      ).bind(adminEmail.toLowerCase(), recipient, body,mode).run();
       return trpcResult({ success: true });
     }
     if (name === "crm.markInternalMessagesRead") {
       if (mode === "agent")
         await (peerEmail ? env.DB.prepare(
-          "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail)=? AND readAt IS NULL AND deletedAt IS NULL"
+          "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail)=? AND senderMode<>'admin' AND readAt IS NULL AND deletedAt IS NULL"
         ).bind(adminEmail.toLowerCase(), peerEmail).run() : env.DB.prepare(
-          "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND lower(senderEmail) IN (SELECT lower(email) FROM adminAccounts WHERE accountType IN ('admin','both')) AND readAt IS NULL AND deletedAt IS NULL"
+          "UPDATE portalMessages SET readAt=CURRENT_TIMESTAMP WHERE lower(recipientEmail)=? AND senderMode='admin' AND readAt IS NULL AND deletedAt IS NULL"
         ).bind(adminEmail.toLowerCase()).run());
       else
         await env.DB.prepare(
@@ -48210,7 +48207,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261105-nlg-number-1" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=3"></script><script src="/portal-notifications.js?v=3" defer></script><script src="/portal-home-notices.js?v=2" defer></script><script src="/internal-messenger.js?v=3" defer></script><script src="/five-rings-background.js?v=9" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261106-unified-account-8" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261106-unified-account-8');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=3"></script><script src="/portal-notifications.js?v=3" defer></script><script src="/portal-home-notices.js?v=2" defer></script><script src="/internal-messenger.js?v=4" defer></script><script src="/five-rings-background.js?v=9" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261106-unified-account-8" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261106-unified-account-8');}}).transform(response);
  }
  return response;
 };
