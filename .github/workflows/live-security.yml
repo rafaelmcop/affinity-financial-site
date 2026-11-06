@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: live-security-${{ github.head_ref || github.ref }}
+  group: live-security-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 jobs:
   verify-live-runtime:
