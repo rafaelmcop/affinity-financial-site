@@ -18,7 +18,7 @@ export {assistantCatalog,normalizeAssistantPermissions,delegatedAccess};
 export function scrubAssistantSecrets(value){if(Array.isArray(value))return value.map(scrubAssistantSecrets);if(!value||typeof value!=='object')return value;return Object.fromEntries(Object.entries(value).filter(([key])=>!(/^(?:password|passwordHash|clientToken|accessCode|reviewToken|token|cookies|qr|qrData|qrCode)$/i.test(key)||/^encrypted|sessionToken|sessionCookie/i.test(key))).map(([key,item])=>[key,scrubAssistantSecrets(item)]));}
 export function assistantOperation(permissions,name,input={}){
  if(!assistantProcedures.has(name))return null;
- if(name==='agent.portalAssistant')return hasAssistantAction(permissions,'ai','view')&&['calendar','policies','email'].some(key=>hasAssistantAction(permissions,key,'view'))?{feature:null,action:'view'}:null;
+ if(name==='agent.portalAssistant')return hasAssistantAction(permissions,'ai','view')&&['calendar','policies','email','messages','applications','application_create','tasks','whatsapp','five_rings','reviews','public_profile'].some(key=>hasAssistantAction(permissions,key,'view'))?{feature:null,action:'view'}:null;
  if(name==='agent.openMeetingClient')return hasAssistantAction(permissions,'calendar','view')&&hasAssistantAction(permissions,'policies','view')?{feature:'calendar',action:'view'}:null;
  if(['agent.sendMeetingEmail','agent.sendMeetingWhatsapp','agent.logMeetingMessage','agent.createServiceFeedbackInvite'].includes(name))return hasAssistantAction(permissions,'calendar','view')?{feature:'calendar',action:'communicate'}:null;
  if(['agent.getProfile','agent.pendingCounts'].includes(name))return {feature:null,action:'view'};

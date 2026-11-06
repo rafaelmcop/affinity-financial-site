@@ -2,7 +2,7 @@
 
 The compact icon beside notifications and the user avatar is enabled by the Admin's `ai` feature grant. New registrations
 do not receive this feature automatically. Assigned assistants need `ai:view`
-and the relevant calendar, policies or email access; each read rechecks the
+and the relevant module’s view access; each read rechecks the
 owner's released functions. No cross-owner IDs or SQL from the model are used.
 
 Cloudflare Workers AI: @cf/zai-org/glm-4.7-flash. Intent extraction and draft
@@ -11,11 +11,12 @@ completion are separate, limited calls, each with a 25 second timeout and a
 that fail still count. Usage stores only identity/day/count, not the transcript.
 AI output is rendered as text, and navigation targets come from server code.
 
-Supported now: upcoming 1–30 days, scheduled/overdue follow-ups, contact name
-lookup, editable email and short WhatsApp drafts. Lists show up to 20 owned
+Supported: upcoming 1–30 days, scheduled/overdue follow-ups, contact name
+lookup, editable email and short WhatsApp drafts, plus the scoped portal
+metadata modules listed below. Lists show up to 20 owned
 records and disclose truncation. Terminal declined/no-interest/already-insured
 cards are excluded from follow-up suggestions. No attachments, medical data,
-identity documents, bank details, mailbox content or credentials enter prompts.
+identity documents, bank details, full message bodies or credentials enter prompts.
 
 Execution is deliberately separate: reviewing an email opens the existing email
 composer with the editable draft and a unique matching contact, or an empty
@@ -40,3 +41,17 @@ Rafael pilot feature grant was recorded in the administrative permission audit.
 page spacing. The launcher is now a 42px circular sparkle icon (36px on mobile),
 with a hover/focus label and pressed state. The existing conversation and access
 checks are unchanged. Responsive browser interaction checks passed.
+
+2026-11-06 scoped portal reads: added fixed read adapters for scheduled/sent
+message history (including personal sent email when separately permitted), inbox
+subjects, WhatsApp audit metadata, CRM board stages, application summaries,
+policy/premium summaries, payment tasks, Five Rings status/credits, reviews,
+profile, own assistants, library metadata, queue outcome history and marketing
+obligations. Each domain independently checks released features and delegated
+view permissions. Materials/assistant management metadata is agent-only.
+No arbitrary procedure, SQL, account selector, message body, attachment,
+password, auth code or encrypted field can be selected by model output.
+No send, lease reservation, synchronization or configuration mutation is called.
+Sources failing to respond are explicitly unavailable, never reported as empty.
+Lists are capped at 20, source windows are bounded, and the UI links to the full
+module. This is contextual assistance, not a complete forensic audit/export.
