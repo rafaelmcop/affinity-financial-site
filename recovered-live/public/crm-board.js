@@ -1,4 +1,4 @@
-import {mountBoardLayout} from '/crm-board-layout.js?v=1';
+import {mountBoardLayout} from '/crm-board-layout.js?v=2';
 const board=document.getElementById('board'),status=document.getElementById('status'),search=document.getElementById('search');let data,editable=true,deletable=true,moving=false,contactTools;
 mountBoardLayout(board);
 async function api(name,input={},post=false){const r=await fetch('/api/trpc/agent.'+name+(post?'':'?input='+encodeURIComponent(JSON.stringify({json:input}))),{credentials:'same-origin',cache:'no-store',...(post?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({json:input})}:{})}),payload=await r.json();if(!r.ok||payload.error)throw Error(payload.error?.json?.message||'Não foi possível atualizar o quadro.');return payload.result.data.json;}

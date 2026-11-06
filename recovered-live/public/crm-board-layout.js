@@ -1,13 +1,12 @@
 export function mountBoardLayout(board){
  const controls=document.createElement('div');controls.className='board-layout-controls';
- const label=document.createElement('label');label.textContent='Largura das colunas';const input=document.createElement('input');input.type='range';input.min='220';input.max='420';input.step='10';input.value='280';input.setAttribute('aria-label','Largura das colunas');
- try{const saved=Number(localStorage.getItem('affinity-crm-column-width'));if(saved>=220&&saved<=420)input.value=String(saved);}catch{}
- const output=document.createElement('output');label.append(input,output);controls.append(label);
- const scroll=document.createElement('div');scroll.className='board-horizontal-scroll';scroll.tabIndex=0;scroll.setAttribute('role','region');scroll.setAttribute('aria-label','Rolar as colunas do funil horizontalmente');const spacer=document.createElement('div');scroll.append(spacer);
- board.before(controls,scroll);board.tabIndex=0;
- const syncSize=()=>{const width=board.scrollWidth+'px';if(spacer.style.width!==width)spacer.style.width=width;scroll.hidden=board.scrollWidth<=board.clientWidth||board.classList.contains('crm-list-view');scroll.scrollLeft=board.scrollLeft;};
- const apply=()=>{board.style.setProperty('--board-column-width',input.value+'px');output.textContent=input.value+' px';requestAnimationFrame(syncSize);};
- input.oninput=()=>{apply();try{localStorage.setItem('affinity-crm-column-width',input.value);}catch{}};
- scroll.addEventListener('scroll',()=>{if(Math.abs(board.scrollLeft-scroll.scrollLeft)>1)board.scrollLeft=scroll.scrollLeft;});board.addEventListener('scroll',()=>{if(Math.abs(scroll.scrollLeft-board.scrollLeft)>1)scroll.scrollLeft=board.scrollLeft;});
- new ResizeObserver(syncSize).observe(board);new MutationObserver(()=>requestAnimationFrame(syncSize)).observe(board,{childList:true,attributes:true,attributeFilter:['class']});apply();
+ const label=document.createElement('label');label.textContent='Percorrer colunas';label.htmlFor='board-scroll-position';
+ const previous=document.createElement('button'),next=document.createElement('button');previous.type=next.type='button';previous.textContent='←';next.textContent='→';previous.setAttribute('aria-label','Ver colunas anteriores');next.setAttribute('aria-label','Ver próximas colunas');
+ const input=document.createElement('input');input.id='board-scroll-position';input.type='range';input.min='0';input.max='0';input.step='1';input.value='0';input.setAttribute('aria-label','Percorrer colunas do funil');
+ controls.append(label,previous,input,next);board.before(controls);board.tabIndex=0;
+ const syncPosition=()=>{input.value=String(board.scrollLeft);previous.disabled=board.scrollLeft<=1;next.disabled=board.scrollLeft>=Number(input.max)-1;};
+ const syncSize=()=>{input.max=String(Math.max(0,board.scrollWidth-board.clientWidth));input.disabled=Number(input.max)===0;controls.hidden=Number(input.max)===0;syncPosition();};
+ input.oninput=()=>{board.scrollLeft=Number(input.value);syncPosition();};
+ previous.onclick=()=>{board.scrollLeft-=Math.max(280,board.clientWidth*.8);syncPosition();};next.onclick=()=>{board.scrollLeft+=Math.max(280,board.clientWidth*.8);syncPosition();};
+ board.addEventListener('scroll',syncPosition);new ResizeObserver(syncSize).observe(board);new MutationObserver(()=>requestAnimationFrame(syncSize)).observe(board,{childList:true,attributes:true,attributeFilter:['class']});requestAnimationFrame(syncSize);
 }

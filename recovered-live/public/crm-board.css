@@ -6,8 +6,9 @@
 
 html body .board-main{width:calc(100% - 256px);min-width:0;max-width:calc(100% - 256px)}
 html body #board{width:100%;min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:auto;scrollbar-color:#647d91 #e4ebf1}
-html body #board .board-column{flex:0 0 var(--board-column-width,280px);width:var(--board-column-width,280px);min-width:0;overflow-wrap:anywhere}
-.board-layout-controls{display:flex;align-items:center;margin:12px 0}.board-layout-controls label{display:flex;align-items:center;gap:12px;font-size:14px;font-weight:700;flex-wrap:wrap}.board-layout-controls input[type=range]{width:180px;min-width:0;accent-color:#17567b;padding:0}.board-layout-controls output{min-width:50px;font-variant-numeric:tabular-nums}
-.board-horizontal-scroll{overflow-x:scroll;overflow-y:hidden;width:100%;height:22px;min-height:22px;border:1px solid #bdcad5;border-radius:8px;background:#e4ebf1;scrollbar-width:auto;scrollbar-color:#647d91 #e4ebf1;margin-bottom:8px}.board-horizontal-scroll>div{height:1px}.board-horizontal-scroll::-webkit-scrollbar,#board::-webkit-scrollbar{height:14px}.board-horizontal-scroll::-webkit-scrollbar-track,#board::-webkit-scrollbar-track{background:#e4ebf1;border-radius:8px}.board-horizontal-scroll::-webkit-scrollbar-thumb,#board::-webkit-scrollbar-thumb{background:#647d91;border:3px solid #e4ebf1;border-radius:8px}
+html body #board .board-column{flex:0 0 280px;width:280px;min-width:0;overflow-wrap:anywhere}
+.board-layout-controls{display:flex;align-items:center;gap:12px;margin:12px 0;padding:12px 16px;border:1px solid #a6b9c8;border-radius:10px;background:#edf3f7}.board-layout-controls label{font-size:14px;font-weight:750;white-space:nowrap}.board-layout-controls input[type=range]{flex:1;width:100%;min-width:60px;max-width:none;padding:0;accent-color:#17567b;height:24px;cursor:ew-resize}.board-layout-controls button{min-width:40px;padding:6px 10px;color:#173348!important;background:#fff!important;border:1px solid #7d94a6!important}.board-layout-controls button:disabled{opacity:.4;cursor:default}
+#board::-webkit-scrollbar{height:14px}#board::-webkit-scrollbar-track{background:#e4ebf1;border-radius:8px}#board::-webkit-scrollbar-thumb{background:#647d91;border:3px solid #e4ebf1;border-radius:8px}
 html[data-assistant=true] body .board-main{width:100%;max-width:100%}
 @media(max-width:900px){html body .board-main{width:100%;max-width:100%}}
+@media(max-width:600px){.board-layout-controls{flex-wrap:wrap}.board-layout-controls label{width:100%}}
