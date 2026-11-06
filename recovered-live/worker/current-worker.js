@@ -1,3 +1,4 @@
+import {googleCalendarRoute} from './google-calendar.js';
 import {chatPanelRole} from './chat-panel-role.js';
 import {homeNotices} from './home-notices.js';
 import {profilePhotoRoute} from './profile-photo-link.js';
@@ -42767,7 +42768,7 @@ __name(schedulePolicyWelcome, "schedulePolicyWelcome");
 __name2(schedulePolicyWelcome, "schedulePolicyWelcome");
 async function syncCalendlyForAgent(env, agentEmail, options = {}) {
   await ensureCalendlyTables(env);
-  if(env.PORTAL_MULTITENANT_MODE==='enabled'&&!options.reminders){const feed=await syncFeedCalendar(env,agentEmail,{open:value=>decryptSmtpPassword(value,env.JWT_SECRET),ensure:()=>ensureCalendlyTables(env)});if(feed)return feed;}
+  if(env.PORTAL_MULTITENANT_MODE==='enabled'&&!options.reminders){const feed=await syncFeedCalendar(env,agentEmail,{open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET),ensure:()=>ensureCalendlyTables(env)});if(feed)return feed;}
   let phonesUpdated = options.reminders?0:await backfillStoredCalendlyPhones(env, agentEmail);
   if(!options.reminders)await mergeClientSourcesForAgent(env, agentEmail);
   const connection = await env.DB.prepare("SELECT * FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(agentEmail.toLowerCase()).first();
@@ -45703,7 +45704,7 @@ Affinity Financial Consulting`,
     const connection = await env.DB.prepare("SELECT schedulingUrl,status,lastSyncAt,lastError FROM agentCalendlyConnections WHERE lower(agentEmail)=?").bind(owner).first();
     const profile = await env.DB.prepare("SELECT slug,headline,bio,sinceYear,photoUrl,calendlyUrl,isPublished FROM agentPublicProfiles WHERE lower(agentEmail)=?").bind(owner).first();
     const feedConnection=await calendarConnection(env,owner);
-    return trpcResult({connection:feedConnection?{...feedConnection,connected:true,readOnly:true,schedulingUrl:feedConnection.bookingUrl}:connection?{...connection,provider:'calendly',connected:true}:null,profile:feedConnection?{...(profile||{}),calendlyUrl:feedConnection.bookingUrl||''}:profile||null});
+    return trpcResult({calendlyConnection:connection?{...connection,provider:'calendly',connected:true}:null,connection:feedConnection?{...feedConnection,connected:true,readOnly:true,schedulingUrl:feedConnection.bookingUrl}:connection?{...connection,provider:'calendly',connected:true}:null,profile:feedConnection?{...(profile||{}),calendlyUrl:feedConnection.bookingUrl||profile?.calendlyUrl||connection?.schedulingUrl||''}:profile||null});
   }
   if (name === "agent.getPublicProfile") {
     await ensureCalendlyTables(env);
@@ -47290,8 +47291,9 @@ __name2(runProcedure, "runProcedure");
 var cloudflare_staging_default = {
   async email(message,env,ctx){await receiveAssistantEmail(message,env,async raw=>require_mailparser().simpleParser(AssistantMailBuffer.from(raw)));},
   async fetch(request, env, ctx) {
-    const calendarResponse=await calendarProviderRoute(request,env,{email:getAdminEmail,access:getAdminAccess,open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET),ensure:()=>ensureCalendlyTables(env)});if(calendarResponse)return calendarResponse;
-    const oauthResponse=await emailOAuthRoute(request,env,{email:getAdminEmail,access:getAdminAccess,open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET)});
+    const googleCalendarResponse=await googleCalendarRoute(request,env,{email:getAdminEmail,access:getAdminAccess,calendarAllowed:owner=>hasFeature(env,owner,'calendar'),open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET),ensure:()=>ensureCalendlyTables(env)});if(googleCalendarResponse)return secureResponse(googleCalendarResponse,{privateData:true});
+    const calendarResponse=await calendarProviderRoute(request,env,{email:getAdminEmail,access:getAdminAccess,calendarAllowed:owner=>hasFeature(env,owner,'calendar'),open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET),ensure:()=>ensureCalendlyTables(env)});if(calendarResponse)return secureResponse(calendarResponse,{privateData:true});
+    const oauthResponse=await emailOAuthRoute(request,env,{email:getAdminEmail,access:getAdminAccess,calendarAllowed:owner=>hasFeature(env,owner,'calendar'),open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET)});
     if(oauthResponse)return secureResponse(oauthResponse,{privateData:true});
     const reviewAttributionResponse=await reviewAttributionRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
     if(reviewAttributionResponse)return secureResponse(reviewAttributionResponse,{privateData:true});
