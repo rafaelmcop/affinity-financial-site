@@ -1,3 +1,4 @@
+import {agentBusiness} from './agent-business.js';
 import {paymentMailRecipients,backfillAssistantPaymentMail} from './assistant-payment-mail.js';
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {discussionRecipients,readDiscussion} from './assistant-discussions.js';
@@ -17,6 +18,7 @@ export async function communicationsSchema(env){await corporateEmailSchema(env);
 export async function provisionAssistantEmail(env,assistant,auth){
  await communicationsSchema(env);let saved=await env.DB.prepare('SELECT * FROM assistantCommunications WHERE assistantId=?').bind(assistant.id).first();
  if(saved?.state==='ready'&&!(assistant.email.endsWith('@'+DOMAIN)&&saved.address!==assistant.email))return saved;
+ if(env.PORTAL_MULTITENANT_MODE==='enabled'){const own=assistant.owner||((await env.DB.prepare('SELECT owner FROM portalAssistants WHERE id=?').bind(assistant.id).first())?.owner);if(!own||!(await agentBusiness(env,own)).affinityTeam)return {address:assistant.email,state:'external',error:'Este é o e-mail de login da assistente. Um endereço corporativo Affinity só pode ser atribuído pelo Admin.'};}
  try{
  const stored=await env.DB.prepare('SELECT encryptedToken FROM domainEmailIntegration WHERE id=1').first();const token=env.CLOUDFLARE_EMAIL_ROUTING_TOKEN||(stored&&await auth.decrypt(stored.encryptedToken,env.JWT_SECRET));if(!token)throw Error('O Admin precisa conectar a Cloudflare.');
  const call=async(path,body,method)=>{const response=await (auth.fetch||fetch)('https://api.cloudflare.com/client/v4/'+path,{method:method||(body?'POST':'GET'),headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(20000)});const result=await response.json();if(!response.ok||!result.success)throw Error('A configuração do e-mail aguarda a Cloudflare (HTTP '+response.status+').');return result;};
