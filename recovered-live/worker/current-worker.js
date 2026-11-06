@@ -612,10 +612,10 @@ async function sendEmail(env, options) {
     auth: { user: String(config.user), pass: password },
     requireTLS: port === 587
   });
-  await transporter.sendMail({
-    from: `"${String(platformMail?"Affinity Portal":config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
+  try{return await transporter.sendMail({
+    from: `"${String(config.fromName || "Affinity Financial")}" <${String(config.fromEmail)}>`,
     ...options
-  });
+  });}finally{transporter.close?.();}
 }
 __name(sendEmail, "sendEmail");
 async function agentSmtpAuth(env,owner,config){return await emailOAuthToken(env,owner,{open:value=>decryptSmtpPassword(value,env.JWT_SECRET),seal:value=>encryptSmtpPassword(value,env.JWT_SECRET)})||{user:String(config.user),pass:await decryptSmtpPassword(String(config.password),env.JWT_SECRET)};}
@@ -42314,15 +42314,15 @@ async function mergePaddedPolicyDuplicates(env, owner) {
 __name(mergePaddedPolicyDuplicates, "mergePaddedPolicyDuplicates");
 __name2(mergePaddedPolicyDuplicates, "mergePaddedPolicyDuplicates");
 async function sendEmailIfConfigured(env, options) {
+  const owner=typeof options.to==='string'?options.to.trim().toLowerCase():'platform';
   try {
-    await sendEmail(env, options);
+    const receipt=await sendEmail(env, options);
+    try{await recordSyncLog(env.DB,owner,{event:'email',state:'completed',count:1,path:'/api/platform/email',errorCode:'smtp_accepted'});}catch{}
+    return {sent:true,messageId:receipt?.messageId||null};
   } catch (error) {
-    console.warn(
-      JSON.stringify({
-        event: "optional_email_not_sent",
-        message: error instanceof Error ? error.message : String(error)
-      })
-    );
+    console.warn(JSON.stringify({event:'optional_email_not_sent',code:'platform_email_failed'}));
+    try{await recordSyncLog(env.DB,owner,{event:'email',state:'error',path:'/api/platform/email',errorCode:'platform_email_failed'});}catch{}
+    return {sent:false};
   }
 }
 __name(sendEmailIfConfigured, "sendEmailIfConfigured");
@@ -46528,12 +46528,12 @@ Affinity Financial Consulting`,
       }
     };
     const message = messages[status];
-    await sendEmailIfConfigured(env, {
+    const notification=await sendEmailIfConfigured(env, {
       to: String(target.email),
       subject: message.subject,
       html: emailHtml(message.title, message.body)
     });
-    return trpcResult({ success: true });
+    return trpcResult({ success: true,notificationSent:notification.sent });
   }
   if (name === "admin.updateAdmin") {
     const id = Number(input.id);
@@ -48202,14 +48202,14 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300&&outcome.httpStatus!==202){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
  if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar','/assistentes/login','/assistant-login.html']);
- if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2"><script src="/portal-business.js?v=1" defer></script><script src="/email-setup-reminder.js?v=1" defer></script>',{html:true});}}).transform(response);
+ if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2"><script src="/portal-business.js?v=1" defer></script><script src="/email-setup-reminder.js?v=2" defer></script>',{html:true});}}).transform(response);
 
  if(request.method==='POST'&&/agent\.send(?:Meeting|Mailbox|Application)Email|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(readPendingEmailDocuments(env).catch(()=>console.error('email_attachment_reading_pending')));
  if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=15" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261012-import-retry-2" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261105-nlg-number-1" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=1" defer></script><script src="/email-setup-reminder.js?v=1" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261105-business-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261105-business-1');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=8"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=2"></script><script src="/portal-notifications.js?v=2" defer></script><script src="/portal-home-notices.js?v=1" defer></script><script src="/internal-messenger.js?v=1" defer></script><script src="/five-rings-background.js?v=6" defer></script><script src="/five-rings-settings-link.js?v=2" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=1" defer></script><script src="/email-setup-reminder.js?v=2" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261105-business-1" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261105-business-1');}}).transform(response);
  }
  return response;
 };
@@ -48225,7 +48225,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
   if(unexpectedSpaPage(url.pathname,html))response=new Response('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width"><title>Page not found | Affinity Financial</title><main><h1>Page not found</h1><p>The address may have changed.</p><a href="/">Return to Affinity Financial</a></main></html>',{status:404,headers:{'content-type':'text/html; charset=utf-8'}});
  }
  if(usesPublicAppearance(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('html',{element(el){el.setAttribute('data-public-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/public-theme.css?v=1">',{html:true});}}).transform(response);
- if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=6" defer></script>',{html:true});}}).transform(response);
+ if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=7" defer></script>',{html:true});}}).transform(response);
  return perimeterHeaders(response,url.pathname);
 };
 export {
