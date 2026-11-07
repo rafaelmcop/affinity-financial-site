@@ -1,0 +1,7 @@
+{
+  "name":"affinity-agent-whatsapp-portal",
+  "main":"../worker/affinity-agent-whatsapp-portal.js",
+  "compatibility_date":"2026-08-06",
+  "services":[{"binding":"PORTAL","service":"affinity-financial-staging"}],
+  "routes":[{"pattern":"affinityfc.org/agentes/whatsapp*","zone_name":"affinityfc.org"},{"pattern":"www.affinityfc.org/agentes/whatsapp*","zone_name":"affinityfc.org"}]
+}

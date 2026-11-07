@@ -1,0 +1,2 @@
+chrome.runtime.onInstalled.addListener(details=>{if(details.reason==='install')chrome.tabs.create({url:chrome.runtime.getURL('consent.html')});});
+async function requireStoreConsent(){const consent=await chrome.storage.local.get('affinityDataConsent');if(consent.affinityDataConsent!==true)throw Error('Open the Affinity connector icon and review its data access settings before enabling synchronization.');}
