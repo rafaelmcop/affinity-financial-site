@@ -28,7 +28,7 @@ import {downloadMedia} from './download.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
-const bridgeVersion='2026-11-06-automatic-five-per-day-1';
+const bridgeVersion='2026-11-06-separate-limits-paced-2';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
 const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');
@@ -217,7 +217,7 @@ const server=http.createServer(async(req,res)=>{
       const old=db.prepare('SELECT state,messageId FROM sends WHERE owner=? AND requestId=?').get(owner,requestId);
       if(old)return reply({...old,...(old.state==='sent'?{}:{error:'Este envio ainda não foi confirmado. Confira no celular antes de tentar novamente.'})},old.state==='sent'?200:old.state==='pending'&&req.headers.prefer==='respond-async'?202:409);
       if(s.busy||Date.now()-s.lastSend<3000)return reply({error:'Aguarde o envio atual.'},429);
-      const automatic=reserveAutomation(db,s.number?'number:'+s.number:owner,input,chat);if(!automatic.allowed)return reply({error:automatic.code==='automation_daily_limit'?'Limite de 5 mensagens automáticas por dia atingido. Nenhum envio realizado.':automatic.code==='automation_duplicate'?'Este aviso automático já foi processado.':'Aviso automático expirado ou não permitido.',code:automatic.code,notSent:true},429);
+      const automatic=reserveAutomation(db,s.number?'number:'+s.number:owner,input,chat);if(!automatic.allowed)return reply({error:automatic.code==='automation_daily_limit'?'Limite diário de '+automatic.limit+(automatic.kind==='birthday'?' aniversários':' avisos de reunião')+' atingido. Nenhum envio realizado.':automatic.code==='automation_duplicate'?'Este aviso automático já foi processado.':automatic.code==='automation_spacing'?'Aguardando o intervalo de 3 minutos entre avisos automáticos.':'Aviso automático expirado ou não permitido.',code:automatic.code,retryAfterSeconds:automatic.retryAfterSeconds||null,notSent:true},429);
       s.busy=true;
       db.prepare("INSERT INTO sends(owner,requestId,state) VALUES(?,?,'pending')").run(owner,requestId);
       const perform=async()=>{try{

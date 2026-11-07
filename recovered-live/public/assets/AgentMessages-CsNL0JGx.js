@@ -636,7 +636,7 @@ function Q({
                 ],
               }),
             e.jsxs("label", {className:"md:col-span-2",children:["Como enviar",e.jsx("select",{className:"mt-2 w-full rounded-md border border-white/20 p-3",value:t.emailEnabled!==false?(t.whatsappEnabled?"both":"email"):(t.whatsappEnabled?"whatsapp":"none"),onChange:a=>n({...t,emailEnabled:["both","email"].includes(a.target.value),whatsappEnabled:["both","whatsapp"].includes(a.target.value)}),children:[e.jsx("option",{value:"both",disabled:t.occasion!=="birthday",children:"E-mail + WhatsApp"}),e.jsx("option",{value:"email",children:"Somente e-mail"}),e.jsx("option",{value:"whatsapp",disabled:t.occasion!=="birthday",children:"Somente WhatsApp"}),e.jsx("option",{value:"none",children:"Não enviar"})]} )]}),
-            e.jsx("p",{className:"md:col-span-2 text-sm",children:"WhatsApp automático: somente aniversários e lembretes de reunião, com limite total de 5 por dia por conta. Não há reenvio acumulado. Outros modelos são enviados apenas por e-mail."}),
+            e.jsx("p",{className:"md:col-span-2 text-sm",children:"WhatsApp automático: somente aniversários e lembretes de reunião, com até 5 aniversários e 15 avisos de reunião por dia por conta, separados por pelo menos 3 minutos. Não há reenvio acumulado. Outros modelos são enviados apenas por e-mail."}),
             e.jsx("label",{className:"md:col-span-2 font-bold",children:"✉️ Mensagem do e-mail"}),
             e.jsx("textarea", {
               className:

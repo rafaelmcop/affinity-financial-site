@@ -27,8 +27,10 @@ Portuguese DOB labels use day/month. Age alone never becomes a DOB.
 
 Only meeting reminders (24 hours / 30 minutes) and birthdays are allowed.
 Legacy generic automation permission cannot authorize campaigns. Server-side
-SQLite quota reserves at most five automated attempts total per physical WhatsApp
-number and New York date, across both permitted types. Manual sends are separate.
+SQLite quota reserves separate limits per physical WhatsApp number and New York
+date: five birthday attempts and fifteen meeting-reminder attempts. All automatic
+reservations share a minimum three-minute interval, including across midnight.
+Spacing refusals consume no quota; quota and interval survive restarts. Manual sends are separate.
 Reservations remain consumed on uncertainty, persist across restarts, and dedupe
 birthday phone/day or meeting/stage/phone/day. Stale birthdays and expired meeting
 notices are refused; quota/duplicate refusals are never retried as service-busy.
@@ -38,3 +40,12 @@ The paused hnempreendedor@gmail.com account remains paused.
 
 Enabling allowed birthday delivery does not reconnect or unblock a banned phone.
 No live test message is needed to validate quota or CRM/PDF projection rules.
+
+Curated default WhatsApp wording rotates through contextual variants, preserving
+the recipient, agent, schedule, time zone and meeting/download links. Custom text
+keeps its body and links; only a recognized greeting is varied. An unrecognized
+custom greeting/text is left unchanged. No zero-width characters, URL disguises
+or provider-safeguard bypass is used. The per-owner, purpose and event sequence
+is stored without message content; retries retain the same variant. This does
+not guarantee deliverability or prevent a provider restriction. Email and manual
+WhatsApp content are unchanged. Expired deferred reminders are marked skipped.
