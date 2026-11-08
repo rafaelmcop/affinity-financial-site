@@ -1,0 +1,25 @@
+import {fileURLToPath} from 'node:url';
+import {test} from 'node:test';import assert from 'node:assert/strict';import http from 'node:http';import{readFile}from'node:fs/promises';import{launchBrowser}from'./test-support/browser.mjs';
+test('user list defaults to one category selector and nests permissions, roles and destructive actions in editing',async()=>{const root=fileURLToPath(new URL('./public',import.meta.url));const calls=new Set(),errors=[];const users=[{id:1,name:'Master Example',email:'master@example.invalid',accountType:'both',adminRole:'master',status:'approved',isActive:1,kind:'internal',agentGroup:'affinity'},{id:2,name:'Agent Example',email:'agent@example.invalid',accountType:'agent',adminRole:'standard',status:'approved',isActive:1,kind:'internal',agentGroup:'alien'}];
+const server=http.createServer(async(req,res)=>{const url=new URL(req.url,'http://localhost');if(url.pathname.startsWith('/api/')){calls.add(url.pathname);res.setHeader('content-type','application/json');const value=path=>path.includes('listAdmins')?{admins:users,currentRole:'master',currentEmail:users[0].email}:path.includes('getAllAffiliates')?[]:path.includes('user-directory')?{users:users.map(x=>({...x,type:x.accountType})),isMaster:true}:path.includes('assistants')?{assistants:[],catalog:[],owners:[],convertible:[],history:[],adminMode:true}:path.includes('notice-read')?{read:[]}:path.includes('user-access')?{features:['email','five_rings'],available:[{key:'email',label:'E-mail',group:'Comunicação'},{key:'five_rings',label:'Five Rings',group:'Integrações'}],fiveRingsRequired:true}:path.includes('check')||path.includes('me')?{...users[0],role:'admin',authenticated:true}:{};if(url.pathname.includes('/trpc/')){const names=url.pathname.split('/trpc/')[1].split(',');const result=names.map(path=>({result:{data:{json:value(path)}}}));res.end(JSON.stringify(url.searchParams.has('batch')?result:result[0]));}else res.end(JSON.stringify(value(url.pathname)));return;}
+let path=url.pathname;if(!/\.[a-z0-9]+$/i.test(path))path='/index.html';try{let data=await readFile(root+path);res.setHeader('content-type',path.endsWith('.js')?'application/javascript':path.endsWith('.css')?'text/css':path.endsWith('.html')?'text/html':'image/svg+xml');if(path==='/index.html')data=Buffer.from(data.toString().replace('<html lang="pt-BR">','<html lang="pt-BR" data-agent-theme="light">').replace('</head>','<link rel="stylesheet" href="/agent-theme.css?v=9"><script src="/admin-unified-menu.js" defer></script></head>'));res.end(data);}catch{res.statusCode=404;res.end('missing');}});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));const browser=await launchBrowser();const page=await browser.newPage();page.on('pageerror',e=>errors.push(e.message));await page.setViewport({width:1440,height:1000});await page.goto('http://127.0.0.1:'+server.address().port+'/admin/usuarios');await new Promise(r=>setTimeout(r,5000));try{
+ await page.waitForSelector('select[aria-label="Categoria de usuários"]');
+ assert.equal(await page.$eval('select[aria-label="Categoria de usuários"]',e=>e.value),'all');
+ assert.equal(await page.$$eval('main button',rows=>rows.some(x=>/^(Bloquear|Excluir usuário|Funções e permissões|Alterar função)$/.test(x.textContent))),false);
+ assert.equal(await page.$eval('#all-user-types',e=>!!e.closest('dialog')&&!e.closest('dialog').open),true);
+ await page.screenshot({path:'/tmp/affinity-admin-users-final.png'});await page.evaluate(()=>[...document.querySelectorAll('button')].filter(x=>x.textContent==='Editar')[1].click());
+ await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(x=>x.textContent==='Funções e permissões'));
+ await page.screenshot({path:'/tmp/affinity-admin-users-edit-final.png',fullPage:true});const editText=await page.$eval('main',e=>e.innerText);assert.match(editText,/Excluir usuário/);assert.match(editText,/Bloquear/);
+ await page.evaluate(()=>[...document.querySelectorAll('button')].find(x=>x.textContent==='Função do usuário · Alterar').click());
+ await page.waitForSelector('#role-change-dialog[open]');assert.equal(await page.$eval('#role-user',e=>e.value),'agent@example.invalid');
+ await page.evaluate(()=>document.getElementById('role-change-dialog').close());
+ await page.evaluate(()=>[...document.querySelectorAll('button')].find(x=>x.textContent==='Funções e permissões').click());
+ await page.waitForSelector('#require-five-rings');assert.equal(await page.$eval('#require-five-rings',e=>e.checked),true);
+ await page.evaluate(()=>document.getElementById('user-access-dialog').close());
+ await page.evaluate(()=>[...document.querySelectorAll('button')].find(x=>x.textContent==='Acessar portal para auditoria').click());
+ await page.waitForSelector('dialog[open] input[type=password]');
+ assert.deepEqual(errors,[]);
+ await page.setViewport({width:390,height:844});const box=await page.$eval('dialog[open]',e=>({left:e.getBoundingClientRect().left,right:e.getBoundingClientRect().right}));assert(box.left>=0&&box.right<=390);
+ }finally{await browser.close();server.closeAllConnections();await new Promise(r=>server.close(r));}
+});

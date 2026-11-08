@@ -1,3 +1,4 @@
+import {fiveRingsSchema} from './five-rings-onboarding.js';
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
 export {pageFeature};
@@ -64,11 +65,13 @@ export function procedureFeature(name){
  if(/Client|Clients/.test(op))return 'crm';
  return 'messages';
 }
-export async function saveUserAccess(env,email,features,admin){
+export async function saveUserAccess(env,email,features,admin,fiveRingsRequired){
  await accessSchema(env);email=String(email||'').trim().toLowerCase();if(!Array.isArray(features)||features.some(f=>!keys.includes(f)&&f!=='crm'))throw Object.assign(Error('Permissões inválidas.'),{status:400});
  const exists=await env.DB.prepare('SELECT email FROM adminAccounts WHERE lower(email)=? UNION SELECT email FROM affiliates WHERE lower(email)=?').bind(email,email).first();if(!exists)throw Object.assign(Error('Usuário não encontrado.'),{status:404});
  const data=JSON.stringify([...new Set(features.map(f=>f==='crm'?'policies':f))]);
- await env.DB.batch([env.DB.prepare('INSERT INTO portalFeatureAccess(email,featuresJson,updatedBy) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET featuresJson=excluded.featuresJson,updatedBy=excluded.updatedBy,updatedAt=CURRENT_TIMESTAMP').bind(email,data,admin),env.DB.prepare('INSERT INTO portalFeatureAccessAudit(email,featuresJson,updatedBy) VALUES(?,?,?)').bind(email,data,admin)]);return userAccess(env,email);
+ const extra=[];if(fiveRingsRequired!==undefined){if(typeof fiveRingsRequired!=='boolean')throw Error('Exigência Five Rings inválida.');const target=await env.DB.prepare("SELECT email FROM adminAccounts WHERE lower(email)=? AND portalDeletedAt IS NULL AND accountType IN ('agent','both')").bind(email).first();if(!target)throw Error('A exigência Five Rings se aplica apenas a agentes.');await fiveRingsSchema(env);extra.push(env.DB.prepare('INSERT INTO agentFiveRingsRequirements(agentEmail,exempt,updatedBy) VALUES(?,?,?) ON CONFLICT(agentEmail) DO UPDATE SET exempt=excluded.exempt,updatedBy=excluded.updatedBy,nextPromptAt=0,updatedAt=CURRENT_TIMESTAMP').bind(email,fiveRingsRequired?0:1,admin));}
+
+ await env.DB.batch([env.DB.prepare('INSERT INTO portalFeatureAccess(email,featuresJson,updatedBy) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET featuresJson=excluded.featuresJson,updatedBy=excluded.updatedBy,updatedAt=CURRENT_TIMESTAMP').bind(email,data,admin),env.DB.prepare('INSERT INTO portalFeatureAccessAudit(email,featuresJson,updatedBy) VALUES(?,?,?)').bind(email,data,admin),...extra]);return userAccess(env,email);
 }
 export async function accessRoute(request,env,auth){
  const url=new URL(request.url),path=url.pathname;
@@ -76,12 +79,13 @@ export async function accessRoute(request,env,auth){
  try{
  let email=await auth.email(request,env);const admin=path==='/api/admin/user-access';
  if(admin){const a=email?await auth.access(email,env):null;if(!a||( !a.isMaster&&!(a.account?.isActive&&a.account.status==='approved'&&['admin','both'].includes(a.account.accountType))))return Response.json({error:'Acesso restrito ao Admin.'},{status:403});
-  if(request.method==='POST'){if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403});const raw=await request.text();if(raw.length>8000)return Response.json({error:'Solicitação muito grande.'},{status:413});const input=JSON.parse(raw);return Response.json(await saveUserAccess(env,input.email,input.features,email),{headers:{'cache-control':'no-store'}});}
+  if(request.method==='POST'){if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403});const raw=await request.text();if(raw.length>8000)return Response.json({error:'Solicitação muito grande.'},{status:413});const input=JSON.parse(raw);return Response.json(await saveUserAccess(env,input.email,input.features,email,input.fiveRingsRequired),{headers:{'cache-control':'no-store'}});}
   email=url.searchParams.get('email');
  }else if(path.includes('/affiliate/')){const id=await auth.affiliate(request,env);const a=id?await env.DB.prepare("SELECT email FROM affiliates WHERE id=? AND isActive=1 AND status='approved'").bind(id).first():null;email=a?.email;
  }else{const a=email?await auth.access(email,env):null;if(!a?.account?.isActive||a.account.status!=='approved'||!['agent','both'].includes(a.account.accountType))email=null;}
  if(!email)return Response.json({error:'Entre no portal.'},{status:401});
  if(request.method!=='GET')return Response.json({error:'Método inválido.'},{status:405});
- return Response.json(await userAccess(env,email),{headers:{'cache-control':'no-store'}});
+ const result=await userAccess(env,email);if(admin){const target=await env.DB.prepare("SELECT email FROM adminAccounts WHERE lower(email)=? AND portalDeletedAt IS NULL AND accountType IN ('agent','both')").bind(email.toLowerCase()).first();if(target){await fiveRingsSchema(env);const requirement=await env.DB.prepare('SELECT exempt FROM agentFiveRingsRequirements WHERE agentEmail=?').bind(email.toLowerCase()).first();result.fiveRingsRequired=!requirement?.exempt;}}
+ return Response.json(result,{headers:{'cache-control':'no-store'}});
  }catch(e){return Response.json({error:e.message||'Não foi possível salvar.'},{status:e.status||400});}
 }
