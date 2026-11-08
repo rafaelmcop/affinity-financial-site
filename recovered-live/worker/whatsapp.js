@@ -1,3 +1,5 @@
+import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
+import {whatsappPolicy,whatsappActionAllowed} from './whatsapp-modes.js';
 import {whatsappContacts} from './whatsapp-contact-names.js';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'cache-control':'no-store'}});
 const encode=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
@@ -9,8 +11,8 @@ export async function whatsappRoute(request,env,auth){
     if(!email)return page?Response.redirect(new URL('/agentes/login',url),302):json({error:'Entre novamente no portal.'},401);
     const {account}=await auth.access(email,env);
     if(!account||!Number(account.isActive)||account.status!=='approved'||!['agent','both'].includes(account.accountType))return json({error:'Acesso restrito ao agente.'},403);
-    if(page)return env.ASSETS.fetch(new Request(new URL('/agent-whatsapp.html',url),request));
-    const action=url.pathname.split('/').at(-1),method=request.method;
+    const policy=await whatsappPolicy(env,email);if(page&&policy.mode==='send')return new Response(sendOnlyWhatsAppPage(),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store'}});if(policy.mode==='disabled')return json({error:'WhatsApp não liberado.'},403);if(page)return env.ASSETS.fetch(new Request(new URL('/agent-whatsapp.html',url),request));
+    const action=url.pathname.split('/').at(-1),method=request.method;if(!whatsappActionAllowed(policy.mode,action))return json({error:'O Admin liberou somente envios.',code:'WHATSAPP_SEND_ONLY'},403);
     if(action==='contacts'&&method==='GET'){
       return json(await whatsappContacts(env,email,auth.contactScopes));
     }
@@ -32,7 +34,7 @@ export async function whatsappRoute(request,env,auth){
       if(reader)while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>11500000){await reader.cancel();return json({error:'Mensagem ou arquivo muito grande.'},413);}parts.push(value);}
       body=await new Blob(parts).text();try{JSON.parse(body||'{}');}catch{return json({error:'Solicitação inválida.'},400);}
     }
-    const encoder=new TextEncoder(),payload=encode(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner:email.toLowerCase(),exp:Math.floor(Date.now()/1000)+60})));
+    const encoder=new TextEncoder(),payload=encode(encoder.encode(JSON.stringify({aud:'affinity-whatsapp',owner:email.toLowerCase(),mode:policy.mode,revision:policy.revision,exp:Math.floor(Date.now()/1000)+60})));
     const key=await crypto.subtle.importKey('raw',encoder.encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']);
     const signature=encode(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))));
     const target=new URL('/'+action,base);if(action==='group-contacts')target.searchParams.set('group',url.searchParams.get('group')||'');if(action==='messages')target.searchParams.set('chat',url.searchParams.get('chat')||'');if(action==='media')target.searchParams.set('id',url.searchParams.get('id')||'');

@@ -1,3 +1,5 @@
+import {whatsappPolicy} from './whatsapp-modes.js';
+import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
 import {agentBusiness} from './agent-business.js';
 import {paymentMailRecipients,backfillAssistantPaymentMail} from './assistant-payment-mail.js';
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
@@ -52,9 +54,10 @@ export async function receiveAssistantEmail(message,env,parse){
 }
 export async function assistantCommunicationsRoute(request,env,assistant,auth){
  const url=new URL(request.url),path=url.pathname;
- if(path==='/api/assistants/communications/portal-whatsapp-access')return json({allowed:await portalWhatsappAllowed(env,assistant.email)});
+ if(path==='/api/assistants/communications/portal-whatsapp-access')return json({...await whatsappPolicy(env,assistant.email),allowed:await portalWhatsappAllowed(env,assistant.email)});
  if(path==='/assistentes/whatsapp'){
   if(!await portalWhatsappAllowed(env,assistant.email))return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><title>WhatsApp no aplicativo</title><body><h1>Use o WhatsApp no seu computador</h1><p>A integração com o portal ainda não foi liberada.</p><a href="whatsapp://">Abrir no WhatsApp</a></body></html>',{headers:{'content-type':'text/html;charset=utf-8'}});
+  if((await whatsappPolicy(env,assistant.email)).mode==='send')return new Response(sendOnlyWhatsAppPage(true),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store','x-affinity-assistant-view':'1'}});
   let theme='light';try{theme=(await auth.appearance?.(assistant.owner))?.theme||'light';}catch{}
   return new Response(renderAssistantWhatsAppPage(theme),{headers:{'content-type':'text/html;charset=utf-8','cache-control':'no-store','x-affinity-assistant-view':'1'}});
  }

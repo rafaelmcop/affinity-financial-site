@@ -1,3 +1,6 @@
+import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
+import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
+import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
 import {noticeReadRoute} from './notice-read.js';
 import {adminAuditAccess,auditSessionValid} from './admin-audit-access.js';
 import {confirmedCommunicationProgress,pendingCommunicationProgress} from './message-crm-progress.js';
@@ -106,8 +109,8 @@ import {syncPolicyLeadLinks,policyLinkReviews} from './policy-lead-links.js';
 import {listObligations,selectBeneficiary,confirmPayment,numberDefaults,applicationAgentDetails,applicationReferralDetails} from './marketing-obligations.js';
 import {portfolioRows} from './agent-portfolio.js';
 import {readRates,saveRates,affiliateSourceSales} from './affiliate-rates.js';
-import {leadFlowRoute,leadSchema,staffIdentity,protectInternalContacts,configuredAccess} from './lead-flow.js';
-import {affiliateWhatsappRoute} from './affiliate-whatsapp.js';
+import {leadFlowRoute,leadSchema,staffIdentity,storeCentralContacts,protectInternalContacts,configuredAccess} from './lead-flow.js';
+import {affiliateWhatsappRoute,contactBridge} from './affiliate-whatsapp.js';
 import {whatsappLeadsRoute} from './whatsapp-leads.js';
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
@@ -243,8 +246,8 @@ async function whatsappRoute(request, env, auth) {
     const { account } = await auth.access(email, env);
     if (!account || !Number(account.isActive) || account.status !== "approved" || !["agent", "both"].includes(account.accountType)) return json2({ error: "Acesso restrito ao agente." }, 403);
     if(!await portalWhatsappAllowed(env,email))return page?Response.redirect(new URL('/agentes/materiais',url),302):json2({error:'WhatsApp do portal não liberado. Use o aplicativo do seu computador.',code:'PORTAL_WHATSAPP_DISABLED'},403);
-    if (page) return new Response(agentWhatsAppPage(), { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
-    const action = url.pathname.split("/").at(-1), method = request.method;
+    const policy=await whatsappPolicy(env,email);if (page) return new Response(policy.mode==='send'?sendOnlyWhatsAppPage():agentWhatsAppPage(), { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-store" } });
+    const action = url.pathname.split("/").at(-1), method = request.method;if(!whatsappActionAllowed(policy.mode,action))return json2({error:'O Admin liberou somente envios para esta conta.',code:'WHATSAPP_SEND_ONLY'},403);
     if (action === "contacts" && method === "GET") {
       return json2(await whatsappContacts(env,email,auth.contactScopes));
     }
@@ -281,7 +284,7 @@ async function whatsappRoute(request, env, auth) {
         return json2({ error: "Solicita\xE7\xE3o inv\xE1lida." }, 400);
       }
     }
-    const encoder = new TextEncoder(), payload = encode(encoder.encode(JSON.stringify({ aud: "affinity-whatsapp", owner: email.toLowerCase(), exp: Math.floor(Date.now() / 1e3) + 60 })));
+    const encoder = new TextEncoder(), payload = encode(encoder.encode(JSON.stringify({ aud: "affinity-whatsapp", owner: email.toLowerCase(), mode:policy.mode,revision:policy.revision,exp: Math.floor(Date.now() / 1e3) + 60 })));
     const key2 = await crypto.subtle.importKey("raw", encoder.encode(env.WHATSAPP_BRIDGE_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
     const signature = encode(new Uint8Array(await crypto.subtle.sign("HMAC", key2, encoder.encode(payload))));
     const target = new URL("/" + action, base);if(action==='group-contacts')target.searchParams.set('group',url.searchParams.get('group')||'');
@@ -47336,7 +47339,7 @@ var cloudflare_staging_default = {
     if(reviewAttributionResponse)return secureResponse(reviewAttributionResponse,{privateData:true});
     const businessResponse=await businessRoute(request,env,{email:getAdminEmail,access:getAdminAccess,publicPageAllowed:owner=>hasFeature(env,owner,'public_profile'),personalPage:async owner=>{await ensureAgentMessageSignatureColumn(env);await ensureCalendlyTables(env);return ensureAgentPersonalPage(env,owner,{publish:await hasFeature(env,owner,'public_profile')});}});
     if(businessResponse)return secureResponse(businessResponse,{privateData:true});
-    const whatsappAccessResponse=await whatsappAccessRoute(request,env,{email:getAdminEmail,access:getAdminAccess});
+    const whatsappAccessResponse=await whatsappAccessRoute(request,env,{email:getAdminEmail,access:getAdminAccess,sync:owner=>contactBridge(env,owner,'policy','POST')});
     if(whatsappAccessResponse)return secureResponse(whatsappAccessResponse,{privateData:true});
     const hierarchyResponse=await hierarchyRoute(request,env,{email:getAdminEmail,access:getAdminAccess,compare:(p,h)=>bcryptjs_default.compare(p,h)});
     if(hierarchyResponse)return secureResponse(hierarchyResponse,{privateData:true});
@@ -47591,7 +47594,7 @@ var cloudflare_staging_default = {
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(pendingCommunicationProgress(env).catch(()=>console.error('crm_communication_progress_pending')));
     ctx.waitUntil(runApplicationLifecycle(env,{decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:(owner,mail)=>sendAgentEmail(env,owner,{...mail,platformMail:true,transientAttachments:true}),definitelyNotSent:emailDefinitelyNotSent,alert:details=>sendEmailIfConfigured(env,{to:'info@affinityfc.org',subject:'Affinity Portal · Application processing needs attention',html:'<p>Application #'+Number(details.applicationId)+' · '+escapeAutomationHtml(details.code)+'</p>'})}).catch(()=>console.error('application_lifecycle_pending')));
-    if(controller.cron==='* * * * *'){ctx.waitUntil(runMeetingReminders(env,meetingReminderServices(env)).catch(()=>console.error('meeting_reminders_pending')));return;}
+    if(controller.cron==='* * * * *'){ctx.waitUntil(flushWhatsappPolicies(env,owner=>contactBridge(env,owner,'policy','POST')).then(()=>importConnectedWhatsapp(env,{bridge:contactBridge,store:storeCentralContacts,protect:protectInternalContacts})).catch(()=>console.error('whatsapp_maintenance_pending')));ctx.waitUntil(runMeetingReminders(env,meetingReminderServices(env)).catch(()=>console.error('meeting_reminders_pending')));return;}
 
     ctx.waitUntil(Promise.resolve().then(()=>{init_icloud_email();return recoverEmailAttachments(env,{open:openAgentImap,quote:quoteImap,literal:extractLiteral,parse:source=>import_mailparser.simpleParser(Buffer2.from(source))});}).then(()=>readPendingEmailDocuments(env)).catch(()=>console.error('email_attachment_maintenance_failed')));
 
@@ -48245,11 +48248,11 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2"><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});}}).transform(response);
 
  if(request.method==='POST'&&/agent\.send(?:Meeting(?:Email|Whatsapp)|MailboxEmail|ApplicationEmail)|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(Promise.all([readPendingEmailDocuments(env),readQueuedProposalDocuments(env)]).catch(()=>console.error('proposal_reading_pending')));
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=18" defer></script><script src="/portal-ai.js?v=5" defer></script>',{html:true});}}).transform(response);
- if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261105-nlg-number-1" defer></script><script src="/user-access-menu.js?v=6" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=19" defer></script><script src="/portal-ai.js?v=5" defer></script>',{html:true});}}).transform(response);
+ if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261105-nlg-number-1" defer></script><script src="/user-access-menu.js?v=7" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   const themeIdentity=await staffIdentity(request,env,{email:getAdminEmail,access:getAdminAccess,affiliate:getAffiliateId},'agent');const appearance=themeIdentity?await agentAppearance(env,themeIdentity.owner):{theme:'light'};
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=3"></script><script src="/portal-ai.js?v=5" defer></script><script src="/portal-notifications.js?v=4" defer></script><script src="/portal-home-notices.js?v=2" defer></script><script src="/internal-messenger.js?v=4" defer></script><script src="/five-rings-background.js?v=9" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=6" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261106-integrations-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261106-integrations-10');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme',appearance.theme);}}).on('head',{element(el){el.prepend('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=9"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/agent-theme.js?v=3"></script><script src="/portal-ai.js?v=5" defer></script><script src="/portal-notifications.js?v=4" defer></script><script src="/portal-home-notices.js?v=2" defer></script><script src="/internal-messenger.js?v=5" defer></script><script src="/five-rings-background.js?v=9" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=13"></script><script src="/user-access-menu.js?v=7" defer></script><script src="/agent-upline-required.js?v=1" defer></script><script src="/portal-whatsapp-controls.js?v=2" defer></script><script src="/portal-business.js?v=2" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261106-integrations-10" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261106-integrations-10');}}).transform(response);
  }
  return response;
 };

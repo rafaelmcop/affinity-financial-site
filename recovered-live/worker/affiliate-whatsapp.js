@@ -1,3 +1,4 @@
+import {whatsappPolicy} from './whatsapp-modes.js';
 import {agentBusiness,businessText} from './agent-business.js';
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
 import {sharedAgentImport} from './staff-whatsapp-reuse.js';
@@ -5,10 +6,10 @@ import {storeCentralContacts,leadSchema,leadFlowRoute,backfill,protectInternalCo
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
 const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function contactBridge(env,owner,action,method='GET',body={},options={}){
- if(!await portalWhatsappAllowed(env,owner))return json({error:'WhatsApp do portal não liberado. Use o aplicativo.',code:'PORTAL_WHATSAPP_DISABLED'},403);
+ const policy=await whatsappPolicy(env,owner);if(policy.mode==='disabled'&&action!=='policy')return json({error:'WhatsApp do portal não liberado. Use o aplicativo.',code:'PORTAL_WHATSAPP_DISABLED'},403);
  if(action==='send'&&method==='POST'&&body?.text)body={...body,text:businessText(body.text,await agentBusiness(env,owner))};
  if(!env.WHATSAPP_BRIDGE_URL||!env.WHATSAPP_BRIDGE_SECRET)return json({error:'Serviço de WhatsApp indisponível.'},503);
- const payload=encoded(new TextEncoder().encode(JSON.stringify({aud:'affinity-whatsapp',owner,exp:Math.floor(Date.now()/1000)+60}))),key=await crypto.subtle.importKey('raw',new TextEncoder().encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']),signature=encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(payload))));
+ const payload=encoded(new TextEncoder().encode(JSON.stringify({aud:'affinity-whatsapp',owner,mode:policy.mode,revision:policy.revision,exp:Math.floor(Date.now()/1000)+60}))),key=await crypto.subtle.importKey('raw',new TextEncoder().encode(env.WHATSAPP_BRIDGE_SECRET),{name:'HMAC',hash:'SHA-256'},false,['sign']),signature=encoded(new Uint8Array(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(payload))));
  return (env.WHATSAPP_RELAY?env.WHATSAPP_RELAY.fetch.bind(env.WHATSAPP_RELAY):fetch)(new URL('/'+action,env.WHATSAPP_BRIDGE_URL),{method,headers:{authorization:'Bearer '+payload+'.'+signature,'content-type':'application/json',...(options.async?{prefer:'respond-async'}:{})},...(method==='POST'?{body:JSON.stringify(body)}:{}),redirect:'manual',signal:options.signal||AbortSignal.timeout(action==='send'?60000:20000)});
 }
 async function schema(env){await env.DB.prepare("CREATE TABLE IF NOT EXISTS affiliateWhatsappLeads (affiliateId INTEGER NOT NULL,affiliateName TEXT NOT NULL,affiliateEmail TEXT NOT NULL,name TEXT NOT NULL,phone TEXT NOT NULL,groupsJson TEXT NOT NULL DEFAULT '[]',source TEXT NOT NULL DEFAULT 'whatsapp_affiliate',createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(affiliateId,phone))").run();await env.DB.prepare("CREATE TABLE IF NOT EXISTS affiliateWhatsappImports (affiliateId INTEGER PRIMARY KEY,state TEXT NOT NULL DEFAULT 'connecting',cursor INTEGER NOT NULL DEFAULT 0,total INTEGER NOT NULL DEFAULT 0,unresolved INTEGER NOT NULL DEFAULT 0,consentedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,completedAt TEXT)").run();}

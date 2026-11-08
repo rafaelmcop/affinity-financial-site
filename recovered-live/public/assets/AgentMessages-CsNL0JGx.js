@@ -17,7 +17,7 @@ import { P as E } from "./pen-BtFcHMZL.js";
 import { T as _ } from "./trash-2-DP0NeSJV.js";
 import { R as q } from "./refresh-cw-DKCd_O_1.js";
 import { C as F } from "./circle-x-CDonS9qj.js";
-import "./FloatingInternalChat-C-mZ1jql.js?v=20261029-assistant-chat-1";
+import "./FloatingInternalChat-C-mZ1jql.js?v=20261107-messenger-layer-2";
 import "./LanguageSelector-DkTXTche.js";
 import "./x-BKidgWlG.js";
 import "./send-u-E2Isyn.js";

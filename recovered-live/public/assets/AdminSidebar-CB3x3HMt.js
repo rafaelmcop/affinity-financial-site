@@ -12,7 +12,7 @@ import {
   a as k,
   L as N,
   b as C,
-} from "./FloatingInternalChat-C-mZ1jql.js?v=20261029-assistant-chat-1";
+} from "./FloatingInternalChat-C-mZ1jql.js?v=20261107-messenger-layer-2";
 import { L as M, S as L } from "./LanguageSelector-DkTXTche.js";
 import { M as S } from "./menu-pEVK7Y0F.js";
 import { X as z } from "./x-BKidgWlG.js";

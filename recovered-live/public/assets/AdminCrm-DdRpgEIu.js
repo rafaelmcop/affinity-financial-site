@@ -23,7 +23,7 @@ import { U as _ } from "./user-round-BYvPk1yR.js";
 import { M as xe } from "./LanguageSelector-DkTXTche.js";
 import { M as pe } from "./mail-DTOVvRc8.js";
 import { P as he } from "./phone-zIXn9s-v.js";
-import "./FloatingInternalChat-C-mZ1jql.js?v=20261029-assistant-chat-1";
+import "./FloatingInternalChat-C-mZ1jql.js?v=20261107-messenger-layer-2";
 import "./x-BKidgWlG.js";
 import "./send-u-E2Isyn.js";
 import "./menu-pEVK7Y0F.js";
