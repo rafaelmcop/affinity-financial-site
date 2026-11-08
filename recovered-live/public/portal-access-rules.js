@@ -9,7 +9,7 @@ export const featureCatalog = [
 ];
 export function pageFeature(path,query=new URLSearchParams()) {
  path=path.replace(/\/$/,'');
- if(path==='/agentes/inicio'||path==='/afiliados/inicio'||path.includes('/contact-import/')||path==='/afiliados/whatsapp'||/^\/api\/affiliate\/whatsapp\//.test(path)||/^\/api\/agent\/whatsapp\/(status|connect|disconnect)$/.test(path))return null;
+ if(path==='/api/agent/portal-whatsapp-access'||path==='/agentes/inicio'||path==='/afiliados/inicio'||path.includes('/contact-import/')||path==='/afiliados/whatsapp'||/^\/api\/affiliate\/whatsapp\//.test(path)||/^\/api\/agent\/whatsapp\/(status|connect|disconnect)$/.test(path))return null;
  if(path==='/agentes/crm/whatsapp')return 'whatsapp_leads';
  if(path.includes('fila-leads')||path.includes('lead-queue'))return 'queue';
  if(path.includes('obrigacoes-marketing')||/\/marketing\//.test(path))return 'marketing';
