@@ -17,8 +17,18 @@ export function perimeterHeaders(response,path){
  result.headers.set('Referrer-Policy','no-referrer');
  if(privatePage(path)||result.status>=400){
   result.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');
-  result.headers.set('Cache-Control','private, no-store, max-age=0');
-  result.headers.set('Pragma','no-cache');
+  const staticCode = [200, 304].includes(result.status)
+    && /\.(?:m?js|css)$/.test(path)
+    && /^(?:text\/(?:javascript|css)|application\/javascript)(?:;|$)/i.test(result.headers.get('Content-Type') || '')
+    && !path.startsWith('/api/')
+    && !result.headers.has('Set-Cookie');
+  if (staticCode) {
+   result.headers.set('Cache-Control','private, max-age=300');
+   result.headers.delete('Pragma');
+  } else {
+   result.headers.set('Cache-Control','private, no-store, max-age=0');
+   result.headers.set('Pragma','no-cache');
+  }
   const vary=new Set((result.headers.get('Vary')||'').split(',').map(x=>x.trim()).filter(Boolean));
   vary.add('Cookie');vary.add('Authorization');result.headers.set('Vary',[...vary].join(', '));
  }

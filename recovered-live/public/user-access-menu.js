@@ -4,5 +4,11 @@
   // Connection panels remain in settings only when that integration is released.
   const ids={'five-rings':'five_rings','five-rings-onboarding':'five_rings','national-life':'national_life','whatsapp':'whatsapp'};for(const [id,f] of Object.entries(ids)){const el=document.getElementById(id);if(el&&!allowed.has(f))el.style.setProperty('display','none','important');}
  }
- apply();document.documentElement.setAttribute('data-feature-access-ready','');new MutationObserver(apply).observe(document.body,{childList:true,subtree:true});document.addEventListener('affinity-agent-menu-ready',apply);
+ apply();document.documentElement.setAttribute('data-feature-access-ready','');let updateScheduled=false;
+ const scheduleUpdate=()=>{
+   if(updateScheduled)return;
+   updateScheduled=true;
+   requestAnimationFrame(()=>{updateScheduled=false;apply();});
+ };
+ new MutationObserver(scheduleUpdate).observe(document.body,{childList:true,subtree:true});document.addEventListener('affinity-agent-menu-ready',apply);
 })();

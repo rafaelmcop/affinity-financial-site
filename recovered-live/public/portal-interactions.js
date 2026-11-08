@@ -59,5 +59,11 @@ if(typeof document!=='undefined'){
   if(!channel&&location.pathname==='/agentes/email'&&el.matches('button[type="submit"]')&&/^enviar$/i.test(label))channel='email';
   if(channel&&el.getAttribute('data-message-channel')!==channel)el.setAttribute('data-message-channel',channel);
  }};
- decorateMessageActions();new MutationObserver(decorateMessageActions).observe(document.body,{childList:true,subtree:true});
+ decorateMessageActions();let updateScheduled=false;
+ const scheduleUpdate=()=>{
+   if(updateScheduled)return;
+   updateScheduled=true;
+   requestAnimationFrame(()=>{updateScheduled=false;decorateMessageActions();});
+ };
+ new MutationObserver(scheduleUpdate).observe(document.body,{childList:true,subtree:true});
 }
