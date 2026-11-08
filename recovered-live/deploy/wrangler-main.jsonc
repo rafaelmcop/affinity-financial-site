@@ -8,7 +8,7 @@
   "services":[{"binding":"WHATSAPP_RELAY","service":"affinity-whatsapp-relay"}],
   "send_email":[{"name":"CORPORATE_EMAIL"}],
   "ai":{"binding":"AI"},
-  "vars":{"PORTAL_MULTITENANT_MODE":"enabled","WHATSAPP_PORTAL_ACCESS_MODE":"restricted","ADMIN_EMAIL":"preview@affinityfc.org","VITE_FRONTEND_URL":"https://www.affinityfc.org","WHATSAPP_BRIDGE_URL":"https://affinity-whatsapp-relay.us-rafael.workers.dev"},
+  "vars":{"PORTAL_MULTITENANT_MODE":"enabled","WHATSAPP_PORTAL_ACCESS_MODE":"restricted","WHATSAPP_AUTOMATIONS_PAUSED":"true","ADMIN_EMAIL":"preview@affinityfc.org","VITE_FRONTEND_URL":"https://www.affinityfc.org","WHATSAPP_BRIDGE_URL":"https://affinity-whatsapp-relay.us-rafael.workers.dev"},
   "observability":{"enabled":true,"head_sampling_rate":1},
   "triggers":{"crons":["* * * * *","*/5 * * * *","2,7,12,17,22,27,32,37,42,47,52,57 * * * *","*/15 * * * *","15 11 * * *"]},
   "routes":[{"pattern":"portal.affinityfc.org","custom_domain":true},{"pattern":"www.affinityfc.org/*","zone_name":"affinityfc.org"},{"pattern":"affinityfc.org/*","zone_name":"affinityfc.org"}]

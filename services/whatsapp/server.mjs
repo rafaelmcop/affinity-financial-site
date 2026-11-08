@@ -29,7 +29,7 @@ import {downloadMedia} from './download.mjs';
 import {initializeContacts,rememberContact,contactIds,listContacts} from './contacts.mjs';
 
 const {Client,LocalAuth}=whatsapp;
-const bridgeVersion='2026-11-07-whatsapp-modes-1';
+const bridgeVersion='2026-11-08-automatic-whatsapp-paused-1';
 const secret=process.env.WHATSAPP_BRIDGE_SECRET||'';
 if(secret.length<32)throw Error('Configure WHATSAPP_BRIDGE_SECRET com pelo menos 32 caracteres.');
 const dataDir=path.resolve(process.env.WHATSAPP_DATA_DIR||'data');

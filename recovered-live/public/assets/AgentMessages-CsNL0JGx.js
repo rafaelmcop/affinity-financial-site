@@ -1,4 +1,4 @@
-import {MeetingReminderSettings} from './MeetingReminderSettings.js?v=1';
+import {MeetingReminderSettings} from './MeetingReminderSettings.js?v=2';
 import {shortWhatsappTemplate} from './whatsapp-automation-templates.js?v=2';
 import {filterDeliveries} from './message-list-utils.js?v=2';
 import {
@@ -66,6 +66,7 @@ Affinity Financial Consulting
     message: "Olá {nome},",
     emailEnabled: true,
     whatsappEnabled: false,
+    whatsappPaused: true,
     whatsappMessage: shortWhatsappTemplate("custom"),
     scheduledAt: "",
     deliveryMode: "default",
@@ -226,6 +227,7 @@ function Q({
         message: a.message,
         emailEnabled: a.emailEnabled!==false,
         whatsappEnabled: a.whatsappEnabled===true,
+        whatsappPaused: a.whatsappPaused!==false,
         whatsappMessage: a.whatsappMessage||shortWhatsappTemplate(a.occasion,a.message,a),
         scheduledAt: a.scheduledAt ? String(a.scheduledAt).slice(0, 16) : "",
         deliveryMode: "scheduled",
@@ -635,8 +637,8 @@ function Q({
                     }),
                 ],
               }),
-            e.jsxs("label", {className:"md:col-span-2",children:["Como enviar",e.jsx("select",{className:"mt-2 w-full rounded-md border border-white/20 p-3",value:t.emailEnabled!==false?(t.whatsappEnabled?"both":"email"):(t.whatsappEnabled?"whatsapp":"none"),onChange:a=>n({...t,emailEnabled:["both","email"].includes(a.target.value),whatsappEnabled:["both","whatsapp"].includes(a.target.value)}),children:[e.jsx("option",{value:"both",disabled:t.occasion!=="birthday",children:"E-mail + WhatsApp"}),e.jsx("option",{value:"email",children:"Somente e-mail"}),e.jsx("option",{value:"whatsapp",disabled:t.occasion!=="birthday",children:"Somente WhatsApp"}),e.jsx("option",{value:"none",children:"Não enviar"})]} )]}),
-            e.jsx("p",{className:"md:col-span-2 text-sm",children:"WhatsApp automático: somente aniversários e lembretes de reunião, com até 5 aniversários e 15 avisos de reunião por dia por conta, separados por pelo menos 3 minutos. Não há reenvio acumulado. Outros modelos são enviados apenas por e-mail."}),
+            e.jsxs("label", {className:"md:col-span-2",children:["Como enviar",e.jsx("select",{className:"mt-2 w-full rounded-md border border-white/20 p-3",value:t.emailEnabled!==false?(t.whatsappEnabled?"both":"email"):(t.whatsappEnabled?"whatsapp":"none"),onChange:a=>n({...t,emailEnabled:["both","email"].includes(a.target.value),whatsappEnabled:["both","whatsapp"].includes(a.target.value)}),children:[e.jsx("option",{value:"both",disabled:t.whatsappPaused||t.occasion!=="birthday",children:"E-mail + WhatsApp"}),e.jsx("option",{value:"email",children:"Somente e-mail"}),e.jsx("option",{value:"whatsapp",disabled:t.whatsappPaused||t.occasion!=="birthday",children:"Somente WhatsApp"}),e.jsx("option",{value:"none",children:"Não enviar"})]} )]}),
+            e.jsx("p",{className:"md:col-span-2 text-sm",children:t.whatsappPaused?"Envios automáticos de WhatsApp pausados. O e-mail e os envios manuais continuam independentes.":"WhatsApp automático: somente aniversários e lembretes de reunião, com até 5 aniversários e 15 avisos de reunião por dia por conta, separados por pelo menos 3 minutos. Não há reenvio acumulado. Outros modelos são enviados apenas por e-mail."}),
             e.jsx("label",{className:"md:col-span-2 font-bold",children:"✉️ Mensagem do e-mail"}),
             e.jsx("textarea", {
               className:

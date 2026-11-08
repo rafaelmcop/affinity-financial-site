@@ -1,3 +1,4 @@
+import {whatsappAutomationPaused,isAutomaticWhatsapp} from './whatsapp-automation-pause.js';
 import {whatsappPolicy} from './whatsapp-modes.js';
 import {agentBusiness,businessText} from './agent-business.js';
 import {portalWhatsappAllowed} from './whatsapp-portal-access.js';
@@ -6,6 +7,7 @@ import {storeCentralContacts,leadSchema,leadFlowRoute,backfill,protectInternalCo
 const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'no-store'}});
 const encoded=bytes=>btoa(String.fromCharCode(...bytes)).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 export async function contactBridge(env,owner,action,method='GET',body={},options={}){
+ if(action.split('?')[0]==='send'&&method==='POST'&&isAutomaticWhatsapp(body)&&whatsappAutomationPaused(env))return json({error:'Envios automáticos de WhatsApp pausados pelo responsável.',code:'automation_paused',notSent:true},403);
  const policy=await whatsappPolicy(env,owner);if(policy.mode==='disabled'&&action!=='policy')return json({error:'WhatsApp do portal não liberado. Use o aplicativo.',code:'PORTAL_WHATSAPP_DISABLED'},403);
  if(action==='send'&&method==='POST'&&body?.text)body={...body,text:businessText(body.text,await agentBusiness(env,owner))};
  if(!env.WHATSAPP_BRIDGE_URL||!env.WHATSAPP_BRIDGE_SECRET)return json({error:'Serviço de WhatsApp indisponível.'},503);

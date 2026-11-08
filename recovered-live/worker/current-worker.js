@@ -45030,7 +45030,7 @@ Detalhes: ${details}` : ""}`;
     if(name==='agent.saveMeetingReminderSettings'){if(request.method!=='POST')return trpcError('Método inválido');try{return trpcResult(await saveMeetingReminderSettings(env,owner,input));}catch(error){return trpcError(error.message);}}
     const config=await getMeetingReminderSettings(env,owner);let mode='Avisos de reunião independentes dos outros disparos automáticos de WhatsApp.';
     const exists=await env.DB.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='meetingReminderWebhooks'").first();if(exists){const hook=await env.DB.prepare('SELECT state FROM meetingReminderWebhooks WHERE owner=?').bind(owner).first();mode=hook?.state==='connected'?'Calendly conectado em tempo real.':hook?.state==='polling'?'Agenda conferida a cada 5 minutos; lembretes verificados a cada minuto.':mode;}
-    return trpcResult({...config,deliveryMode:mode});
+    return trpcResult({...config,deliveryMode:config.whatsappPaused?'Envios automáticos de WhatsApp pausados. Os avisos por e-mail continuam conforme sua configuração.':mode});
   }
   if (name === "agent.listMessages") {
     const owner = adminEmail.toLowerCase();
