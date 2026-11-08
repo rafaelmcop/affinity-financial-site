@@ -52,3 +52,7 @@ O arquivo é confirmado por `/audit-ack`, acessível somente com o ticket assina
 Para a primeira limpeza, `archive-before-prune.mjs` permite uma simulação com `--data`, `--wrangler`, `--config` e `--database`. Somente `--apply` grava as conversas vinculadas no D1 e libera a limpeza local. Identidades ambíguas são preservadas. Nenhuma mensagem é enviada. Execute apenas em ambiente administrativo confiável: arquivos SQL temporários são privados e removidos após a operação.
 
 A retenção trata das cópias mantidas pelo portal, não apaga mensagens do celular nem controla todos os caches internos do WhatsApp Web. Credenciais de sessão, identidades de contato e recibos de idempotência são preservados para manter conexão, identificação e proteção contra reenvio duplicado.
+
+### Mac production capacity (2026-11-07)
+
+The managed Mac deployment uses `WHATSAPP_MAX_SESSIONS=5` in its private service environment (previously 3). This is a ceiling for simultaneously loaded accounts, not an automatic permission grant. Admin-controlled access, separate session storage and automatic-send limits remain unchanged. The host has 8 GB RAM; five active accounts have not yet been load-tested together. Watch memory pressure, swap and send latency as additional accounts are paired. A provider-expired session still requires its owner to scan a QR code; raising capacity does not restore provider authorization.
