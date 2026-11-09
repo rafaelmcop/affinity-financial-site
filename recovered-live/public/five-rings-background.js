@@ -1,4 +1,5 @@
 (()=>{
+ if(document.documentElement.hasAttribute('data-portal-audit'))return;
  if(location.pathname==='/agent-five-rings-sync.html'||location.pathname==='/agentes/inicio'||window.affinityFiveRingsBackground)return;
  window.affinityFiveRingsBackground=true;
  const bridge=(action,extra={})=>new Promise((resolve,reject)=>{const id=crypto.randomUUID(),timer=setTimeout(()=>{window.removeEventListener('message',receive);reject(Error('Conector Five Rings indisponível.'));},4000);function receive(event){if(event.source!==window||event.origin!==location.origin||event.data?.type!=='affinity-five-rings-response'||event.data.id!==id)return;clearTimeout(timer);window.removeEventListener('message',receive);event.data.result?.ok?resolve(event.data.result):reject(Error(event.data.result?.error||'Não foi possível iniciar a sincronização.'));}window.addEventListener('message',receive);window.postMessage({type:'affinity-five-rings-request',id,action,...extra},location.origin);});

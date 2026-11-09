@@ -76,7 +76,7 @@ function H() {
       localStorage.setItem("affinity-agent-counts", JSON.stringify(l.data));
   }, [l.data]);
   k.useEffect(() => {
-    if (!calendarAllowed) return;
+    if (!calendarAllowed || document.documentElement.hasAttribute("data-portal-audit")) return;
     let active = true;
     q.mutateAsync({ quick: true, daily: true })
       .then(result => {if(active&&!result.skipped){setCalendarVersion(v=>v+1);return Promise.all([r.refetch(), l.refetch()]);}})

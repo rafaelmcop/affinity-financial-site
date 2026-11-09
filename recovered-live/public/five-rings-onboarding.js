@@ -1,4 +1,5 @@
 (async()=>{
+ if(document.documentElement.hasAttribute('data-portal-audit'))return;
 if(window.affinityFiveRingsReminder)return;window.affinityFiveRingsReminder=true;
 if(!['/agentes/dashboard','/agentes/inicio'].includes(location.pathname))return;
 try{
