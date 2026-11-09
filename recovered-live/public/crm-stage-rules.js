@@ -1,0 +1,13 @@
+export const crmStageLabels={new:'Novos',scheduled:'Reunião marcada',attended:'Atendimento realizado',follow_up:'Follow-up',proposal_sent:'Proposta enviada',closed:'Fechado',closed_documents_pending:'Faltando documentos',application_submitted:'Aplicação submetida',issued:'InForce',lapsed:'Lapsada',not_interested:'Sem interesse',already_insured:'Já tem seguro',insurer_declined:'Recusado pela seguradora',no_show:'Não compareceu'};
+export const legacyStage=status=>({new:'new',contacted:'new',meeting:'scheduled',proposal:'proposal_sent',first_meeting:'proposal_sent',followup_service:'follow_up',followup_review:'follow_up',followup_application:'follow_up',followup_documents:'closed_documents_pending',follow_up:'follow_up',client:'closed',closed:'closed',completed:'closed',lapsed:'lapsed'})[status];
+export const storedCrmStatus=(stage,fallback='new')=>({new:'new',scheduled:'meeting',attended:'proposal',follow_up:'proposal',proposal_sent:'proposal',closed:'closed',closed_documents_pending:'proposal',application_submitted:'proposal',issued:'client',lapsed:'closed',not_interested:'closed',already_insured:'closed',insurer_declined:'closed',no_show:'contacted'})[stage]||(['new','contacted','meeting','proposal','client','closed'].includes(fallback)?fallback:'contacted');
+export const displayCrmStatus=(stage,fallback)=>({scheduled:'meeting',follow_up:'followup_service',closed_documents_pending:'followup_documents',application_submitted:'followup_application',issued:'client',lapsed:'lapsed',attended:'first_meeting',proposal_sent:'proposal'})[stage]||fallback;
+export function clientInCrmSector(client,sector){
+ const stage=client.crmStage,active=stage==='issued'||client.hasInforcePolicy;
+ if(sector==='inforce')return !!active;if(sector==='lapsed')return stage==='lapsed';
+ if(sector==='followup')return client.crmFollowUp===true||['follow_up','closed_documents_pending','proposal_sent','attended','no_show'].includes(stage)||!stage&&!client.hasPolicy&&!client.hasDraftApplication&&!client.hasCompletedApplication&&(!!client.lastMeetingAt||['meeting','first_meeting','followup_service','followup_documents','followup_review'].includes(client.status));
+ if(sector==='new_business')return !active&&(client.hasCompletedApplication||client.hasPendingPolicy||stage==='application_submitted');
+ if(sector==='clients')return !!client.hasPolicy||['client','completed','active'].includes(client.status);
+ if(sector==='leads')return !client.hasPolicy&&!client.hasDraftApplication&&!client.hasCompletedApplication&&!['agent','client','completed','active'].includes(client.status)&&(!stage? !client.lastMeetingAt:stage==='new'||stage==='scheduled');
+ return true;
+}

@@ -1,0 +1,1 @@
+export function chatPanelRole(accountType,requested){const mode=requested|| (accountType==='admin'?'admin':'agent');if(!['agent','admin'].includes(mode)||mode==='admin'&&!['admin','both'].includes(accountType)||mode==='agent'&&!['agent','both'].includes(accountType))throw Object.assign(Error('Acesso não permitido neste painel.'),{status:403});return mode;}

@@ -1,0 +1,7 @@
+export function appendColumnMenu(heading,{label,onEdit,onDelete,deleteReason=''}){
+ const trigger=document.createElement('button');trigger.type='button';trigger.className='column-menu-trigger';trigger.textContent='⋯';trigger.setAttribute('aria-label','Opções da coluna '+label);trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.draggable=false;
+ const menu=document.createElement('div');menu.className='column-popover';menu.setAttribute('popover','auto');menu.setAttribute('role','menu');menu.setAttribute('aria-label','Opções da coluna '+label);
+ for(const [text,callback] of [['Editar',onEdit],['Excluir',onDelete]]){const item=document.createElement('button');item.type='button';item.textContent=text;item.setAttribute('role','menuitem');if(text==='Excluir')item.className='delete-column';item.disabled=!callback;if(item.disabled)item.title=deleteReason;item.onclick=()=>{menu.hidePopover();callback?.();};menu.append(item);}
+ trigger.onclick=event=>{event.stopPropagation();menu.togglePopover();};trigger.addEventListener('dragstart',event=>{event.preventDefault();event.stopPropagation();});menu.addEventListener('toggle',event=>{trigger.setAttribute('aria-expanded',String(event.newState==='open'));if(event.newState==='open'){const rect=trigger.getBoundingClientRect();menu.style.left=Math.max(8,Math.min(rect.right-170,innerWidth-178))+'px';menu.style.top=Math.max(8,Math.min(rect.bottom+5,innerHeight-110))+'px';menu.querySelector('button:not(:disabled)')?.focus();}});
+ heading.append(trigger,menu);
+}

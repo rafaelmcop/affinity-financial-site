@@ -304,14 +304,19 @@ export default function AgentSettings() {
             </label>
           </div>
           <label className="block text-sm text-gray-300">
-            Usuário do iCloud
+            Conta que recebe respostas e avisos das seguradoras
             <Input
               className="mt-2"
+              type="email"
+              placeholder="Ex.: us.rafael@icloud.com"
               value={emailForm.imapUser}
               onChange={e =>
                 setEmailForm({ ...emailForm, imapUser: e.target.value })
               }
             />
+            <span className="mt-2 block text-xs text-gray-500">
+              Pode ser diferente do e-mail de envio. O sistema usará a mesma senha de aplicativo para acompanhar respostas de clientes e avisos de pagamento de apólices.
+            </span>
           </label>
           <Button
             className="w-full bg-gold text-black"

@@ -1,0 +1,1 @@
+{"name":"affinity-live-runtime","private":true,"version":"1.0.0","description":"Pinned dependencies bundled into the production Cloudflare worker","dependencies":{"nodemailer":"10.3.1"}}

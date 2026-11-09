@@ -1,0 +1,32 @@
+/* White, cream, navy and gold: the same palette as the current public home page. */
+html[data-public-theme=site]{color-scheme:light;--gold:#d4a93f;--navy:#14233b;--muted:#526174;--line:#d9d4c8;--card:#fff;--public-bg:#faf8f2;--public-text:#14233b;--background:43 44% 96%;--foreground:218 49% 15%;--card-foreground:218 49% 15%;--border:42 18% 82%}
+html[data-public-theme=site],html[data-public-theme=site] body{background:#faf8f2!important;color:#14233b!important}
+html[data-public-theme=site] :is(.nav,.top,header){background:#fffffff5!important;border-color:#ddd6c6!important;box-shadow:0 6px 24px #14233b0b}
+html[data-public-theme=site] :is(h1,h2,h3,h4,strong,label,legend){color:#14233b!important}
+html[data-public-theme=site] :is(p,li,small,.headline,.bio,.subtitle,.lead,.muted,.rating-text,.thanks){color:#526174!important}
+html[data-public-theme=site] :is(a,.brand,.eyebrow,[class*=text-gold]){color:#805e08!important}
+html[data-public-theme=site] :is(.calendar,.profile-details){background:#f4f0e6!important;border-color:#ddd6c6!important}
+html[data-public-theme=site] :is(.card,.detail-card,.widget,.section-title,.secure,[class*=bg-black],[class*="bg-[#"],[class*="bg-white/"]){background:#fff!important;color:#14233b!important;border-color:#d9d4c8!important}
+html[data-public-theme=site] .card,html[data-public-theme=site] .detail-card{box-shadow:0 12px 38px #14233b0a}
+html[data-public-theme=site] :is([class*=text-white],[class*=text-gray],[class*=text-slate]){color:#526174!important}
+html[data-public-theme=site] :is(input,textarea,select){background:#fff!important;color:#14233b!important;border-color:#a7b4c2!important;caret-color:#14233b}
+html[data-public-theme=site] :is(input,textarea)::placeholder{color:#647184!important;opacity:1}
+html[data-public-theme=site] :is(button,.button,.back,[role=button]){background:#fff!important;color:#14233b!important;border-color:#a7b4c2!important}
+html[data-public-theme=site] :is(.primary,.cta,.send,button[type=submit],[class*=bg-gold],.calendar-help a){background:#d4a93f!important;color:#14233b!important;border-color:#96701c!important;font-weight:800}
+html[data-public-theme=site] :is(a,button,input,textarea,select):focus-visible{outline:3px solid #2771a5;outline-offset:3px}
+html[data-public-theme=site] .placeholder{background:linear-gradient(145deg,#f5efdf,#e4edf3)!important;color:#805e08!important}
+html[data-public-theme=site] .photo{border-color:#d4a93f!important;box-shadow:0 18px 48px #14233b18}
+html[data-public-theme=site] .star{background:transparent!important;color:#657080!important}
+html[data-public-theme=site] .star.filled{color:#805e08!important}
+html[data-public-theme=site] :is(.msg,.message){background:#e6f4eb!important;color:#14532d!important;border-color:#8cc9a1!important}
+html[data-public-theme=site] :is(.error,[role=alert]){color:#991b1b!important}
+html[data-public-theme=site] footer{background:#10233f!important;color:#fff!important}
+html[data-public-theme=site] footer :is(p,a,small,li,strong){color:#e6edf5!important}
+html[data-public-theme=site]::-webkit-scrollbar-track{background:#faf8f2}
+html[data-public-theme=site]::-webkit-scrollbar-thumb{background:#bca66c}
+html[data-public-theme=site] [class*=min-h-screen]{background:#faf8f2!important;color:#14233b!important}
+html[data-public-theme=site] #contact-form{background:#fff!important;border:1px solid #d9d4c8;box-shadow:0 12px 38px #14233b0a}
+html[data-public-theme=site] #contact-form button{background:#d4a93f!important;color:#14233b!important}
+html[data-public-theme=site] a[href*="wa.me/"]{background:#166534!important;color:#fff!important;border-color:#14532d!important}
+html[data-public-theme=site] .pending-summary{background:#edf3f8!important;color:#14233b!important;border-color:#b8c7d6!important}
+html[data-public-theme=site] .notice{background:#e6f4eb!important;color:#14532d!important}
