@@ -61,7 +61,7 @@ function readPage(path, action) {
       const nextPage = String(Math.ceil(last / (last - first + 1)) + 1);
       const label = element => String(element.textContent || '').trim().replace(/\s+/g, ' ');
       const nextLabel = /^(next(?: page)?|›|»)[.!]?$/i;
-      const footerText = /\bprevious\b[\s\S]*\bnext\b/i;
+      const footerText = /previous[\s\S]*next/i;
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
       const controls = [];
       for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -70,7 +70,7 @@ function readPage(path, action) {
         const element = node.parentElement;
         if (!element || !visible(element)) continue;
         for (let group = element.parentElement, depth = 0; group && group !== document.body && depth < 10; group = group.parentElement, depth++) {
-          if (!footerText.test(label(group))) continue;
+          if (!footerText.test(group.innerText || group.textContent)) continue;
           const clickable = element.closest('button,a,[role=button],[role=link],li,[tabindex]') || element;
           if (group.contains(clickable) && visible(clickable)) controls.push({ clickable, isNext: nextLabel.test(text), size: label(group).length });
           break;
@@ -81,7 +81,8 @@ function readPage(path, action) {
         controls[0].clickable.click();
         return true;
       }
-      const accessible = [...document.querySelectorAll('button,a,[role=button],[role=link]')].filter(element => visible(element) && nextLabel.test(element.getAttribute('aria-label') || element.getAttribute('title') || ''));
+      const accessible = [...document.querySelectorAll('button,a,[role=button],[role=link]')].filter(element =>
+        visible(element) && [element.getAttribute('aria-label'), element.getAttribute('title'), label(element)].some(value => nextLabel.test(value?.trim() || '')));
       if (accessible.length === 1) {
         accessible[0].click();
         return true;
