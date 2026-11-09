@@ -5,7 +5,7 @@ import {featureCatalog,pageFeature} from '../public/portal-access-rules.js';
 export {pageFeature};
 export const newAgentFeatures=Object.freeze(['ai','application_create','applications','email','messages','calendar','policies','tasks','reviews','public_profile','five_rings']);
 export const accessFeatures=featureCatalog.map(([key,label])=>[key,label]);
-const keys=accessFeatures.map(([key])=>key),all=JSON.stringify(keys);
+const keys=accessFeatures.map(([key])=>key),all=JSON.stringify(keys.filter(key=>key!=='national_life_browser'));
 const schemaInitializations=new WeakMap();
 export async function accessSchema(env,refresh=false){
  if(refresh)schemaInitializations.delete(env.DB);

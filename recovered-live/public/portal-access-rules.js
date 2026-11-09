@@ -5,7 +5,7 @@ export const featureCatalog = [
  ['email','E-mail','Comunicação'],['whatsapp','WhatsApp — conversas e mensagens','Comunicação'],
  ['messages','Mensagens e automações','CRM'],['direct_contacts','Contato direto','CRM'],['calendar','Agenda','CRM'],
  ['policies','Apólices','Cliente'],['tasks','Avisos de pagamentos atrasados','Notificações'],['reviews','Avaliações','Avaliações'],
- ['national_life','Integração National Life','Conta e integrações'],['public_profile','Página pública do agente','Conta e integrações'],['five_rings','Integração Five Rings','Conta e integrações'],['referrals','Indicações de afiliados','Afiliados']
+ ['national_life_browser','National Life — sincronização pelo navegador','Conta e integrações'],['national_life','Integração National Life','Conta e integrações'],['public_profile','Página pública do agente','Conta e integrações'],['five_rings','Integração Five Rings','Conta e integrações'],['referrals','Indicações de afiliados','Afiliados']
 ];
 export function pageFeature(path,query=new URLSearchParams()) {
  path=path.replace(/\/$/,'');

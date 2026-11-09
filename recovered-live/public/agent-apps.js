@@ -12,7 +12,7 @@ if(released.has('five_rings')){
 const pilotStart=$('nlg-pilot-start');
 pilotStart?.addEventListener('click',()=>{
  if(pilotStart.dataset.connectorReady==='true')return;
- $('nlg-pilot-progress').textContent='Conector não detectado nesta aba. Abra Integrações no Chrome ou Edge onde a versão 0.5.2 está instalada. Em chrome://extensions, recarregue o conector, permita acesso a este site e atualize a página.';
+ $('nlg-pilot-progress').textContent='Conector não detectado nesta aba. Abra Integrações no Chrome ou Edge onde a extensão atualizada está instalada. Em chrome://extensions, recarregue o conector, permita acesso a este site e atualize a página.';
 });
 const savedIssues=$('nlg-saved-issues');
 if(savedIssues){

@@ -2,7 +2,7 @@ let job;
 const result = { set textContent(message) { if (job) job.message = message; } };
 const base = 'https://www.nationallife.com';
 const listPath = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent';
-const pilotMinimum = 264; // Last unfiltered total confirmed for the pilot portfolio.
+
 const origins = ['https://www.affinityfc.org', 'https://portal.affinityfc.org', 'https://affinityfc.org'];
 
 async function runOn(tab, func, ...args) {
@@ -43,6 +43,7 @@ function readPage(path, action) {
     const total = document.body.innerText.match(/Viewing\s+([\d,]+)\s+to\s+([\d,]+)\s+of\s+([\d,]+)\s+entries/i);
     if (!table || !total) return null;
     const [first, last, count] = total.slice(1).map(value => Number(value.replaceAll(',', '')));
+    const minimum = Number((document.body.innerText.match(/([\d,]+)\s+Your Active, Issued and Pending Lapse Policies/i)?.[1] || '').replaceAll(',', ''));
     if (action === 'clear-filters') {
       const controls = [...document.querySelectorAll('button,a,[role=button],input[type=reset]')].filter(visible);
       const clear = controls.find(element => [element.textContent, element.getAttribute('aria-label'), element.getAttribute('title'), element.value].some(value => /^(clear|reset) (all )?(filters?|search)$/i.test(value?.trim() || '')));
@@ -107,7 +108,7 @@ function readPage(path, action) {
       link.click();
       return true;
     }
-    return { first, last, count, rows };
+    return { first, last, count, rows, minimum };
   }
   if (!action) return null;
   const body = () => document.body.innerText;
@@ -227,6 +228,14 @@ async function waitFor(tab, predicate, label) {
   throw Error(label);
 }
 
+function nationalLifeWritingNumber() {
+  if (location.origin !== 'https://www.nationallife.com' || location.pathname.replace(/\/$/, '') !== '/agent') return null;
+  const lines=document.body.innerText.split('\n').map(line=>line.trim()).filter(Boolean);
+  const index=lines.findIndex(line=>/^Life Writing #$/i.test(line));
+  const number=index>0?lines[index-1]:null;
+  return /^[A-Z0-9-]{3,25}$/i.test(number||'')?number:null;
+}
+
 async function goToListPage(tab, first) {
   let page = await waitFor(tab, snapshot => snapshot.count > 0, 'Não consegui abrir All Clients. Confira o login da National Life no Chrome.');
   while (page.first < first) {
@@ -241,7 +250,7 @@ async function goToListPage(tab, first) {
 
 async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
-  let listTab, detailsTab, expected = pilotMinimum, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0, reused = 0, duplicateRows = 0;
+  let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0, reused = 0, duplicateRows = 0;
   const seen = new Map();
   const counts = () => `Registradas: ${saved}/${expected} · Reaproveitadas: ${reused} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Linhas repetidas: ${duplicateRows} · Não registradas: ${failed}`;
   function note(number, message) {
@@ -261,12 +270,13 @@ async function batch(affinity, origin, windowId) {
       try {
         if (!listTab || reload || attempt) listTab = await openReader(listTab, listUrl);
         const listing = await waitFor(listTab, snapshot => snapshot.count > 0, 'Não consegui abrir All Clients. Confira o login da National Life.');
-        if (listing.count < expected) {
+        const threshold = Math.max(expected,listing.minimum||0);
+        if (listing.count < threshold) {
           result.textContent = 'Lista com ' + listing.count + ' registro(s). Tentando remover filtros…';
           if (await runOn(listTab, readPage, listPath, 'clear-filters')) {
-            await waitFor(listTab, snapshot => snapshot.count >= expected, 'All Clients continuou filtrada. Limpe a pesquisa e os filtros na National Life.');
+            await waitFor(listTab, snapshot => snapshot.count >= threshold, 'All Clients continuou filtrada. Limpe a pesquisa e os filtros na National Life.');
           } else {
-            throw Error('All Clients mostrou ' + listing.count + ' de pelo menos ' + expected + ' registros esperados. Limpe a pesquisa e os filtros na National Life.');
+            throw Error('All Clients mostrou ' + listing.count + ' de pelo menos ' + threshold + ' registros esperados. Limpe a pesquisa e os filtros na National Life.');
           }
         }
         return await goToListPage(listTab, first);
@@ -281,10 +291,28 @@ async function batch(affinity, origin, windowId) {
   try {
     const access = await runOn(affinity, affinityRequest, origin, null);
     if (!access?.allowed) throw Error('Piloto indisponível para esta conta.');
+    if(!access.pilot){
+      const expectedNumber=String(access.writingNumber||'').trim().toUpperCase();
+      if(!expectedNumber)throw Error('Cadastre seu número de agente NLG no portal antes de sincronizar.');
+      result.textContent='Conferindo a conta National Life aberta…';
+      listTab=await openReader(null,base+'/agent/');
+      let writingNumber;
+      for(let attempt=0;attempt<18;attempt++){
+        const current=await chrome.tabs.get(listTab.id);
+        if(current.status==='complete'&&current.url?.startsWith(base+'/agent/')){
+          writingNumber=await runOn(listTab,nationalLifeWritingNumber);
+          if(writingNumber)break;
+        }
+        await pause(600);
+      }
+      if(String(writingNumber||'').toUpperCase()!==expectedNumber)throw Error('A conta aberta na National Life não pôde ser confirmada pelo número de agente NLG.');
+      listTab=await openReader(listTab,listUrl);
+    }
+    expected = Math.max(1,Number(access.minimum)||1);
     const fresh = new Map((access.policies || []).map(item => [item.policyNumber, item]));
     result.textContent = 'Abrindo All Clients na National Life…';
     let page = await restorePage(1);
-    if (page.count < pilotMinimum) throw Error('A lista está abaixo do total de referência da carteira.');
+    if (page.count < expected) throw Error('A lista está abaixo do total de referência da carteira.');
     expected = page.count;
     while (true) {
       if (page.rows.length !== page.last - page.first + 1) throw Error('A página da carteira veio incompleta.');
@@ -403,6 +431,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     reply({ error: 'Já existe uma conferência em andamento nesta extensão.' });
     return;
   }
+  if (typeof requireNationalLifeConsent === 'function') {
+    requireNationalLifeConsent().then(()=>startJob(tab,url,reply)).catch(error=>reply({error:error.message}));
+    return true;
+  }
+  startJob(tab,url,reply);
+});
+
+function startJob(tab,url,reply) {
+  if(job?.running){reply({error:'Já existe uma conferência em andamento nesta extensão.'});return;}
   job = { running: true, origin: url.origin, tabId: tab.id, message: 'Verificando a sessão…', issues: [] };
   const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo().catch(() => {}), 20000);
   void batch(tab, url.origin, tab.windowId).finally(() => {
@@ -410,4 +447,4 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     job.running = false;
   });
   reply({ ok: true });
-});
+}
