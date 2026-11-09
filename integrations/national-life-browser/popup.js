@@ -64,9 +64,11 @@ function readPage(path, action) {
     const headers = [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim());
     const policyIndex = headers.findIndex(text => /^policy\s*#/i.test(text));
     const dateIndex = headers.findIndex(text => /^issue date/i.test(text));
-    const cells = policyIndex >= 0 && dateIndex >= 0 ? [...table.querySelectorAll('tbody tr')].map(row => [row.cells[policyIndex], row.cells[dateIndex]]) : [];
-    const rows = cells.map(([policy, date]) => [
-      policy?.textContent.trim(), date?.textContent.trim(), policy?.querySelector('a[href]')?.href || ''
+    const statusIndex = headers.findIndex(text => /^status$/i.test(text));
+    const productIndex = headers.findIndex(text => /^(type|product)$/i.test(text));
+    const cells = policyIndex >= 0 ? [...table.querySelectorAll('tbody tr')].map(row => [row.cells[policyIndex], row.cells[dateIndex], row.cells[statusIndex], row.cells[productIndex]]) : [];
+    const rows = cells.map(([policy, date, status, product]) => [
+      policy?.textContent.trim(), date?.textContent.trim(), policy?.querySelector('a[href]')?.href || '', status?.textContent.trim(), product?.textContent.trim()
     ]);
     if (typeof action === 'object' && action?.open) {
       const index = rows.findIndex(([number]) => number?.toUpperCase() === action.open);
@@ -95,7 +97,7 @@ function readPage(path, action) {
   };
   if (action === 'policy' || action === 'payments') {
     const control = tab(action);
-    if (!control) return null;
+    if (!control) return { number, unavailable: true };
     control.click();
     return { number };
   }
@@ -148,6 +150,7 @@ async function readPolicy(tab) {
   async function readSection(section, ready) {
     const opened = await runOn(tab, readPage, listPath, section);
     if (!opened || (expectedNumber && opened.number !== expectedNumber)) throw Error('A ficha mudou durante a leitura. Abra a apólice e tente novamente.');
+    if (opened.unavailable) return opened;
     let snapshot;
     for (let attempt = 0; attempt < 20; attempt++) {
       snapshot = await runOn(tab, readPage, listPath, 'snapshot');
@@ -155,11 +158,7 @@ async function readPolicy(tab) {
       if (ready(snapshot)) return snapshot;
       await new Promise(resolve => setTimeout(resolve, 400));
     }
-    if (section === 'payments') {
-      if (!snapshot?.paymentsVisible) throw Error('A aba Payments não mostrou a seção Payment Details.');
-      return snapshot;
-    }
-    throw Error('A aba Policy não mostrou um Net Death Benefit identificável.');
+    return snapshot || opened;
   }
 
   result.textContent = 'Conferindo a cobertura na aba Policy…';
@@ -198,9 +197,17 @@ async function goToListPage(tab, first) {
 
 async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
-  let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, paymentPending = 0, consecutiveFailures = 0;
+  let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0;
   const seen = new Set();
-  const counts = () => `Validadas: ${saved}/${expected} · No CRM: ${matched} · Com divergência: ${differing} · Pagamento a conferir: ${paymentPending} · Outros problemas: ${failed}`;
+  const counts = () => `Registradas: ${saved}/${expected} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Sem identificação: ${failed}`;
+  const issues = document.getElementById('issues');
+  const issueList = document.getElementById('issue-list');
+  function note(number, message) {
+    issues.hidden = false;
+    const entry = document.createElement('li');
+    entry.textContent = number + ' · ' + message;
+    issueList.append(entry);
+  }
   try {
     if (!(await runOn(affinity, affinityRequest, origin, null))?.allowed) throw Error('Piloto indisponível para esta conta.');
     result.textContent = 'Abrindo All Clients na National Life…';
@@ -209,9 +216,9 @@ async function batch(affinity, origin, windowId) {
     expected = page.count;
     while (true) {
       if (page.rows.length !== page.last - page.first + 1) throw Error('A página da carteira veio incompleta.');
-      for (const [rawNumber, issueDate, href] of page.rows) {
+      for (const [rawNumber, issueDate, href, status, product] of page.rows) {
         const number = rawNumber?.toUpperCase();
-        if (!number || !issueDate || seen.has(number)) { failed++; continue; }
+        if (!number || seen.has(number)) { failed++; continue; }
         seen.add(number);
         result.textContent = counts() + '\nAbrindo a próxima apólice…';
         let direct;
@@ -219,32 +226,29 @@ async function batch(affinity, origin, windowId) {
           const url = new URL(href);
           if (url.origin === base && url.pathname.startsWith('/agent/') && url.pathname.replace(/\/$/, '') !== listPath) direct = url.href;
         } catch {}
+        let record = {}, detailError = '';
         try {
           if (direct) {
             detailsTab = detailsTab ? await chrome.tabs.update(detailsTab.id, { url: direct }) : await chrome.tabs.create({ url: direct, active: false, windowId });
-          } else {
-            if (!await runOn(listTab, readPage, listPath, { open: number })) throw Error('O link da apólice não abriu.');
+          } else if (!await runOn(listTab, readPage, listPath, { open: number })) {
+            throw Error('O link da ficha não abriu.');
           }
           const reader = direct ? detailsTab : listTab;
-          await waitFor(reader, item => item.number === number, 'A ficha da apólice não carregou.');
-          const record = await readPolicy(reader);
+          await waitFor(reader, item => item.number === number, 'A ficha não carregou.');
+          record = await readPolicy(reader);
           if (record.number !== number) throw Error('A ficha aberta tem outro número.');
-          if (!record.premium || !record.frequency) {
-            paymentPending++;
-            consecutiveFailures = 0;
-            result.textContent = counts() + '\nPrêmio ou frequência não confirmado. Continuando a carteira…';
-          } else {
-            const comparison = await runOn(affinity, affinityRequest, origin, { ...record, issueDate });
-            if (!comparison?.saved) throw Error('A sessão da Affinity deixou de responder.');
-            saved++;
-            consecutiveFailures = 0;
-            if (comparison.matched) matched++;
-            if (comparison.differences.length) differing++;
-          }
         } catch (error) {
-          failed++;
-          result.textContent = counts() + '\n' + error.message;
-          if (++consecutiveFailures >= 3) throw Error('A leitura falhou em três apólices seguidas. ' + error.message);
+          record = {};
+          detailError = error.message;
+        }
+        const comparison = await runOn(affinity, affinityRequest, origin, { ...record, number, issueDate, status, product });
+        if (!comparison?.saved) throw Error('A sessão da Affinity deixou de responder.');
+        saved++;
+        if (comparison.matched) matched++;
+        if (comparison.differences.length) differing++;
+        if (comparison.missing.length || detailError) {
+          pending++;
+          note(number, [comparison.category, comparison.missing.join(', '), detailError].filter(Boolean).join(' · '));
         }
         if (!direct) {
           await chrome.tabs.update(listTab.id, { url: listUrl });
@@ -255,7 +259,7 @@ async function batch(affinity, origin, windowId) {
       page = await goToListPage(listTab, page.last + 1);
       if (page.count !== expected) throw Error('O total da carteira mudou durante a leitura.');
     }
-    result.textContent = (saved === expected ? 'Conferência concluída.' : 'Conferência parcial.') + '\n' + counts();
+    result.textContent = (saved === expected ? 'Carteira percorrida.' : 'Conferência parcial.') + '\n' + counts();
   } catch (error) {
     result.textContent = 'Conferência interrompida. ' + error.message + '\n' + counts();
   } finally {
