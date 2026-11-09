@@ -362,6 +362,8 @@ function describeApplicationParent(row,parent,feminine=false){
     if (!p?.result?.data || !("json" in p.result.data))
       throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
     const data = p.result?.data?.json;
+    if (name === "agent.submitApplication" && data?.success)
+      notice("Aplicação concluída.", false, false, Number(input.id));
     if (name === "agent.submitApplication" && data?.reviewInvite&&!data.reviewEmailScheduled)
       setTimeout(
         async () => {
@@ -392,11 +394,11 @@ function describeApplicationParent(row,parent,feminine=false){
       badge.hidden = !total;
     })
     .catch(() => {});
-  function notice(message, error = false, critical = false) {
+  function notice(message, error = false, critical = false, applicationId = Number($("id").value)) {
     const b = $("notice");
     const technical=/signal timed out|TimeoutError/i.test(String(message));
     const text=technical&&critical?'Não foi possível confirmar o salvamento. Mantenha a ficha aberta e confira antes de tentar novamente.':technical?'Uma operação excedeu o tempo de espera. Verifique a conexão; se estava salvando, confirme o salvamento antes de fechar a ficha.':message;
-    const item={id:technical?'application-timeout':String(message),message:text};
+    const item={id:`${applicationId||'new'}:${technical?'application-timeout':message}`,message:text,href:applicationId?'/agent-applications?applicationId='+encodeURIComponent(applicationId):location.pathname+location.search,label:applicationId?'Abrir ficha da aplicação':'Abrir aplicações'};
     if(window.affinityNotify)window.affinityNotify(item);else(window.affinityNotificationQueue||=[]).push(item);
     if(error&&(!technical||critical)){b.textContent=text;b.className='notice show error';b.setAttribute('role','alert');}
     else if(!technical||!b.classList.contains('error')){b.textContent='';b.className='notice';}
@@ -1589,9 +1591,6 @@ function describeApplicationParent(row,parent,feminine=false){
       $("form-card").classList.add("hidden");
       if(newApplicationView) $("applications-page-title").textContent="Aplicação concluída";
       await load();
-      notice(
-        "Aplicação concluída e PDF gerado. O pedido de avaliação por e-mail foi programado pela plataforma."
-      );
     } catch (error) {
       notice(error.message, true);
     }
