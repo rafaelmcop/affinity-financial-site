@@ -29,7 +29,7 @@ async function affinityRequest(origin, record) {
   return response.ok ? payload : null;
 }
 
-async function readPage(path, readDetail) {
+function readPage(path, action) {
   if (location.origin !== 'https://www.nationallife.com' || !location.pathname.startsWith('/agent/')) return null;
   if (location.pathname.replace(/\/$/, '') === path) {
     const table = [...document.querySelectorAll('table')].find(element => {
@@ -47,7 +47,7 @@ async function readPage(path, readDetail) {
     ]) : [];
     return { first, last, count, rows };
   }
-  if (!readDetail) return null;
+  if (!action) return null;
   const body = () => document.body.innerText;
   const policy = () => body().match(/\bPolicy\s*#\s*([A-Z0-9-]{5,30})\b/i)?.[1]?.toUpperCase();
   const number = policy();
@@ -55,29 +55,44 @@ async function readPage(path, readDetail) {
   const controls = [...document.querySelectorAll('button,a,[role=tab],[data-toggle="tab"],li')];
   const tab = name => controls.find(element => element.getClientRects().length && element.textContent.trim().toLowerCase() === name);
   if (!tab('policy') || !tab('payments')) return null;
-  async function field(label, pattern) {
-    for (let i = 0; i < 30; i++) {
-      if (policy() !== number) return null;
-      const lines = body().split('\n').map(line => line.trim()).filter(Boolean);
-      const values = [...new Set(lines.flatMap((line, index) => line === label && pattern.test(lines[index - 1] || '') ? [lines[index - 1]] : []))];
-      if (values.length === 1) return values[0];
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
-    return null;
+  if (action === 'policy' || action === 'payments') {
+    tab(action).click();
+    return { number };
+  }
+  const lines = body().split('\n').map(line => line.trim()).filter(Boolean);
+  function field(label, pattern) {
+    const values = [...new Set(lines.flatMap((line, index) => line === label && pattern.test(lines[index - 1] || '') ? [lines[index - 1]] : []))];
+    return values.length === 1 ? values[0] : null;
   }
   const money = /^\$[\d,]+\.\d{2}$/;
-  const originalTab = controls.find(element => element.getAttribute('aria-selected') === 'true');
-  try {
-    tab('policy')?.click();
-    const deathBenefit = await field('Net Death Benefit', money);
-    tab('payments')?.click();
-    const premium = await field('Premium', money);
-    const frequency = premium ? await field('Premium Payment Frequency', /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Biweekly)$/i) : null;
-    if (policy() !== number) return null;
-    return { number, deathBenefit, premium, frequency };
-  } finally {
-    if (policy() === number) (originalTab || tab('policy'))?.click();
+  return {
+    number,
+    deathBenefit: field('Net Death Benefit', money),
+    premium: field('Premium', money),
+    frequency: field('Premium Payment Frequency', /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Biweekly)$/i)
+  };
+}
+
+async function readPolicy(tab) {
+  let expectedNumber;
+  async function readSection(section, ready) {
+    const opened = await runOn(tab, readPage, listPath, section);
+    if (!opened || (expectedNumber && opened.number !== expectedNumber)) throw Error('A ficha mudou durante a leitura. Abra a apólice e tente novamente.');
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const snapshot = await runOn(tab, readPage, listPath, 'snapshot');
+      if (snapshot?.number !== opened.number) throw Error('A ficha mudou durante a leitura.');
+      if (ready(snapshot)) return snapshot;
+      await new Promise(resolve => setTimeout(resolve, 400));
+    }
+    throw Error('Não consegui confirmar os campos da aba ' + section + '. Abra essa aba na National Life e tente novamente.');
   }
+
+  result.textContent = 'Conferindo a cobertura na aba Policy…';
+  const policy = await readSection('policy', item => item.deathBenefit);
+  expectedNumber = policy.number;
+  result.textContent = 'Conferindo o prêmio na aba Payments…';
+  const payment = await readSection('payments', item => item.premium && item.frequency);
+  return { number: policy.number, deathBenefit: policy.deathBenefit, premium: payment.premium, frequency: payment.frequency };
 }
 
 async function check(readDetail) {
@@ -99,10 +114,7 @@ async function check(readDetail) {
     }
     const candidate = tabs.find(item => /inforce.*policy|policy.*details/i.test(item.title || '') && item.id !== list?.id);
     if (!candidate) throw Error('A lista está pronta. Falta abrir os detalhes de uma apólice em outra aba desta janela.');
-    result.textContent = 'Lendo os detalhes e a aba Payments da apólice…';
-    const detail = await runOn(candidate, readPage, listPath, true);
-    if (!detail) throw Error('A ficha está aberta, mas não encontrei as abas Policy e Payments. Aguarde a ficha carregar e tente novamente.');
-    if (!detail.deathBenefit || !detail.premium || !detail.frequency) throw Error('A leitura não confirmou prêmio, frequência e cobertura. Nenhum dado foi gravado.');
+    const detail = await readPolicy(candidate);
     const issueDate = snapshot?.rows.find(([number]) => number?.toUpperCase() === detail.number)?.[1];
     if (!issueDate) throw Error('Mantenha All Clients aberta em outra aba, na página que contém esta apólice, para confirmar a data de emissão.');
     result.textContent = 'Comparando com a carteira do Manezinho…';
