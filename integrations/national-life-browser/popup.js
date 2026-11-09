@@ -67,24 +67,60 @@ function readPage(path, action) {
   const policy = () => body().match(/\bPolicy\s*#\s*([A-Z0-9-]{5,30})\b/i)?.[1]?.toUpperCase();
   const number = policy();
   if (!number) return null;
-  const controls = [...document.querySelectorAll('button,a,[role=tab],[data-toggle="tab"],li')];
-  const tab = name => controls.find(element => element.getClientRects().length && element.textContent.trim().toLowerCase() === name);
-  if (!tab('policy') || !tab('payments')) return null;
+  const normalize = value => String(value ?? '').replace(/[\s\u00a0]+/g, ' ').trim();
+  const visible = element => element.getClientRects().length > 0;
+  const tab = name => {
+    for (const selector of ['[role=tab],button,a,[data-toggle="tab"],[data-bs-toggle="tab"]', 'li,span,div']) {
+      const control = [...document.querySelectorAll(selector)].find(element =>
+        visible(element) && normalize(element.textContent).toLowerCase() === name &&
+        ![...element.children].some(child => visible(child) && normalize(child.textContent).toLowerCase() === name && child.matches('button,a,[role=tab]')));
+      if (control) return control;
+    }
+    return null;
+  };
   if (action === 'policy' || action === 'payments') {
-    tab(action).click();
+    const control = tab(action);
+    if (!control) return null;
+    control.click();
     return { number };
   }
-  const lines = body().split('\n').map(line => line.trim()).filter(Boolean);
-  function field(label, pattern) {
-    const values = [...new Set(lines.flatMap((line, index) => line === label && pattern.test(lines[index - 1] || '') ? [lines[index - 1]] : []))];
-    return values.length === 1 ? values[0] : null;
+
+  const lines = body().split('\n').map(normalize).filter(Boolean);
+  function field(labels, pattern) {
+    const keys = labels.map(label => label.toLowerCase());
+    const candidates = new Set();
+    const add = value => {
+      const normalized = normalize(value).replace(/^\$\s+/, '$');
+      if (pattern.test(normalized)) candidates.add(normalized);
+    };
+    const elements = [...document.querySelectorAll('span,div,p,label,small,dt,dd,strong,td')];
+    for (const element of elements) {
+      if (!keys.includes(normalize(element.textContent).toLowerCase()) || !visible(element)) continue;
+      if ([...element.children].some(child => keys.includes(normalize(child.textContent).toLowerCase()))) continue;
+      for (let group = element.parentElement, depth = 0; group && depth < 3; group = group.parentElement, depth++) {
+        const text = normalize(group.innerText);
+        const key = keys.find(label => text.toLowerCase().startsWith(label) || text.toLowerCase().endsWith(label));
+        if (!key) continue;
+        const value = text.toLowerCase().startsWith(key) ? text.slice(key.length) : text.slice(0, -key.length);
+        const before = candidates.size;
+        add(value.replace(/^\s*:\s*|\s*:\s*$/g, ''));
+        if (candidates.size > before) break;
+      }
+    }
+    if (!candidates.size) for (const [index, line] of lines.entries()) {
+      if (!keys.includes(line.toLowerCase())) continue;
+      add(lines[index - 1]);
+    }
+    return candidates.size === 1 ? [...candidates][0] : null;
   }
   const money = /^\$[\d,]+\.\d{2}$/;
+  const paymentsVisible = lines.some(line => /^payment details$/i.test(line));
   return {
     number,
-    deathBenefit: field('Net Death Benefit', money),
-    premium: field('Premium', money),
-    frequency: field('Premium Payment Frequency', /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Biweekly)$/i)
+    paymentsVisible,
+    deathBenefit: field(['Net Death Benefit'], money),
+    premium: paymentsVisible ? field(['Premium', 'Modal Premium'], money) : null,
+    frequency: paymentsVisible ? field(['Premium Payment Frequency', 'Payment Frequency'], /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Bi[ -]?Weekly)$/i) : null
   };
 }
 
@@ -93,13 +129,19 @@ async function readPolicy(tab) {
   async function readSection(section, ready) {
     const opened = await runOn(tab, readPage, listPath, section);
     if (!opened || (expectedNumber && opened.number !== expectedNumber)) throw Error('A ficha mudou durante a leitura. Abra a apólice e tente novamente.');
-    for (let attempt = 0; attempt < 10; attempt++) {
-      const snapshot = await runOn(tab, readPage, listPath, 'snapshot');
+    let snapshot;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      snapshot = await runOn(tab, readPage, listPath, 'snapshot');
       if (snapshot?.number !== opened.number) throw Error('A ficha mudou durante a leitura.');
       if (ready(snapshot)) return snapshot;
       await new Promise(resolve => setTimeout(resolve, 400));
     }
-    throw Error('Não consegui confirmar os campos da aba ' + section + '. Abra essa aba na National Life e tente novamente.');
+    if (section === 'payments') {
+      if (!snapshot?.paymentsVisible) throw Error('A aba Payments não mostrou a seção Payment Details.');
+      const missing = [!snapshot.premium && 'prêmio', !snapshot.frequency && 'frequência'].filter(Boolean);
+      throw Error('A aba Payments carregou, mas não consegui confirmar: ' + missing.join(' e ') + '.');
+    }
+    throw Error('A aba Policy não mostrou um Net Death Benefit identificável.');
   }
 
   result.textContent = 'Conferindo a cobertura na aba Policy…';
