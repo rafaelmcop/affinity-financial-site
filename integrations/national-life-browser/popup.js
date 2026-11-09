@@ -33,12 +33,6 @@ function readPage(path, action) {
   if (location.origin !== 'https://www.nationallife.com' || !location.pathname.startsWith('/agent/')) return null;
   if (location.pathname.replace(/\/$/, '') === path) {
     const visible = element => element.getClientRects().length && !element.closest('[aria-disabled="true"],.disabled') && !element.disabled;
-    if (action === 'next') {
-      const next = [...document.querySelectorAll('button,a,[role=button]')].find(element => visible(element) && /^(next|›|»)$/.test((element.getAttribute('aria-label') || element.textContent).trim().toLowerCase()));
-      if (!next) return false;
-      next.click();
-      return true;
-    }
     const table = [...document.querySelectorAll('table')].find(element => {
       const headers = [...element.querySelectorAll('th')].map(cell => cell.textContent.trim());
       return headers.some(text => /^policy\s*#/i.test(text)) && headers.some(text => /^insured\s*\/\s*annuitant/i.test(text));
@@ -46,6 +40,27 @@ function readPage(path, action) {
     const total = document.body.innerText.match(/Viewing\s+([\d,]+)\s+to\s+([\d,]+)\s+of\s+([\d,]+)\s+entries/i);
     if (!table || !total) return null;
     const [first, last, count] = total.slice(1).map(value => Number(value.replaceAll(',', '')));
+    if (action === 'next') {
+      if (last >= count) return false;
+      const nextPage = String(Math.ceil(last / (last - first + 1)) + 1);
+      const scopes = [];
+      for (let parent = table.parentElement, depth = 0; parent && depth < 7; parent = parent.parentElement, depth++) scopes.push(parent);
+      const targets = 'button,a,[role=button],[role=link],li,span,div';
+      const label = element => String(element.textContent || '').trim().replace(/\s+/g, ' ');
+      for (const scope of scopes) {
+        const controls = [...scope.querySelectorAll(targets)].filter(visible);
+        const next = controls.find(element => [element.getAttribute('aria-label'), element.getAttribute('title'), label(element)].some(value => /^(next(?: page)?|›|»)[.!]?$/i.test(value?.trim() || '')));
+        const page = controls.find(element => label(element) === nextPage && /page/i.test((element.getAttribute('aria-label') || '') + ' ' + (element.closest('nav,[role=navigation],.pagination,[class*="pagin"]')?.className || '')));
+        const control = next || page;
+        if (control) {
+          const clickable = control.closest('button,a,[role=button],[role=link]') || control;
+          if (!visible(clickable)) continue;
+          clickable.click();
+          return true;
+        }
+      }
+      return false;
+    }
     const headers = [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim());
     const policyIndex = headers.findIndex(text => /^policy\s*#/i.test(text));
     const dateIndex = headers.findIndex(text => /^issue date/i.test(text));
