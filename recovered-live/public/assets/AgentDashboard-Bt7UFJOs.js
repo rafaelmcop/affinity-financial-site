@@ -1,8 +1,6 @@
 import AgentEmailReviews from './AgentEmailReviews.js?v=2';
 import BirthdayAlerts from './AgentBirthdayAlerts.js?v=6';
 import {
-  c as v,
-  a as w,
   t as i,
   r as k,
   T as x,
@@ -11,26 +9,14 @@ import {
 } from "./index-BIU-6RMI.js?v=20261009-setup-1";
 import { A as C } from "./AgentSidebar-BffvVO7a.js?v=20260907-menu2";
 import { u as A } from "./FloatingInternalChat-C-mZ1jql.js?v=20261107-messenger-layer-2";
-import { M as P } from "./mail-DTOVvRc8.js";
 import { C as f, M as I } from "./message-square-Bd585pvl.js";
 import { S as M } from "./shield-check-CQZEKJwS.js";
-import { T as S } from "./trash-2-DP0NeSJV.js";
-import { R as AgendaRefresh } from "./refresh-cw-DKCd_O_1.js";
 import "./LanguageSelector-DkTXTche.js";
 import "./x-BKidgWlG.js";
 import "./chevron-right-DepQZrYR.js";
 import "./external-link-CEjUwZyT.js";
 import "./input-maK0rC7f.js";
 import "./send-u-E2Isyn.js";
-/**
- * @license lucide-react v0.453.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */ const T = v("CheckCheck", [
-  ["path", { d: "M18 6 7 17l-5-5", key: "116fxf" }],
-  ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }],
-]);
 import WeeklyAgenda from "./AgentWeeklyAgenda.js?v=10";
 function H() {
   const [calendarVersion,setCalendarVersion]=k.useState(0);
@@ -38,56 +24,24 @@ function H() {
   const [calendarAllowed,setCalendarAllowed]=k.useState(false),[agendaStatus,setAgendaStatus]=k.useState(''),[agendaError,setAgendaError]=k.useState(false);
   k.useEffect(()=>{let active=true;fetch('/api/agent/access',{credentials:'same-origin',cache:'no-store'}).then(res=>res.ok?res.json():null).then(data=>{if(active)setCalendarAllowed(!!data?.features?.includes('calendar'));}).catch(()=>{});return()=>{active=false;};},[]);
 
-  const [credits,setCredits]=k.useState(null),[creditLoading,setCreditLoading]=k.useState(true);
-  async function updateCredits(refresh=false){setCreditLoading(true);try{const response=await fetch('/api/trpc/agent.fiveRingsCredits?input='+encodeURIComponent(JSON.stringify({json:{refresh}})),{credentials:'include',cache:'no-store'});const data=await response.json();if(data.error)throw Error(data.error.json?.message||'Não foi possível consultar os créditos');setCredits(data.result.data.json);}catch(error){setCredits(previous=>({...previous,error:error.message}));}finally{setCreditLoading(false);}}
-  // Production counters remain hidden until the integration is ready.
   const o = destination => window.location.assign(destination);
-  const
-    r = i.agent.dashboard.useQuery(void 0, {
-      staleTime: 0,
-      refetchOnMount: "always",
-      refetchOnWindowFocus: true,
-      refetchInterval: 30000,
-      retry: 3,
-    }),
-    l = i.agent.pendingCounts.useQuery(void 0, {
-      staleTime: 0,
-      refetchOnMount: "always",
-      refetchOnWindowFocus: true,
-      refetchInterval: 30000,
-      retry: 3,
-    }),
-    q = i.agent.syncCalendly.useMutation(),
-    j = i.agent.syncInbox.useMutation(),
-    p = i.agent.markClientEmailRead.useMutation(),
-    b = i.agent.toggleTask.useMutation(),
-    h = i.agent.deleteTask.useMutation(),
-    E = (() => {
-      try {
-        return JSON.parse(
-          localStorage.getItem("affinity-agent-counts") || "{}"
-        );
-      } catch {
-        return {};
-      }
-    })();
-  k.useEffect(() => {
-    l.data &&
-      localStorage.setItem("affinity-agent-counts", JSON.stringify(l.data));
-  }, [l.data]);
+  const r = i.agent.homeNotices.useQuery(undefined, {
+    staleTime: 30000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60000,
+    retry: 1,
+  });
+  const q = i.agent.syncCalendly.useMutation();
+  const p = i.agent.markClientEmailRead.useMutation();
   k.useEffect(() => {
     if (!calendarAllowed || document.documentElement.hasAttribute("data-portal-audit")) return;
     let active = true;
     q.mutateAsync({ quick: true, daily: true })
-      .then(result => {if(active&&!result.skipped){setCalendarVersion(v=>v+1);return Promise.all([r.refetch(), l.refetch()]);}})
+      .then(result => {if(active&&!result.skipped){setCalendarVersion(v=>v+1);return r.refetch();}})
       .catch(error => {if(active){setAgendaError(true);setAgendaStatus(error instanceof Error ? error.message : "Não foi possível sincronizar. Use o ícone de atualização para tentar novamente.");}});
     return () => { active = false; };
   }, [calendarAllowed]);
   const s = r.data,
-    g = (s?.policies || []).filter(
-      t => String(t.status || "inactive") === "active"
-    ),
-    y = g.reduce((t, a) => t + Math.round(Number(a.points || 0)), 0),
     c = (s?.tasks || [])
       .filter(t => t.status === "pending")
       .sort((t, a) => {
@@ -103,15 +57,6 @@ function H() {
       (birthdayNotices.data?.length||0) +
       c.length;
   A("portal", d, "affinity-agent-pending");
-  const N = [
-    ["Agenda de hoje", s?.todayMeetingCount ?? s?.todayMeetings?.length ?? 0, x],
-    ["Total Credits · Five Rings", credits?.totalCredits?.toLocaleString('pt-BR') ?? (creditLoading?'…':'Não sincronizado'), M],
-    [
-      "Leadership · Five Rings",
-      credits?.leadershipCurrent?.toLocaleString('pt-BR') ?? (creditLoading?'…':'Não sincronizado'),
-      M,
-    ],
-  ];
   return e.jsxs("div", {
     className: "min-h-screen bg-black text-white lg:pl-64",
     children: [
@@ -124,7 +69,7 @@ function H() {
             style: { margin: "0 0 12px" },
             children: "Início",
           }),
-          calendarAllowed && e.jsx(WeeklyAgenda,{version:calendarVersion,syncing:q.isPending,onSync:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await Promise.all([r.refetch(),l.refetch()]);setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar.');}}}),
+          calendarAllowed && e.jsx(WeeklyAgenda,{version:calendarVersion,syncing:q.isPending,onSync:async()=>{setAgendaError(false);setAgendaStatus('Sincronizando agenda…');try{await q.mutateAsync({quick:true});setCalendarVersion(v=>v+1);await r.refetch();setAgendaStatus('Agenda sincronizada.');}catch(error){setAgendaError(true);setAgendaStatus(error instanceof Error?error.message:'Não foi possível sincronizar.');}}}),
           d > 0 &&
             e.jsxs(m, {
               className: "border-gold/30 bg-[#0b1524] p-6",
@@ -217,7 +162,7 @@ function H() {
                                         e.jsx("span", {
                                           className:
                                             "mt-1 block truncate text-sm text-gray-200",
-                                          children: String(t.body||"").split(/Em .{0,100}escreveu:|On .{0,100}wrote:/i)[0].trim(),
+                                          children: t.subject || "E-mail recebido",
                                         }),
                                         e.jsx("span", {
                                           className:
