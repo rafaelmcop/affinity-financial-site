@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Affinity · National Life Preview",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "permissions": [
     "activeTab",
     "scripting"

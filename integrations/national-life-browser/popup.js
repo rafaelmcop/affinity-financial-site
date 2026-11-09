@@ -1,6 +1,7 @@
 const result = document.getElementById('result');
 const base = 'https://www.nationallife.com';
 const listPath = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent';
+const pilotMinimum = 264; // Last unfiltered total confirmed for the pilot portfolio.
 const origins = ['https://www.affinityfc.org', 'https://portal.affinityfc.org', 'https://affinityfc.org'];
 
 async function runOn(tab, func, ...args) {
@@ -41,6 +42,20 @@ function readPage(path, action) {
     const total = document.body.innerText.match(/Viewing\s+([\d,]+)\s+to\s+([\d,]+)\s+of\s+([\d,]+)\s+entries/i);
     if (!table || !total) return null;
     const [first, last, count] = total.slice(1).map(value => Number(value.replaceAll(',', '')));
+    if (action === 'clear-filters') {
+      const controls = [...document.querySelectorAll('button,a,[role=button],input[type=reset]')].filter(visible);
+      const clear = controls.find(element => [element.textContent, element.getAttribute('aria-label'), element.getAttribute('title'), element.value].some(value => /^(clear|reset) (all )?(filters?|search)$/i.test(value?.trim() || '')));
+      if (clear) {
+        clear.click();
+        return true;
+      }
+      const allClients = controls.find(element => /^all clients(?:\s+\d+)?$/i.test(element.textContent.trim()));
+      if (allClients) {
+        allClients.click();
+        return true;
+      }
+      return false;
+    }
     if (action === 'next') {
       if (last >= count) return false;
       const nextPage = String(Math.ceil(last / (last - first + 1)) + 1);
@@ -218,7 +233,7 @@ async function goToListPage(tab, first) {
 
 async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
-  let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0;
+  let listTab, detailsTab, expected = pilotMinimum, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0;
   const seen = new Set();
   const counts = () => `Registradas: ${saved}/${expected} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Não registradas: ${failed}`;
   const issues = document.getElementById('issues');
@@ -242,6 +257,15 @@ async function batch(affinity, origin, windowId) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (!listTab || reload || attempt) listTab = await openReader(listTab, listUrl);
+        const listing = await waitFor(listTab, snapshot => snapshot.count > 0, 'Não consegui abrir All Clients. Confira o login da National Life.');
+        if (listing.count < expected) {
+          result.textContent = 'Lista com ' + listing.count + ' registro(s). Tentando remover filtros…';
+          if (await runOn(listTab, readPage, listPath, 'clear-filters')) {
+            await waitFor(listTab, snapshot => snapshot.count >= expected, 'All Clients continuou filtrada. Limpe a pesquisa e os filtros na National Life.');
+          } else {
+            throw Error('All Clients mostrou ' + listing.count + ' de pelo menos ' + expected + ' registros esperados. Limpe a pesquisa e os filtros na National Life.');
+          }
+        }
         return await goToListPage(listTab, first);
       } catch (error) {
         lastError = error;
@@ -255,6 +279,7 @@ async function batch(affinity, origin, windowId) {
     if (!(await runOn(affinity, affinityRequest, origin, null))?.allowed) throw Error('Piloto indisponível para esta conta.');
     result.textContent = 'Abrindo All Clients na National Life…';
     let page = await restorePage(1);
+    if (page.count < pilotMinimum) throw Error('A lista está abaixo do total de referência da carteira.');
     expected = page.count;
     while (true) {
       if (page.rows.length !== page.last - page.first + 1) throw Error('A página da carteira veio incompleta.');
