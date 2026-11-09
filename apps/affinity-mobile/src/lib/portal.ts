@@ -2,6 +2,7 @@ export type Role = 'agent';
 export const ORIGIN = 'https://www.affinityfc.org';
 export const roles = {
   agent: { title: 'Agente', description: 'Sua fila de ligações e as etapas dos seus clientes.', login: '/agentes/login', tabs: [
+    { title: 'Início', path: '/agentes/dashboard' },
     { title: 'Ligações', path: '/agentes/fila-leads' },
     { title: 'CRM', path: '/agentes/fila-leads?view=crm' },
   ] },
@@ -9,13 +10,13 @@ export const roles = {
 export function parseRole(value: unknown): Role | null {
   return value === 'agent' ? value : null;
 }
-export type Destination = { type: 'internal' } | { type: 'queue' } | { type: 'setup' } | { type: 'call' | 'whatsapp'; phone: string; message?: string } | { type: 'external'; url: string } | { type: 'blocked' };
+export type Destination = { type: 'internal' } | { type: 'setup' } | { type: 'call' | 'whatsapp'; phone: string; message?: string } | { type: 'external'; url: string } | { type: 'blocked' };
 // Navigation decisions are deliberately independent of authentication; the server enforces roles.
 export function destination(raw: string): Destination {
   try {
     const url = new URL(raw);
     if (url.origin === ORIGIN) {
-      if (['/agentes/dashboard', '/agentes', '/agentes/'].includes(url.pathname)) return { type: 'queue' };
+      if (['/agentes/dashboard', '/agentes', '/agentes/'].includes(url.pathname)) return { type: 'internal' };
       if (['/agentes/inicio', '/agentes/configuracoes'].includes(url.pathname)) return { type: 'setup' };
       if (url.pathname === '/agentes/login' || (url.pathname === '/agentes/fila-leads' && (!url.search || url.search === '?view=crm'))) return { type: 'internal' };
       return { type: 'blocked' };

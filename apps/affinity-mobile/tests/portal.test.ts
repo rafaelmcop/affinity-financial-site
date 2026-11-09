@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { destination, ORIGIN, parseRole, roles } from '../src/lib/portal.ts';
-test('The initial application is agent-only with queue and read-only CRM navigation', () => {
+test('The initial application is agent-only and opens the dashboard before queue navigation', () => {
   assert.equal(parseRole('admin'), null); assert.equal(parseRole('affiliate'), null); assert.equal(parseRole('agent'), 'agent');
-  assert.deepEqual(roles.agent.tabs.map(t => t.path), ['/agentes/fila-leads', '/agentes/fila-leads?view=crm']);
+  assert.deepEqual(roles.agent.tabs.map(t => t.path), ['/agentes/dashboard', '/agentes/fila-leads', '/agentes/fila-leads?view=crm']);
   for (const path of ['/admin', '/afiliados/dashboard', '/agentes/crm', '/agentes/whatsapp']) assert.equal(destination(ORIGIN + path).type, 'blocked');
-  assert.equal(destination(ORIGIN + '/agentes/dashboard').type, 'queue');
+  assert.equal(destination(ORIGIN + '/agentes/dashboard').type, 'internal');
   assert.equal(destination(ORIGIN + '/agentes/configuracoes').type, 'setup');
 });
 test('Only the Affinity HTTPS origin loads inside the authenticated view', () => {

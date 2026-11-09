@@ -15,6 +15,7 @@ export default function Portal() {
   const [canBack, setCanBack] = useState(false);
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [queueAllowed, setQueueAllowed] = useState(false);
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (canBack) ref.current?.goBack(); else router.back();
@@ -29,10 +30,7 @@ export default function Portal() {
   function navigate(raw: string) {
     const target = destination(raw);
     if (target.type === 'internal') return true;
-    if (target.type === 'queue') {
-      setUri(ORIGIN + '/agentes/fila-leads');
-      ref.current?.injectJavaScript("window.location.replace(" + JSON.stringify(ORIGIN + '/agentes/fila-leads') + ");true;");
-    } else if (target.type === 'setup') {
+    if (target.type === 'setup') {
       Alert.alert('Complete sua configuração no portal', 'Use o portal no computador para completar os dados e conectar o WhatsApp. Depois, volte ao aplicativo para acessar a fila.');
     } else if (target.type === 'call') {
       Alert.alert('Ligar para o contato?', target.phone, [{ text: 'Cancelar', style: 'cancel' }, { text: 'Ligar', onPress: () => openExternal('tel:' + target.phone) }]);
@@ -56,15 +54,28 @@ export default function Portal() {
         onOpenWindow={event => { if (navigate(event.nativeEvent.targetUrl)) setUri(event.nativeEvent.targetUrl); }}
         javaScriptEnabled domStorageEnabled sharedCookiesEnabled thirdPartyCookiesEnabled={false}
         mixedContentMode="never" allowsBackForwardNavigationGestures
-        onNavigationStateChange={state => { setCanBack(state.canGoBack); const target = destination(state.url); if (target.type === 'queue' || target.type === 'setup') { navigate(state.url); } else if (target.type === 'internal') setCurrentUrl(state.url); }}
-        onLoadStart={() => { setLoading(true); setFailed(false); }} onLoadEnd={() => setLoading(false)}
+        onNavigationStateChange={state => { setCanBack(state.canGoBack); const target = destination(state.url); if (target.type === 'setup') { navigate(state.url); } else if (target.type === 'internal') { setCurrentUrl(state.url); if (state.url === ORIGIN + portal.login) setQueueAllowed(false); } }}
+        onLoadStart={() => { setLoading(true); setFailed(false); }} onLoadEnd={event => {
+          setLoading(false);
+          if (!event.nativeEvent.url.startsWith(ORIGIN + '/')) return;
+          ref.current?.injectJavaScript(`
+            fetch('/api/agent/access', { cache: 'no-store' })
+              .then(response => response.ok ? response.json() : null)
+              .then(access => window.ReactNativeWebView.postMessage(access?.features?.includes('queue') ? 'queue-allowed' : 'queue-denied'))
+              .catch(() => window.ReactNativeWebView.postMessage('queue-denied'));
+            true;
+          `);
+        }}
+        onMessage={event => {
+          if (event.nativeEvent.url.startsWith(ORIGIN + '/')) setQueueAllowed(event.nativeEvent.data === 'queue-allowed');
+        }}
         onError={() => { setFailed(true); setLoading(false); }}
         onHttpError={event => { if (event.nativeEvent.statusCode >= 500) { setFailed(true); setLoading(false); } }}
       />
       {loading && <View pointerEvents="none" style={styles.loading}><ActivityIndicator color="#126448" /><Text>Carregando…</Text></View>}
       {failed && <View style={styles.failure}><Text style={styles.errorTitle}>Não foi possível carregar o portal.</Text><Text>Verifique sua conexão. Seu atendimento continua no CRM.</Text><Pressable style={styles.retry} onPress={() => { setFailed(false); ref.current?.reload(); }}><Text style={styles.white}>Tentar novamente</Text></Pressable></View>}
     </View>
-    <View style={styles.tabs}>{portal.tabs.map(tab => <Pressable accessibilityRole="button" accessibilityState={{ selected: currentUrl === ORIGIN + tab.path }} key={tab.path} style={[styles.tab, currentUrl === ORIGIN + tab.path && styles.selected]} onPress={() => { if (currentUrl === ORIGIN + tab.path) return; const next = ORIGIN + tab.path; if (uri === next) ref.current?.injectJavaScript("window.location.assign(" + JSON.stringify(next) + ");true;"); else setUri(next); }}><Text style={styles.tabText}>{tab.title}</Text></Pressable>)}</View>
+    <View style={styles.tabs}>{portal.tabs.filter(tab => queueAllowed || tab.path === '/agentes/dashboard').map(tab => <Pressable accessibilityRole="button" accessibilityState={{ selected: currentUrl === ORIGIN + tab.path }} key={tab.path} style={[styles.tab, currentUrl === ORIGIN + tab.path && styles.selected]} onPress={() => { if (currentUrl === ORIGIN + tab.path) return; const next = ORIGIN + tab.path; if (uri === next) ref.current?.injectJavaScript("window.location.assign(" + JSON.stringify(next) + ");true;"); else setUri(next); }}><Text style={styles.tabText}>{tab.title}</Text></Pressable>)}</View>
   </SafeAreaView>;
 }
 const styles = StyleSheet.create({
