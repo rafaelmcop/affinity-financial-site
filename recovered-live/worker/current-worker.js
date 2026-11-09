@@ -1,3 +1,4 @@
+import {enforceAgentSetupDeadlines} from './agent-setup-deadline.js';
 import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,nlgPilotSharedPolicies,saveNlgPilotAgents,saveNlgPilotCorrection,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
 import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
 import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
@@ -47631,7 +47632,10 @@ var cloudflare_staging_default = {
       return;
     }
     // Calendar sync runs at first daily dashboard access or on manual request.
-    if (controller.cron === "*/15 * * * *") return;
+    if (controller.cron === "*/15 * * * *") {
+      ctx.waitUntil(leadSchema(env).then(()=>enforceAgentSetupDeadlines(env,configuredAccess)).catch(()=>console.error("agent_setup_deadline_maintenance_failed")));
+      return;
+    }
     if (controller.cron === "15 11 * * *") {
       ctx.waitUntil(syncAllFiveRingsConnections(env));
     }
