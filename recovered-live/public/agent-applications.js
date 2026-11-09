@@ -644,8 +644,8 @@ function describeApplicationParent(row,parent,feminine=false){
     delete d.applicationData.id;
     return d;
   }
-  function validateForCompletion() {
-    document
+  function validateForCompletion({ checkOnly = false } = {}) {
+    if (!checkOnly) document
       .querySelectorAll(".field-error,.section-error")
       .forEach(el => el.classList.remove("field-error", "section-error"));
     const data = collect(),
@@ -765,6 +765,7 @@ function describeApplicationParent(row,parent,feminine=false){
         "percentuais dos beneficiários devem somar exatamente 100%",
         "beneficiaries"
       );
+    if (checkOnly) return missing.length === 0 && $("form").checkValidity();
     for (const item of missing) {
       for (const id of item.ids) {
         const el = $(id);
@@ -1406,7 +1407,7 @@ function describeApplicationParent(row,parent,feminine=false){
       ? data
           .map(
             r =>
-              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName)}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}${r.retention?`<p class="application-retention" role="status" style="padding:12px;border:1px solid #b98b26;border-radius:8px;background:#fff6db;color:#14233b">${esc(r.retention.label)} · Restam ${Number(r.retention.daysRemaining)} dia(s). Exclusão prevista: ${esc(new Date(r.retention.expiresAt).toLocaleString('pt-BR',{timeZone:'America/New_York'}))}.</p>`:""}<div class="actions"><button data-access-feature="application_create" data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button data-access-feature="application_create" class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
+              `<article class="application"><div class="toolbar"><div><strong>${esc(r.clientName || "Rascunho sem nome")}</strong><div class="muted">${esc(r.clientEmail || "E-mail não informado")}</div>${r.serviceDate ? `<div class="muted">Atendimento inicial: ${esc(usDate(r.serviceDate))}</div>` : ""}</div><span class="pill">${r.status === "draft" ? "Em andamento" : "Concluída · aguardando apólice"}</span></div>${r.status === "submitted" ? `<div class="application-summary"><div><small>Telefone</small><strong>${esc(formatPhone(r.clientPhone) || "Não informado")}</strong></div><div><small>Produto</small><strong>${esc(r.productInterest || "Não informado")}</strong></div><div><small>Target premium anual</small><strong>${esc(usd(Number(r.targetPremium || 0) || currencyNumber(r.premiumBudget) * 12) || "$0.00")}</strong></div></div>` : ""}${r.retention?`<p class="application-retention" role="status" style="padding:12px;border:1px solid #b98b26;border-radius:8px;background:#fff6db;color:#14233b">${esc(r.retention.label)} · Restam ${Number(r.retention.daysRemaining)} dia(s). Exclusão prevista: ${esc(new Date(r.retention.expiresAt).toLocaleString('pt-BR',{timeZone:'America/New_York'}))}.</p>`:""}<div class="actions"><button data-access-feature="application_create" data-edit="${r.id}">Alterar</button><button data-pdf="${r.id}">Gerar PDF</button>${r.status === "draft" && r.clientToken ? `<button data-share="${r.id}">Link privado do cliente</button>` : ""}<button data-delete-request="${r.id}" ${Number(r.deletionPending) ? "disabled" : ""}>${Number(r.deletionPending) ? "Exclusão aguardando análise" : "Excluir ou solicitar exclusão"}</button>${r.status === "draft" ? `<button data-access-feature="application_create" class="primary" data-submit="${r.id}">Concluir aplicação</button>` : ""}</div></article>`
           )
           .join("")
       : '<div class="empty">'+(query?'Nenhuma aplicação encontrada para esta busca.':'Nenhuma aplicação nesta categoria.')+'</div>';
@@ -1559,6 +1560,20 @@ function describeApplicationParent(row,parent,feminine=false){
       "input",
       e => (e.target.value = upper(e.target.value))
     );
+  const draftConfirmation = $("draft-confirmation");
+  $("save-draft").onclick = () => {
+    const pending = !validateForCompletion({ checkOnly: true });
+    const documents = attachments.length ? "" : " Nenhum documento foi anexado.";
+    $("draft-confirmation-detail").textContent =
+      (pending ? "A ficha ainda tem campos pendentes." : "A ficha será mantida em andamento.") +
+      documents + " Você pode voltar para completá-la depois.";
+    draftConfirmation.returnValue = "cancel";
+    draftConfirmation.showModal();
+  };
+  draftConfirmation.addEventListener("close", async () => {
+    if (draftConfirmation.returnValue !== "save") return;
+    if (await saveDraft(false)) await load();
+  });
   $("form").onsubmit = async e => {
     e.preventDefault();
     if (!validateForCompletion()) return;

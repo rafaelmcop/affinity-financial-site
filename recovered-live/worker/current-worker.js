@@ -43940,8 +43940,7 @@ Detalhes: ${details}` : ""}`;
     if (name === "agent.saveApplication") {
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
       const clientEmail = String(input.clientEmail || "").trim().toLowerCase();
-      if (!clientName) return trpcError("Informe o nome completo do cliente");
-      if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail v\xE1lido");
+      if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail válido ou deixe o campo em branco para salvar o rascunho");
       const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "residentCardNumber", "visaNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName", "physicianAddress", "healthHistory"]);
       const extra = {}, sensitive = {};
       const supplied = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : input;
@@ -43992,6 +43991,7 @@ Detalhes: ${details}` : ""}`;
       }
       if (!Array.isArray(all.beneficiaries) || !all.beneficiaries.length || all.beneficiaries.some((b) => !b.name || !b.relationship || !b.birthDate || String(b.percentage ?? "").trim() === "")) missing.push("benefici\xE1rio completo");
       else if (Math.abs(all.beneficiaries.reduce((sum, b) => sum + Number(b.percentage || 0), 0) - 100) > 1e-3) missing.push("percentuais dos benefici\xE1rios devem somar exatamente 100%");
+      if (all.clientEmail && !validEmail(all.clientEmail)) missing.push("e-mail válido");
       if (missing.length) return trpcError(`Complete antes de concluir: ${[...new Set(missing)].join(", ")}`);
       if (String(application.status) === "completed") return trpcError("Esta aplica\xE7\xE3o j\xE1 foi conclu\xEDda");
       const result = await env.DB.prepare("UPDATE agentApplications SET status='submitted',submittedAt=COALESCE(submittedAt,CURRENT_TIMESTAMP),updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND status IN ('draft','submitted')").bind(id, owner).run();

@@ -643,11 +643,21 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
             <div class="actions">
               <button type="button" id="prev">Anterior</button
               ><button type="button" class="primary" id="next">Próximo</button
-              ><button class="primary hidden" id="save" type="submit">
-                Salvar e concluir aplicação
+              ><button type="button" id="save-draft">Salvar rascunho</button><button class="primary hidden" id="save" type="submit">
+                Concluir aplicação
               </button>
             </div>
           </form>
+          <dialog id="draft-confirmation" class="card" aria-labelledby="draft-confirmation-title">
+            <form method="dialog">
+              <h2 id="draft-confirmation-title">Salvar como rascunho?</h2>
+              <p id="draft-confirmation-detail"></p>
+              <div class="actions">
+                <button value="cancel" autofocus>Continuar preenchendo</button>
+                <button value="save" class="primary">Salvar em andamento</button>
+              </div>
+            </form>
+          </dialog>
         </section>
         <section id="list" class="card">
           <div class="empty">Carregando aplicações…</div>
@@ -655,8 +665,8 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261106-ai-application-link-2"></script>
-    <script src="/address-autocomplete.js?v=20260825-1" defer></script>
+    <script src="/agent-applications.js?v=20261108-draft-1"></script>
+    <script src="/address-autocomplete.js?v=20261108-address-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>
 </html>

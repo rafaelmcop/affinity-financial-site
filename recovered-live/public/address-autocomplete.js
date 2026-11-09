@@ -1,62 +1,62 @@
 (() => {
-  const attached = new WeakSet();
-  const endpoint = '/api/trpc/address.search';
-  const setup = address => {
-    if (!address || attached.has(address)) return;
-    const city = document.getElementById('city'), state = document.getElementById('state'), zip = document.getElementById('zipCode');
-    if (!city || !state || !zip) return;
-    attached.add(address);
-    address.autocomplete = 'street-address';
-    address.setAttribute('aria-autocomplete', 'list');
-    const list = document.createElement('datalist');
-    list.id = `address-suggestions-${Math.random().toString(36).slice(2)}`;
-    address.setAttribute('list', list.id);
-    address.insertAdjacentElement('afterend', list);
-    const help = document.createElement('small');
-    help.textContent = 'Comece a digitar e selecione um endereço sugerido.';
-    help.style.cssText = 'display:block;margin-top:6px;color:#9ca3af;font-size:12px';
-    list.insertAdjacentElement('afterend', help);
-    let timer, controller, choices = new Map();
-    const apply = value => {
-      const selected = choices.get(value);
-      if (!selected) return false;
-      address.value = selected.street;
-      city.value = selected.city;
-      state.value = selected.state;
-      zip.value = selected.zip;
-      for (const field of [address, city, state, zip]) field.dispatchEvent(new Event('change', { bubbles: true }));
-      help.textContent = 'Endereço confirmado e campos preenchidos automaticamente.';
-      help.style.color = '#86efac';
-      return true;
-    };
-    const search = async value => {
-      controller?.abort();
-      controller = new AbortController();
-      help.textContent = 'Buscando endereços…';
-      help.style.color = '#9ca3af';
-      try {
-        const input = encodeURIComponent(JSON.stringify({ json: { query: value } }));
-        const response = await fetch(`${endpoint}?input=${input}`, { signal: controller.signal, credentials: 'same-origin' });
-        if (!response.ok) throw new Error('address lookup failed');
-        const payload = await response.json(), matches = payload?.result?.data?.json || [];
-        choices = new Map(matches.slice(0, 6).map(match => [match.full, match]));
-        list.innerHTML = [...choices.keys()].map(item => `<option value="${item.replaceAll('&','&amp;').replaceAll('"','&quot;')}"></option>`).join('');
-        help.textContent = choices.size ? 'Selecione uma das sugestões para completar cidade, estado e ZIP Code.' : 'Continue digitando o endereço, incluindo número e rua.';
-      } catch (error) {
-        if (error?.name !== 'AbortError') help.textContent = 'Não foi possível buscar agora. Você ainda pode preencher manualmente.';
-      }
-    };
-    address.addEventListener('input', () => {
-      if (apply(address.value)) return;
-      clearTimeout(timer);
-      const value = address.value.trim();
-      list.innerHTML = '';
-      if (value.length < 6) { help.textContent = 'Digite pelo menos o número e o começo da rua.'; return; }
-      timer = setTimeout(() => search(value), 650);
-    });
-    address.addEventListener('change', () => apply(address.value));
-  };
-  const scan = () => setup(document.getElementById('address'));
-  scan();
-  new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+  const address = document.getElementById('address');
+  const city = document.getElementById('city');
+  const state = document.getElementById('state');
+  const zip = document.getElementById('zipCode');
+  if (!address || !city || !state || !zip) return;
+
+  const results = document.createElement('select');
+  results.hidden = true;
+  results.setAttribute('aria-label', 'Endereços encontrados');
+  const help = document.createElement('small');
+  help.setAttribute('role', 'status');
+  const hint = 'Digite o número e a rua. Inclua a cidade ou o ZIP Code para melhorar a busca.';
+  help.textContent = hint;
+  address.after(results, help);
+
+  let timer, controller, choices = [];
+  async function search(query) {
+    const request = new AbortController();
+    controller = request;
+    help.textContent = 'Buscando endereços…';
+    try {
+      const input = encodeURIComponent(JSON.stringify({ json: { query } }));
+      const response = await fetch('/api/trpc/address.search?input=' + input, { signal: request.signal });
+      if (!response.ok) throw new Error('address lookup failed');
+      const matches = (await response.json())?.result?.data?.json;
+      if (request.signal.aborted) return;
+      choices = Array.isArray(matches) ? matches : [];
+      results.replaceChildren(new Option('Selecione um endereço', ''), ...choices.map((match, index) => new Option(match.full, String(index))));
+      results.hidden = !choices.length;
+      help.textContent = choices.length ? 'Escolha o endereço para preencher cidade, estado e ZIP Code.' : 'Nenhum endereço encontrado. Confira o número e a rua e informe a cidade ou o ZIP Code.';
+    } catch {
+      if (!request.signal.aborted) help.textContent = 'Busca indisponível. Você pode preencher o endereço manualmente.';
+    }
+  }
+  function scheduleSearch() {
+    clearTimeout(timer);
+    controller?.abort();
+    results.hidden = true;
+    choices = [];
+    const street = address.value.trim();
+    if (street.length < 6) {
+      help.textContent = hint;
+      return;
+    }
+    const query = street.includes(',') ? street : [street, city.value, state.value, zip.value].filter(value => value.trim()).join(', ');
+    timer = setTimeout(() => search(query), 650);
+  }
+  address.addEventListener('input', scheduleSearch);
+  for (const field of [city, state, zip]) field.addEventListener('change', scheduleSearch);
+  results.addEventListener('change', () => {
+    const selected = choices[results.value];
+    if (!selected) return;
+    for (const [field, value] of [[address, selected.street], [city, selected.city], [state, selected.state], [zip, selected.zip]]) {
+      field.value = value;
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    clearTimeout(timer);
+    results.hidden = true;
+    help.textContent = 'Endereço preenchido. Confira os dados e acrescente o apartamento, se necessário.';
+  });
 })();
