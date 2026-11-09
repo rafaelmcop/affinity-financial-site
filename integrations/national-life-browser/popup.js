@@ -90,7 +90,11 @@ function readPage(path, action) {
     const keys = labels.map(label => label.toLowerCase());
     const candidates = new Set();
     const add = value => {
-      const normalized = normalize(value).replace(/^\$\s+/, '$');
+      let normalized = normalize(value).replace(/^(?:USD\s*)?\$\s*/i, '$');
+      if (pattern === money) {
+        const amount = /^\$(\d+|\d{1,3}(?:,\d{3})+)(?:\.(\d{1,2}))?$/.exec(normalized);
+        if (amount) normalized = '$' + amount[1] + '.' + (amount[2] || '').padEnd(2, '0');
+      }
       if (pattern.test(normalized)) candidates.add(normalized);
     };
     const elements = [...document.querySelectorAll('span,div,p,label,small,dt,dd,strong,td')];
@@ -119,7 +123,7 @@ function readPage(path, action) {
     number,
     paymentsVisible,
     deathBenefit: field(['Net Death Benefit'], money),
-    premium: paymentsVisible ? field(['Premium', 'Modal Premium'], money) : null,
+    premium: paymentsVisible ? (field(['Premium'], money) || field(['Modal Premium'], money)) : null,
     frequency: paymentsVisible ? field(['Premium Payment Frequency', 'Payment Frequency'], /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Bi[ -]?Weekly)$/i) : null
   };
 }
@@ -138,8 +142,7 @@ async function readPolicy(tab) {
     }
     if (section === 'payments') {
       if (!snapshot?.paymentsVisible) throw Error('A aba Payments não mostrou a seção Payment Details.');
-      const missing = [!snapshot.premium && 'prêmio', !snapshot.frequency && 'frequência'].filter(Boolean);
-      throw Error('A aba Payments carregou, mas não consegui confirmar: ' + missing.join(' e ') + '.');
+      return snapshot;
     }
     throw Error('A aba Policy não mostrou um Net Death Benefit identificável.');
   }
@@ -180,9 +183,9 @@ async function goToListPage(tab, first) {
 
 async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
-  let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, consecutiveFailures = 0;
+  let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, paymentPending = 0, consecutiveFailures = 0;
   const seen = new Set();
-  const counts = () => `Validadas: ${saved}/${expected} · No CRM: ${matched} · Com divergência: ${differing} · Não lidas: ${failed}`;
+  const counts = () => `Validadas: ${saved}/${expected} · No CRM: ${matched} · Com divergência: ${differing} · Pagamento a conferir: ${paymentPending} · Outros problemas: ${failed}`;
   try {
     if (!(await runOn(affinity, affinityRequest, origin, null))?.allowed) throw Error('Piloto indisponível para esta conta.');
     result.textContent = 'Abrindo All Clients na National Life…';
@@ -211,12 +214,18 @@ async function batch(affinity, origin, windowId) {
           await waitFor(reader, item => item.number === number, 'A ficha da apólice não carregou.');
           const record = await readPolicy(reader);
           if (record.number !== number) throw Error('A ficha aberta tem outro número.');
-          const comparison = await runOn(affinity, affinityRequest, origin, { ...record, issueDate });
-          if (!comparison?.saved) throw Error('A sessão da Affinity deixou de responder.');
-          saved++;
-          consecutiveFailures = 0;
-          if (comparison.matched) matched++;
-          if (comparison.differences.length) differing++;
+          if (!record.premium || !record.frequency) {
+            paymentPending++;
+            consecutiveFailures = 0;
+            result.textContent = counts() + '\nPrêmio ou frequência não confirmado. Continuando a carteira…';
+          } else {
+            const comparison = await runOn(affinity, affinityRequest, origin, { ...record, issueDate });
+            if (!comparison?.saved) throw Error('A sessão da Affinity deixou de responder.');
+            saved++;
+            consecutiveFailures = 0;
+            if (comparison.matched) matched++;
+            if (comparison.differences.length) differing++;
+          }
         } catch (error) {
           failed++;
           result.textContent = counts() + '\n' + error.message;
