@@ -1,4 +1,4 @@
-import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,nlgPilotSharedPolicies,saveNlgPilotAgents,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
+import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,nlgPilotSharedPolicies,saveNlgPilotAgents,saveNlgPilotCorrection,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
 import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
 import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
 import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
@@ -48264,7 +48264,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
    try{
     const record=await boundedJson(request,2048);
     const owner=staff.email.toLowerCase();
-    const result=Object.hasOwn(record||{},'assignments')?await saveNlgPilotAgents(env.DB,owner,record.assignments):await saveNlgPilotPolicy(env.DB,owner,record);
+    const result=record?.action==='correct'?await saveNlgPilotCorrection(env.DB,owner,record):Object.hasOwn(record||{},'assignments')?await saveNlgPilotAgents(env.DB,owner,record.assignments):await saveNlgPilotPolicy(env.DB,owner,record);
     return Response.json(result||{error:'Dados da apólice incompletos ou inválidos.'},{status:result?200:400,headers});
    }catch(error){return Response.json({error:'Não foi possível validar a apólice.'},{status:error.status||503,headers});}
   }

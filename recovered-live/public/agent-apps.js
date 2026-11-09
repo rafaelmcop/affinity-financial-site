@@ -15,18 +15,66 @@ pilotStart?.addEventListener('click',()=>{
  $('nlg-pilot-progress').textContent='Conector não detectado nesta aba. Abra Integrações no Chrome ou Edge onde a versão 0.5.2 está instalada. Em chrome://extensions, recarregue o conector, permita acesso a este site e atualize a página.';
 });
 const savedIssues=$('nlg-saved-issues');
-if(savedIssues)savedIssues.addEventListener('toggle',async()=>{
- if(!savedIssues.open)return;
- const list=savedIssues.querySelector('ul');
- try{
-  const response=await fetch('/api/agent/nlg-pilot?pending=1',{cache:'no-store'});
-  if(!response.ok)throw Error();
-  const {pending}=await response.json();
-  list.replaceChildren(...(pending.length?pending.map(row=>row.policyNumber+' · '+row.category+' · '+row.missing.join(', ')):['Nenhuma pendência registrada.']).map(text=>{
-   const item=document.createElement('li');item.textContent=text;return item;
-  }));
- }catch{list.textContent='Não foi possível carregar as pendências.';}
-});
+if(savedIssues){
+ const list=$('nlg-pending-list'),status=$('nlg-pending-status'),search=$('nlg-pending-search'),showReviewed=$('nlg-show-reviewed');
+ const fields={'data de emissão':['issueDate','date'],'prêmio':['premium','number'],'frequência':['frequency',['Monthly','Quarterly','Semiannual','Annual','Weekly','Biweekly']],'death benefit':['deathBenefit','number'],'status':['status',['Active','Pending','Pending Lapse','Lapsed','Not Taken','Inactive','Declined','Cancelled']]};
+ let rows=[];
+ function renderPending(){
+  const filter=search.value.trim().replace(/[^a-z0-9]/gi,'').toUpperCase();
+  const visible=rows.filter(row=>row.policyNumber.includes(filter)&&(showReviewed.checked||row.outstanding.length));
+  list.replaceChildren();
+  status.textContent=visible.length+' apólice(s) nesta lista.';
+  for(const row of visible){
+   const card=document.createElement('details');
+   const title=document.createElement('summary');
+   title.textContent=row.policyNumber+' · '+row.category+' · '+(row.outstanding.join(', ')||'Correção registrada');
+   card.append(title);
+   const form=document.createElement('form');
+   for(const missing of row.missing){
+    const field=fields[missing];
+    if(!field)continue;
+    const [key,type]=field;
+    const label=document.createElement('label');label.textContent=missing;
+    const input=document.createElement(Array.isArray(type)?'select':'input');
+    input.name=key;
+    if(Array.isArray(type))input.replaceChildren(new Option('Selecione',''),...type.map(value=>new Option(value,value)));
+    else{input.type=type;if(type==='number'){input.min='0';input.step='0.01';}}
+    input.value=row.corrections[key]||'';
+    label.append(input);form.append(label);
+   }
+   if(form.children.length){
+    const save=document.createElement('button');save.type='submit';save.className='primary';save.textContent='Salvar correção';
+    const feedback=document.createElement('p');feedback.setAttribute('role','status');
+    form.append(save,feedback);
+    form.onsubmit=async event=>{
+     event.preventDefault();save.disabled=true;
+     try{
+      const values=Object.fromEntries(new FormData(form));
+      const response=await fetch('/api/agent/nlg-pilot',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'correct',number:row.policyNumber,values})});
+      if(!response.ok)throw Error('Confira os campos e informe pelo menos um valor válido.');
+      await loadPending();
+      status.textContent='Correção salva para a apólice '+row.policyNumber+'.';
+     }catch(error){feedback.textContent=error.message;}
+     finally{save.disabled=false;}
+    };
+    card.append(form);
+   }
+   list.append(card);
+  }
+ }
+ async function loadPending(){
+  try{
+   const response=await fetch('/api/agent/nlg-pilot?pending=1',{cache:'no-store'});
+   if(!response.ok)throw Error();
+   rows=(await response.json()).pending;
+   renderPending();
+  }catch{status.textContent='Não foi possível carregar as pendências.';}
+ }
+ savedIssues.addEventListener('toggle',()=>{if(savedIssues.open)void loadPending();});
+ search.addEventListener('input',renderPending);
+ showReviewed.addEventListener('change',renderPending);
+ if(location.hash==='#nlg-saved-issues'){$('nlg-pilot').open=true;savedIssues.open=true;}
+}
 
 const sharedPolicies=$('nlg-shared-policies');
 sharedPolicies?.addEventListener('toggle',async()=>{

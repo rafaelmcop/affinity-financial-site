@@ -3,7 +3,10 @@ const frequencyAliases = {
   semiannually: 'semiannual', annual: 'annual', annually: 'annual',
   weekly: 'weekly', biweekly: 'biweekly'
 };
-const frequency = value => frequencyAliases[String(value ?? '').toLowerCase().replace(/[^a-z]/g, '')];
+const frequency = value => {
+  const key=String(value ?? '').toLowerCase().replace(/[^a-z]/g, '');
+  return Object.hasOwn(frequencyAliases,key)?frequencyAliases[key]:undefined;
+};
 
 function cents(value) {
   const text = String(value ?? '');
@@ -30,7 +33,7 @@ function policyStatus(value) {
     nottaken: 'Not Taken', inactive: 'Inativa', notactive: 'Inativa',
     declined: 'Recusada', cancelled: 'Cancelada', canceled: 'Cancelada'
   };
-  return { source, category: labels[key] || 'Status a conferir' };
+  return { source, category: Object.hasOwn(labels,key)?labels[key]:'Status a conferir' };
 }
 
 const prepared = new WeakSet();
@@ -39,6 +42,7 @@ async function ensureReviews(db) {
   await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotPolicyReviews (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,issuedOn TEXT,premiumCents INTEGER,premiumFrequency TEXT,deathBenefitCents INTEGER,carrierStatus TEXT NOT NULL,category TEXT NOT NULL,product TEXT NOT NULL,missingJson TEXT NOT NULL,checkedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber))').run();
   await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotPaymentChecks (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,nextDueOn TEXT,paymentStatus TEXT,checkedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber))').run();
   await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotPolicyAgents (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,agentKey TEXT NOT NULL,agentLabel TEXT NOT NULL,lastSeenAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber,agentKey))').run();
+  await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotCorrections (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,valuesJson TEXT NOT NULL,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber))').run();
   prepared.add(db);
 }
 
@@ -51,10 +55,53 @@ export async function nlgPilotFreshPolicies(db, owner) {
   return results;
 }
 
+const correctionFields = {
+  'data de emissão': 'issueDate', 'prêmio': 'premium', 'frequência': 'frequency',
+  'death benefit': 'deathBenefit', 'status': 'status'
+};
+
 export async function nlgPilotPendingPolicies(db, owner) {
   await ensureReviews(db);
-  const {results} = await db.prepare("SELECT r.policyNumber,r.category,r.missingJson,p.paymentStatus FROM nlgPilotPolicyReviews r LEFT JOIN nlgPilotPaymentChecks p ON p.owner=r.owner AND p.policyNumber=r.policyNumber WHERE r.owner=? AND (r.missingJson<>'[]' OR p.paymentStatus IN ('past due','overdue','delinquent')) ORDER BY r.checkedAt DESC,r.policyNumber LIMIT 400").bind(owner).all();
-  return results.map(({policyNumber,category,missingJson,paymentStatus})=>({policyNumber,category,missing:[...JSON.parse(missingJson),...(['past due','overdue','delinquent'].includes(paymentStatus)?['atraso informado pela National Life']:[])]}));
+  const {results} = await db.prepare(`SELECT r.policyNumber,r.category,r.missingJson,p.paymentStatus,c.valuesJson,c.updatedAt
+    FROM nlgPilotPolicyReviews r
+    LEFT JOIN nlgPilotPaymentChecks p ON p.owner=r.owner AND p.policyNumber=r.policyNumber
+    LEFT JOIN nlgPilotCorrections c ON c.owner=r.owner AND c.policyNumber=r.policyNumber
+    WHERE r.owner=? AND (r.missingJson<>'[]' OR p.paymentStatus IN ('past due','overdue','delinquent'))
+    ORDER BY r.policyNumber LIMIT 400`).bind(owner).all();
+  return results.map(row=>{
+    const corrections=JSON.parse(row.valuesJson||'{}');
+    const missing=JSON.parse(row.missingJson);
+    if(['past due','overdue','delinquent'].includes(row.paymentStatus))missing.push('atraso informado pela National Life');
+    const outstanding=missing.filter(label=>corrections[correctionFields[label]]===undefined);
+    return {policyNumber:row.policyNumber,category:row.category,missing,outstanding,corrections,updatedAt:row.updatedAt};
+  });
+}
+
+export async function saveNlgPilotCorrection(db, owner, input) {
+  const number=String(input?.number??'').toUpperCase().replace(/-/g,'');
+  if(!/^[A-Z0-9]{5,30}$/.test(number))return null;
+  await ensureReviews(db);
+  const row=await db.prepare('SELECT missingJson FROM nlgPilotPolicyReviews WHERE owner=? AND policyNumber=?').bind(owner,number).first();
+  if(!row)return null;
+  const allowed=JSON.parse(row.missingJson).map(label=>correctionFields[label]).filter(Boolean);
+  const corrections={};
+  for(const [key,value] of Object.entries(input?.values||{})){
+    if(!allowed.includes(key)||typeof value!=='string')return null;
+    if(!value.trim())continue;
+    if(key==='issueDate'){
+      const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+      if(!match||!issueDay(match[2]+'/'+match[3]+'/'+match[1]))return null;
+    }else if(key==='premium'||key==='deathBenefit'){
+      if(!/^\d{1,10}(?:\.\d{1,2})?$/.test(value))return null;
+    }else if(key==='frequency'&&!frequency(value))return null;
+    else if(key==='status'&&policyStatus(value).category==='Status a conferir')return null;
+    corrections[key]=value;
+  }
+  if(!Object.keys(corrections).length)return null;
+  await db.prepare(`INSERT INTO nlgPilotCorrections(owner,policyNumber,valuesJson) VALUES(?,?,?)
+    ON CONFLICT(owner,policyNumber) DO UPDATE SET valuesJson=json_patch(valuesJson,excluded.valuesJson),updatedAt=CURRENT_TIMESTAMP`)
+    .bind(owner,number,JSON.stringify(corrections)).run();
+  return {saved:true};
 }
 
 export async function saveNlgPilotAgents(db, owner, assignments) {
