@@ -48210,6 +48210,7 @@ cloudflare_staging_default.fetch = async (request, env, context) => {
   const output = marker >= 0 ? html.slice(0, marker) + whatsappSettingsPanelScript + html.slice(marker) : html + whatsappSettingsPanelScript;
   return new Response(output, { status: response.status, statusText: response.statusText, headers });
 };
+const isNlgPilotAccount=account=>Number(account?.id)===26&&String(account.email).toLowerCase()==='rafaelmcop@hotmail.com'&&Number(account.isActive)===1&&account.status==='approved'&&account.accountType==='agent';
 const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);let appsResponse=null;
@@ -48217,7 +48218,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(request.method==='GET'){
  const destinations={'/agentes/conectar-email':'email','/agentes/conectar-agenda':'calendar','/agentes/configuracoes-agenda':'calendar','/agentes/configuracoes':'','/agentes/pagina-publica':'profile'};
  if(Object.hasOwn(destinations,url.pathname)){const section=destinations[url.pathname],target=new URL(section==='profile'?'/agentes/empresa':'/agentes/apps',url);target.search=url.search;if(section==='profile')target.hash='public-profile-settings';else target.hash=section||url.hash;return Response.redirect(target,302);}
- if(url.pathname==='/agentes/apps'){const email=await getAdminEmail(request,env),access=email?await getAdminAccess(email,env):null;if(!access?.account?.isActive||access.account.status!=='approved')return Response.redirect(new URL('/agentes/login',url),302);appsResponse=await env.ASSETS.fetch(new Request(new URL('/agent-apps.html',url),request));}
+ if(url.pathname==='/agentes/apps'){const email=await getAdminEmail(request,env),access=email?await getAdminAccess(email,env):null;if(!access?.account?.isActive||access.account.status!=='approved')return Response.redirect(new URL('/agentes/login',url),302);appsResponse=await env.ASSETS.fetch(new Request(new URL('/agent-apps.html',url),request));appsResponse=new HTMLRewriter().on('#nlg-pilot',{element(el){if(isNlgPilotAccount(access.account))el.removeAttribute('hidden');else el.remove();}}).transform(appsResponse);}
  }
  if(request.method==='GET'&&url.hostname==='portal.affinityfc.org'&&url.pathname==='/agent-five-rings-sync.html'&&url.searchParams.get('background')!=='1')return Response.redirect('https://www.affinityfc.org/agent-five-rings-sync.html?manual=1',302);
  const photoResponse=await profilePhotoRoute(request,env,{email:getAdminEmail,access:getAdminAccess,personalPage:async owner=>{await ensureCalendlyTables(env);return ensureAgentPersonalPage(env,owner,{publish:await hasFeature(env,owner,'public_profile')});},send:options=>sendEmail(env,options)});if(photoResponse)return secureResponse(photoResponse,{privateData:true});
@@ -48246,9 +48247,9 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
   const headers={'cache-control':'private, no-store'};
   if(!['GET','POST'].includes(request.method))return Response.json({error:'Método indisponível.'},{status:405,headers});
   const session=await getSession(request,env,ADMIN_COOKIE);
-  if(session?.type!=='admin'||session.auditAccess||String(session.email).toLowerCase()!=='rafaelmcop@hotmail.com')return Response.json({allowed:false},{status:403,headers});
+  if(session?.type!=='admin'||String(session.email).toLowerCase()!=='rafaelmcop@hotmail.com')return Response.json({allowed:false},{status:403,headers});
   const staff=await readStaff('agent');
-  if(Number(staff?.id)!==26)return Response.json({allowed:false},{status:403,headers});
+  if(!isNlgPilotAccount(staff))return Response.json({allowed:false},{status:403,headers});
   if(request.method==='POST'){
    if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403,headers});
    try{
@@ -48259,7 +48260,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
   }
   if(url.searchParams.get('download')!=='1')return Response.json({allowed:true},{headers});
   const archive=await env.ASSETS.fetch(new Request(new URL('/nlg-pilot-package.zip',url)));
-  if(!archive.ok||!archive.headers.get('content-type')?.includes('zip'))return Response.json({error:'Pacote indisponível.'},{status:503,headers});
+  if(!archive.ok||!/^application\/(?:zip|x-zip-compressed|octet-stream)(?:;|$)/i.test(archive.headers.get('content-type')||''))return Response.json({error:'Pacote indisponível.'},{status:503,headers});
   return new Response(archive.body,{headers:{...headers,'content-type':'application/zip','content-disposition':'attachment; filename="affinity-national-life-pilot.zip"'}});
  }
  const accessResponse=await accessRoute(request,env,featureAuth);if(accessResponse)return accessResponse;

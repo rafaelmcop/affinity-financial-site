@@ -1,15 +1,14 @@
 const $=id=>document.getElementById(id);
 const released=await fetch('/api/agent/access',{credentials:'same-origin',cache:'no-store'}).then(async r=>r.ok?new Set((await r.json()).features||[]):new Set()).catch(()=>new Set());
-for(const [id,key]of [['email','email'],['calendar','calendar'],['five-rings','five_rings'],['national-life','national_life']]){const el=$(id);if(el)el.hidden=!released.has(key);}
+for(const [id,key]of [['email','email'],['calendar','calendar'],['five-rings','five_rings']]){const el=$(id);if(el)el.hidden=!released.has(key);}
 
-const pilotAllowed=await fetch('/api/agent/nlg-pilot',{cache:'no-store'}).then(async response=>response.ok&&(await response.json()).allowed===true).catch(()=>false);
-if(pilotAllowed){$('national-life').hidden=true;$('nlg-pilot').hidden=false;if(location.hash==='#national-life')$('nlg-pilot').open=true;}
+if(location.hash==='#national-life'&&$('nlg-pilot'))$('nlg-pilot').open=true;
 
 async function api(name,input){const r=await fetch('/api/trpc/'+name+(input===undefined?'?input='+encodeURIComponent(JSON.stringify({json:{}})):''),{credentials:'same-origin',cache:'no-store',...(input===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({json:input})})}),body=await r.json();if(!r.ok||body.error)throw Error(body.error?.json?.message||'Não foi possível concluir.');return body.result?.data?.json;}
 function state(id,text,connected=false){$(id).textContent=text;$(id).classList.toggle('connected',connected);}
 async function loadEmail(){try{const saved=await api('agent.getEmailSettings');state('email-state',saved?.passwordConfigured?'Configurado':'Não conectado',!!saved?.passwordConfigured);}catch{state('email-state','Verifique a conexão');}}
 async function loadCalendar(){try{const saved=await api('agent.getCalendly');const r=await fetch('/api/agent/calendar-provider',{cache:'no-store'}),feed=r.ok?(await r.json()).connection:null;const connected=!!saved?.connection||!!feed;state('calendar-state',connected?'Conectada':'Não conectada',connected);const calendly=saved?.calendlyConnection||(!saved?.connection?.provider||saved.connection.provider==='calendly'?saved?.connection:null);$('calendly-state').textContent=calendly?'Calendly conectado.':'Calendly não conectado.';$('calendly-app-form').hidden=!!calendly;$('calendly-app-actions').hidden=!calendly;}catch{state('calendar-state','Verifique a conexão');}}
-for(const [formId,get,save,badge,notice]of [['five-app-form','agent.getFiveRingsConnection','agent.saveFiveRingsConnection','five-state','five-app-status'],['nlg-app-form','agent.getNationalLifeConnection','agent.saveNationalLifeConnection','nlg-state','nlg-app-status']]){
+for(const [formId,get,save,badge,notice]of [['five-app-form','agent.getFiveRingsConnection','agent.saveFiveRingsConnection','five-state','five-app-status']]){
  const form=$(formId);if(form.closest('details').hidden)continue;async function load(){try{const saved=await api(get);form.elements.portalEmail.value=saved?.portalEmail||'';form.elements.password.required=!saved?.passwordConfigured;state(badge,saved?.passwordConfigured?'Configurado':'Não conectado',!!saved?.passwordConfigured);}catch(error){state(badge,'Verifique a conexão');$(notice).textContent=error.message;}}
  form.onsubmit=async event=>{event.preventDefault();const b=event.submitter;b.disabled=true;try{await api(save,{portalEmail:form.elements.portalEmail.value.trim(),password:form.elements.password.value});form.elements.password.value='';await load();$(notice).textContent='Conexão salva. As verificações de segurança são feitas no portal do provedor.';}catch(error){$(notice).textContent=error.message;}finally{b.disabled=false;}};void load();
 }
