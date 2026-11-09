@@ -2,7 +2,7 @@ import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
 import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
 import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
 import {noticeReadRoute} from './notice-read.js';
-import {adminAuditAccess,auditSessionValid} from './admin-audit-access.js';
+import {adminAuditAccess,auditSessionValid,endAuditOnLogout} from './admin-audit-access.js';
 import {confirmedCommunicationProgress,pendingCommunicationProgress} from './message-crm-progress.js';
 import {syncApplicationClient} from './application-crm-sync.js';
 import {queueProposalDocuments,readQueuedProposalDocuments} from './proposal-document-enrichment.js';
@@ -48270,7 +48270,14 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
  if(sensitiveResource(url.pathname))return perimeterHeaders(new Response('Not found',{status:404}),url.pathname);
  if(['GET','HEAD'].includes(request.method)&&(url.pathname==='/index.html'||(url.hostname==='affinityfc.org'&&url.pathname==='/'))){url.hostname='www.affinityfc.org';url.pathname='/';return perimeterHeaders(Response.redirect(url.toString(),301),url.pathname);}
- let response=await auditedPortalFetch.call(this,request,env,ctx);
+ let portalRequest=request;
+ if(request.method==='POST'&&url.pathname==='/api/auth.logout'){
+  if(request.headers.get('origin')&&request.headers.get('origin')!==url.origin)return perimeterHeaders(Response.json({error:'Solicitação inválida.'},{status:403}),url.pathname);
+  const headers=new Headers(request.headers);headers.set('content-type','application/json');
+  portalRequest=new Request(new URL('/api/trpc/auth.logout',url),{method:'POST',headers,body:'{}'});
+ }
+ let response=await auditedPortalFetch.call(this,portalRequest,env,ctx);
+ response=await endAuditOnLogout(request,response,env,getSession);
  if(response.headers.get('content-type')?.includes('text/html')&&(request.headers.get('cookie')||'').includes('affinity_audit_master=')){const auditMaster=await getSession(request,env,'affinity_audit_master');if(auditMaster?.type==='admin')response=new HTMLRewriter().on('body',{element(el){el.append('<script src="/audit-return.js?v=1" defer></script>',{html:true});}}).transform(response);}
 
  if(request.method==='GET'&&response.status===200&&response.headers.get('content-type')?.includes('text/html')&&!privatePage(url.pathname)&&url.pathname!=='/'){

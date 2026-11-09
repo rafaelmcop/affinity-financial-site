@@ -13,6 +13,21 @@ export async function auditSessionValid(env,session,request){
  if(valid&&request&&!recorded.has(request)){recorded.add(request);await env.DB.prepare('CREATE TABLE IF NOT EXISTS adminAuditRequests(id TEXT PRIMARY KEY,auditId TEXT NOT NULL,actor TEXT NOT NULL,method TEXT NOT NULL,path TEXT NOT NULL,createdAt INTEGER NOT NULL)').run();await env.DB.prepare('INSERT INTO adminAuditRequests VALUES(?,?,?,?,?,?)').bind(crypto.randomUUID(),session.auditAccess,row.actor,request.method,new URL(request.url).pathname,Date.now()).run();}
  return valid;
 }
+async function closeAudit(env,restore){
+ await env.DB.prepare('UPDATE adminAuditAccess SET endedAt=? WHERE actor=? AND id=? AND endedAt IS NULL').bind(Date.now(),String(restore.email).toLowerCase(),restore.auditRestore).run();
+}
+export async function endAuditOnLogout(request,response,env,session){
+ if(request.method!=='POST'||!response.ok||!(request.headers.get('cookie')||'').includes(backup+'='))return response;
+ const url=new URL(request.url),origin=request.headers.get('origin');
+ if(origin&&origin!==url.origin)return response;
+ if(!['/api/auth.logout','/api/assistants/logout'].includes(url.pathname)&&!(url.pathname.startsWith('/api/trpc/')&&url.pathname.slice('/api/trpc/'.length).split(',').includes('auth.logout')))return response;
+ const restore=await session(request,env,backup);
+ if(restore?.type!=='admin'||!restore.auditRestore)return response;
+ await closeAudit(env,restore);
+ const headers=new Headers(response.headers);
+ for(const name of [...cookies,backup])headers.append('set-cookie',name+'=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax');
+ return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+}
 export async function adminAuditAccess(request,env,auth){
  const url=new URL(request.url);if(url.pathname!=='/api/admin/audit-access')return null;
  const json=(data,status=200)=>Response.json(data,{status,headers:{'cache-control':'private, no-store'}});
@@ -29,11 +44,11 @@ export async function adminAuditAccess(request,env,auth){
   const set=(name,value,age=3600)=>headers.append('set-cookie',name+'='+value+'; Path=/; Max-Age='+age+'; HttpOnly; Secure; SameSite=Lax');
   if(input.action==='stop'){
    if(!restore)return json({error:'Nenhuma auditoria aberta.'},400);
-   await env.DB.prepare('UPDATE adminAuditAccess SET endedAt=? WHERE actor=? AND id=? AND endedAt IS NULL').bind(Date.now(),actor,restore.auditRestore||'').run();
+   await closeAudit(env,restore);
    for(const name of cookies)set(name,'',0);set(cookies[0],await auth.createSession({type:'admin',email:actor},env,28800),28800);set(backup,'',0);
    return new Response(JSON.stringify({ok:true,url:'/admin/usuarios'}),{headers});
   }
-  if(restore)return json({error:'Encerre a auditoria atual antes de abrir outra.'},409);
+  if(restore&&(normal?.type!=='admin'||normal.auditAccess||String(normal.email).toLowerCase()!==actor))return json({error:'Encerre a auditoria atual antes de abrir outra.'},409);
   await confirmAdmin(env,actor,input,auth.compare);
   const email=String(input.email||'').trim().toLowerCase(),kind=input.kind;
   let target,payload,destination,cookie;
@@ -41,6 +56,7 @@ export async function adminAuditAccess(request,env,auth){
   else if(kind==='affiliate'){target=await env.DB.prepare("SELECT id,email FROM affiliates WHERE lower(email)=? AND isActive=1 AND status='approved' AND portalDeletedAt IS NULL").bind(email).first();if(target){payload={type:'affiliate',affiliateId:Number(target.id)};cookie=cookies[1];destination='/afiliados/dashboard';}}
   else if(['agent','admin'].includes(kind)){target=await env.DB.prepare("SELECT id,email,accountType FROM adminAccounts WHERE lower(email)=? AND isActive=1 AND status='approved' AND portalDeletedAt IS NULL").bind(email).first();if(target&&!((kind==='agent'?['agent','both']:['admin','both']).includes(target.accountType)))target=null;if(target){payload={type:'admin',email};cookie=cookies[0];destination=kind==='agent'?'/agentes/dashboard':'/admin/dashboard';}}
   if(!target||email===actor)return json({error:'Selecione outra conta ativa e um portal disponível para ela.'},400);
+  if(restore)await closeAudit(env,restore);
   const id=crypto.randomUUID(),now=Date.now();await env.DB.prepare('INSERT INTO adminAuditAccess(id,actor,target,kind,startedAt,expiresAt) VALUES(?,?,?,?,?,?)').bind(id,actor,email,kind,now,now+3600000).run();
   for(const name of cookies)set(name,'',0);set(backup,await auth.createSession({type:'admin',email:actor,auditRestore:id},env,3600));set(cookie,await auth.createSession({...payload,auditAccess:id,auditActor:actor},env,3600));
   return new Response(JSON.stringify({ok:true,url:destination}),{headers});

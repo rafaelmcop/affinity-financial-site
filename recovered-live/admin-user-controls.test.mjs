@@ -1,7 +1,7 @@
 import {userRolesRoute} from './worker/user-roles.js';
 import {saveUserAccess,accessRoute} from './worker/user-access.js';
 import {test} from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';
-import {ensureHierarchy} from './worker/agent-hierarchy.js';import {referenceAction} from './worker/hierarchy-reference-actions.js';import {adminAuditAccess,auditSessionValid} from './worker/admin-audit-access.js';import {noticeReadRoute} from './worker/notice-read.js';
+import {ensureHierarchy} from './worker/agent-hierarchy.js';import {referenceAction} from './worker/hierarchy-reference-actions.js';import {adminAuditAccess,auditSessionValid,endAuditOnLogout} from './worker/admin-audit-access.js';import {noticeReadRoute} from './worker/notice-read.js';
 function fixture(){const db=new DatabaseSync(':memory:');db.exec(`CREATE TABLE adminAccounts(id INTEGER PRIMARY KEY,email TEXT,name TEXT,passwordHash TEXT,isActive INTEGER,status TEXT,accountType TEXT,adminRole TEXT,portalDeletedAt TEXT);INSERT INTO adminAccounts VALUES(1,'master@test.invalid','Master','hash',1,'approved','both','master',NULL),(2,'agent@test.invalid','Upline','hash',1,'approved','agent','standard',NULL),(3,'child@test.invalid','Child','hash',1,'approved','agent','standard',NULL),(4,'standard@test.invalid','Admin','hash',1,'approved','admin','standard',NULL);CREATE TABLE affiliates(id INTEGER PRIMARY KEY,email TEXT,isActive INTEGER,status TEXT,portalDeletedAt TEXT);INSERT INTO affiliates VALUES(7,'affiliate@test.invalid',1,'approved',NULL);CREATE TABLE portalAssistants(id INTEGER PRIMARY KEY,email TEXT,active INTEGER,sessionVersion INTEGER,deletedAt TEXT);INSERT INTO portalAssistants VALUES(9,'assistant@test.invalid',1,3,NULL);`);const env={ADMIN_EMAIL:'master@test.invalid',DB:{prepare(sql){let args=[];return{bind(...a){args=a;return this},async first(){return db.prepare(sql).get(...args)||null},async all(){return{results:db.prepare(sql).all(...args)}},async run(){const result=db.prepare(sql).run(...args);return{meta:{changes:Number(result.changes),last_row_id:Number(result.lastInsertRowid)}}}}},async batch(statements){db.exec('BEGIN');try{const out=[];for(const s of statements)out.push(await s.run());db.exec('COMMIT');return out;}catch(e){db.exec('ROLLBACK');throw e;}}}};return{db,env};}
 const compare=async(p,h)=>p==='correct'&&h==='hash';const confirmed={confirmed:true,password:'correct'};const request=(input,method='POST')=>new Request('https://portal.test.invalid/api/admin/audit-access',{method,headers:{origin:'https://portal.test.invalid','content-type':'application/json'},...(method==='POST'?{body:JSON.stringify(input)}:{})});
 function authFor(env,email='master@test.invalid',sessions={}){return{session:async(r,e,c)=>sessions[c]||(c==='affinity_admin_session'?{type:'admin',email}:null),access:async owner=>{const account=await env.DB.prepare('SELECT * FROM adminAccounts WHERE email=?').bind(owner).first();return{account,isMaster:account?.adminRole==='master'};},createSession:async payload=>JSON.stringify(payload),compare};}
@@ -15,3 +15,24 @@ test('Five Rings requirement is edited with user permissions and remains indepen
 
 test('Admin avatar returns only the authenticated administrators own profile photo',async()=>{const{db,env}=fixture();db.exec("CREATE TABLE agentPublicProfiles(agentEmail TEXT,photoUrl TEXT);INSERT INTO agentPublicProfiles VALUES('master@test.invalid','/own-photo.png'),('agent@test.invalid','/other-photo.png')");const response=await userRolesRoute(new Request('https://portal.test.invalid/api/admin/account-avatar?email=agent@test.invalid'),env,{email:async()=> 'master@test.invalid',access:async()=>({account:{isActive:1,status:'approved',accountType:'both'}})});assert.deepEqual(await response.json(),{avatar:'/own-photo.png'});});
 test('registration bell lists pending users individually, deduplicates roles and excludes deleted registrations',async()=>{const{db,env}=fixture();db.exec("ALTER TABLE adminAccounts ADD COLUMN createdAt TEXT;ALTER TABLE affiliates ADD COLUMN createdAt TEXT;ALTER TABLE affiliates ADD COLUMN name TEXT;UPDATE adminAccounts SET status='pending' WHERE id IN (2,3);UPDATE adminAccounts SET portalDeletedAt='2026-11-07' WHERE id=3;UPDATE affiliates SET email='agent@test.invalid',status='pending' WHERE id=7");const auth={email:async()=> 'master@test.invalid',access:async()=>({account:{isActive:1,status:'approved',accountType:'both'}})};const req=new Request('https://portal.test.invalid/api/admin/registration-notices');const response=await userRolesRoute(req,env,auth);const data=await response.json();assert.equal(data.requests.length,1);assert.equal(data.requests[0].email,'agent@test.invalid');assert.match(data.requests[0].id,/affiliate-7/);assert.match(data.requests[0].id,/agent-2/);assert.equal((await userRolesRoute(req,env,{...auth,access:async()=>({account:{isActive:1,status:'approved',accountType:'agent'}})})).status,403);});
+
+test('ordinary portal logout revokes the audit and clears the restore cookie',async()=>{
+ for(const path of ['/api/auth.logout','/api/trpc/auth.logout','/api/assistants/logout']){
+  const {db,env}=fixture(),auth=authFor(env);
+  await adminAuditAccess(request({...confirmed,email:'agent@test.invalid',kind:'agent'}),env,auth);
+  const row=db.prepare('SELECT * FROM adminAuditAccess').get();
+  const logout=new Request('https://portal.test.invalid'+path,{method:'POST',headers:{origin:'https://portal.test.invalid',cookie:'affinity_audit_master=fixture'}});
+  const response=await endAuditOnLogout(logout,Response.json({success:true}),env,async()=>({type:'admin',email:row.actor,auditRestore:row.id}));
+  assert.ok(response.headers.getSetCookie().some(cookie=>cookie.startsWith('affinity_audit_master=;')&&cookie.includes('Max-Age=0')));
+  assert.equal(await auditSessionValid(env,{auditAccess:row.id,auditActor:row.actor}),false);
+  assert.equal((await adminAuditAccess(request({...confirmed,email:'agent@test.invalid',kind:'agent'}),env,auth)).status,200);
+ }
+});
+test('a newly signed-in master can replace a stale audit cookie after password confirmation',async()=>{
+ const {db,env}=fixture(),auth=authFor(env);
+ await adminAuditAccess(request({...confirmed,email:'agent@test.invalid',kind:'agent'}),env,auth);
+ const row=db.prepare('SELECT * FROM adminAuditAccess').get();
+ const signedIn=authFor(env,row.actor,{'affinity_audit_master':{type:'admin',email:row.actor,auditRestore:row.id}});
+ assert.equal((await adminAuditAccess(request({...confirmed,email:'child@test.invalid',kind:'agent'}),env,signedIn)).status,200);
+ assert.equal(await auditSessionValid(env,{auditAccess:row.id,auditActor:row.actor}),false);
+});
