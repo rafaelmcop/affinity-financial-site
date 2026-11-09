@@ -375,6 +375,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   let url;
   try { url = new URL(sender.url); } catch { return; }
   if (!tab || !origins.includes(url.origin) || url.pathname !== '/agentes/apps' || sender.frameId !== 0) return;
+  if (message?.type === 'nlg-ready') {
+    reply({ok:true,version:chrome.runtime.getManifest().version});
+    return;
+  }
   if (message?.type === 'nlg-progress') {
     reply(job?.origin === url.origin && job.tabId === tab.id ? job : null);
     return;

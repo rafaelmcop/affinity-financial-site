@@ -9,6 +9,11 @@ if(released.has('five_rings')){
  sync.src='/agent-five-rings-sync.js?v=1.0.14';
  document.head.append(sync);
 }
+const pilotStart=$('nlg-pilot-start');
+pilotStart?.addEventListener('click',()=>{
+ if(pilotStart.dataset.connectorReady==='true')return;
+ $('nlg-pilot-progress').textContent='Conector não detectado nesta aba. Abra Integrações no Chrome ou Edge onde a versão 0.5.1 está instalada. Em chrome://extensions, recarregue o conector, permita acesso a este site e atualize a página.';
+});
 const savedIssues=$('nlg-saved-issues');
 if(savedIssues)savedIssues.addEventListener('toggle',async()=>{
  if(!savedIssues.open)return;

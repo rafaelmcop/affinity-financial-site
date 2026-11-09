@@ -21,13 +21,14 @@
         return item;
       }));
     } catch {
+      delete start.dataset.connectorReady;
       start.disabled = false;
       progress.textContent = 'Recarregue a página depois de atualizar a extensão.';
     }
   }
-  start.disabled = false;
-  progress.textContent = 'Extensão pronta.';
-  start.onclick = async () => {
+
+  start.addEventListener('click', async () => {
+    if(start.dataset.connectorReady!=='true')return;
     start.disabled = true;
     progress.textContent = 'Iniciando conferência…';
     try {
@@ -38,7 +39,15 @@
       start.disabled = false;
       progress.textContent = error.message;
     }
-  };
-  setInterval(refresh, 1200);
-  void refresh();
+  });
+  chrome.runtime.sendMessage({type:'nlg-ready'}).then(ready=>{
+    if(!ready?.ok)throw Error('A extensão não respondeu.');
+    start.dataset.connectorReady='true';
+    start.disabled=false;
+    progress.textContent='Extensão '+ready.version+' pronta.';
+    setInterval(refresh, 1200);
+    void refresh();
+  }).catch(()=>{
+    progress.textContent='A extensão não respondeu. Recarregue o conector e esta página.';
+  });
 })();

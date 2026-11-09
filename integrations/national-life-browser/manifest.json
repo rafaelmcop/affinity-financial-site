@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Affinity · National Life Preview",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "permissions": ["scripting"],
   "background": {"service_worker": "background.js"},
   "host_permissions": ["https://www.nationallife.com/*", "https://www.affinityfc.org/*", "https://portal.affinityfc.org/*", "https://affinityfc.org/*"],
