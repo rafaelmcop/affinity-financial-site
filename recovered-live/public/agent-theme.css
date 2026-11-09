@@ -27,11 +27,7 @@ html[data-agent-theme] #messages :is(article,.message),html[data-agent-theme] .m
 html[data-agent-theme] #messages .sent,html[data-agent-theme] .message.sent{background:var(--agent-sent)!important}
 html[data-agent-theme] #chats button{background:var(--agent-surface)!important;color:var(--agent-text)!important}
 html[data-agent-theme] :is([role=alert],#error,.error){color:var(--agent-text)!important;border-left-color:#d64c4c!important}
-html[data-agent-theme] #agent-appearance{background:var(--agent-surface)!important;color:var(--agent-text)!important;display:block!important;padding:24px;border:1px solid var(--agent-border);border-radius:14px;margin:20px 0}
-#agent-appearance .theme-options{display:flex;gap:20px;flex-wrap:wrap;margin:18px 0}
-#agent-appearance label{display:flex;align-items:center;gap:9px;cursor:pointer}
-#agent-appearance input{width:auto!important;accent-color:#b18b10}
-#agent-theme-save{padding:12px 24px;border:1px solid;border-radius:9px;cursor:pointer}
+#agent-appearance{display:none!important}
 html[data-agent-theme] :is(#agent-number,#my-agent-number,#agent-number-reminder input[name=number]){background:var(--agent-surface)!important;color:var(--agent-text)!important}
 html[data-agent-theme] :focus-visible{outline:3px solid #3984cc!important;outline-offset:3px}
 }
