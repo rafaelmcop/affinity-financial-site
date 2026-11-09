@@ -47633,7 +47633,7 @@ var cloudflare_staging_default = {
     }
     // Calendar sync runs at first daily dashboard access or on manual request.
     if (controller.cron === "*/15 * * * *") {
-      ctx.waitUntil(leadSchema(env).then(()=>enforceAgentSetupDeadlines(env,configuredAccess)).catch(()=>console.error("agent_setup_deadline_maintenance_failed")));
+      ctx.waitUntil(leadSchema(env).then(()=>enforceAgentSetupDeadlines(env,configuredAccess,{send:mail=>sendEmail(env,mail),definitelyNotSent:emailDefinitelyNotSent})).catch(()=>console.error("agent_setup_deadline_maintenance_failed")));
       return;
     }
     if (controller.cron === "15 11 * * *") {
