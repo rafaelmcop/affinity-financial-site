@@ -1,3 +1,4 @@
+import {saveNlgPilotPolicy} from './nlg-pilot-policy.js';
 import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
 import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
 import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
@@ -48243,11 +48244,19 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname==='/nlg-pilot-package.zip')return new Response('Not found',{status:404});
  if(url.pathname==='/api/agent/nlg-pilot'){
   const headers={'cache-control':'private, no-store'};
-  if(request.method!=='GET')return Response.json({error:'Use GET.'},{status:405,headers});
+  if(!['GET','POST'].includes(request.method))return Response.json({error:'Método indisponível.'},{status:405,headers});
   const session=await getSession(request,env,ADMIN_COOKIE);
   if(session?.type!=='admin'||session.auditAccess||String(session.email).toLowerCase()!=='rafaelmcop@hotmail.com')return Response.json({allowed:false},{status:403,headers});
   const staff=await readStaff('agent');
   if(Number(staff?.id)!==26)return Response.json({allowed:false},{status:403,headers});
+  if(request.method==='POST'){
+   if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403,headers});
+   try{
+    const record=await boundedJson(request,2048);
+    const result=await saveNlgPilotPolicy(env.DB,staff.email.toLowerCase(),record);
+    return Response.json(result||{error:'Dados da apólice incompletos ou inválidos.'},{status:result?200:400,headers});
+   }catch(error){return Response.json({error:'Não foi possível validar a apólice.'},{status:error.status||503,headers});}
+  }
   if(url.searchParams.get('download')!=='1')return Response.json({allowed:true},{headers});
   const archive=await env.ASSETS.fetch(new Request(new URL('/nlg-pilot-package.zip',url)));
   if(!archive.ok||!archive.headers.get('content-type')?.includes('zip'))return Response.json({error:'Pacote indisponível.'},{status:503,headers});

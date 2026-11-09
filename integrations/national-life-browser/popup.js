@@ -1,50 +1,117 @@
-const button = document.getElementById('inspect');
 const result = document.getElementById('result');
+const base = 'https://www.nationallife.com';
+const listPath = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent';
+const origins = ['https://www.affinityfc.org', 'https://portal.affinityfc.org', 'https://affinityfc.org'];
 
-button.onclick = async () => {
-  button.disabled = true;
-  result.textContent = 'Conferindo a tabela…';
+async function runOn(tab, func, ...args) {
+  const [reply] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func, args });
+  return reply?.result;
+}
+
+async function affinityRequest(origin, record) {
+  if (location.origin !== origin || location.pathname !== '/agentes/apps') return null;
+  const options = { cache: 'no-store', credentials: 'same-origin' };
+  if (record) {
+    options.method = 'POST';
+    options.headers = { 'content-type': 'application/json' };
+    options.body = JSON.stringify(record);
+  }
+  const response = await fetch('/api/agent/nlg-pilot', options);
+  return response.ok ? response.json() : null;
+}
+
+async function readPage(path, readDetail) {
+  if (location.origin !== 'https://www.nationallife.com' || !location.pathname.startsWith('/agent/')) return null;
+  if (location.pathname.replace(/\/$/, '') === path) {
+    const table = [...document.querySelectorAll('table')].find(element => {
+      const headers = [...element.querySelectorAll('th')].map(cell => cell.textContent.trim());
+      return headers.some(text => /^policy\s*#/i.test(text)) && headers.some(text => /^insured\s*\/\s*annuitant/i.test(text));
+    });
+    const total = document.body.innerText.match(/Viewing\s+([\d,]+)\s+to\s+([\d,]+)\s+of\s+([\d,]+)\s+entries/i);
+    if (!table || !total) return null;
+    const [first, last, count] = total.slice(1).map(value => Number(value.replaceAll(',', '')));
+    const headers = [...table.querySelectorAll('thead th')].map(cell => cell.textContent.trim());
+    const policyIndex = headers.findIndex(text => /^policy\s*#/i.test(text));
+    const dateIndex = headers.findIndex(text => /^issue date/i.test(text));
+    const rows = policyIndex >= 0 && dateIndex >= 0 ? [...table.querySelectorAll('tbody tr')].map(row => [
+      row.cells[policyIndex]?.textContent.trim(), row.cells[dateIndex]?.textContent.trim()
+    ]) : [];
+    return { first, last, count, rows };
+  }
+  if (!readDetail || !/^Inforce Policy Details$/i.test(document.title.trim())) return null;
+  const body = () => document.body.innerText;
+  const policy = () => body().match(/\bPolicy\s*#\s*([A-Z0-9-]{5,30})\b/i)?.[1]?.toUpperCase();
+  const number = policy();
+  if (!number) return null;
+  const controls = [...document.querySelectorAll('button,a,[role=tab]')];
+  const tab = name => controls.find(element => element.textContent.trim().toLowerCase() === name);
+  async function field(label, pattern) {
+    for (let i = 0; i < 30; i++) {
+      if (policy() !== number) return null;
+      const lines = body().split('\n').map(line => line.trim()).filter(Boolean);
+      const values = [...new Set(lines.flatMap((line, index) => line === label && pattern.test(lines[index - 1] || '') ? [lines[index - 1]] : []))];
+      if (values.length === 1) return values[0];
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    return null;
+  }
+  const money = /^\$[\d,]+\.\d{2}$/;
+  const originalTab = controls.find(element => element.getAttribute('aria-selected') === 'true');
+  try {
+    tab('policy')?.click();
+    const deathBenefit = await field('Net Death Benefit', money);
+    tab('payments')?.click();
+    const premium = await field('Premium', money);
+    const frequency = premium ? await field('Premium Payment Frequency', /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Biweekly)$/i) : null;
+    if (policy() !== number) return null;
+    return { number, deathBenefit, premium, frequency };
+  } finally {
+    if (policy() === number) (originalTab || tab('policy'))?.click();
+  }
+}
+
+async function check(readDetail) {
+  result.textContent = 'Conferindo a National Life…';
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = new URL(tab?.url || 'about:blank');
-    if (!['https://www.affinityfc.org', 'https://portal.affinityfc.org', 'https://affinityfc.org'].includes(url.origin) || url.pathname !== '/agentes/apps') {
-      throw Error('Abra a extensão na aba Integrações do portal Affinity.');
+    if (!origins.includes(url.origin) || url.pathname !== '/agentes/apps') throw Error('Abra a extensão na aba Integrações da Affinity.');
+    const permission = await runOn(tab, affinityRequest, url.origin, null);
+    if (!permission?.allowed) throw Error('Piloto indisponível para esta conta.');
+    const tabs = await chrome.tabs.query({ windowId: tab.windowId, url: base + '/agent/*' });
+    const list = tabs.find(candidate => new URL(candidate.url).pathname.replace(/\/$/, '') === listPath);
+    const snapshot = list ? await runOn(list, readPage, listPath, false) : null;
+    if (!readDetail) {
+      if (!snapshot) throw Error('Abra All Clients na National Life, na mesma janela.');
+      result.textContent = 'Página atual: ' + snapshot.first + '–' + snapshot.last + '\nTotal informado: ' + snapshot.count;
+      return;
     }
-    const [permission] = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: async origin => {
-        if (location.origin !== origin || location.pathname !== '/agentes/apps') return false;
-        const response = await fetch('/api/agent/nlg-pilot', { cache: 'no-store', credentials: 'same-origin' });
-        return response.ok && (await response.json()).allowed === true;
-      },
-      args: [url.origin]
-    });
-    if (!permission?.result) throw Error('Piloto indisponível para esta conta.');
-    const tabs = await chrome.tabs.query({ windowId: tab.windowId, url: 'https://www.nationallife.com/agent/*' });
-    const path = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent';
-    const reader = tabs.find(candidate => new URL(candidate.url).pathname.replace(/\/$/, '') === path);
-    if (!reader) throw Error('Abra My Business → Inforce Clients → All Clients na National Life, na mesma janela.');
-    const [snapshot] = await chrome.scripting.executeScript({
-      target: { tabId: reader.id },
-      args: [path],
-      func: expectedPath => {
-        if (location.origin !== 'https://www.nationallife.com' || location.pathname.replace(/\/$/, '') !== expectedPath) return null;
-        const table = [...document.querySelectorAll('table')].find(element => {
-          const headings = [...element.querySelectorAll('th')].map(cell => cell.textContent.trim());
-          return headings.some(text => /^policy\s*#/i.test(text)) && headings.some(text => /^insured\s*\/\s*annuitant/i.test(text));
-        });
-        const total = document.body.innerText.match(/Viewing\s+([\d,]+)\s+to\s+([\d,]+)\s+of\s+([\d,]+)\s+entries/i);
-        if (!table || !total) return null;
-        const [first, last, count] = total.slice(1).map(value => Number(value.replaceAll(',', '')));
-        return { first, last, count };
-      }
-    });
-    if (!snapshot?.result) throw Error('A lista All Clients ainda não está pronta ou mudou de formato.');
-    const { first, last, count } = snapshot.result;
-    result.textContent = ['Página atual: ' + first + '–' + last, 'Total informado pelo portal: ' + count, 'Nenhuma apólice importada.'].join('\n');
+    let detail;
+    for (const candidate of tabs.filter(item => item.title === 'Inforce Policy Details')) {
+      detail = await runOn(candidate, readPage, listPath, true);
+      if (detail) break;
+    }
+    if (!detail) throw Error('Abra a ficha de uma apólice na National Life, na mesma janela.');
+    if (!detail.deathBenefit || !detail.premium || !detail.frequency) throw Error('A leitura não confirmou prêmio, frequência e cobertura. Nenhum dado foi gravado.');
+    const issueDate = snapshot?.rows.find(([number]) => number?.toUpperCase() === detail.number)?.[1];
+    if (!issueDate) throw Error('Mantenha All Clients aberta em outra aba, na página que contém esta apólice, para confirmar a data de emissão.');
+    const comparison = await runOn(tab, affinityRequest, url.origin, { ...detail, issueDate });
+    if (!comparison?.saved) throw Error('A Affinity recusou a validação desta apólice.');
+    result.textContent = [
+      'Apólice: ' + detail.number, 'Emissão: ' + issueDate,
+      'Prêmio: ' + detail.premium + ' (' + detail.frequency + ')', 'Death benefit: ' + detail.deathBenefit,
+      comparison.matched ? 'Apólice localizada no CRM. Campos divergentes: ' + (comparison.differences.join(', ') || 'nenhum') : 'Apólice ainda não cadastrada no CRM do Manezinho.',
+      'Dados salvos apenas na área de teste.'
+    ].join('\n');
   } catch (error) {
     result.textContent = error.message;
-  } finally {
-    button.disabled = false;
   }
-};
+}
+
+for (const [id, detail] of [['inspect', false], ['inspect-policy', true]]) {
+  const button = document.getElementById(id);
+  button.onclick = async () => {
+    button.disabled = true;
+    try { await check(detail); } finally { button.disabled = false; }
+  };
+}
