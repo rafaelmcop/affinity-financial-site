@@ -25,6 +25,7 @@ async function affinityRequest(origin, record) {
   }
   const response = await fetch('/api/agent/nlg-pilot', options);
   const payload = await response.json().catch(() => null);
+  if (record && [401,403].includes(response.status)) throw Error('A sessão do piloto expirou.');
   if (record && !response.ok) throw Error(payload?.error || 'A Affinity recusou a validação.');
   return response.ok ? payload : null;
 }
@@ -106,7 +107,7 @@ function readPage(path, action) {
     }
     return null;
   };
-  if (action === 'policy' || action === 'payments') {
+  if (['policy','payments','transactions'].includes(action)) {
     const control = tab(action);
     if (!control) return { number, unavailable: true };
     control.click();
@@ -147,23 +148,26 @@ function readPage(path, action) {
   }
   const money = /^\$[\d,]+\.\d{2}$/;
   const paymentsVisible = lines.some(line => /^payment details$/i.test(line));
+  const transactionsVisible = lines.some(line => /^(transaction history|transaction details|transaction date|transaction type)$/i.test(line));
+  const paymentFieldsVisible = paymentsVisible || transactionsVisible;
   return {
     number,
     paymentsVisible,
+    transactionsVisible,
     deathBenefit: field(['Net Death Benefit'], money),
-    premium: paymentsVisible ? (field(['Premium'], money) || field(['Modal Premium'], money)) : null,
-    frequency: paymentsVisible ? field(['Premium Payment Frequency', 'Payment Frequency'], /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Bi[ -]?Weekly)$/i) : null
+    premium: paymentFieldsVisible ? (field(['Premium'], money) || field(['Modal Premium'], money)) : null,
+    frequency: paymentFieldsVisible ? field(['Premium Payment Frequency', 'Payment Frequency'], /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Bi[ -]?Weekly)$/i) : null
   };
 }
 
-async function readPolicy(tab) {
-  let expectedNumber;
+async function readPolicy(tab, number) {
+  let expectedNumber = number;
   async function readSection(section, ready) {
     const opened = await runOn(tab, readPage, listPath, section);
     if (!opened || (expectedNumber && opened.number !== expectedNumber)) throw Error('A ficha mudou durante a leitura. Abra a apólice e tente novamente.');
     if (opened.unavailable) return opened;
     let snapshot;
-    for (let attempt = 0; attempt < 20; attempt++) {
+    for (let attempt = 0; attempt < 12; attempt++) {
       snapshot = await runOn(tab, readPage, listPath, 'snapshot');
       if (snapshot?.number !== opened.number) throw Error('A ficha mudou durante a leitura.');
       if (ready(snapshot)) return snapshot;
@@ -177,7 +181,13 @@ async function readPolicy(tab) {
   expectedNumber = policy.number;
   result.textContent = 'Conferindo o prêmio na aba Payments…';
   const payment = await readSection('payments', item => item.premium && item.frequency);
-  return { number: policy.number, deathBenefit: policy.deathBenefit, premium: payment.premium, frequency: payment.frequency };
+  let transactions;
+  if (!payment.premium || !payment.frequency) {
+    result.textContent = 'Conferindo prêmio e frequência na aba Transactions…';
+    transactions = await readSection('transactions', item => item.transactionsVisible && (payment.premium || item.premium) && (payment.frequency || item.frequency));
+    if (!transactions.transactionsVisible) transactions = null;
+  }
+  return { number: policy.number, deathBenefit: policy.deathBenefit, premium: payment.premium || transactions?.premium, frequency: payment.frequency || transactions?.frequency };
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -210,7 +220,7 @@ async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
   let listTab, detailsTab, expected = 0, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0;
   const seen = new Set();
-  const counts = () => `Registradas: ${saved}/${expected} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Sem identificação: ${failed}`;
+  const counts = () => `Registradas: ${saved}/${expected} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Não registradas: ${failed}`;
   const issues = document.getElementById('issues');
   const issueList = document.getElementById('issue-list');
   function note(number, message) {
@@ -219,11 +229,32 @@ async function batch(affinity, origin, windowId) {
     entry.textContent = number + ' · ' + message;
     issueList.append(entry);
   }
+  const tabMissing = error => /no tab with id|tab (?:was )?closed/i.test(error.message);
+  async function openReader(tab, url) {
+    if (tab) {
+      try { return await chrome.tabs.update(tab.id, { url }); }
+      catch (error) { if (!tabMissing(error)) throw error; }
+    }
+    return chrome.tabs.create({ url, active: false, windowId });
+  }
+  async function restorePage(first, reload = false) {
+    let lastError;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (!listTab || reload || attempt) listTab = await openReader(listTab, listUrl);
+        return await goToListPage(listTab, first);
+      } catch (error) {
+        lastError = error;
+        note('Página iniciada no registro ' + first, error.message);
+        await pause(600);
+      }
+    }
+    throw lastError;
+  }
   try {
     if (!(await runOn(affinity, affinityRequest, origin, null))?.allowed) throw Error('Piloto indisponível para esta conta.');
     result.textContent = 'Abrindo All Clients na National Life…';
-    listTab = await chrome.tabs.create({ url: listUrl, active: false, windowId });
-    let page = await goToListPage(listTab, 1);
+    let page = await restorePage(1);
     expected = page.count;
     while (true) {
       if (page.rows.length !== page.last - page.first + 1) throw Error('A página da carteira veio incompleta.');
@@ -238,36 +269,46 @@ async function batch(affinity, origin, windowId) {
           if (url.origin === base && url.pathname.startsWith('/agent/') && url.pathname.replace(/\/$/, '') !== listPath) direct = url.href;
         } catch {}
         let record = {}, detailError = '';
-        try {
+        for (let attempt = 0; attempt < 2; attempt++) try {
           if (direct) {
-            detailsTab = detailsTab ? await chrome.tabs.update(detailsTab.id, { url: direct }) : await chrome.tabs.create({ url: direct, active: false, windowId });
+            detailsTab = await openReader(detailsTab, direct);
           } else if (!await runOn(listTab, readPage, listPath, { open: number })) {
             throw Error('O link da ficha não abriu.');
           }
           const reader = direct ? detailsTab : listTab;
           await waitFor(reader, item => item.number === number, 'A ficha não carregou.');
-          record = await readPolicy(reader);
+          record = await readPolicy(reader, number);
           if (record.number !== number) throw Error('A ficha aberta tem outro número.');
+          break;
         } catch (error) {
           record = {};
           detailError = error.message;
+          if (!tabMissing(error) || attempt) break;
+          note(number, 'Aba de leitura fechada. Tentando novamente.');
+          if (!direct) await restorePage(page.first, true);
         }
-        const comparison = await runOn(affinity, affinityRequest, origin, { ...record, number, issueDate, status, product });
-        if (!comparison?.saved) throw Error('A sessão da Affinity deixou de responder.');
-        saved++;
-        if (comparison.matched) matched++;
-        if (comparison.differences.length) differing++;
-        if (comparison.missing.length || detailError) {
+        let comparison;
+        try {
+          comparison = await runOn(affinity, affinityRequest, origin, { ...record, number, issueDate, status, product });
+          if (!comparison?.saved) throw Error('A Affinity não confirmou o registro.');
+        } catch (error) {
+          failed++;
+          note(number, 'Não registrada · ' + error.message);
+          if (tabMissing(error) || /sessão do piloto expirou/i.test(error.message)) throw Error('A aba Integrações foi fechada ou perdeu a sessão. Abra a Affinity e inicie novamente.');
+        }
+        if (comparison?.saved) saved++;
+        if (comparison?.matched) matched++;
+        if (comparison?.differences.length) differing++;
+        if (comparison?.saved && (comparison.missing.length || detailError)) {
           pending++;
           note(number, [comparison.category, comparison.missing.join(', '), detailError].filter(Boolean).join(' · '));
         }
         if (!direct) {
-          await chrome.tabs.update(listTab.id, { url: listUrl });
-          await goToListPage(listTab, page.first);
+          await restorePage(page.first, true);
         }
       }
       if (page.last >= expected) break;
-      page = await goToListPage(listTab, page.last + 1);
+      page = await restorePage(page.last + 1);
       if (page.count !== expected) throw Error('O total da carteira mudou durante a leitura.');
     }
     result.textContent = (saved === expected ? 'Carteira percorrida.' : 'Conferência parcial.') + '\n' + counts();
