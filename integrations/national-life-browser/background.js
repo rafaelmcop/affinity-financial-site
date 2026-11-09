@@ -1,4 +1,5 @@
-const result = document.getElementById('result');
+let job;
+const result = { set textContent(message) { if (job) job.message = message; } };
 const base = 'https://www.nationallife.com';
 const listPath = '/agent/book-of-business/inforce-book/all-clients/all-clients-agent';
 const pilotMinimum = 264; // Last unfiltered total confirmed for the pilot portfolio.
@@ -16,7 +17,7 @@ async function runOn(tab, func, ...args) {
 }
 
 async function affinityRequest(origin, record) {
-  if (location.origin !== origin || location.pathname !== '/agentes/apps') return null;
+  if (location.origin !== origin) return null;
   const options = { cache: 'no-store', credentials: 'same-origin' };
   if (record) {
     options.method = 'POST';
@@ -24,7 +25,7 @@ async function affinityRequest(origin, record) {
     options.headers = { 'content-type': 'application/json' };
     options.body = JSON.stringify(record);
   }
-  const response = await fetch('/api/agent/nlg-pilot', options);
+  const response = await fetch('/api/agent/nlg-pilot'+(record?'':'?fresh=1'), options);
   const payload = await response.json().catch(() => null);
   if (record && [401,403].includes(response.status)) throw Error('A sessão do piloto expirou.');
   if (record && !response.ok) throw Error(payload?.error || 'A Affinity recusou a validação.');
@@ -123,7 +124,7 @@ function readPage(path, action) {
     }
     return null;
   };
-  if (['policy','payments','transactions'].includes(action)) {
+  if (['policy','payments','transactions','values'].includes(action)) {
     const control = tab(action);
     if (!control) return { number, unavailable: true };
     control.click();
@@ -165,11 +166,13 @@ function readPage(path, action) {
   const money = /^\$[\d,]+\.\d{2}$/;
   const paymentsVisible = lines.some(line => /^payment details$/i.test(line));
   const transactionsVisible = lines.some(line => /^(transaction history|transaction details|transaction date|transaction type)$/i.test(line));
-  const paymentFieldsVisible = paymentsVisible || transactionsVisible;
+  const paymentFieldsVisible = paymentsVisible || transactionsVisible || lines.some(line => /^value details$/i.test(line));
   return {
     number,
     paymentsVisible,
     transactionsVisible,
+    nextDue: paymentFieldsVisible ? field(['Next Premium Due Date'], /^\d{2}\/\d{2}\/\d{4}$/) : null,
+    paymentStatus: paymentFieldsVisible ? field(['Premium Payment Status','Payment Status'], /^(past due|overdue|paid|current|pending|delinquent)$/i) : null,
     deathBenefit: field(['Net Death Benefit'], money),
     premium: paymentFieldsVisible ? (field(['Premium'], money) || field(['Modal Premium'], money)) : null,
     frequency: paymentFieldsVisible ? field(['Premium Payment Frequency', 'Payment Frequency'], /^(Monthly|Quarterly|Semi[ -]?Annual(?:ly)?|Annual(?:ly)?|Weekly|Bi[ -]?Weekly)$/i) : null
@@ -183,7 +186,7 @@ async function readPolicy(tab, number) {
     if (!opened || (expectedNumber && opened.number !== expectedNumber)) throw Error('A ficha mudou durante a leitura. Abra a apólice e tente novamente.');
     if (opened.unavailable) return opened;
     let snapshot;
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 7; attempt++) {
       snapshot = await runOn(tab, readPage, listPath, 'snapshot');
       if (snapshot?.number !== opened.number) throw Error('A ficha mudou durante a leitura.');
       if (ready(snapshot)) return snapshot;
@@ -197,13 +200,16 @@ async function readPolicy(tab, number) {
   expectedNumber = policy.number;
   result.textContent = 'Conferindo o prêmio na aba Payments…';
   const payment = await readSection('payments', item => item.premium && item.frequency);
-  let transactions;
+  let transactions, values;
   if (!payment.premium || !payment.frequency) {
     result.textContent = 'Conferindo prêmio e frequência na aba Transactions…';
     transactions = await readSection('transactions', item => item.transactionsVisible && (payment.premium || item.premium) && (payment.frequency || item.frequency));
     if (!transactions.transactionsVisible) transactions = null;
   }
-  return { number: policy.number, deathBenefit: policy.deathBenefit, premium: payment.premium || transactions?.premium, frequency: payment.frequency || transactions?.frequency };
+  if (!policy.deathBenefit || !(payment.premium || transactions?.premium) || !(payment.frequency || transactions?.frequency)) {
+    values = await readSection('values', item => (policy.deathBenefit || item.deathBenefit) && (payment.premium || transactions?.premium || item.premium) && (payment.frequency || transactions?.frequency || item.frequency));
+  }
+  return { number: policy.number, deathBenefit: policy.deathBenefit || values?.deathBenefit, premium: payment.premium || transactions?.premium || values?.premium, frequency: payment.frequency || transactions?.frequency || values?.frequency, nextDue: payment.nextDue || transactions?.nextDue, paymentStatus: payment.paymentStatus || transactions?.paymentStatus };
 }
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -234,16 +240,11 @@ async function goToListPage(tab, first) {
 
 async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
-  let listTab, detailsTab, expected = pilotMinimum, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0;
+  let listTab, detailsTab, expected = pilotMinimum, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0, reused = 0;
   const seen = new Set();
-  const counts = () => `Registradas: ${saved}/${expected} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Não registradas: ${failed}`;
-  const issues = document.getElementById('issues');
-  const issueList = document.getElementById('issue-list');
+  const counts = () => `Registradas: ${saved}/${expected} · Reaproveitadas: ${reused} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Não registradas: ${failed}`;
   function note(number, message) {
-    issues.hidden = false;
-    const entry = document.createElement('li');
-    entry.textContent = number + ' · ' + message;
-    issueList.append(entry);
+    if (job.issues.length < 400) job.issues.push(number + ' · ' + message);
   }
   const tabMissing = error => /no tab with id|tab (?:was )?closed/i.test(error.message);
   async function openReader(tab, url) {
@@ -277,7 +278,9 @@ async function batch(affinity, origin, windowId) {
     throw lastError;
   }
   try {
-    if (!(await runOn(affinity, affinityRequest, origin, null))?.allowed) throw Error('Piloto indisponível para esta conta.');
+    const access = await runOn(affinity, affinityRequest, origin, null);
+    if (!access?.allowed) throw Error('Piloto indisponível para esta conta.');
+    const fresh = new Map((access.policies || []).map(item => [item.policyNumber, item]));
     result.textContent = 'Abrindo All Clients na National Life…';
     let page = await restorePage(1);
     if (page.count < pilotMinimum) throw Error('A lista está abaixo do total de referência da carteira.');
@@ -286,8 +289,20 @@ async function batch(affinity, origin, windowId) {
       if (page.rows.length !== page.last - page.first + 1) throw Error('A página da carteira veio incompleta.');
       for (const [rawNumber, issueDate, href, status, product] of page.rows) {
         const number = rawNumber?.toUpperCase();
-        if (!number || seen.has(number)) { failed++; continue; }
+        if (!number || seen.has(number)) {
+          failed++;
+          note(number || 'Sem número de apólice', number ? 'Número repetido na lista da National Life.' : 'O registro não trouxe número de apólice.');
+          continue;
+        }
         seen.add(number);
+        const previous = fresh.get(number.replace(/-/g, ''));
+        const date = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(issueDate || '');
+        const issuedOn = date && date[3] + '-' + date[1] + '-' + date[2];
+        if (previous && previous.issuedOn === issuedOn && previous.carrierStatus === status && previous.product === product) {
+          reused++;
+          result.textContent = counts();
+          continue;
+        }
         result.textContent = counts() + '\nAbrindo a próxima apólice…';
         let direct;
         try {
@@ -315,7 +330,17 @@ async function batch(affinity, origin, windowId) {
         }
         let comparison;
         try {
-          comparison = await runOn(affinity, affinityRequest, origin, { ...record, number, issueDate, status, product });
+          const input = { ...record, number, issueDate, status, product, detailUnavailable: Boolean(detailError) };
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              comparison = await runOn(affinity, affinityRequest, origin, input);
+              if (comparison?.saved) break;
+              throw Error('A Affinity não confirmou o registro.');
+            } catch (error) {
+              if (attempt === 2 || tabMissing(error) || /sessão do piloto expirou/i.test(error.message)) throw error;
+              await pause(350 * (attempt + 1));
+            }
+          }
           if (!comparison?.saved) throw Error('A Affinity não confirmou o registro.');
         } catch (error) {
           failed++;
@@ -325,9 +350,9 @@ async function batch(affinity, origin, windowId) {
         if (comparison?.saved) saved++;
         if (comparison?.matched) matched++;
         if (comparison?.differences.length) differing++;
-        if (comparison?.saved && (comparison.missing.length || detailError)) {
+        if (comparison?.saved && (comparison.missing.length || detailError || comparison.paymentNotice)) {
           pending++;
-          note(number, [comparison.category, comparison.missing.join(', '), detailError].filter(Boolean).join(' · '));
+          note(number, [comparison.category, comparison.missing.join(', '), comparison.paymentNotice, detailError].filter(Boolean).join(' · '));
         }
         if (!direct) {
           await restorePage(page.first, true);
@@ -337,7 +362,7 @@ async function batch(affinity, origin, windowId) {
       page = await restorePage(page.last + 1);
       if (page.count !== expected) throw Error('O total da carteira mudou durante a leitura.');
     }
-    result.textContent = (saved === expected ? 'Carteira percorrida.' : 'Conferência parcial.') + '\n' + counts();
+    result.textContent = (saved + reused === expected ? 'Carteira percorrida.' : 'Conferência parcial.') + '\n' + counts();
   } catch (error) {
     result.textContent = 'Conferência interrompida. ' + error.message + '\n' + counts();
   } finally {
@@ -345,26 +370,25 @@ async function batch(affinity, origin, windowId) {
   }
 }
 
-const params = new URLSearchParams(location.search);
-const launcher = document.getElementById('inspect');
-if (params.has('job')) {
-  launcher.hidden = true;
-  const origin = params.get('origin');
-  const id = Number(params.get('job'));
-  const windowId = Number(params.get('window'));
-  if (origins.includes(origin) && Number.isInteger(id) && id > 0 && Number.isInteger(windowId)) void batch({ id }, origin, windowId);
-  else result.textContent = 'Abra o piloto a partir da aba Integrações.';
-} else {
-  launcher.onclick = async () => {
-    launcher.disabled = true;
-    try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const url = new URL(tab?.url || 'about:blank');
-      if (!origins.includes(url.origin) || url.pathname !== '/agentes/apps') throw Error('Abra a extensão na aba Integrações da Affinity.');
-      if (!(await runOn(tab, affinityRequest, url.origin, null))?.allowed) throw Error('Piloto indisponível para esta conta.');
-      const job = new URLSearchParams({ job: String(tab.id), origin: url.origin, window: String(tab.windowId) });
-      await chrome.tabs.create({ url: chrome.runtime.getURL('popup.html') + '?' + job, windowId: tab.windowId });
-    } catch (error) { result.textContent = error.message; }
-    finally { launcher.disabled = false; }
-  };
-}
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  const tab = sender.tab;
+  let url;
+  try { url = new URL(sender.url); } catch { return; }
+  if (!tab || !origins.includes(url.origin) || url.pathname !== '/agentes/apps' || sender.frameId !== 0) return;
+  if (message?.type === 'nlg-progress') {
+    reply(job?.origin === url.origin && job.tabId === tab.id ? job : null);
+    return;
+  }
+  if (message?.type !== 'nlg-start') return;
+  if (job?.running) {
+    reply({ error: 'Já existe uma conferência em andamento nesta extensão.' });
+    return;
+  }
+  job = { running: true, origin: url.origin, tabId: tab.id, message: 'Verificando a sessão…', issues: [] };
+  const keepAlive = setInterval(() => void chrome.runtime.getPlatformInfo().catch(() => {}), 20000);
+  void batch(tab, url.origin, tab.windowId).finally(() => {
+    clearInterval(keepAlive);
+    job.running = false;
+  });
+  reply({ ok: true });
+});

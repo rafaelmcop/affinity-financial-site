@@ -1,4 +1,4 @@
-import {saveNlgPilotPolicy} from './nlg-pilot-policy.js';
+import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
 import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
 import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
 import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
@@ -48258,6 +48258,8 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
     return Response.json(result||{error:'Dados da apólice incompletos ou inválidos.'},{status:result?200:400,headers});
    }catch(error){return Response.json({error:'Não foi possível validar a apólice.'},{status:error.status||503,headers});}
   }
+  if(url.searchParams.get('pending')==='1')return Response.json({pending:await nlgPilotPendingPolicies(env.DB,staff.email.toLowerCase())},{headers});
+  if(url.searchParams.get('fresh')==='1')return Response.json({allowed:true,policies:await nlgPilotFreshPolicies(env.DB,staff.email.toLowerCase())},{headers});
   if(url.searchParams.get('download')!=='1')return Response.json({allowed:true},{headers});
   const archive=await env.ASSETS.fetch(new Request(new URL('/nlg-pilot-package.zip',url)));
   if(!archive.ok||!/^application\/(?:zip|x-zip-compressed|octet-stream)(?:;|$)/i.test(archive.headers.get('content-type')||''))return Response.json({error:'Pacote indisponível.'},{status:503,headers});

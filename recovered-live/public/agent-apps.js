@@ -4,12 +4,31 @@ for(const [id,key]of [['email','email'],['calendar','calendar'],['five-rings','f
 
 if(location.hash==='#national-life'&&$('nlg-pilot'))$('nlg-pilot').open=true;
 
+if(released.has('five_rings')){
+ const sync=document.createElement('script');
+ sync.src='/agent-five-rings-sync.js?v=1.0.14';
+ document.head.append(sync);
+}
+const savedIssues=$('nlg-saved-issues');
+if(savedIssues)savedIssues.addEventListener('toggle',async()=>{
+ if(!savedIssues.open)return;
+ const list=savedIssues.querySelector('ul');
+ try{
+  const response=await fetch('/api/agent/nlg-pilot?pending=1',{cache:'no-store'});
+  if(!response.ok)throw Error();
+  const {pending}=await response.json();
+  list.replaceChildren(...(pending.length?pending.map(row=>row.policyNumber+' · '+row.category+' · '+row.missing.join(', ')):['Nenhuma pendência registrada.']).map(text=>{
+   const item=document.createElement('li');item.textContent=text;return item;
+  }));
+ }catch{list.textContent='Não foi possível carregar as pendências.';}
+});
+
 async function api(name,input){const r=await fetch('/api/trpc/'+name+(input===undefined?'?input='+encodeURIComponent(JSON.stringify({json:{}})):''),{credentials:'same-origin',cache:'no-store',...(input===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({json:input})})}),body=await r.json();if(!r.ok||body.error)throw Error(body.error?.json?.message||'Não foi possível concluir.');return body.result?.data?.json;}
 function state(id,text,connected=false){$(id).textContent=text;$(id).classList.toggle('connected',connected);}
 async function loadEmail(){try{const saved=await api('agent.getEmailSettings');state('email-state',saved?.passwordConfigured?'Configurado':'Não conectado',!!saved?.passwordConfigured);}catch{state('email-state','Verifique a conexão');}}
 async function loadCalendar(){try{const saved=await api('agent.getCalendly');const r=await fetch('/api/agent/calendar-provider',{cache:'no-store'}),feed=r.ok?(await r.json()).connection:null;const connected=!!saved?.connection||!!feed;state('calendar-state',connected?'Conectada':'Não conectada',connected);const calendly=saved?.calendlyConnection||(!saved?.connection?.provider||saved.connection.provider==='calendly'?saved?.connection:null);$('calendly-state').textContent=calendly?'Calendly conectado.':'Calendly não conectado.';$('calendly-app-form').hidden=!!calendly;$('calendly-app-actions').hidden=!calendly;}catch{state('calendar-state','Verifique a conexão');}}
 for(const [formId,get,save,badge,notice]of [['five-app-form','agent.getFiveRingsConnection','agent.saveFiveRingsConnection','five-state','five-app-status']]){
- const form=$(formId);if(form.closest('details').hidden)continue;async function load(){try{const saved=await api(get);form.elements.portalEmail.value=saved?.portalEmail||'';form.elements.password.required=!saved?.passwordConfigured;state(badge,saved?.passwordConfigured?'Configurado':'Não conectado',!!saved?.passwordConfigured);}catch(error){state(badge,'Verifique a conexão');$(notice).textContent=error.message;}}
+ const form=$(formId);if(form.closest('details').hidden)continue;async function load(){try{const saved=await api(get);if(saved?.lastImport||saved?.lastError){const last=saved?.lastImport;$('five-app-status').textContent=[last&&('Última sincronização: '+last.policies+' apólices novas · '+last.updated+' atualizadas.'),saved.lastError||last?.warning].filter(Boolean).join(' ');}form.elements.portalEmail.value=saved?.portalEmail||'';form.elements.password.required=!saved?.passwordConfigured;state(badge,saved?.passwordConfigured?'Configurado':'Não conectado',!!saved?.passwordConfigured);}catch(error){state(badge,'Verifique a conexão');$(notice).textContent=error.message;}}
  form.onsubmit=async event=>{event.preventDefault();const b=event.submitter;b.disabled=true;try{await api(save,{portalEmail:form.elements.portalEmail.value.trim(),password:form.elements.password.value});form.elements.password.value='';await load();$(notice).textContent='Conexão salva. As verificações de segurança são feitas no portal do provedor.';}catch(error){$(notice).textContent=error.message;}finally{b.disabled=false;}};void load();
 }
 $('calendly-app-form').onsubmit=async event=>{event.preventDefault();const b=event.submitter;b.disabled=true;try{await api('agent.connectCalendly',{token:event.target.elements.token.value.trim()});event.target.elements.token.value='';await loadCalendar();}catch(error){$('calendly-state').textContent=error.message;}finally{b.disabled=false;}};
