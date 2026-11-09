@@ -94,13 +94,14 @@ function readPage(path, action) {
     const policyIndex = headers.findIndex(text => /^policy\s*#/i.test(text));
     const dateIndex = headers.findIndex(text => /^issue date/i.test(text));
     const statusIndex = headers.findIndex(text => /^status$/i.test(text));
+    const agentIndex = headers.findIndex(text => /^agent$/i.test(text));
     const productIndex = headers.findIndex(text => /^(type|product)$/i.test(text));
-    const cells = policyIndex >= 0 ? [...table.querySelectorAll('tbody tr')].map(row => [row.cells[policyIndex], row.cells[dateIndex], row.cells[statusIndex], row.cells[productIndex]]) : [];
-    const rows = cells.map(([policy, date, status, product]) => [
-      policy?.textContent.trim(), date?.textContent.trim(), policy?.querySelector('a[href]')?.href || '', status?.textContent.trim(), product?.textContent.trim()
+    const cells = policyIndex >= 0 ? [...table.querySelectorAll('tbody tr')].map(row => [row.cells[policyIndex], row.cells[dateIndex], row.cells[statusIndex], row.cells[productIndex], row.cells[agentIndex]]) : [];
+    const rows = cells.map(([policy, date, status, product, agent]) => [
+      policy?.textContent.trim(), date?.textContent.trim(), policy?.querySelector('a[href]')?.href || '', status?.textContent.trim(), product?.textContent.trim(), agent?.innerText.trim().replace(/\s+/g, ' ')
     ]);
     if (typeof action === 'object' && action?.open) {
-      const index = rows.findIndex(([number]) => number?.toUpperCase() === action.open);
+      const index = rows.findIndex(([number]) => number?.toUpperCase().replace(/-/g,'') === action.open);
       const link = cells[index]?.[0]?.querySelector('a,button,[role=link]');
       if (!link) return false;
       link.click();
@@ -110,7 +111,7 @@ function readPage(path, action) {
   }
   if (!action) return null;
   const body = () => document.body.innerText;
-  const policy = () => body().match(/\bPolicy\s*#\s*([A-Z0-9-]{5,30})\b/i)?.[1]?.toUpperCase();
+  const policy = () => body().match(/\bPolicy\s*#\s*([A-Z0-9-]{5,30})\b/i)?.[1]?.toUpperCase().replace(/-/g,'');
   const number = policy();
   if (!number) return null;
   const normalize = value => String(value ?? '').replace(/[\s\u00a0]+/g, ' ').trim();
@@ -240,9 +241,9 @@ async function goToListPage(tab, first) {
 
 async function batch(affinity, origin, windowId) {
   const listUrl = base + listPath;
-  let listTab, detailsTab, expected = pilotMinimum, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0, reused = 0;
-  const seen = new Set();
-  const counts = () => `Registradas: ${saved}/${expected} · Reaproveitadas: ${reused} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Não registradas: ${failed}`;
+  let listTab, detailsTab, expected = pilotMinimum, saved = 0, matched = 0, differing = 0, failed = 0, pending = 0, reused = 0, duplicateRows = 0;
+  const seen = new Map();
+  const counts = () => `Registradas: ${saved}/${expected} · Reaproveitadas: ${reused} · Com campos pendentes: ${pending} · No CRM: ${matched} · Com divergência: ${differing} · Linhas repetidas: ${duplicateRows} · Não registradas: ${failed}`;
   function note(number, message) {
     if (job.issues.length < 400) job.issues.push(number + ' · ' + message);
   }
@@ -287,14 +288,28 @@ async function batch(affinity, origin, windowId) {
     expected = page.count;
     while (true) {
       if (page.rows.length !== page.last - page.first + 1) throw Error('A página da carteira veio incompleta.');
-      for (const [rawNumber, issueDate, href, status, product] of page.rows) {
-        const number = rawNumber?.toUpperCase();
-        if (!number || seen.has(number)) {
+      const assignments = page.rows.flatMap(([number,,,,,agent])=>number&&agent?[{number:number.slice(0,30),agent:agent.slice(0,120)}]:[]);
+      for(let index=0;index<assignments.length;index+=10){
+        try{
+          const response=await runOn(affinity,affinityRequest,origin,{assignments:assignments.slice(index,index+10)});
+          if(!response?.saved)throw Error('Vínculos não confirmados pela Affinity.');
+        }catch(error){note('Vínculos de agentes na página '+page.first,error.message);}
+      }
+      for (const [rawNumber, issueDate, href, status, product, agent] of page.rows) {
+        const number = rawNumber?.toUpperCase().replace(/-/g,'');
+        if (!number) {
           failed++;
-          note(number || 'Sem número de apólice', number ? 'Número repetido na lista da National Life.' : 'O registro não trouxe número de apólice.');
+          note('Sem número de apólice', 'O registro não trouxe número de apólice.');
           continue;
         }
-        seen.add(number);
+        if(seen.has(number)){
+          duplicateRows++;
+          const agents=seen.get(number);
+          if(agent)agents.add(agent);
+          note(number, agents.size>1?'Mais de um agente listado: '+[...agents].join(' / '):'Linha repetida. '+(agent?'Mesmo agente listado: '+agent:'A seguradora não informou um segundo agente.'));
+          continue;
+        }
+        seen.set(number,new Set(agent?[agent]:[]));
         const previous = fresh.get(number.replace(/-/g, ''));
         const date = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(issueDate || '');
         const issuedOn = date && date[3] + '-' + date[1] + '-' + date[2];
@@ -362,7 +377,7 @@ async function batch(affinity, origin, windowId) {
       page = await restorePage(page.last + 1);
       if (page.count !== expected) throw Error('O total da carteira mudou durante a leitura.');
     }
-    result.textContent = (saved + reused === expected ? 'Carteira percorrida.' : 'Conferência parcial.') + '\n' + counts();
+    result.textContent = (saved + reused + duplicateRows === expected ? 'Carteira percorrida.' : 'Conferência parcial.') + '\n' + counts();
   } catch (error) {
     result.textContent = 'Conferência interrompida. ' + error.message + '\n' + counts();
   } finally {

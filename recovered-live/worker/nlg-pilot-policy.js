@@ -38,6 +38,7 @@ async function ensureReviews(db) {
   if (prepared.has(db)) return;
   await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotPolicyReviews (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,issuedOn TEXT,premiumCents INTEGER,premiumFrequency TEXT,deathBenefitCents INTEGER,carrierStatus TEXT NOT NULL,category TEXT NOT NULL,product TEXT NOT NULL,missingJson TEXT NOT NULL,checkedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber))').run();
   await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotPaymentChecks (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,nextDueOn TEXT,paymentStatus TEXT,checkedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber))').run();
+  await db.prepare('CREATE TABLE IF NOT EXISTS nlgPilotPolicyAgents (owner TEXT NOT NULL,policyNumber TEXT NOT NULL,agentKey TEXT NOT NULL,agentLabel TEXT NOT NULL,lastSeenAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,policyNumber,agentKey))').run();
   prepared.add(db);
 }
 
@@ -54,6 +55,29 @@ export async function nlgPilotPendingPolicies(db, owner) {
   await ensureReviews(db);
   const {results} = await db.prepare("SELECT r.policyNumber,r.category,r.missingJson,p.paymentStatus FROM nlgPilotPolicyReviews r LEFT JOIN nlgPilotPaymentChecks p ON p.owner=r.owner AND p.policyNumber=r.policyNumber WHERE r.owner=? AND (r.missingJson<>'[]' OR p.paymentStatus IN ('past due','overdue','delinquent')) ORDER BY r.checkedAt DESC,r.policyNumber LIMIT 400").bind(owner).all();
   return results.map(({policyNumber,category,missingJson,paymentStatus})=>({policyNumber,category,missing:[...JSON.parse(missingJson),...(['past due','overdue','delinquent'].includes(paymentStatus)?['atraso informado pela National Life']:[])]}));
+}
+
+export async function saveNlgPilotAgents(db, owner, assignments) {
+  if (!Array.isArray(assignments) || assignments.length > 10) return null;
+  await ensureReviews(db);
+  const statements = [];
+  for (const item of assignments) {
+    const number = String(item?.number ?? '').trim().toUpperCase().replace(/-/g, '');
+    const label = String(item?.agent ?? '').trim().replace(/\s+/g, ' ').slice(0, 120);
+    if (!/^[A-Z0-9]{5,30}$/.test(number) || !label) continue;
+    statements.push(db.prepare(`INSERT INTO nlgPilotPolicyAgents(owner,policyNumber,agentKey,agentLabel) VALUES (?,?,?,?)
+      ON CONFLICT(owner,policyNumber,agentKey) DO UPDATE SET agentLabel=excluded.agentLabel,lastSeenAt=CURRENT_TIMESTAMP`)
+      .bind(owner,number,label.toLowerCase(),label));
+  }
+  if (statements.length) await db.batch(statements);
+  return { saved: true };
+}
+
+export async function nlgPilotSharedPolicies(db, owner) {
+  await ensureReviews(db);
+  const {results} = await db.prepare(`SELECT policyNumber,json_group_array(agentLabel) AS agents
+    FROM nlgPilotPolicyAgents WHERE owner=? GROUP BY policyNumber HAVING COUNT(*)>1 ORDER BY policyNumber LIMIT 400`).bind(owner).all();
+  return results.map(row=>({policyNumber:row.policyNumber,agents:JSON.parse(row.agents)}));
 }
 
 export async function saveNlgPilotPolicy(db, owner, input) {

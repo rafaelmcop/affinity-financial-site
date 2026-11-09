@@ -1,4 +1,4 @@
-import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
+import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,nlgPilotSharedPolicies,saveNlgPilotAgents,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
 import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
 import {whatsappPolicy,whatsappActionAllowed,flushWhatsappPolicies} from './whatsapp-modes.js';
 import {sendOnlyWhatsAppPage} from './whatsapp-send-only-page.js';
@@ -48263,10 +48263,12 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
    if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))return Response.json({error:'Solicitação inválida.'},{status:403,headers});
    try{
     const record=await boundedJson(request,2048);
-    const result=await saveNlgPilotPolicy(env.DB,staff.email.toLowerCase(),record);
+    const owner=staff.email.toLowerCase();
+    const result=Object.hasOwn(record||{},'assignments')?await saveNlgPilotAgents(env.DB,owner,record.assignments):await saveNlgPilotPolicy(env.DB,owner,record);
     return Response.json(result||{error:'Dados da apólice incompletos ou inválidos.'},{status:result?200:400,headers});
    }catch(error){return Response.json({error:'Não foi possível validar a apólice.'},{status:error.status||503,headers});}
   }
+  if(url.searchParams.get('shared')==='1')return Response.json({shared:await nlgPilotSharedPolicies(env.DB,staff.email.toLowerCase())},{headers});
   if(url.searchParams.get('pending')==='1')return Response.json({pending:await nlgPilotPendingPolicies(env.DB,staff.email.toLowerCase())},{headers});
   if(url.searchParams.get('fresh')==='1')return Response.json({allowed:true,policies:await nlgPilotFreshPolicies(env.DB,staff.email.toLowerCase())},{headers});
   if(url.searchParams.get('download')!=='1')return Response.json({allowed:true},{headers});

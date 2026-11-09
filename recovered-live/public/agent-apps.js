@@ -12,7 +12,7 @@ if(released.has('five_rings')){
 const pilotStart=$('nlg-pilot-start');
 pilotStart?.addEventListener('click',()=>{
  if(pilotStart.dataset.connectorReady==='true')return;
- $('nlg-pilot-progress').textContent='Conector não detectado nesta aba. Abra Integrações no Chrome ou Edge onde a versão 0.5.1 está instalada. Em chrome://extensions, recarregue o conector, permita acesso a este site e atualize a página.';
+ $('nlg-pilot-progress').textContent='Conector não detectado nesta aba. Abra Integrações no Chrome ou Edge onde a versão 0.5.2 está instalada. Em chrome://extensions, recarregue o conector, permita acesso a este site e atualize a página.';
 });
 const savedIssues=$('nlg-saved-issues');
 if(savedIssues)savedIssues.addEventListener('toggle',async()=>{
@@ -26,6 +26,20 @@ if(savedIssues)savedIssues.addEventListener('toggle',async()=>{
    const item=document.createElement('li');item.textContent=text;return item;
   }));
  }catch{list.textContent='Não foi possível carregar as pendências.';}
+});
+
+const sharedPolicies=$('nlg-shared-policies');
+sharedPolicies?.addEventListener('toggle',async()=>{
+ if(!sharedPolicies.open)return;
+ const list=sharedPolicies.querySelector('ul');
+ try{
+  const response=await fetch('/api/agent/nlg-pilot?shared=1',{cache:'no-store'});
+  if(!response.ok)throw Error();
+  const {shared}=await response.json();
+  list.replaceChildren(...(shared.length?shared.map(row=>row.policyNumber+' · '+row.agents.join(' / ')):['Nenhum vínculo múltiplo observado ainda.']).map(text=>{
+   const item=document.createElement('li');item.textContent=text;return item;
+  }));
+ }catch{list.textContent='Não foi possível carregar os vínculos.';}
 });
 
 async function api(name,input){const r=await fetch('/api/trpc/'+name+(input===undefined?'?input='+encodeURIComponent(JSON.stringify({json:{}})):''),{credentials:'same-origin',cache:'no-store',...(input===undefined?{}:{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({json:input})})}),body=await r.json();if(!r.ok||body.error)throw Error(body.error?.json?.message||'Não foi possível concluir.');return body.result?.data?.json;}
