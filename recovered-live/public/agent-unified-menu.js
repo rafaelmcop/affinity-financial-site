@@ -10,8 +10,8 @@
   const setup=document.createElement('script');setup.src='/staff-setup-check.js?v=20261108-audit';setup.defer=true;document.head.appendChild(setup);
   const assistantSettings=document.createElement('script');assistantSettings.src='/assistant-settings-link.js?v=2';assistantSettings.defer=true;document.head.appendChild(assistantSettings);
   const matches = (...items) => items.some(item => path === item || path.startsWith(`${item}/`));
-  const trpc = async name => {
-    const input = encodeURIComponent(JSON.stringify({ json: {} }));
+  const trpc = async (name, args = {}) => {
+    const input = encodeURIComponent(JSON.stringify({ json: args }));
     const response = await fetch(`/api/trpc/${name}?input=${input}`, { credentials: "include", cache: "no-store" }), payload = await response.json();
     if (!response.ok || payload?.error) throw new Error(payload?.error?.json?.message || "Não foi possível carregar");
     return payload?.result?.data?.json;
@@ -74,7 +74,7 @@
     showName(profile.name || user.name);
     if (profile.photoUrl) photo.src = profile.photoUrl;
   });
-  trpc("agent.pendingCounts").then(counts => {
+  trpc("agent.pendingCounts", { menuOnly: true }).then(counts => {
     counts = counts || {};
     for (const [id, value] of [["unified-email-badge", counts.newMessages], ["unified-reviews-badge", counts.pendingReviews], ["unified-applications-badge", counts.incompleteProfiles]]) { const badge = document.getElementById(id), count = Number(value || 0); if (badge && count > 0) { badge.textContent = count > 99 ? "99+" : String(count); badge.hidden = false; } }
   }).catch(() => {});

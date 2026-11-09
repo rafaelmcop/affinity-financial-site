@@ -44220,13 +44220,17 @@ Detalhes: ${details}` : ""}`;
   if (name === "agent.pendingCounts") {
     const owner = adminEmail.toLowerCase();
     const permitted=new Set((await userAccess(env,owner)).features);
+    if(input.mailOnly===true){
+      const mail=permitted.has('email')?await env.DB.prepare("SELECT COUNT(*) AS total FROM clientEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner).first():null;
+      return trpcResult({newMessages:Number(mail?.total||0)});
+    }
     const [clientsQuery, policiesQuery, reviewsQuery, internalQuery, messagesQuery, tasksQuery] = await env.DB.batch([
       env.DB.prepare("SELECT id,name,email,phone,birthDate FROM crmClients WHERE lower(assignedAdminEmail)=?").bind(owner),
       env.DB.prepare("SELECT clientId,status,policyNumber,product,issuedAt,premiumAmount,targetPremium,points,coverageAmount,beneficiaries FROM agentPolicies WHERE lower(agentEmail)=?").bind(owner),
       env.DB.prepare("SELECT COUNT(*) AS total FROM testimonials WHERE source='client' AND lower(agentEmail)=? AND agentDecision='pending' AND adminDecision='pending'").bind(owner),
-      env.DB.prepare("SELECT COUNT(*) AS total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(owner),
+      input.menuOnly===true?env.DB.prepare("SELECT 0 AS total"):env.DB.prepare("SELECT COUNT(*) AS total FROM portalMessages WHERE lower(recipientEmail)=? AND readAt IS NULL AND deletedAt IS NULL").bind(owner),
       env.DB.prepare("SELECT COUNT(*) AS total FROM clientEmails WHERE lower(agentEmail)=? AND direction='received' AND readAt IS NULL").bind(owner),
-      env.DB.prepare("SELECT COUNT(*) AS total FROM agentTasks WHERE lower(agentEmail)=? AND status='pending' AND dueAt IS NOT NULL AND title NOT LIKE '%Revis\xE3o de ap\xF3lice%Flex Life%' AND title NOT LIKE 'Revisar a ap\xF3lice %'").bind(owner)
+      input.menuOnly===true?env.DB.prepare("SELECT 0 AS total"):env.DB.prepare("SELECT COUNT(*) AS total FROM agentTasks WHERE lower(agentEmail)=? AND status='pending' AND dueAt IS NOT NULL AND title NOT LIKE '%Revis\xE3o de ap\xF3lice%Flex Life%' AND title NOT LIKE 'Revisar a ap\xF3lice %'").bind(owner)
     ]);
     const clients = clientsQuery.results || [];
     const policies = policiesQuery.results || [];
@@ -44240,6 +44244,11 @@ Detalhes: ${details}` : ""}`;
     const incompleteProfiles = clients.filter(
       (client) => missingClientProfileFields(client, policiesByClient.get(Number(client.id)) || []).length > 0
     ).length;
+    if(input.menuOnly===true)return trpcResult({
+      incompleteProfiles:permitted.has('policies')?incompleteProfiles:0,
+      pendingReviews:permitted.has('reviews')?Number(reviewsQuery.results?.[0]?.total||0):0,
+      newMessages:permitted.has('email')?Number(messagesQuery.results?.[0]?.total||0):0
+    });
     const activePolicies = policies.filter((policy) => String(policy.status || "").toLowerCase() === "active");
     return trpcResult({
       incompleteProfiles: permitted.has("policies")?incompleteProfiles:0,
@@ -48286,7 +48295,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=19" defer></script><script src="/portal-ai.js?v=5" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261108-audit" defer></script><script src="/user-access-menu.js?v=8" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
-  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/portal-ai.js?v=5" defer></script><script src="/portal-notifications.js?v=5" defer></script><script src="/portal-home-notices.js?v=3" defer></script><script src="/internal-messenger.js?v=5" defer></script><script src="/five-rings-background.js?v=10" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=14"></script><script src="/user-access-menu.js?v=8" defer></script><script src="/agent-upline-required.js?v=2" defer></script><script src="/portal-whatsapp-controls.js?v=3" defer></script><script src="/portal-business.js?v=3" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261108-audit" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261108-audit');}}).transform(response);
+  return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/portal-ai.js?v=5" defer></script><script src="/portal-notifications.js?v=5" defer></script><script src="/portal-home-notices.js?v=3" defer></script><script src="/internal-messenger.js?v=5" defer></script><script src="/five-rings-background.js?v=10" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=14"></script><script src="/user-access-menu.js?v=8" defer></script><script src="/agent-upline-required.js?v=2" defer></script><script src="/portal-whatsapp-controls.js?v=3" defer></script><script src="/portal-business.js?v=3" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261109-menu-summary" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261109-menu-summary');}}).transform(response);
  }
  return response;
 };

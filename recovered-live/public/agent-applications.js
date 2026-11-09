@@ -386,7 +386,7 @@ function describeApplicationParent(row,parent,feminine=false){
     localStorage.removeItem("agentSession");
     location.href = "/agentes";
   };
-  api("agent.pendingCounts")
+  api("agent.pendingCounts", { mailOnly: true })
     .then(counts => {
       const badge = $("application-email-badge"),
         total = Number(counts?.newMessages || 0);

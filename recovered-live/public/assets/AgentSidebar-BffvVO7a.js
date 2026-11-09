@@ -62,6 +62,7 @@ import { E as z } from "./external-link-CEjUwZyT.js";
     ["Avaliações", "/agentes/avaliacoes", k],
   ];
 function E() {
+  const [canonicalMenu,setCanonicalMenu]=f.useState(document.body.classList.contains("agent-unified-layout"));
   const [t, s] = u(),
     x = t === "/agentes/crm" || t === "/agentes/mensagens" || t === "/agentes/contato-direto",
     [l, m] = f.useState(x),
@@ -71,7 +72,8 @@ function E() {
     p = g.auth.logout.useMutation(),
     Q = g.agent.getProfile.useQuery(),
     portalAccess = g.auth.me.useQuery(),
-    d = g.agent.pendingCounts.useQuery(void 0, {
+    d = g.agent.pendingCounts.useQuery({ menuOnly: true }, {
+      enabled: !canonicalMenu,
       refetchInterval: 6e4,
       staleTime: 3e4,
     }),
@@ -81,7 +83,6 @@ function E() {
     profileName = Q.data?.name || (() => { try { return JSON.parse(localStorage.getItem("agentSession") || "{}").name || "Agente"; } catch { return "Agente"; } })(),
     initials = profileName.split(/\s+/).filter(Boolean).slice(0, 1).concat(profileName.split(/\s+/).filter(Boolean).slice(-1)).map(r => r[0]).join("").slice(0, 2).toUpperCase(),
     logoutToHome = async () => { try { await p.mutateAsync(); } catch {} localStorage.removeItem("agentSession"); window.location.assign("/"); };
-  const [canonicalMenu,setCanonicalMenu]=f.useState(document.body.classList.contains("agent-unified-layout"));
   f.useEffect(()=>{const ready=()=>setCanonicalMenu(true);document.addEventListener("affinity-agent-menu-ready",ready);return()=>document.removeEventListener("affinity-agent-menu-ready",ready);},[]);
   if(canonicalMenu)return null;
   return e.jsxs(e.Fragment, {
