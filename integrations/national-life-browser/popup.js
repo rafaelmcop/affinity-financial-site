@@ -43,21 +43,32 @@ function readPage(path, action) {
     if (action === 'next') {
       if (last >= count) return false;
       const nextPage = String(Math.ceil(last / (last - first + 1)) + 1);
-      const scopes = [];
-      for (let parent = table.parentElement, depth = 0; parent && depth < 7; parent = parent.parentElement, depth++) scopes.push(parent);
-      const targets = 'button,a,[role=button],[role=link],li,span,div';
       const label = element => String(element.textContent || '').trim().replace(/\s+/g, ' ');
-      for (const scope of scopes) {
-        const controls = [...scope.querySelectorAll(targets)].filter(visible);
-        const next = controls.find(element => [element.getAttribute('aria-label'), element.getAttribute('title'), label(element)].some(value => /^(next(?: page)?|›|»)[.!]?$/i.test(value?.trim() || '')));
-        const page = controls.find(element => label(element) === nextPage && /page/i.test((element.getAttribute('aria-label') || '') + ' ' + (element.closest('nav,[role=navigation],.pagination,[class*="pagin"]')?.className || '')));
-        const control = next || page;
-        if (control) {
-          const clickable = control.closest('button,a,[role=button],[role=link]') || control;
-          if (!visible(clickable)) continue;
-          clickable.click();
-          return true;
+      const nextLabel = /^(next(?: page)?|›|»)[.!]?$/i;
+      const footerText = /\bprevious\b[\s\S]*\bnext\b/i;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const controls = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const text = node.textContent.trim();
+        if (!nextLabel.test(text) && text !== nextPage) continue;
+        const element = node.parentElement;
+        if (!element || !visible(element)) continue;
+        for (let group = element.parentElement, depth = 0; group && group !== document.body && depth < 10; group = group.parentElement, depth++) {
+          if (!footerText.test(label(group))) continue;
+          const clickable = element.closest('button,a,[role=button],[role=link],li,[tabindex]') || element;
+          if (group.contains(clickable) && visible(clickable)) controls.push({ clickable, isNext: nextLabel.test(text), size: label(group).length });
+          break;
         }
+      }
+      controls.sort((a, b) => a.size - b.size || Number(a.isNext) - Number(b.isNext));
+      if (controls.length) {
+        controls[0].clickable.click();
+        return true;
+      }
+      const accessible = [...document.querySelectorAll('button,a,[role=button],[role=link]')].filter(element => visible(element) && nextLabel.test(element.getAttribute('aria-label') || element.getAttribute('title') || ''));
+      if (accessible.length === 1) {
+        accessible[0].click();
+        return true;
       }
       return false;
     }
@@ -187,7 +198,7 @@ async function goToListPage(tab, first) {
   let page = await waitFor(tab, snapshot => snapshot.count > 0, 'Não consegui abrir All Clients. Confira o login da National Life no Chrome.');
   while (page.first < first) {
     const previous = page;
-    if (!await runOn(tab, readPage, listPath, 'next')) throw Error('Não encontrei o botão Next.');
+    if (!await runOn(tab, readPage, listPath, 'next')) throw Error('Não encontrei o controle da próxima página no rodapé de All Clients.');
     page = await waitFor(tab, snapshot => snapshot.first > previous.first, 'A próxima página não carregou.');
     if (page.first !== previous.last + 1 || page.count !== previous.count) throw Error('A lista mudou durante a leitura.');
   }
