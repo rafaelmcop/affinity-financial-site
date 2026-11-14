@@ -14,7 +14,7 @@ document.getElementById('browser-sync').onclick=()=>{
  if(embedded&&!document.getElementById('browser-confirm').checked){browserStatus.textContent='Confirme a conta aberta no Five Rings antes de sincronizar.';return;}
  void browserSync(true);
 };
-if(embedded)return;
+if(embedded||window.affinityCarrierDesktopSupported===false)return;
 const response=await fetch('/api/agent/onboarding/status',{credentials:'same-origin',cache:'no-store'});if(!response.ok){location.replace('/agentes/login');return;}
 const state=await response.json();if(!state.fiveRingsSyncDue&&!manualEntry){if(background)await bridge('backgroundFinish');else location.replace('/agentes/dashboard');return;}
 if(!state.fiveRingsConfigured){if(background){await bridge('backgroundFinish',{error:'Configure o acesso Five Rings para atualizar seus dados.'});return;}status.textContent='Cadastre seu acesso Five Rings. Se ainda não tiver uma conta, adie por 15 dias.';postpone.hidden=false;postpone.onclick=async()=>{postpone.disabled=true;const r=await fetch('/api/agent/onboarding/five-rings-postpone',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:'{}'});if(r.ok)location.replace('/agentes/dashboard');else{status.textContent='Não foi possível adiar. Tente novamente.';postpone.disabled=false;}};return;}
