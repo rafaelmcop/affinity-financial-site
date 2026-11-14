@@ -47376,7 +47376,6 @@ var cloudflare_staging_default = {
     init_icloud_email();
     const url = new URL(request.url);
     if(url.pathname==='/agentes/conectar-email'){const owner=await getAdminEmail(request,env);if(!owner)return Response.redirect(new URL('/agentes/login',url),302);url.pathname='/agent-email-connect.html';return secureResponse(await env.ASSETS.fetch(new Request(url,request)),{privateData:true});}
-    if(url.hostname==='portal.affinityfc.org'&&url.pathname==='/'){url.pathname='/portal-home.html';return secureResponse(await env.ASSETS.fetch(new Request(url,request)));}
     if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
       const origin = request.headers.get("Origin");
       const headers = { "Access-Control-Allow-Methods": "GET,POST,OPTIONS", "Access-Control-Allow-Headers": "Content-Type,Authorization", "Vary": "Origin" };
@@ -48324,6 +48323,15 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
  if(sensitiveResource(url.pathname))return perimeterHeaders(new Response('Not found',{status:404}),url.pathname);
  if(['GET','HEAD'].includes(request.method)&&(url.pathname==='/index.html'||(url.hostname==='affinityfc.org'&&url.pathname==='/'))){url.hostname='www.affinityfc.org';url.pathname='/';return perimeterHeaders(Response.redirect(url.toString(),301),url.pathname);}
+ // The public portal landing page is a static asset and does not need a database or session.
+ if(url.hostname==='portal.affinityfc.org'&&url.pathname==='/'&&['GET','HEAD'].includes(request.method)){
+  const asset=await env.ASSETS.fetch(new Request(new URL('/portal-home.html',url),{method:request.method}));
+  let response=secureResponse(asset);
+  if(request.method==='GET'&&response.headers.get('content-type')?.includes('text/html')){
+   response=new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1"><script src="/portal-language.js?v=9" defer></script>',{html:true});}}).transform(response);
+  }
+  return perimeterHeaders(response,url.pathname);
+ }
  let portalRequest=request;
  if(request.method==='POST'&&url.pathname==='/api/auth.logout'){
   if(request.headers.get('origin')&&request.headers.get('origin')!==url.origin)return perimeterHeaders(Response.json({error:'Solicitação inválida.'},{status:403}),url.pathname);
@@ -48341,6 +48349,25 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(usesPublicAppearance(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('html',{element(el){el.setAttribute('data-public-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/public-theme.css?v=1">',{html:true});}}).transform(response);
  if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=9" defer></script>',{html:true});}}).transform(response);
  return perimeterHeaders(response,url.pathname);
+};
+const protectedPortalFetch=cloudflare_staging_default.fetch;
+cloudflare_staging_default.fetch=async function(request,env,ctx){
+ try{
+  return await protectedPortalFetch.call(this,request,env,ctx);
+ }catch(error){
+  const url=new URL(request.url);
+  const ray=request.headers.get('cf-ray')||'';
+  const errorName=error instanceof Error?error.name:'UnknownError';
+  const category=error instanceof Error&&error.message.startsWith('D1_')?'d1':'runtime';
+  console.error('portal_request_failed',{ray:/^[0-9a-f]{16}(?:-[A-Z]{3})?$/.test(ray)?ray:null,host:url.hostname,method:request.method,category,errorName:['Error','TypeError','ReferenceError','RangeError','SyntaxError'].includes(errorName)?errorName:'OtherError'});
+  const message='Portal temporariamente indisponível. Tente novamente em instantes.';
+  const response=request.method==='HEAD'
+   ?new Response(null,{status:503})
+   :url.pathname.startsWith('/api/')
+    ?Response.json({error:message},{status:503})
+    :new Response(message,{status:503,headers:{'content-type':'text/plain; charset=utf-8'}});
+  return perimeterHeaders(response,url.pathname);
+ }
 };
 export {
   cloudflare_staging_default as default
