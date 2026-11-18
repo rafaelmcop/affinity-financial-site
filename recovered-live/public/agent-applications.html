@@ -314,7 +314,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
             ao agente responsável.
           </div>
           <div class="steps" id="steps"></div>
-          <section id="application-client-details" aria-label="Cliente da aplicação" style="position:sticky;top:0;z-index:10;background:var(--agent-surface,#fff);color:var(--agent-text,#172b3a);padding:12px 16px;border:1px solid var(--agent-border,#cbd5e1);border-radius:10px;font-weight:800;margin-bottom:16px"></section>
+          <section id="application-client-details" aria-label="Cliente da aplicação" style="position:sticky;top:0;z-index:10;background:var(--agent-surface,#fff);color:var(--agent-text,#172b3a);padding:12px 16px;border:1px solid var(--agent-border,#cbd5e1);border-radius:10px;font-weight:800;margin-bottom:16px"></section><p id="application-save-status" role="status" aria-live="polite" style="padding:12px 16px;margin:12px 0;color:#17324d;background:#edf4fa;border:1px solid #b3c4d3;border-radius:10px">Alterações serão gravadas ao salvar ou avançar.</p>
           <form id="form">
             <input type="hidden" id="id" />
             <section class="section" data-step="Cliente">
@@ -665,7 +665,7 @@ html.application-new-view #application-list-toolbar,html.application-new-view #l
       </main>
     </div>
     <script src="/vendor/pdf-lib.min.js?v=1.17.1"></script>
-    <script src="/agent-applications.js?v=20261118-persistence"></script>
+    <script src="/agent-applications.js?v=20261118-save-status"></script>
     <script src="/address-autocomplete.js?v=20261108-address-1" defer></script>
     <script src="/agent-unified-menu.js?v=20260907-4" defer></script>
   </body>

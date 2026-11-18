@@ -856,6 +856,7 @@ function describeApplicationParent(row,parent,feminine=false){
       updateHeight();
       updateBirthPlace();
       showStep(0);
+      showSaveStatus(row.id ? "Ficha carregada do servidor. Salve depois de alterar os dados." : "Nova ficha. Salve para registrar seus dados.");
     } catch (e) {
       notice(e.message, true);
     }
@@ -1503,10 +1504,17 @@ function describeApplicationParent(row,parent,feminine=false){
       else notice(e.message, true);
     }
   }
+  function showSaveStatus(message, error = false) {
+    const status = $("application-save-status");
+    status.textContent = message;
+    status.style.color = error ? "#8b1e14" : "#17324d";
+    status.style.background = error ? "#fff0ed" : "#edf4fa";
+    status.setAttribute("role", error ? "alert" : "status");
+  }
   let savingDraft = null;
   let unsavedChanges = false;
-  $("form").addEventListener("input", () => { unsavedChanges = true; });
-  $("form").addEventListener("change", () => { unsavedChanges = true; });
+  $("form").addEventListener("input", () => { unsavedChanges = true; showSaveStatus("Há alterações pendentes. Salve a ficha antes de sair."); });
+  $("form").addEventListener("change", () => { unsavedChanges = true; showSaveStatus("Há alterações pendentes. Salve a ficha antes de sair."); });
   window.addEventListener("beforeunload", event => {
     if (!unsavedChanges && !savingDraft) return;
     event.preventDefault();
@@ -1522,6 +1530,7 @@ function describeApplicationParent(row,parent,feminine=false){
   }
   async function persistDraft(silent) {
     const snapshot = collect();
+    showSaveStatus("Salvando os dados da ficha…");
     try {
       const result = await api("agent.saveApplication", snapshot, true);
       if (!Number(result?.id)) throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
@@ -1529,12 +1538,15 @@ function describeApplicationParent(row,parent,feminine=false){
       applicationRevision=result.revision||applicationRevision;
       if(result.applicationDate) $("applicationDate").value=result.applicationDate;
       unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id, expectedRevision:snapshot.expectedRevision }) !== JSON.stringify({...snapshot,applicationDate:result.applicationDate||snapshot.applicationDate});
+      const savedAt = new Date().toLocaleString("pt-BR", {timeZone:"America/New_York"});
+      showSaveStatus(unsavedChanges ? "O envio anterior foi salvo, mas há novas alterações pendentes nesta tela." : "Salvo no servidor em " + savedAt + " · Nova York. Você pode fechar e reabrir a ficha.");
       if (!silent) {
         notice(result.crm?.review?"Rascunho salvo. Há divergência de identidade ou data de nascimento com o CRM; revise a ficha antes de atualizar esse dado.":"Rascunho salvo com segurança.",result.crm?.review===true);
       }
       return true;
     } catch (e) {
       unsavedChanges = true;
+      showSaveStatus("Não foi possível salvar: " + e.message + " Mantenha esta ficha aberta.", true);
       notice(`Não foi possível salvar: ${e.message} Os campos continuam nesta tela; não feche nem atualize a página.`, true, true);
       return false;
     }
