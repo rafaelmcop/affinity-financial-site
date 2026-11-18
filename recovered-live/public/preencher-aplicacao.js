@@ -16,8 +16,8 @@ async function prepareFile(file){const name=String(file.name||''),type=String(fi
 async function readFiles(e){const selected=[...e.target.files];if(!selected.length||uploadingFiles)return;uploadingFiles=true;const save=$('save'),category=$('document-category').value;save.disabled=true;show('msg','Enviando os documentos com segurança. Aguarde…');try{for(const file of selected){const prepared={...await prepareFile(file),category};if(prepared.remote){const stored=await api('applications.uploadDocument',{id,code,token,name:prepared.name,type:prepared.type,data:prepared.data,category},true);attachments.push(stored)}else attachments.push(prepared)}showFiles();show('msg',`${selected.length} arquivo(s) enviado(s) com segurança.`)}catch(error){show('msg',error.message,true)}finally{uploadingFiles=false;save.disabled=false;e.target.value=''}}
 function showOnlyPending(data={}){const optional=new Set(['referral1Name','referral1Phone','referral1Email','referral2Name','referral2Phone','referral2Email','referral3Name','referral3Phone','referral3Email','document-category','camera','files']);let pending=0;document.querySelectorAll('#form label').forEach(label=>{const control=label.querySelector('input,select,textarea');if(!control)return;const key=control.id,value=data[key]??control.value;if(optional.has(key))return;if(String(value??'').trim()!=='')label.classList.add('completed-field');else if(label.style.display!=='none')pending++});$('pending-summary').textContent=pending?`Encontramos ${pending} informação(ões) pendente(s). Os dados já preenchidos foram ocultados para facilitar.`:'Seu cadastro já possui todas as informações necessárias. Os documentos abaixo são opcionais.'}
 function show(id,message,error=false){const box=document.createElement('div');box.className='notice';box.textContent=message;$(id).replaceChildren(box);$(id).setAttribute('role',error?'alert':'status')}
-async function enterApplication(){try{$('link-error').classList.add('hidden');$('retry-access').classList.add('hidden');code=token?'':$('code').value.trim().toUpperCase();const r=await api('applications.verifyCode',{id,code,token},true);build(r.application);setupConditions(r.application);setupBirthPlace(r.application);setupMeasurements(r.application);for(const key of ['reviewCity','reviewState','reviewRating','reviewQuote'])$(key)?.parentElement.remove();showOnlyPending(r.application);setupSteps(r.application);$('gate').classList.add('hidden');$('application').classList.remove('hidden');$('access-intro').textContent='Preencha as informações pendentes e envie ao seu agente.'}catch(e){if(token){$('access-intro').textContent='Não foi possível abrir seu link privado.';$('link-error').textContent=e.message;$('link-error').classList.remove('hidden');$('retry-access').classList.remove('hidden')}else{$('gate').classList.remove('hidden');show('gate-msg',e.message,true)}}}
-let stepIndex=0, stepPanels=[], stepTitles=[], savedSteps=[], savingStep=false, uploadingFiles=false;
+async function enterApplication(){try{$('link-error').classList.add('hidden');$('retry-access').classList.add('hidden');code=token?'':$('code').value.trim().toUpperCase();const r=await api('applications.verifyCode',{id,code,token},true);build(r.application);setupConditions(r.application);setupBirthPlace(r.application);setupMeasurements(r.application);for(const key of ['reviewCity','reviewState','reviewRating','reviewQuote'])$(key)?.parentElement.remove();showOnlyPending(r.application);setupSteps(r.application);revision=r.revision||'';$('gate').classList.add('hidden');$('application').classList.remove('hidden');$('access-intro').textContent='Preencha as informações pendentes e envie ao seu agente.'}catch(e){if(token){$('access-intro').textContent='Não foi possível abrir seu link privado.';$('link-error').textContent=e.message;$('link-error').classList.remove('hidden');$('retry-access').classList.remove('hidden')}else{$('gate').classList.remove('hidden');show('gate-msg',e.message,true)}}}
+let stepIndex=0, stepPanels=[], stepTitles=[], savedSteps=[], savingStep=false, uploadingFiles=false, revision='';
 $('enter').onclick=enterApplication;$('retry-access').onclick=enterApplication;if(token){enterApplication()}else{$('access-intro').textContent='Abra o link privado completo enviado pelo seu agente. Se recebeu um código separado, informe-o abaixo.';$('gate').classList.remove('hidden')}
 function setupSteps(data){
  const groups=[
@@ -82,13 +82,19 @@ async function saveCurrentStep(){
   if(stepTitles[stepIndex]==='Documentos')keys.add('attachments');
   const data=Object.fromEntries(Object.entries(all).filter(([key])=>keys.has(key)));
   const sections=[...new Set([...savedSteps,stepTitles[stepIndex]])];data.clientSavedSections=sections;
-  await api('applications.clientSave',{id,code,token,applicationData:data},true);
+  const result=await api('applications.clientSave',{id,code,token,expectedRevision:revision,applicationData:data},true);
+  revision=result.revision||revision;
   savedSteps=sections;updateStepButtons();
   show('msg','Quadro salvo. Você pode fechar e continuar depois pelo mesmo link.');
   return true;
  }catch(error){show('msg',error.message,true);return false}
  finally{savingStep=false;buttons.forEach(button=>button.disabled=false)}
 }
+$('toggle-completed').onclick=()=>{
+ const shown=$('form').classList.toggle('show-completed');
+ $('toggle-completed').setAttribute('aria-pressed',String(shown));
+ $('toggle-completed').textContent=shown?'Ocultar dados já preenchidos':'Mostrar dados já preenchidos';
+};
 $('save').onclick=()=>saveCurrentStep();
 $('previous-step').onclick=()=>{if(!savingStep&&!uploadingFiles)showStep(Math.max(0,stepIndex-1))};
 $('next-step').onclick=async()=>{

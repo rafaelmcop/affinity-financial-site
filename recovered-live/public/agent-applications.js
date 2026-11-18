@@ -69,6 +69,7 @@ function describeApplicationParent(row,parent,feminine=false){
   const newApplicationView = document.documentElement.classList.contains("application-new-view");
   if(newApplicationView) { $("applications-page-title").textContent="Aplicação nova"; $("cancel").textContent="Voltar ao início"; }
   let originMeetingId = 0;
+  let applicationRevision = "";
   let rows = [],
     tab = "open",
     step = 0,
@@ -460,13 +461,13 @@ function describeApplicationParent(row,parent,feminine=false){
   document.querySelectorAll("[data-step-index]").forEach(
     b =>
       (b.onclick = async () => {
-        if (+b.dataset.stepIndex > step) await saveDraft(true);
+        if (+b.dataset.stepIndex > step && !await saveDraft(true)) return;
         showStep(+b.dataset.stepIndex);
       })
   );
   $("prev").onclick = () => showStep(step - 1);
   $("next").onclick = async () => {
-    await saveDraft(true);
+    if (!await saveDraft(true)) return;
     showStep(step + 1);
   };
   $("add-beneficiary").onclick = () => {
@@ -644,6 +645,7 @@ function describeApplicationParent(row,parent,feminine=false){
         : Number(beneficiaries[0]?.percentage || 0);
     d.applicationData = { ...d };
     delete d.applicationData.id;
+    d.expectedRevision=applicationRevision;
     return d;
   }
   function validateForCompletion({ checkOnly = false } = {}) {
@@ -795,6 +797,8 @@ function describeApplicationParent(row,parent,feminine=false){
   async function edit(row = {}) {
     try {
       if (row.id) row = await api("agent.getApplication", { id: row.id });
+      applicationRevision=row.revision||"";
+      unsavedChanges=false;
       document.getElementById('application-retention-current')?.remove();
       if(row.retention){const warning=document.createElement('p');warning.id='application-retention-current';warning.setAttribute('role','status');warning.style.cssText='padding:14px;background:#fff6db;color:#14233b;border:1px solid #b98b26;border-radius:8px';warning.textContent=row.retention.label+' · Restam '+row.retention.daysRemaining+' dia(s). Exclusão: '+new Date(row.retention.expiresAt).toLocaleString('pt-BR',{timeZone:'America/New_York'})+' (Nova York).';document.getElementById('form-card')?.prepend(warning);}
 
@@ -1522,8 +1526,9 @@ function describeApplicationParent(row,parent,feminine=false){
       const result = await api("agent.saveApplication", snapshot, true);
       if (!Number(result?.id)) throw Error("O servidor não confirmou o salvamento. Mantenha esta ficha aberta.");
       $("id").value = result.id;
+      applicationRevision=result.revision||applicationRevision;
       if(result.applicationDate) $("applicationDate").value=result.applicationDate;
-      unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id }) !== JSON.stringify({...snapshot,applicationDate:result.applicationDate||snapshot.applicationDate});
+      unsavedChanges = JSON.stringify({ ...collect(), id: snapshot.id, expectedRevision:snapshot.expectedRevision }) !== JSON.stringify({...snapshot,applicationDate:result.applicationDate||snapshot.applicationDate});
       if (!silent) {
         notice(result.crm?.review?"Rascunho salvo. Há divergência de identidade ou data de nascimento com o CRM; revise a ficha antes de atualizar esse dado.":"Rascunho salvo com segurança.",result.crm?.review===true);
       }

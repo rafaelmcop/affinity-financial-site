@@ -86,7 +86,7 @@ import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
 import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
-import {clientApplicationColumns} from './application-client-data.js';
+import {clientApplicationColumns,applicationExtra,applicationFields,applicationClientFields,applicationRevision,applicationVersionGuard} from './application-client-data.js';
 import {applicationDay} from '../public/application-date.js';
 import {sendMeetingMessage} from './meeting-message-send.js';
 import {syncExcludedWorkGroups} from './excluded-work-groups.js';
@@ -43421,8 +43421,9 @@ Detalhes: ${details}` : ""}`;
         sensitive2 = JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET));
       } catch {
       }
-      return trpcResult({ success: true, application: { ...extra2, ...sensitive2, clientName: row.clientName, clientEmail: row.clientEmail, clientPhone: row.clientPhone, birthDate: row.birthDate, address: row.address, city: row.city, state: row.state, zipCode: row.zipCode } });
+      return trpcResult({ success: true, revision:await applicationRevision(row), application: { ...applicationClientFields(row,extra2,sensitive2), clientName: row.clientName, clientEmail: row.clientEmail, clientPhone: row.clientPhone, birthDate: row.birthDate, address: row.address, city: row.city, state: row.state, zipCode: row.zipCode } });
     }
+    if(input.expectedRevision&&input.expectedRevision!==await applicationRevision(row))return trpcError("A ficha foi atualizada em outra janela. Suas alterações continuam nesta tela. Reabra o link em outra aba para conferir os dados mais recentes.","CONFLICT",409);
     const payload = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : {};
     const columns = clientApplicationColumns(row, payload);
     if (Object.hasOwn(payload, "clientEmail") && columns[1] && !validEmail(columns[1])) return trpcError("Informe um e-mail válido");
@@ -43431,14 +43432,17 @@ Detalhes: ${details}` : ""}`;
       Object.assign(extra, JSON.parse(String(row.applicationData || "{}")));
     } catch {
     }
-    try {
-      Object.assign(sensitive, JSON.parse(await decryptSmtpPassword(String(row.sensitiveData || ""), env.JWT_SECRET)));
-    } catch {
+    if(row.sensitiveData){
+     try{Object.assign(sensitive,JSON.parse(await decryptSmtpPassword(row.sensitiveData,env.JWT_SECRET)));}
+     catch{return trpcError("Não foi possível abrir os dados protegidos da ficha. Nenhuma alteração foi salva. Tente novamente.","INTERNAL_SERVER_ERROR",503);}
     }
     for (const [key2, value] of Object.entries(payload)) (sensitiveKeys.has(key2) ? sensitive : extra)[key2] = value;
+    const storedExtra=applicationExtra(extra),guard=applicationVersionGuard(row);
     const encrypted = await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET);
-    await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(...columns, JSON.stringify(extra), encrypted, Number(row.id)).run();
-    return trpcResult({ success: true, message: "Informa\xE7\xF5es enviadas ao seu agente." });
+    const saved=await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND "+guard.sql).bind(...columns, JSON.stringify(storedExtra), encrypted, Number(row.id),...guard.values).run();
+    if(!saved.meta.changes)return trpcError("A ficha foi atualizada durante o salvamento. Suas alterações continuam nesta tela. Confira a versão mais recente em outra aba.","CONFLICT",409);
+    const persisted=await env.DB.prepare("SELECT * FROM agentApplications WHERE id=?").bind(Number(row.id)).first();
+    return trpcResult({ success: true, revision:await applicationRevision(persisted), message: "Informações enviadas ao seu agente." });
   }
   if (name === "reviewInvites.get" || name === "reviewInvites.submit") {
     const token = String(input.token || "").trim();
@@ -43903,7 +43907,7 @@ Detalhes: ${details}` : ""}`;
         }
         delete row.sensitiveData;
         delete row.applicationData;
-        return { ...row, ...extra,retention:retentionForApplication(row,!identity.affinityTeam),business:identity, applicationDate:applicationDay(row.createdAt), id: Number(row.id) };
+        return { ...row, ...applicationFields(row,extra),retention:retentionForApplication(row,!identity.affinityTeam),business:identity, applicationDate:applicationDay(row.createdAt), id: Number(row.id) };
       }));
     }
     if (name === "agent.getApplication") {
@@ -43935,34 +43939,44 @@ Detalhes: ${details}` : ""}`;
       } catch (error) {
         console.error("Could not merge stored application documents", error);
       }
+      const revision=await applicationRevision(row);
       delete row.applicationData;
       delete row.sensitiveData;
-      await leadSchema(env);return trpcResult({ ...row, ...extra, ...sensitive, applicationDate:applicationDay(row.createdAt), business:await agentBusiness(env,owner),retention:retentionForApplication(row,!(await agentBusiness(env,owner)).affinityTeam),agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
+      await leadSchema(env);return trpcResult({ ...row, ...applicationFields(row,extra,sensitive),revision, applicationDate:applicationDay(row.createdAt), business:await agentBusiness(env,owner),retention:retentionForApplication(row,!(await agentBusiness(env,owner)).affinityTeam),agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
     }
     if (name === "agent.saveApplication") {
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
       const clientEmail = String(input.clientEmail || "").trim().toLowerCase();
       if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail válido ou deixe o campo em branco para salvar o rascunho");
       const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "residentCardNumber", "visaNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName", "physicianAddress", "healthHistory"]);
-      const extra = {}, sensitive = {};
+      const previous=id?await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first():null;
+      if(id&&!previous)return trpcError("Aplicação não encontrada","NOT_FOUND",404);
+      if(previous&&input.expectedRevision&&input.expectedRevision!==await applicationRevision(previous))return trpcError("A ficha foi atualizada em outra janela. Suas alterações continuam nesta tela. Confira a versão mais recente em outra aba antes de salvar.","CONFLICT",409);
+      let extra = {}, sensitive = {};
+      if(previous){
+       try{extra=applicationExtra(JSON.parse(previous.applicationData||"{}"));}catch{}
+       if(previous.sensitiveData)sensitive=JSON.parse(await decryptSmtpPassword(previous.sensitiveData,env.JWT_SECRET));
+      }
       const supplied = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : input;
       for (const [key2, value] of Object.entries(supplied)) {
         if (["id", "clientName", "clientEmail", "clientPhone", "applicationDate"].includes(key2)) continue;
         (sensitiveKeys.has(key2) ? sensitive : extra)[key2] = value;
       }
-      const started=id?await env.DB.prepare("SELECT createdAt FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first():null;
+      extra=applicationExtra(extra);
+      const started=previous;
       if(id&&!started)return trpcError("Aplicação não encontrada","NOT_FOUND",404);
       extra.applicationDate=applicationDay(started?.createdAt||new Date());
       const encryptedSensitive = Object.keys(sensitive).length ? await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET) : null;
       const values = [clientName, clientEmail || null, String(input.clientPhone || "").trim() || null, String(input.birthDate || "").trim() || null, String(input.address || "").trim() || null, String(input.city || "").trim() || null, String(input.state || "").trim() || null, String(input.zipCode || "").trim() || null, String(input.maritalStatus || "").trim() || null, String(input.occupation || "").trim() || null, Number(input.annualIncome || 0), String(input.beneficiaryName || "").trim() || null, String(input.beneficiaryRelationship || "").trim() || null, Number(input.beneficiaryPercentage || 100), String(input.productInterest || "").trim() || null, Number(input.coverageRequested || 0), Number(input.premiumBudget || 0), String(input.applicationReason || "").trim() || null, String(input.notes || "").trim() || null, JSON.stringify(extra), encryptedSensitive];
       if (id) {
-        const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),status=CASE WHEN status='submitted' THEN 'draft' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=?`).bind(...values,id,owner).run();
-        if (!result.meta.changes) return trpcError("Aplicação não encontrada", "NOT_FOUND", 404);
-        const crm=await syncApplicationClient(env,owner,id,delegation?.actorEmail||owner);return trpcResult({ success: true, id,crm,applicationDate:extra.applicationDate });
+        const guard=applicationVersionGuard(previous);
+        const result = await env.DB.prepare(`UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,maritalStatus=?,occupation=?,annualIncome=?,beneficiaryName=?,beneficiaryRelationship=?,beneficiaryPercentage=?,productInterest=?,coverageRequested=?,premiumBudget=?,applicationReason=?,notes=?,applicationData=?,sensitiveData=COALESCE(?,sensitiveData),status=CASE WHEN status='submitted' THEN 'draft' ELSE status END,updatedAt=CURRENT_TIMESTAMP WHERE id=? AND lower(agentEmail)=? AND ${guard.sql}`).bind(...values,id,owner,...guard.values).run();
+        if (!result.meta.changes) return trpcError("A ficha foi atualizada durante o salvamento. Suas alterações continuam nesta tela. Confira a versão mais recente em outra aba.","CONFLICT",409);
+        const crm=await syncApplicationClient(env,owner,id,delegation?.actorEmail||owner);const persisted=await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id,owner).first();return trpcResult({ success: true, id,crm,revision:await applicationRevision(persisted),applicationDate:extra.applicationDate });
       }
       const accessCode = Array.from(crypto.getRandomValues(new Uint8Array(4)), byte => byte.toString(36).padStart(2,"0")).join("").slice(0,8).toUpperCase();
       const inserted = await env.DB.prepare(`INSERT INTO agentApplications (agentEmail,clientName,clientEmail,clientPhone,birthDate,address,city,state,zipCode,maritalStatus,occupation,annualIncome,beneficiaryName,beneficiaryRelationship,beneficiaryPercentage,productInterest,coverageRequested,premiumBudget,applicationReason,notes,applicationData,sensitiveData,accessCode) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(owner,...values,accessCode).run();
-      const crm=await syncApplicationClient(env,owner,Number(inserted.meta.last_row_id),delegation?.actorEmail||owner);return trpcResult({ success: true, id: Number(inserted.meta.last_row_id),crm, accessCode,applicationDate:extra.applicationDate });
+      const newId=Number(inserted.meta.last_row_id);const crm=await syncApplicationClient(env,owner,newId,delegation?.actorEmail||owner);const persisted=await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(newId,owner).first();return trpcResult({ success: true, id:newId,crm,revision:await applicationRevision(persisted),accessCode,applicationDate:extra.applicationDate });
     }
     if (name === "agent.submitApplication") {
       const id = Number(input.id || 0);
