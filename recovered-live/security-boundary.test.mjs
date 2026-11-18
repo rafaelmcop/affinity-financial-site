@@ -9,3 +9,10 @@ test('streaming JSON limit does not depend on Content-Length',async()=>{await as
 test('global reviews require admin while scoped agent procedures remain unchanged',()=>{for(const name of ['testimonials.getAll','testimonials.delete','testimonials.update','testimonials.setAdminDecision']){assert.equal(globalTestimonialsAllowed(name,'agent'),false);assert.equal(globalTestimonialsAllowed(name,'admin'),true);assert.equal(globalTestimonialsAllowed(name,'both'),true);}assert.equal(globalTestimonialsAllowed('agent.listAssignedReviews','agent'),true);});
 test('batched errors retain the failing operation without copying private messages',async()=>{const request=req('agent.dashboard,agent.listClients');const response=Response.json([{error:{json:{message:'private information',data:{httpStatus:500,code:'INTERNAL_SERVER_ERROR'}}}},{result:{data:{json:{}}}}],{status:207});assert.deepEqual(await requestOutcomes(request,response),[{path:'/api/trpc/agent.dashboard',httpStatus:500,errorCode:'INTERNAL_SERVER_ERROR'},{path:'/api/trpc/agent.listClients',httpStatus:200}]);assert(!JSON.stringify(await requestOutcomes(request,response)).includes('private'));});
 test('whole-batch failure attributes errors to each requested operation',async()=>{const outcomes=await requestOutcomes(req('agent.dashboard,agent.listClients'),Response.json([{error:{json:{data:{httpStatus:500}}}}],{status:500}));assert(outcomes.every(x=>x.httpStatus===500));assert.notEqual(outcomes[0].path,outcomes[1].path);});
+
+test('client application access accepts existing private-link reads while writes remain POST-only',()=>{
+ const base='https://www.affinityfc.org/api/trpc/';
+ assert.equal(trpcBoundary(new Request(base+'applications.verifyCode?input=%7B%7D')),null);
+ assert.equal(trpcBoundary(new Request(base+'applications.clientSave')).status,405);
+ assert.equal(trpcBoundary(new Request(base+'applications.uploadDocument')).status,405);
+});
