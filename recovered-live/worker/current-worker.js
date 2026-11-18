@@ -86,6 +86,7 @@ import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
 import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
+import {clientApplicationColumns} from './application-client-data.js';
 import {applicationDay} from '../public/application-date.js';
 import {sendMeetingMessage} from './meeting-message-send.js';
 import {syncExcludedWorkGroups} from './excluded-work-groups.js';
@@ -43423,9 +43424,8 @@ Detalhes: ${details}` : ""}`;
       return trpcResult({ success: true, application: { ...extra2, ...sensitive2, clientName: row.clientName, clientEmail: row.clientEmail, clientPhone: row.clientPhone, birthDate: row.birthDate, address: row.address, city: row.city, state: row.state, zipCode: row.zipCode } });
     }
     const payload = input.applicationData && typeof input.applicationData === "object" ? input.applicationData : {};
-    const clientName = String(payload.clientName || "").trim(), clientEmail = String(payload.clientEmail || "").trim().toLowerCase();
-    if (!clientName) return trpcError("Informe seu nome completo");
-    if (!validEmail(clientEmail)) return trpcError("Informe um e-mail v\xE1lido");
+    const columns = clientApplicationColumns(row, payload);
+    if (Object.hasOwn(payload, "clientEmail") && columns[1] && !validEmail(columns[1])) return trpcError("Informe um e-mail válido");
     const sensitiveKeys = /* @__PURE__ */ new Set(["ssn", "passportNumber", "residentCardNumber", "visaNumber", "driverLicenseNumber", "bankName", "routingNumber", "accountNumber", "medicalDetails", "medications", "physicianName", "physicianAddress", "healthHistory"]), extra = {}, sensitive = {};
     try {
       Object.assign(extra, JSON.parse(String(row.applicationData || "{}")));
@@ -43437,7 +43437,7 @@ Detalhes: ${details}` : ""}`;
     }
     for (const [key2, value] of Object.entries(payload)) (sensitiveKeys.has(key2) ? sensitive : extra)[key2] = value;
     const encrypted = await encryptSmtpPassword(JSON.stringify(sensitive), env.JWT_SECRET);
-    await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(clientName, clientEmail || null, String(payload.clientPhone || "").trim() || null, String(payload.birthDate || "").trim() || null, String(payload.address || "").trim() || null, String(payload.city || "").trim() || null, String(payload.state || "").trim() || null, String(payload.zipCode || "").trim() || null, JSON.stringify(extra), encrypted, Number(row.id)).run();
+    await env.DB.prepare("UPDATE agentApplications SET clientName=?,clientEmail=?,clientPhone=?,birthDate=?,address=?,city=?,state=?,zipCode=?,applicationData=?,sensitiveData=?,updatedAt=CURRENT_TIMESTAMP WHERE id=?").bind(...columns, JSON.stringify(extra), encrypted, Number(row.id)).run();
     return trpcResult({ success: true, message: "Informa\xE7\xF5es enviadas ao seu agente." });
   }
   if (name === "reviewInvites.get" || name === "reviewInvites.submit") {
