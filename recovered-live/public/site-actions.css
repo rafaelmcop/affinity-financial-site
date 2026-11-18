@@ -3,3 +3,27 @@
 .public-light button.whatsapp-solid :is(svg,span){color:#fff!important}
 .public-light button.whatsapp-solid:hover,.public-light a[aria-label="Contact us on WhatsApp"]:hover{background:#06612e!important;color:#fff!important}
 .public-light button.whatsapp-solid:focus-visible,.public-light a[aria-label="Contact us on WhatsApp"]:focus-visible{outline:3px solid #fff!important;outline-offset:3px;box-shadow:0 0 0 6px #087f3c!important}
+
+.public-site-nav .public-nav-row{gap:16px;min-height:76px;height:auto;padding-block:8px}
+.public-site-nav .public-nav-brand{flex:0 1 208px;min-width:100px;max-width:208px}
+.public-site-nav .public-nav-brand img{max-width:100%;height:auto;max-height:52px;object-fit:contain}
+.public-site-nav .public-nav-links{flex-shrink:0;gap:clamp(12px,1.7vw,28px)}
+.public-site-nav .public-nav-links button{white-space:nowrap}
+.public-site-nav .public-nav-actions{flex:0 0 auto;gap:10px}
+.public-site-nav .public-login-menu{display:block!important;flex-shrink:0}
+.public-site-nav .public-mobile-toggle{width:44px;height:44px;align-items:center;justify-content:center;flex-shrink:0}
+.public-site-nav[data-compact=true] .public-nav-links{display:flex!important;position:absolute;visibility:hidden;pointer-events:none}
+.public-site-nav[data-compact=true] .public-mobile-toggle{display:flex!important}
+.public-site-nav[data-compact=true] .public-mobile-panel{display:block!important;max-height:calc(100dvh - 100px);overflow-y:auto}
+@media(max-width:1279px){
+ .public-site-nav .public-nav-links{display:flex!important;position:absolute;visibility:hidden;pointer-events:none}
+ .public-site-nav .public-mobile-toggle{display:flex!important}
+ .public-site-nav .public-mobile-panel{display:block!important;max-height:calc(100dvh - 100px);overflow-y:auto}
+}
+@media(max-width:540px){
+ .public-site-nav .public-nav-row{gap:8px;flex-wrap:wrap}
+ .public-site-nav .public-nav-brand{flex-basis:140px;max-width:140px}
+ .public-site-nav .public-nav-actions{gap:6px;margin-left:auto}
+ .public-site-nav .public-login-menu>button{padding:10px!important;min-height:44px}
+ .public-site-nav .public-nav-brand img{max-height:42px}
+}

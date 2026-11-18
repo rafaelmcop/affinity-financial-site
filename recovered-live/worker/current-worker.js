@@ -81,6 +81,7 @@ import {claimBrowserChunk,finishBrowserChunk} from './five-rings-browser-job.js'
 import {userRolesRoute} from './user-roles.js';
 import {browserSnapshot} from './five-rings-browser-snapshot.js';
 import {deferFiveRingsSession,deferredFiveRingsSession} from './five-rings-session-defer.js';
+import {loadPublishedTestimonials} from './testimonial-loading.js';
 import {publicTestimonial,publicTestimonialColumns} from './public-testimonials.js';
 import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
@@ -42937,7 +42938,7 @@ async function portalAiDeliveryLog(env,owner){
     const waDeliveries=await whatsappDeliveryHistory(env,owner);
     return trpcResult([...upcoming, ...failed, ...sentAutomation,...paymentDeliveries,...paymentReviews,...waDeliveries,...await meetingReminderHistory(env,owner)]);
 }
-async function runProcedure(name, input, request, env, delegation=null) {
+async function runProcedure(name, input, request, env, delegation=null, context=null) {
   await accessSchema(env);
   const feature=procedureFeature(name);
   if(feature){let email;if(name.startsWith('affiliate.')){const id=await getAffiliateId(request,env);email=id?(await env.DB.prepare('SELECT email FROM affiliates WHERE id=?').bind(id).first())?.email:null;}else email=await getAdminEmail(request,env);
@@ -43097,10 +43098,10 @@ async function runProcedure(name, input, request, env, delegation=null) {
     if (!isSupportedLanguage(languageValue))
       return trpcError("Idioma n\xE3o suportado.");
     const result = await env.DB.prepare(
-      "SELECT "+publicTestimonialColumns+" FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
+      "SELECT "+publicTestimonialColumns+",updatedAt FROM testimonials WHERE isActive = 1 ORDER BY createdAt DESC"
     ).all();
     return trpcResult(
-      (await publicAgentLabels(env,await localizeTestimonials(result.results, languageValue, env))).map(publicTestimonial)
+      (await publicAgentLabels(env,await loadPublishedTestimonials(result.results, languageValue, env, context, localizeTestimonials))).map(publicTestimonial)
     );
   }
   if (name === "testimonials.submitReview") {
@@ -47577,7 +47578,7 @@ var cloudflare_staging_default = {
       const cookies = [];
       for (let index = 0; index < names.length; index += 1) {
         const input = getInput(inputs[String(index)] ?? inputs);
-        const result = await authenticationLimit(request,env,names[index],input)?trpcError('Muitas tentativas. Aguarde 15 minutos.','TOO_MANY_REQUESTS',429):await runProcedure(names[index], input, request, env);
+        const result = await authenticationLimit(request,env,names[index],input)?trpcError('Muitas tentativas. Aguarde 15 minutos.','TOO_MANY_REQUESTS',429):await runProcedure(names[index], input, request, env, null, ctx);
         if (result && typeof result === "object" && "body" in result) {
           responses.push(result.body);
           if (Array.isArray(result.cookies)) cookies.push(...result.cookies);
@@ -48312,7 +48313,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.pathname==='/agent-five-rings-sync.html'){const staff=await readStaff('agent');if(!staff)return Response.redirect(new URL('/agentes/login',url),302);}
  let response;try{response=appsResponse?appsResponse:domainEmailResponse?secureResponse(domainEmailResponse,{privateData:true}):assistantResponse?secureResponse(assistantResponse,{privateData:true}):await canonicalMenuFetchSource.call(this,request,env,ctx);}catch(error){try{await recordSyncLog(env.DB,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'});await notifyImportantLog(env,'server',{event:'service',state:'error',path:url.pathname,errorCode:'request_failed'},sendEmail);}catch{}throw error;}
  if(url.pathname.startsWith('/api/'))ctx.waitUntil((async()=>{try{for(const outcome of await requestOutcomes(request,response)){if(outcome.httpStatus>=500){const input={event:'service',state:'error',...outcome};await recordSyncLog(env.DB,'server',input);await notifyImportantLog(env,'server',input,sendEmail);}else if(outcome.httpStatus>=200&&outcome.httpStatus<300&&outcome.httpStatus!==202){const input={event:'service',...outcome};const resolved=await resolveImportantLog(env.DB,'server',input);if(resolved.meta?.changes)await recordSyncLog(env.DB,'server',{...input,state:'completed'});}}}catch{}})());
- if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=1">',{html:true});}}).transform(response);
+ if(url.pathname==='/'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=2"><script src="/public-navigation.js?v=1" defer></script>',{html:true});}}).transform(response);
  const publicLoginPaths=new Set(['/admin/login','/agentes','/afiliados','/agentes/login','/agentes/registrar','/afiliados/login','/afiliados/registrar','/assistentes/login','/assistant-login.html']);
  if(publicLoginPaths.has(url.pathname.replace(/\/$/,''))&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-login-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/login-theme.css?v=2"><script src="/portal-business.js?v=3" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});}}).transform(response);
 
