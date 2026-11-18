@@ -18,8 +18,7 @@
  }
  async function check() {
   if (checking || redirecting || document.visibilityState === 'hidden') return;
-  if (expiresAt && Date.now() >= expiresAt) { returnToLogin(); return; }
-  if (Date.now() - lastCheck < 10000) return;
+  if (Date.now() - lastCheck < 10000 && (!expiresAt || Date.now() < expiresAt)) return;
   checking = true;
   lastCheck = Date.now();
   try {
@@ -34,10 +33,7 @@
    clearTimeout(expirationTimer);
    const remaining = expiresAt - Date.now();
    if (remaining <= 0) returnToLogin();
-   else expirationTimer = setTimeout(() => {
-    if (Date.now() >= expiresAt) returnToLogin();
-    else void check();
-   }, Math.min(remaining, 2147483647));
+   else expirationTimer = setTimeout(() => void check(), Math.min(remaining, 2147483647));
   } catch {
    // A temporary network failure does not establish that the session expired.
   } finally { checking = false; }

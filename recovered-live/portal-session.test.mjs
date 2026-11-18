@@ -47,8 +47,9 @@ test('a tab returning after expiry redirects to login once, using the verified e
  const f=await browserFixture({status:200,json:async()=>({active:true,expiresAt:110000})});
  assert.equal(f.redirects.length,0);
  f.advance(11000);f.events.focus();f.events.visibilitychange();
+ await new Promise(resolve=>setImmediate(resolve));
  assert.deepEqual(f.redirects,['/agentes/login']);
- assert.equal(f.calls,1);
+ assert.equal(f.calls,2);
 });
 test('network failures and service outages do not log out a user',async()=>{
  for(const response of [new Error('offline'),{status:503},{status:403}]){
@@ -66,4 +67,13 @@ test('legacy SPA authentication returns to local login without generating the ol
   vm.runInNewContext(script.slice(start,end)+';uA();',{URLSearchParams,window:{location:{pathname:path,search:'',replace:value=>redirect=value}}});
   assert.equal(redirect,expected);
  }
+});
+
+test('renewal in another tab is checked before redirecting at the previous expiration time',async()=>{
+ let expiry=110000;
+ const f=await browserFixture({status:200,json:async()=>({active:true,expiresAt:expiry})});
+ expiry=200000;
+ f.advance(11000);f.events.focus();
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(f.calls,2);assert.deepEqual(f.redirects,[]);
 });
