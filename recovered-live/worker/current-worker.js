@@ -86,6 +86,7 @@ import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
 import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
+import {portalSessionKind,portalSessionRoute} from './portal-session.js';
 import {clientApplicationColumns,applicationExtra,applicationFields,applicationClientFields,applicationRevision,applicationVersionGuard} from './application-client-data.js';
 import {applicationDay} from '../public/application-date.js';
 import {sendMeetingMessage} from './meeting-message-send.js';
@@ -48335,6 +48336,8 @@ async function staffAuditSession(request,env,affiliate){
 const auditedPortalFetch=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
+ const sessionStatus=await portalSessionRoute(request,env,getSession);
+ if(sessionStatus)return perimeterHeaders(sessionStatus,url.pathname);
  if(sensitiveResource(url.pathname))return perimeterHeaders(new Response('Not found',{status:404}),url.pathname);
  if(['GET','HEAD'].includes(request.method)&&(url.pathname==='/index.html'||(url.hostname==='affinityfc.org'&&url.pathname==='/'))){url.hostname='www.affinityfc.org';url.pathname='/';return perimeterHeaders(Response.redirect(url.toString(),301),url.pathname);}
  // The public portal landing page is a static asset and does not need a database or session.
@@ -48361,6 +48364,8 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
   if(unexpectedSpaPage(url.pathname,html))response=new Response('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="robots" content="noindex"><meta name="viewport" content="width=device-width"><title>Page not found | Affinity Financial</title><main><h1>Page not found</h1><p>The address may have changed.</p><a href="/">Return to Affinity Financial</a></main></html>',{status:404,headers:{'content-type':'text/html; charset=utf-8'}});
  }
  if(usesPublicAppearance(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('html',{element(el){el.setAttribute('data-public-theme','site');}}).on('head',{element(el){el.append('<link rel="stylesheet" href="/public-theme.css?v=1">',{html:true});}}).transform(response);
+ const sessionPortal=portalSessionKind(url);
+ if(sessionPortal&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.prepend('<script src="/portal-session.js?v=1" data-session-portal="'+sessionPortal+'" defer></script>',{html:true});}}).transform(response);
  if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=9" defer></script>',{html:true});}}).transform(response);
  return perimeterHeaders(response,url.pathname);
 };
