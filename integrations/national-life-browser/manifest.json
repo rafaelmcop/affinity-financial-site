@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Affinity · National Life Preview",
+  "version": "0.5.2",
+  "permissions": ["scripting"],
+  "background": {"service_worker": "background.js"},
+  "host_permissions": ["https://www.nationallife.com/*", "https://www.affinityfc.org/*", "https://portal.affinityfc.org/*", "https://affinityfc.org/*"],
+  "content_scripts": [{
+    "matches": ["https://www.affinityfc.org/agentes/apps*", "https://portal.affinityfc.org/agentes/apps*", "https://affinityfc.org/agentes/apps*"],
+    "js": ["affinity-pilot.js"]
+  }]
+}

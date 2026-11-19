@@ -1,0 +1,23 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {DatabaseSync} from 'node:sqlite';import {isOverduePaymentNotice,paymentTasks,dismissEmailNotification} from './worker/payment-attention.js';
+test('payment tasks exclude issue notifications and newsletters, include unpaid premiums, and isolate owners',async()=>{
+assert(!isOverduePaymentNotice('Issue Notification DBD','Your policy was issued. Payment returned instructions.'));
+assert(!isOverduePaymentNotice('The Starting Line - October','Our newsletter describes insufficient funds and returned payment.'));
+assert(!isOverduePaymentNotice('Policy declined','Monthly premium $100.'));
+assert(isOverduePaymentNotice('Payment Returned by Bank - Example'));
+assert(isOverduePaymentNotice('Past due premium notice'));
+assert(isOverduePaymentNotice('Notice','Your premium payment was returned.'));
+const db=new DatabaseSync(':memory:');db.exec("CREATE TABLE agentTasks(id INTEGER,agentEmail TEXT,title TEXT,status TEXT,dueAt TEXT);CREATE TABLE agentMailboxEmails(agentEmail TEXT,imapUid INTEGER,subject TEXT,body TEXT);CREATE TABLE clientEmails(id INTEGER,agentEmail TEXT,direction TEXT,readAt TEXT);");
+const env={DB:{prepare(sql){let args=[];return{bind(...v){args=v;return this},async all(){return{results:db.prepare(sql).all(...args)}},async run(){const result=db.prepare(sql).run(...args);return{meta:{changes:result.changes}}}}}}};
+db.prepare('INSERT INTO agentTasks VALUES(?,?,?,?,?)').run(1,'a','[Pagamento 1] Issue Notification','pending','2026-10-09');
+db.prepare('INSERT INTO agentTasks VALUES(?,?,?,?,?)').run(2,'a','[Pagamento 2] Payment Returned by Bank','pending','2026-10-09');
+db.prepare('INSERT INTO agentTasks VALUES(?,?,?,?,?)').run(3,'b','[Pagamento 3] Payment Returned by Bank','pending','2026-10-09');
+db.prepare('INSERT INTO agentMailboxEmails VALUES(?,?,?,?)').run('a',1,'Issue Notification','Insufficient funds');
+db.prepare('INSERT INTO agentMailboxEmails VALUES(?,?,?,?)').run('a',2,'Payment Returned by Bank','Premium payment was returned');
+assert.deepEqual((await paymentTasks(env,'a',true)).map(t=>t.id),[2]);
+db.exec("INSERT INTO clientEmails VALUES(1,'a','received',NULL),(2,'b','received',NULL)");
+await assert.rejects(()=>dismissEmailNotification(env,'a',2));
+await dismissEmailNotification(env,'a',1);await dismissEmailNotification(env,'a',1);
+assert(db.prepare('SELECT readAt FROM clientEmails WHERE id=1').get().readAt);
+assert.equal(db.prepare('SELECT COUNT(*) AS n FROM clientEmails').get().n,2);
+db.close();
+});

@@ -1,0 +1,1 @@
+export function transientApplicationMail(mail){const value=mail?.headers?.get?.('x-affinity-transient-application')||mail?.headers?.['x-affinity-transient-application'];return typeof value==='string'&&/^\d+; expires=\d{4}-\d{2}-\d{2}T/.test(value);}

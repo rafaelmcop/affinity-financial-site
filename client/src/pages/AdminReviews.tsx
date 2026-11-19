@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Check, Edit2, EyeOff, Star, Trash2, X } from 'lucide-react';
+import { Check, Edit2, Star, Trash2, X } from 'lucide-react';
 import AdminSidebar from '@/components/AdminSidebar';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -7,12 +7,14 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { trpc } from '@/lib/trpc';
 import { toast } from 'sonner';
+import { US_STATES } from '@/lib/usStates';
 
 type ReviewForm = {
   id: number;
   name: string;
   email: string;
-  role: string;
+  city: string;
+  state: string;
   quote: string;
   rating: number;
   language: 'pt' | 'en' | 'es';
@@ -21,7 +23,7 @@ type ReviewForm = {
 export default function AdminReviews() {
   const reviewsQuery = trpc.testimonials.getAll.useQuery();
   const updateMutation = trpc.testimonials.update.useMutation();
-  const toggleMutation = trpc.testimonials.toggleActive.useMutation();
+  const decisionMutation = trpc.testimonials.setAdminDecision.useMutation();
   const deleteMutation = trpc.testimonials.delete.useMutation();
   const [editing, setEditing] = useState<ReviewForm | null>(null);
 
@@ -29,10 +31,10 @@ export default function AdminReviews() {
 
   const refresh = async () => { await reviewsQuery.refetch(); };
 
-  const toggle = async (review: any) => {
+  const decide = async (review: any, decision: 'approved' | 'rejected') => {
     try {
-      await toggleMutation.mutateAsync({ id: review.id, isActive: review.isActive !== 1 });
-      toast.success(review.isActive === 1 ? 'Avaliação ocultada.' : 'Avaliação aprovada e publicada.');
+      await decisionMutation.mutateAsync({ id: review.id, decision });
+      toast.success(decision === 'approved' ? 'Avaliação aprovada e publicada.' : 'Avaliação recusada.');
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Não foi possível alterar a avaliação.');
@@ -58,7 +60,9 @@ export default function AdminReviews() {
         id: editing.id,
         name: editing.name,
         email: editing.email,
-        role: editing.role,
+        role: `${editing.city}, ${editing.state}`,
+        city: editing.city,
+        state: editing.state,
         quote: editing.quote,
         rating: editing.rating,
         language: editing.language,
@@ -91,7 +95,8 @@ export default function AdminReviews() {
               <div className="grid gap-4 md:grid-cols-2">
                 <Input value={editing.name} onChange={event => setEditing({ ...editing, name: event.target.value })} placeholder="Nome" required />
                 <Input type="email" value={editing.email} onChange={event => setEditing({ ...editing, email: event.target.value })} placeholder="E-mail" required />
-                <Input value={editing.role} onChange={event => setEditing({ ...editing, role: event.target.value })} placeholder="Cidade e estado" required />
+                <Input value={editing.city} onChange={event => setEditing({ ...editing, city: event.target.value })} placeholder="Cidade" required />
+                <select value={editing.state} onChange={event => setEditing({ ...editing, state: event.target.value })} className="rounded border border-gold/30 bg-black px-4 py-2 text-white" required><option value="">Estado</option>{US_STATES.map(state => <option key={state} value={state}>{state}</option>)}</select>
                 <select value={editing.language} onChange={event => setEditing({ ...editing, language: event.target.value as ReviewForm['language'] })} className="rounded border border-gold/30 bg-black px-4 py-2 text-white">
                   <option value="pt">Português</option><option value="en">English</option><option value="es">Español</option>
                 </select>
@@ -121,17 +126,19 @@ export default function AdminReviews() {
                 <div className="min-w-0 flex-1">
                   <div className="mb-3 flex flex-wrap items-center gap-3">
                     <p className="text-lg font-bold text-white">{review.name}</p>
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${review.isActive === 1 ? 'bg-green-500/15 text-green-300' : 'bg-amber-500/15 text-amber-300'}`}>{review.isActive === 1 ? 'Publicada' : 'Aguardando aprovação'}</span>
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${review.adminDecision === 'approved' ? 'bg-green-500/15 text-green-300' : review.adminDecision === 'rejected' ? 'bg-red-500/15 text-red-300' : 'bg-amber-500/15 text-amber-300'}`}>{review.adminDecision === 'approved' ? 'Publicada' : review.adminDecision === 'rejected' ? 'Recusada pelo administrador' : 'Aguardando decisão final'}</span>
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-gray-300">Agente: {review.agentDecision === 'approved' ? 'recomendou aprovar' : review.agentDecision === 'rejected' ? 'recomendou recusar' : 'ainda não analisou'}</span>
                   </div>
                   <div className="mb-4 flex gap-1" aria-label={`${review.rating} de 5 estrelas`}>
                     {[1, 2, 3, 4, 5].map(value => <Star key={value} size={20} strokeWidth={value <= review.rating ? 0 : 2} className={value <= review.rating ? 'text-gold' : 'text-gray-600'} style={value <= review.rating ? { fill: '#d4af37' } : undefined} />)}
                   </div>
                   <blockquote className="text-base leading-relaxed text-gray-200">“{review.quote}”</blockquote>
-                  <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400"><span>{review.role}</span><span>{review.email}</span><span>{String(review.language).toUpperCase()}</span></div>
+                  <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-400"><span>{review.city || review.role}{review.state ? `, ${review.state}` : ''}</span><span>{review.email}</span><span>Agente: {review.agentEmail || 'não informado'}</span><span>{String(review.language).toUpperCase()}</span></div>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => toggle(review)} className={review.isActive === 1 ? 'bg-amber-500 text-black hover:bg-amber-400' : 'bg-green-600 text-white hover:bg-green-500'}>{review.isActive === 1 ? <><EyeOff size={16} className="mr-2" />Ocultar</> : <><Check size={16} className="mr-2" />Aprovar</>}</Button>
-                  <Button size="sm" variant="outline" onClick={() => setEditing({ id: review.id, name: review.name, email: review.email || '', role: review.role, quote: review.quote, rating: review.rating, language: review.language })}><Edit2 size={16} className="mr-2" />Editar</Button>
+                  <Button size="sm" onClick={() => decide(review, 'approved')} className="bg-green-600 text-white hover:bg-green-500"><Check size={16} className="mr-2" />Aprovar</Button>
+                  <Button size="sm" onClick={() => decide(review, 'rejected')} className="bg-red-600 text-white hover:bg-red-500"><X size={16} className="mr-2" />Recusar</Button>
+                  <Button size="sm" variant="outline" onClick={() => setEditing({ id: review.id, name: review.name, email: review.email || '', city: review.city || String(review.role || '').split(',')[0] || '', state: review.state || String(review.role || '').split(',')[1]?.trim() || '', quote: review.quote, rating: review.rating, language: review.language })}><Edit2 size={16} className="mr-2" />Editar</Button>
                   <Button size="sm" variant="outline" onClick={() => remove(review)} className="border-red-500/40 text-red-300 hover:bg-red-500/10"><Trash2 size={16} className="mr-2" />Excluir</Button>
                 </div>
               </div>

@@ -112,3 +112,15 @@ temp/
 # Manus version file (auto-generated, not part of source)
 client/public/__manus__/version.json
 .project-config.json
+
+# Authentication and local deployment state
+.env.*
+!.env.example
+.dev.vars*
+.wrangler/
+private/
+services/whatsapp/data/
+**/auth_info/
+**/session-data/
+*.pem
+*.key
