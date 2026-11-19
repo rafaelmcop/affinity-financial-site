@@ -52,7 +52,7 @@ import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
 import {birthdayHoldSchema} from './birthday-alerts.js';
-import {runtimeSmtpOptions} from './smtp-runtime.js';
+import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
 import {crmClientDetail} from './crm-client-detail.js';
@@ -48341,6 +48341,15 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(sessionStatus)return perimeterHeaders(sessionStatus,url.pathname);
  if(sensitiveResource(url.pathname))return perimeterHeaders(new Response('Not found',{status:404}),url.pathname);
  if(['GET','HEAD'].includes(request.method)&&(url.pathname==='/index.html'||(url.hostname==='affinityfc.org'&&url.pathname==='/'))){url.hostname='www.affinityfc.org';url.pathname='/';return perimeterHeaders(Response.redirect(url.toString(),301),url.pathname);}
+ // Serve the public homepage independently from private database initialization.
+ if(url.protocol==='https:'&&url.hostname==='www.affinityfc.org'&&url.pathname==='/'&&['GET','HEAD'].includes(request.method)){
+  const asset=await env.ASSETS.fetch(new Request(new URL('/index.html',url),{method:request.method}));
+  let response=clearPortalSessions(secureResponse(asset));
+  if(request.method==='GET'&&response.headers.get('content-type')?.includes('text/html')){
+   response=new HTMLRewriter().on('head',{element(el){el.append('<link rel="stylesheet" href="/site-actions.css?v=2"><script src="/public-navigation.js?v=1" defer></script>',{html:true});}}).transform(response);
+  }
+  return perimeterHeaders(response,url.pathname);
+ }
  // The public portal landing page is a static asset and does not need a database or session.
  if(url.hostname==='portal.affinityfc.org'&&url.pathname==='/'&&['GET','HEAD'].includes(request.method)){
   const asset=await env.ASSETS.fetch(new Request(new URL('/portal-home.html',url),{method:request.method}));
