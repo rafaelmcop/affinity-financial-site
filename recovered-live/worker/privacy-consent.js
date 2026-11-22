@@ -1,6 +1,14 @@
 export const legalVersion = '2026-11-21.1';
 export const legalDocuments = {"terms": "f5e938de81056aa3f343d5693f2b53e0ddd5b4d0daebe34fdff829ab42f431cb", "privacy": "4029aa6076eb4ea28f9aa9a8f1ecdf372f84649dc7badd41777ea8d03216489b"};
 export const legalCookie = 'affinity_legal_consent';
+// Preserve the exact archived document bytes: shared HTML enhancements/nonces would change the fingerprint.
+export function legalDocumentResponse(asset) {
+ const response=new Response(asset.body,asset);
+ response.headers.set('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+ response.headers.set('X-Frame-Options','DENY');
+ response.headers.set('Cache-Control','no-store');
+ return response;
+}
 const initialized = new WeakMap();
 export async function privacySchema(env) {
  if (initialized.has(env.DB)) return initialized.get(env.DB);

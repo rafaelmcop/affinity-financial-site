@@ -23,7 +23,7 @@ Scope: the tracked live Affinity portal, its production Worker configuration, su
 
 ## Validation
 
-61 automated checks passed across versioned acceptance, CSRF/origin protection, actor isolation, AI permission/memory behavior, incident encryption/alert retry behavior, scoped data access, private-file protection, mail attachment restrictions, session expiry and homepage availability. Browser testing used a disposable local account to confirm that unchecked terms cannot be saved and that optional AI/media choices remain unchecked. No real client messages or legal incident reports were sent by the tests.
+62 automated checks passed across versioned acceptance, CSRF/origin protection, actor isolation, AI permission/memory behavior, incident encryption/alert retry behavior, scoped data access, private-file protection, mail attachment restrictions, session expiry and homepage availability. Browser testing used a disposable local account to confirm that unchecked terms cannot be saved and that optional AI/media choices remain unchecked. No real client messages or legal incident reports were sent by the tests.
 
 ## Remaining legal and operational work
 

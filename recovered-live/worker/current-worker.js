@@ -52,7 +52,7 @@ import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
 import {birthdayHoldSchema} from './birthday-alerts.js';
-import {legalRoute,currentLegalReceipt,legalProtectedProcedures} from './privacy-consent.js';
+import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentResponse} from './privacy-consent.js';
 import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
@@ -48348,7 +48348,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const legalResponse=await legalRoute(request,env,legalServices);
  if(legalResponse)return perimeterHeaders(legalResponse,url.pathname);
  const legalPages={'/legal/2026-11-21.1/terms-of-use.html':'/legal/2026-11-21.1/terms-of-use.html','/legal/2026-11-21.1/portal-privacy.html':'/legal/2026-11-21.1/portal-privacy.html','/terms-of-use.html':'/terms-of-use.html','/terms':'/terms-of-use.html','/termos':'/terms-of-use.html','/portal-privacy.html':'/portal-privacy.html','/privacy':'/portal-privacy.html','/politica-de-privacidade':'/portal-privacy.html'};
- if(['GET','HEAD'].includes(request.method)&&Object.hasOwn(legalPages,url.pathname))return perimeterHeaders(secureResponse(await env.ASSETS.fetch(new Request(new URL(legalPages[url.pathname],url),{method:request.method}))),url.pathname);
+ if(['GET','HEAD'].includes(request.method)&&Object.hasOwn(legalPages,url.pathname))return perimeterHeaders(legalDocumentResponse(await env.ASSETS.fetch(new Request(new URL(legalPages[url.pathname],url),{method:request.method}))),url.pathname);
  if(request.method==='POST'){
   const names=url.pathname.startsWith('/api/trpc/')?procedureNames(url.pathname):url.pathname.startsWith('/api/assistants/procedure/')?[url.pathname.slice('/api/assistants/procedure/'.length)]:[];
   if(names.some(name=>legalProtectedProcedures.has(name))){
