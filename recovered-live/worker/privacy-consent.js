@@ -6,7 +6,7 @@ export function legalDocumentResponse(asset) {
  const response=new Response(asset.body,asset);
  response.headers.set('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
  response.headers.set('X-Frame-Options','DENY');
- response.headers.set('Cache-Control','no-store');
+ response.headers.set('Cache-Control','no-store, no-transform');
  return response;
 }
 const initialized = new WeakMap();
