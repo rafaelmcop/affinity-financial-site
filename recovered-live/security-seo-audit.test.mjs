@@ -47,11 +47,12 @@ test('homepage retains a no-script alternative and structured data without flash
  assert.match(html,/index-BIU-6RMI.js\?v=20261009-setup-1/);
 });
 
-// Static resources bypass the Worker only for the compiled JavaScript/CSS.
+// Static resources bypass the Worker for compiled code and the isolated public Tesla prototype.
 // Sensitive extensions and SPA fallbacks must still reach the perimeter.
 test('asset routing cannot bypass sensitive-file checks and static assets carry security headers',()=>{
  const config=JSON.parse(fs.readFileSync(new URL('./deploy/wrangler-main.jsonc',import.meta.url),'utf8'));
- assert.deepEqual(config.assets.run_worker_first,['/*','!/assets/*.js','!/assets/*.css','!/vendor/*.js','!/vendor/*.css']);
+ assert.deepEqual(config.assets.run_worker_first,['/*','!/assets/*.js','!/assets/*.css','!/vendor/*.js','!/vendor/*.css','!/teste/tesla','!/teste/tesla/*']);
+ assert.deepEqual(fs.readdirSync(new URL('./public/teste/tesla/',import.meta.url)),['index.html']);
  const headers=fs.readFileSync(new URL('./public/_headers',import.meta.url),'utf8');
  for(const value of ['X-Content-Type-Options: nosniff','Strict-Transport-Security: max-age=31536000','Referrer-Policy: no-referrer'])assert(headers.includes(value));
  for(const path of ['/assets/app.js.map','/vendor/.env','/assets/backup.sqlite'])assert(sensitiveResource(path));

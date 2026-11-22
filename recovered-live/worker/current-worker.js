@@ -52,6 +52,8 @@ import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
 import {birthdayHoldSchema} from './birthday-alerts.js';
+import {legalRoute,currentLegalReceipt,legalProtectedProcedures} from './privacy-consent.js';
+import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
@@ -85,7 +87,7 @@ import {loadPublishedTestimonials} from './testimonial-loading.js';
 import {publicTestimonial,publicTestimonialColumns} from './public-testimonials.js';
 import {assistantsRoute,delegatedAccess} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
-import {trpcBoundary,boundedJson,globalTestimonialsAllowed} from './security-boundary.js';
+import {trpcBoundary,boundedJson,globalTestimonialsAllowed,procedureNames} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
 import {portalSessionKind,portalSessionRoute} from './portal-session.js';
 import {clientApplicationColumns,applicationExtra,applicationFields,applicationClientFields,applicationRevision,applicationVersionGuard} from './application-client-data.js';
@@ -228,7 +230,7 @@ async function siteBrandingRoute(request, env, auth) {
 function applySiteBranding(response) {
   if(!response.headers.get('content-type')?.includes('text/html'))return response;
   // Stream the shared enhancement into every HTML shell; do not rewrite React-owned children.
-  return new HTMLRewriter().on('head',{element(element){element.append('<script src="/brand-logo.js?v=1" defer></script><script src="/site-branding.js?v=5" defer></script>',{html:true});}}).transform(response);
+  return new HTMLRewriter().on('head',{element(element){element.append('<script src="/legal-privacy.js?v=1" defer></script><script src="/brand-logo.js?v=1" defer></script><script src="/site-branding.js?v=5" defer></script>',{html:true});}}).transform(response);
 }
 
 /**
@@ -47620,6 +47622,7 @@ var cloudflare_staging_default = {
     }
   },
   async scheduled(controller, env, ctx) {
+    if(controller.cron==='*/5 * * * *')ctx.waitUntil(flushSecurityAlerts(env,mail=>sendEmailIfConfigured(env,mail)).catch(()=>console.error('security_alert_pending')));
     ctx.waitUntil(pendingCommunicationProgress(env).catch(()=>console.error('crm_communication_progress_pending')));
     ctx.waitUntil(runApplicationLifecycle(env,{decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:(owner,mail)=>sendAgentEmail(env,owner,{...mail,platformMail:true,transientAttachments:true}),definitelyNotSent:emailDefinitelyNotSent,alert:details=>sendEmailIfConfigured(env,{to:'info@affinityfc.org',subject:'Affinity Portal · Application processing needs attention',html:'<p>Application #'+Number(details.applicationId)+' · '+escapeAutomationHtml(details.code)+'</p>'})}).catch(()=>console.error('application_lifecycle_pending')));
     if(controller.cron==='* * * * *'){ctx.waitUntil(flushWhatsappPolicies(env,owner=>contactBridge(env,owner,'policy','POST')).then(()=>importConnectedWhatsapp(env,{bridge:contactBridge,store:storeCentralContacts,protect:protectInternalContacts})).catch(()=>console.error('whatsapp_maintenance_pending')));ctx.waitUntil(runMeetingReminders(env,meetingReminderServices(env)).catch(()=>console.error('meeting_reminders_pending')));return;}
@@ -48319,7 +48322,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
 
  if(request.method==='POST'&&/agent\.send(?:Meeting(?:Email|Whatsapp)|MailboxEmail|ApplicationEmail)|agent\.restoreEmailAttachments/.test(url.pathname))ctx.waitUntil(Promise.all([readPendingEmailDocuments(env),readQueuedProposalDocuments(env)]).catch(()=>console.error('proposal_reading_pending')));
  const portalFirstPaint='<meta name="color-scheme" content="only light"><style>html[data-agent-theme=light],html[data-agent-theme=light] body{color-scheme:only light;background:#f3f6f8!important;color:#111827!important}</style>';
- if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=19" defer></script><script src="/portal-ai.js?v=5" defer></script>',{html:true});}}).transform(response);
+ if((url.pathname==='/admin'||url.pathname.startsWith('/admin/')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='admin'))&&url.pathname!=='/admin/login'&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/admin-unified-menu.js?v=20" defer></script><script src="/portal-ai.js?v=5" defer></script>',{html:true});}}).transform(response);
  if(url.pathname.startsWith('/afiliados/')&&!['/afiliados/login','/afiliados/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html'))return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/staff-setup-check.js?v=20261114-apps" defer></script><script src="/user-access-menu.js?v=8" defer></script>',{html:true});}}).transform(response);
  if((url.pathname.startsWith('/agentes/')||url.pathname.startsWith('/agent-')||(url.pathname==='/candidaturas.html'&&url.searchParams.get('portal')==='agent'))&&!['/agentes/login','/agentes/registrar'].includes(url.pathname)&&response.headers.get('content-type')?.includes('text/html')){
   return new HTMLRewriter().on('html',{element(el){el.setAttribute('data-agent-theme','light');}}).on('head',{element(el){el.prepend(portalFirstPaint,{html:true});el.append('<style>html:not([data-feature-access-ready]) .agent-unified-nav{visibility:hidden}</style><link rel="stylesheet" href="/agent-theme.css?v=10"><link rel="stylesheet" href="/portal-navigation.css?v=3"><link rel="stylesheet" href="/portal-typography.css?v=1"><script src="/portal-ai.js?v=5" defer></script><script src="/portal-notifications.js?v=5" defer></script><script src="/portal-home-notices.js?v=3" defer></script><script src="/internal-messenger.js?v=5" defer></script><script src="/five-rings-background.js?v=10" defer></script><script src="/five-rings-settings-link.js?v=4" defer></script><link rel="stylesheet" href="/message-channel-icons.css?v=2"><script type="module" src="/portal-interactions.js?v=14"></script><script src="/user-access-menu.js?v=8" defer></script><script src="/agent-upline-required.js?v=2" defer></script><script src="/portal-whatsapp-controls.js?v=3" defer></script><script src="/portal-business.js?v=3" defer></script><script src="/email-setup-reminder.js?v=3" defer></script>',{html:true});el.append('<script src="/agent-unified-menu.js?v=20261114-apps" defer></script>',{html:true});}}).on('script[src*="agent-unified-menu.js"]',{element(el){el.setAttribute('src','/agent-unified-menu.js?v=20261114-apps');}}).transform(response);
@@ -48337,6 +48340,23 @@ async function staffAuditSession(request,env,affiliate){
 const auditedPortalFetch=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
+ const legalServices={
+  session:getSession,create:createSession,json:boundedJson,identity:legalIdentity
+ };
+ const incidentResponse=await securityIncidentRoute(request,env,{...legalServices,encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:mail=>sendEmailIfConfigured(env,mail)});
+ if(incidentResponse)return perimeterHeaders(secureResponse(incidentResponse,{privateData:true}),url.pathname);
+ const legalResponse=await legalRoute(request,env,legalServices);
+ if(legalResponse)return perimeterHeaders(legalResponse,url.pathname);
+ const legalPages={'/legal/2026-11-21.1/terms-of-use.html':'/legal/2026-11-21.1/terms-of-use.html','/legal/2026-11-21.1/portal-privacy.html':'/legal/2026-11-21.1/portal-privacy.html','/terms-of-use.html':'/terms-of-use.html','/terms':'/terms-of-use.html','/termos':'/terms-of-use.html','/portal-privacy.html':'/portal-privacy.html','/privacy':'/portal-privacy.html','/politica-de-privacidade':'/portal-privacy.html'};
+ if(['GET','HEAD'].includes(request.method)&&Object.hasOwn(legalPages,url.pathname))return perimeterHeaders(secureResponse(await env.ASSETS.fetch(new Request(new URL(legalPages[url.pathname],url),{method:request.method}))),url.pathname);
+ if(request.method==='POST'){
+  const names=url.pathname.startsWith('/api/trpc/')?procedureNames(url.pathname):url.pathname.startsWith('/api/assistants/procedure/')?[url.pathname.slice('/api/assistants/procedure/'.length)]:[];
+  if(names.some(name=>legalProtectedProcedures.has(name))){
+   const kind=url.pathname.startsWith('/api/assistants/')?'assistant':names.some(name=>name.startsWith('admin.'))?'admin':names.some(name=>name.startsWith('agent.'))?'agent':names.some(name=>name.startsWith('affiliate.'))?'affiliate':'public';
+   const identity=await legalIdentity(request,env,kind);
+   if(!await currentLegalReceipt(request,env,legalServices,identity?.actor||null)){const error=trpcError('Leia e aceite os Termos de Uso e a Política de Privacidade antes de continuar.','PRECONDITION_FAILED',428);return perimeterHeaders(Response.json(url.searchParams.get('batch')==='1'?names.map(()=>error):error,{status:428,headers:{'cache-control':'no-store'}}),url.pathname);}
+  }
+ }
  const sessionStatus=await portalSessionRoute(request,env,getSession);
  if(sessionStatus)return perimeterHeaders(sessionStatus,url.pathname);
  if(sensitiveResource(url.pathname))return perimeterHeaders(new Response('Not found',{status:404}),url.pathname);
@@ -48379,6 +48399,33 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(url.hostname==='portal.affinityfc.org'&&response.headers.get('content-type')?.includes('text/html'))response=new HTMLRewriter().on('head',{element(el){el.append('<script src="/portal-language.js?v=9" defer></script>',{html:true});}}).transform(response);
  return perimeterHeaders(response,url.pathname);
 };
+async function legalIdentity(request,env,kind){
+ if(kind==='public')return null;
+ if(kind==='assistant'){
+  const assistant=await getSession(request,env,'affinity_assistant_session');
+  if(assistant?.type==='assistant'){
+   const row=await env.DB.prepare('SELECT email,sessionVersion FROM portalAssistants WHERE id=? AND active=1 AND deletedAt IS NULL').bind(assistant.id).first();
+   return row&&Number(row.sessionVersion)===assistant.version?{actor:String(row.email).toLowerCase(),kind:'assistant',isAdmin:false}:null;
+  }
+ }
+ if(kind==='affiliate'){
+  const affiliate=await getSession(request,env,AFFILIATE_COOKIE);
+  if(affiliate?.type==='affiliate'){
+   const row=await env.DB.prepare("SELECT email FROM affiliates WHERE id=? AND isActive=1 AND status='approved' AND portalDeletedAt IS NULL").bind(Number(affiliate.affiliateId)).first();
+   return row?{actor:String(row.email).toLowerCase(),kind:'affiliate',isAdmin:false}:null;
+  }
+ }
+ const session=await getSession(request,env,ADMIN_COOKIE);
+ if(session?.type==='admin'){
+  let actor=session.email;
+  if(session.auditAccess){const master=await getSession(request,env,'affinity_audit_master');if(master?.email)actor=master.email;}
+  const access=await getAdminAccess(actor,env);
+  if(!access.account?.isActive||access.account.status!=='approved')return null;
+  return {actor:String(actor).toLowerCase(),kind:kind==='admin'?'admin':'agent',isAdmin:['admin','both'].includes(access.account.accountType)};
+ }
+ if(kind==='agent'&&(request.headers.get('cookie')||'').includes('affinity_assistant_session='))return legalIdentity(request,env,'assistant');
+ return null;
+}
 const protectedPortalFetch=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  try{

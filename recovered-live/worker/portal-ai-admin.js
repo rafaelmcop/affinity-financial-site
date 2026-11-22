@@ -1,6 +1,8 @@
+import {requireAiProcessing} from './privacy-consent.js';
 import {portalAi,aiCompletion} from './portal-ai.js';import {aiMemory,rememberAi,memoryText} from './portal-ai-memory.js';
 // Called only after the worker validates an active Admin session; never from agent mode.
 export async function adminPortalAi(env,actor,input,{readFor,bankSummary,now=new Date()}={}){
+ await requireAiProcessing(env,actor);
  const message=memoryText(input.message,1500).trim();if(!message)throw Object.assign(Error('Descreva sua consulta.'),{status:400});
  const memoryIdentity={owner:'admin:'+actor,actor};const memory=await aiMemory(env,memoryIdentity);
  await env.DB.prepare('CREATE TABLE IF NOT EXISTS portalAiUsage(owner TEXT NOT NULL,actor TEXT NOT NULL,day TEXT NOT NULL,requests INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(owner,actor,day))').run();const usage=await env.DB.prepare('INSERT INTO portalAiUsage(owner,actor,day,requests) VALUES(?,?,?,1) ON CONFLICT(owner,actor,day) DO UPDATE SET requests=requests+1 WHERE requests<100 RETURNING requests').bind(memoryIdentity.owner,actor,now.toISOString().slice(0,10)).first();if(!usage)throw Object.assign(Error('Limite diário de consultas da IA atingido.'),{status:429});
