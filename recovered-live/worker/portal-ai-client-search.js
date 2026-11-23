@@ -2,6 +2,7 @@
 const safe=(v,n=160)=>String(v??'').replace(/[\u0000-\u001f]/g,' ').slice(0,n);
 const norm=v=>safe(v,400).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 const nyDay=value=>{const d=new Date(value);return Number.isFinite(d.getTime())?new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(d):'';};
+export const aiClientNameMatches=(name,query)=>{const words=norm(name).split(/[^a-z0-9]+/).filter(Boolean),tokens=norm(query).split(/[^a-z0-9]+/).filter(Boolean);return tokens.every(token=>words.some(word=>word.startsWith(token)));};
 const validDay=v=>/^\d{4}-\d{2}-\d{2}$/.test(v||'')&&Number.isFinite(Date.parse(v+'T12:00:00Z'))&&new Date(v+'T12:00:00Z').toISOString().slice(0,10)===v;
 export async function findAiClients(env,identity,plan,{allowed,bankSummary}={}){
  const owner=String(identity.owner).toLowerCase(),admin=identity.admin===true,global=admin&&identity.allOwners===true;
@@ -18,7 +19,7 @@ export async function findAiClients(env,identity,plan,{allowed,bankSummary}={}){
  const meetings=calendar&&from?await sql('SELECT id,agentEmail,clientId,inviteeName,startTime,status FROM calendlyMeetings WHERE '+(global?'1=1':'lower(agentEmail)=?')+" AND date(startTime)>=date(?,'-1 day') AND date(startTime)<=date(?,'+1 day') ORDER BY startTime LIMIT 1001",[...(global?[]:[owner]),from,to]):[];
  const policies=plan.financial?await sql('SELECT agentEmail,clientId,clientName,policyNumber,status,premiumAmount,premiumFrequency FROM agentPolicies WHERE '+(global?'1=1':'lower(agentEmail)=?')+' ORDER BY id DESC LIMIT 1001',global?[]:[owner]):[];
  const candidates=[];
- const matches=(record,app)=>{const name=norm(filters.name||plan.search),state=norm(filters.state),city=norm(filters.city),spouse=norm(filters.spouse),marital=norm(filters.maritalStatus);if(name&&!norm(record.name).includes(name))return false;
+ const matches=(record,app)=>{const name=norm(filters.name||plan.search),state=norm(filters.state),city=norm(filters.city),spouse=norm(filters.spouse),marital=norm(filters.maritalStatus);if(name&&!aiClientNameMatches(record.name,name))return false;
  if(state){const canonical=v=>norm(v)==='florida'?'fl':norm(v);const known=canonical(app?.state);const address=' '+norm(record.address).replace(/[^a-z0-9]+/g,' ')+' ';if(known?known!==canonical(state):!address.includes(' '+canonical(state)+' '))return false;}
  if(city&&!norm(app?.city||record.address).includes(city))return false;
  const explicitSpouse=app?.spouseName||(/^(spouse|wife|husband|conjuge|esposa|marido)$/i.test(norm(app?.beneficiaryRelationship))?app.beneficiaryName:'');
