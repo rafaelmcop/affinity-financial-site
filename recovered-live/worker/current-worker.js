@@ -55,6 +55,7 @@ import {birthdayHoldSchema} from './birthday-alerts.js';
 import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentResponse,recordRegistrationConsent} from './privacy-consent.js';
 import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
 import {publicDatabaseErrorMessage} from './database-error-privacy.js';
+import {youtubeSearchRoute} from './media-youtube-search.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
@@ -48347,6 +48348,8 @@ async function staffAuditSession(request,env,affiliate){
 const auditedPortalFetch=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
+ const mediaSearch=await youtubeSearchRoute(request,env);
+ if(mediaSearch)return perimeterHeaders(mediaSearch,url.pathname);
  const legalServices={
   session:getSession,create:createSession,json:boundedJson,identity:legalIdentity
  };

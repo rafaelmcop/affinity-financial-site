@@ -1,60 +1,40 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0b1220">
-<title>Tesla Entertainment Hub — Teste</title>
-<style>
-*{box-sizing:border-box}
-body{margin:0;background:#0b1220;color:#f8fafc;font:18px system-ui,sans-serif}
-main{max-width:1100px;margin:auto;padding:32px}
-h1{font-size:clamp(28px,4vw,44px);margin:0 0 10px}
-p{color:#cbd5e1;line-height:1.55}
-.services{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:32px}
-article{background:#172236;border:1px solid #334155;border-radius:20px;padding:28px;display:flex;flex-direction:column}
-h2{font-size:32px;margin:0}
-a{color:#dbeafe;text-underline-offset:5px}
-.action{display:flex;align-items:center;justify-content:center;min-height:76px;padding:20px;background:#dc2626;border:2px solid #ef4444;border-radius:14px;color:white;text-decoration:none;font-weight:750;font-size:23px}
-.netflix{background:#b20710;border-color:#e50914}
-.login{display:inline-block;margin-top:22px;padding:10px 0}
-form{margin-top:24px}
-label{display:block;margin-bottom:10px;font-weight:650}
-.search{display:flex;flex-wrap:wrap;gap:10px}
-input,button{font:inherit;border-radius:10px;padding:15px;min-height:56px}
-input{flex:1;min-width:0;width:100%;background:#0b1220;color:white;border:1px solid #94a3b8}
-button{border:1px solid #60a5fa;background:#1d4ed8;color:white;cursor:pointer}
-a:focus-visible,button:focus-visible,input:focus-visible{outline:3px solid #facc15;outline-offset:5px}
-.note{font-size:15px;margin-top:26px}
-@media(max-width:650px){main{padding:22px}.services{grid-template-columns:1fr}article{padding:22px}}
-</style>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="referrer" content="strict-origin-when-cross-origin"><meta name="theme-color" content="#14233b">
+<title>Affinity Play | Reprodutor</title>
+<link rel="stylesheet" href="./player.css?v=1"><script type="module" src="./player.js?v=1"></script>
 </head>
 <body>
+<header class="topbar"><a class="brand" href="https://www.affinityfc.org/" aria-label="Ir para o site da Affinity"><img src="/policy-welcome-logo.png" alt="Affinity Financial Consulting" width="184" height="64"><span class="brand-separator"></span><span class="play-word">PLAY</span></a><a class="back-link" href="https://www.affinityfc.org/">Site Affinity</a></header>
 <main>
-<h1>Entertainment Hub</h1>
-<p>Escolha um serviço para navegar pelo catálogo e entrar na sua conta. Use com o veículo estacionado.</p>
-<div class="services">
-<article>
-<h2>YouTube</h2>
-<p>Vídeos, canais, inscrições e recomendações.</p>
-<a class="action" href="https://www.youtube.com/">Abrir YouTube</a>
-<a class="login" href="https://www.youtube.com/">Entrar na minha conta YouTube</a>
-<form action="https://www.youtube.com/results" method="get">
-<label for="search">Pesquisar no YouTube</label>
-<div class="search">
-<input id="search" name="search_query" type="search" placeholder="Nome do vídeo, canal ou assunto" required>
-<button type="submit">Pesquisar</button>
+<div class="page-heading"><div><p class="eyebrow">SEU ESPAÇO DE VÍDEO</p><h1>Escolha. Relaxe. Dê play.</h1></div><p class="intro">YouTube e canais HLS em um só lugar.<br>Você escolhe quando começar.</p></div>
+<div class="workspace">
+<section class="watch" aria-label="Área de reprodução">
+<div class="watch-heading"><span id="source-label">Pronto para começar</span><span class="format-label">REPRODUTOR</span></div>
+<div id="screen" class="screen">
+<div id="empty-state" class="empty-state"><span class="play-symbol" aria-hidden="true">▶</span><h2>Seu próximo vídeo começa aqui.</h2><p>O vídeo inicial já está selecionado.<br>Carregue e toque em Play para assistir.</p><button id="default-start" class="button primary" type="button">Carregar vídeo inicial</button><span class="video-reference">YouTube · 3HOKK2MTtNQ</span></div>
+<div id="youtube-mount" class="youtube-mount" hidden></div>
+<video id="iptv-player" controls playsinline preload="none" aria-label="Reprodutor do canal HLS" hidden></video>
 </div>
-</form>
-</article>
-<article>
-<h2>Netflix</h2>
-<p>Entre na sua conta para escolher filmes e séries.</p>
-<a class="action netflix" href="https://www.netflix.com/browse">Abrir Netflix</a>
-<a class="login" href="https://www.netflix.com/login">Entrar na minha conta Netflix</a>
-</article>
+<div class="watch-bottom"><p id="status" role="status" aria-live="polite">Selecione uma fonte. Nada será reproduzido automaticamente.</p><div class="player-actions"><button id="play-pause" class="button compact" type="button" disabled>Reproduzir</button><button id="fullscreen" class="button compact" type="button">Tela cheia</button><button id="stop" class="button compact" type="button" disabled>Encerrar</button></div></div>
+<a id="youtube-link" class="outside-link" href="https://www.youtube.com/watch?v=3HOKK2MTtNQ" target="_blank" rel="noopener noreferrer" hidden>Abrir no YouTube</a>
+</section>
+<aside class="controls" aria-label="Escolher conteúdo">
+<div class="controls-title"><p class="eyebrow">O QUE VAMOS ASSISTIR?</p><h2>Sua escolha de hoje</h2></div>
+<div role="tablist" aria-label="Fontes de vídeo" class="tabs"><button id="tab-youtube" role="tab" aria-selected="true" aria-controls="panel-youtube" type="button"><span class="service-icon youtube-icon" aria-hidden="true">▶</span>YouTube</button><button id="tab-iptv" role="tab" aria-selected="false" aria-controls="panel-iptv" tabindex="-1" type="button"><span aria-hidden="true">◉</span>IPTV / HLS</button></div>
+<section id="panel-youtube" role="tabpanel" aria-labelledby="tab-youtube"><form id="youtube-search-form"><label for="youtube-search">Pesquisar no YouTube</label><input id="youtube-search" type="search" placeholder="Vídeos, canais ou assuntos" autocomplete="off" maxlength="120" minlength="2" required><button id="youtube-search-button" class="button primary wide" type="submit" disabled>Buscar vídeos</button><p id="youtube-search-availability" class="field-help" role="status">Conferindo disponibilidade da busca…</p></form><hr class="form-divider"><form id="youtube-form"><label for="youtube-input">Vídeo do YouTube</label><p class="field-help">Use um link do YouTube ou o ID do vídeo.</p><input id="youtube-input" value="3HOKK2MTtNQ" type="text" inputmode="url" autocomplete="off" spellcheck="false" maxlength="2048" required><button class="button primary wide" type="submit">Carregar vídeo</button></form><button id="demo-video" class="text-button" type="button">Experimentar vídeo de demonstração</button></section>
+<section id="panel-iptv" role="tabpanel" aria-labelledby="tab-iptv" hidden>
+<form id="iptv-account-form"><label for="iptv-name">Nome da sua conexão</label><input id="iptv-name" placeholder="Minha TV" maxlength="80" autocomplete="off" required><label for="iptv-server">Servidor</label><input id="iptv-server" type="url" inputmode="url" placeholder="https://seu-provedor.com:porta" autocomplete="off" spellcheck="false" required><div class="credential-fields"><div><label for="iptv-user">Usuário</label><input id="iptv-user" autocomplete="off" spellcheck="false" maxlength="256" required></div><div><label for="iptv-password">Senha</label><input id="iptv-password" type="password" autocomplete="off" maxlength="512" required></div></div><p class="field-help">Conta compatível com a API Xtream. O servidor precisa aceitar HTTPS e conexões do navegador (CORS).</p><button id="iptv-connect" class="button primary wide" type="submit">Conectar e listar canais</button></form>
+<div id="iptv-channels" hidden><div class="channel-heading"><strong id="iptv-account-name"></strong><button id="iptv-disconnect" class="text-button" type="button">Desconectar</button></div><label for="channel-search">Buscar canal</label><input id="channel-search" type="search" placeholder="Nome do canal" autocomplete="off"><p id="channel-count" class="field-help"></p><div id="channel-list" class="channel-list" aria-label="Canais disponíveis"></div><button id="more-channels" class="text-button" type="button" hidden>Mostrar mais canais</button></div>
+<p class="privacy-note">Sua senha e seus canais ficam apenas na memória desta sessão. A conexão é direta com o provedor; nada é salvo pelo nosso site.</p>
+<details class="direct-hls"><summary>Usar um link HLS direto</summary><form id="iptv-form"><label for="iptv-input">Link do canal</label><input id="iptv-input" type="url" inputmode="url" placeholder="https://provedor.exemplo/canal.m3u8" autocomplete="off" spellcheck="false" autocapitalize="none" maxlength="8192" required><button class="button primary wide" type="submit">Carregar canal</button></form><button id="demo-hls" class="text-button" type="button">Experimentar canal de demonstração</button></details></section>
+<div class="netflix-card"><span class="netflix-mark" aria-hidden="true">N</span><div><h3>Netflix</h3><p>Seu catálogo, na sua conta.</p></div><a id="netflix-link" href="https://www.netflix.com/" target="_blank" rel="noopener noreferrer" class="button netflix-button">Abrir Netflix</a></div>
+<p class="provider-note">Ao carregar um vídeo ou canal, você se conecta ao YouTube ou ao provedor informado. Conteúdos e disponibilidade dependem desses serviços.</p>
+</aside>
 </div>
-<p class="note">O catálogo e o login abrem no site oficial, nesta mesma aba. Use Voltar no navegador para retornar ao hub. A reprodução depende da compatibilidade do navegador do veículo.</p>
+<section id="youtube-discovery" class="discovery" hidden><div class="discovery-heading"><h2>Resultados do YouTube</h2><p id="youtube-result-count"></p></div><div id="youtube-results" class="youtube-results"></div><button id="youtube-next" class="button" type="button" hidden>Mais vídeos</button></section>
+<div class="safety-note"><span aria-hidden="true">ⓘ</span><p>Na tela do veículo, use com o carro estacionado e respeite as restrições do Tesla. Passageiros podem usar celular ou tablet. A compatibilidade com um Tesla real ainda não foi validada.</p></div>
 </main>
-</body>
-</html>
+<footer><span>Affinity Play <span class="footer-divider">/</span> Ambiente de testes</span><nav aria-label="Informações"><a href="/terms-of-use.html">Termos de uso</a><a href="/portal-privacy.html">Privacidade</a></nav></footer>
+</body></html>
