@@ -56,6 +56,7 @@ import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentRes
 import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
 import {publicDatabaseErrorMessage} from './database-error-privacy.js';
 import {youtubeSearchRoute} from './media-youtube-search.js';
+import {mediaIptvSessionRoute} from './media-iptv-session.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
@@ -48348,6 +48349,8 @@ async function staffAuditSession(request,env,affiliate){
 const auditedPortalFetch=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
+ const mediaIptv=await mediaIptvSessionRoute(request,env);
+ if(mediaIptv)return perimeterHeaders(mediaIptv,url.pathname);
  const mediaSearch=await youtubeSearchRoute(request,env);
  if(mediaSearch)return perimeterHeaders(mediaSearch,url.pathname);
  const legalServices={
