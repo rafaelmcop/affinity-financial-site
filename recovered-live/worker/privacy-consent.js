@@ -101,11 +101,7 @@ export async function legalRoute(request, env, auth) {
  return json({success:true,accepted:true,receiptId:id,media},200,{'set-cookie':legalCookie+'='+token+'; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax'});
 }
 
-export const legalProtectedProcedures = new Set([
- 'agent.register','affiliate.register','applications.clientSave','applications.uploadDocument',
- 'testimonials.submitReview','reviewInvites.submit','serviceFeedback.submit','calendly.contactAgent',
- // Authenticated portal use never requests another agreement after registration.
-]);
+export const legalProtectedProcedures = new Set(['agent.register','affiliate.register']);
 
 export async function requireAiProcessing(env, actor) {
  const choices=await privacyChoices(env,actor);

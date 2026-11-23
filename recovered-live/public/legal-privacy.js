@@ -18,13 +18,15 @@
  function close(){dialog?.remove();dialog=null;}
  async function open(purpose='privacy'){
   if(dialog)return;
+  if(!['account','privacy','ai'].includes(purpose))return;
+  if(purpose==='account'&&!/^\/(?:agentes|afiliados|assistentes|admin)\/(?:login|registrar|cadastro)$/.test(location.pathname))return;
   let state;
   try{state=await read()}catch{return;}
   if(dialog)return;
   if(purpose!=='account'&&!['privacy','ai'].includes(purpose)&&['agent','assistant','admin','affiliate'].includes(kind))return;
   if(state.accepted&&!['privacy','ai'].includes(purpose))return;
   if(purpose==='ai'&&state.choices?.aiProcessing)return;
-  const registration=purpose==='account',agreementRequired=!state.accepted&&(registration||!['agent','assistant','admin','affiliate'].includes(kind));
+  const registration=purpose==='account',agreementRequired=registration&&!state.accepted;
   dialog=document.createElement('dialog');
   dialog.setAttribute('aria-label','Privacidade e termos');
   dialog.style.cssText='width:min(620px,calc(100% - 32px));max-height:85vh;overflow:auto;border:1px solid #9fb1c4;border-radius:16px;padding:24px;background:#fff;color:#14233b;font:16px/1.5 system-ui;box-shadow:0 12px 70px #0005';
@@ -60,7 +62,8 @@
   if(dialog.showModal)dialog.showModal();else dialog.setAttribute('open','');
  }
  async function ensure(purpose){
-  try{const state=await read();if(purpose!=='account'&&['agent','assistant','admin','affiliate'].includes(kind))return true;if(state.accepted)return true;await open(purpose);return false}catch{return false}
+  if(purpose!=='account')return true;
+  try{const state=await read();if(state.accepted)return true;await open('account');return false}catch{return false}
  }
  window.affinityPrivacy={open,ensure,refresh:read};
  const footer=document.createElement('div');
@@ -76,25 +79,16 @@
  // Add a discoverable preference control to the existing, independently managed account menus.
  const attach=()=>{for(const menu of document.querySelectorAll('.agent-account-popover,#affinity-admin-account>div')){if(menu.querySelector('[data-privacy-settings]'))continue;const button=document.createElement('button');button.type='button';button.dataset.privacySettings='';button.textContent='Privacidade / Privacy';button.onclick=()=>void open();menu.append(button);}};
  attach();new MutationObserver(attach).observe(document.body,{childList:true,subtree:true});
- // A visitor can browse without accepting service terms. Submission and portal use ask explicitly.
+ // Only account registration may interrupt a form to request service-term acceptance.
  document.addEventListener('submit',event=>{
-  if(event.target.method==='dialog'||event.target.closest('dialog'))return;
-  const loginOnly=/\/login$/.test(path)&&event.target.querySelectorAll('input[type=password]').length<2&&!/cadastr|registr|criar conta|create account|sign up/i.test(event.submitter?.textContent||'');
-  const registration=/\/registrar$/.test(location.pathname)||event.target.querySelectorAll('input[type=password]').length>=2||/cadastr|registr|criar conta|create account|sign up/i.test(event.submitter?.textContent||'');
-  if(loginOnly)return;
-  if(['agent','assistant','admin','affiliate'].includes(kind)&&!registration)return;
-  if(status?.accepted)return;
+  const form=event.target;
+  if(form.method==='dialog'||form.closest('dialog'))return;
+  const authPage=/^\/(?:agentes|afiliados|assistentes|admin)\/(?:login|registrar|cadastro)$/.test(location.pathname);
+  const passwordCount=form.querySelectorAll('input[type=password]').length;
+  const registration=authPage&&passwordCount>0&&(passwordCount>=2||/\/(registrar|cadastro)$/.test(location.pathname)||/cadastr|registr|criar conta|create account|sign up/i.test(event.submitter?.textContent||''));
+  if(!registration||status?.accepted)return;
   event.preventDefault();event.stopImmediatePropagation();
-  const form=event.target,submitter=event.submitter;void read().then(state=>{if(state.accepted){if(submitter?.isConnected)form.requestSubmit(submitter);else form.requestSubmit();}else void open(registration?'account':path.includes('aplicacao')?'application':'contact');}).catch(()=>{});
- },true);
- document.addEventListener('click',event=>{
-  const button=event.target.closest('button');
-  if(!button||button.closest('dialog'))return;
-  if(['agent','assistant','admin','affiliate'].includes(kind))return;
-  if(status?.accepted)return;
-  if(button.matches('#save,#next-step,#save-draft,#next,#portal-ai-submit,[data-step-index]')){
-   event.preventDefault();event.stopImmediatePropagation();void read().then(state=>{if(state.accepted)button.click();else void open(path.includes('aplicacao')?'application':'portal');}).catch(()=>{});
-  }
+  const submitter=event.submitter;void read().then(state=>{if(state.accepted){if(submitter?.isConnected)form.requestSubmit(submitter);else form.requestSubmit();}else void open('account');}).catch(()=>{});
  },true);
  // Account agreements are collected only during registration; never open them on portal load.
  read().catch(()=>{});
