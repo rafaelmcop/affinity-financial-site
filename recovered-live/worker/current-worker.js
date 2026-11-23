@@ -43401,6 +43401,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "applications.uploadDocument") {
     const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase(), token = String(input.token || "").trim().toLowerCase();
+    if(token ? !/^[a-f0-9]{32}$/.test(token) : (!Number.isSafeInteger(id)||id<=0||!/^[A-Z0-9]{8}$/.test(code)))return trpcError("Link ou código inválido", "UNAUTHORIZED", 401);
     const row = token ? await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND clientToken=?").bind(id, token).first() : await env.DB.prepare("SELECT id,agentEmail,status FROM agentApplications WHERE id=? AND accessCode=?").bind(id, code).first();
     if (!row || (token ? !/^[a-f0-9]{32}$/.test(token) : !/^[A-Z0-9]{8}$/.test(code))) return trpcError("Link ou c\xF3digo inv\xE1lido", "UNAUTHORIZED", 401);
     if (row.status === "completed") return trpcError("Esta aplica\xE7\xE3o j\xE1 foi conclu\xEDda");
@@ -43412,6 +43413,7 @@ Detalhes: ${details}` : ""}`;
   }
   if (name === "applications.verifyCode" || name === "applications.clientSave") {
     const id = Number(input.id || 0), code = String(input.code || "").trim().toUpperCase(), token = String(input.token || "").trim().toLowerCase();
+    if(token ? !/^[a-f0-9]{32}$/.test(token) : (!Number.isSafeInteger(id)||id<=0||!/^[A-Z0-9]{8}$/.test(code)))return trpcError("Link ou código inválido", "UNAUTHORIZED", 401);
     try {
       await env.DB.prepare("ALTER TABLE agentApplications ADD COLUMN clientToken TEXT").run();
     } catch {
@@ -47611,7 +47613,8 @@ var cloudflare_staging_default = {
       console.error(
         JSON.stringify({
           event: "staging_api_error",
-          message: error instanceof Error ? error.message : String(error)
+          category: /^D1_|SQLITE_/i.test(String(error?.message||''))?'database':'runtime',
+          errorName: error instanceof SyntaxError?'SyntaxError':error instanceof TypeError?'TypeError':'Error'
         })
       );
       if([400,413].includes(error?.httpStatus))return secureResponse(jsonResponse([trpcError(error.message,error.httpStatus===413?'PAYLOAD_TOO_LARGE':'BAD_REQUEST',error.httpStatus)],error.httpStatus),{privateData:true});
