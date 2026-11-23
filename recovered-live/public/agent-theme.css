@@ -1,5 +1,5 @@
 @media screen {
-html[data-agent-theme]{--agent-bg:#f3f6f8;--agent-surface:#fff;--agent-inset:#eaf0f5;--agent-text:#172b3a;--agent-muted:#526779;--agent-border:#cbd7e1;--agent-accent:#805e08;--agent-sent:#dcf4e7;color-scheme:light;--background:210 30% 97%;--foreground:208 40% 16%;--card:0 0% 100%;--card-foreground:208 40% 16%;--popover:0 0% 100%;--popover-foreground:208 40% 16%;--muted:210 30% 93%;--muted-foreground:208 20% 38%;--border:210 25% 82%;--input:210 25% 82%}
+html[data-agent-theme]{--agent-bg:#f3f6f8;--agent-surface:#fff;--agent-inset:#eaf0f5;--agent-text:#172b3a;--agent-muted:#526779;--agent-border:#cbd7e1;--agent-accent:#805e08;--agent-sent:#dcf4e7;color-scheme:light;--background:#f3f6f8;--foreground:#111827;--card:#fff;--card-foreground:#111827;--popover:#fff;--popover-foreground:#111827;--muted:#eaf0f5;--muted-foreground:#334155;--border:#a8b6c4;--input:#a8b6c4;--secondary:#eaf0f5;--secondary-foreground:#172b3a;--accent:#e8eef5;--accent-foreground:#172b3a;--primary:#dfb934;--primary-foreground:#142238;--sidebar:#fff;--sidebar-foreground:#172b3a;--sidebar-primary:#dfb934;--sidebar-primary-foreground:#142238;--sidebar-accent:#e8eef5;--sidebar-accent-foreground:#172b3a;--sidebar-border:#cbd7e1;--ring:#3984cc;--destructive:#b91c1c;--destructive-foreground:#fff}
 
 html[data-agent-theme]{--bg:var(--agent-bg);--panel:var(--agent-surface);--soft:var(--agent-inset);--text:var(--agent-text);--sent:var(--agent-sent);--line:var(--agent-border)}
 html[data-agent-theme],html[data-agent-theme] body{background:var(--agent-bg)!important;color:var(--agent-text)!important}
@@ -34,7 +34,7 @@ html[data-agent-theme] :focus-visible{outline:3px solid #3984cc!important;outlin
 
 /* Light portals need dark semantic labels, including legacy dark-theme utility classes. */
 @media screen {
-html[data-agent-theme=light]{--agent-text:#111827;--agent-muted:#334155;--agent-accent:#654600;--agent-border:#a8b6c4;--foreground:221 39% 11%;--card-foreground:221 39% 11%;--popover-foreground:221 39% 11%;--muted-foreground:215 25% 27%;--border:213 20% 71%;--input:213 20% 71%}
+html[data-agent-theme=light]{--agent-text:#111827;--agent-muted:#334155;--agent-accent:#654600;--agent-border:#a8b6c4;--foreground:#111827;--card-foreground:#111827;--popover-foreground:#111827;--muted-foreground:#334155;--border:#a8b6c4;--input:#a8b6c4}
 html[data-agent-theme=light] :is([class*="text-green"],[class*="text-emerald"],[class*="text-teal"]){color:#14532d!important}
 html[data-agent-theme=light] :is([class*="text-red"],[class*="text-rose"],[class*="text-pink"]){color:#991b1b!important}
 html[data-agent-theme=light] :is([class*="text-purple"],[class*="text-violet"],[class*="text-fuchsia"]){color:#581c87!important}
@@ -62,3 +62,9 @@ html[data-agent-theme=light] :is(.client-record,#crm-client-profile,#client-conv
 html[data-agent-theme=light] .client-record button.primary {background:#d5b52f!important;color:#17202e!important;border-color:#927712!important}
 
 html[data-agent-theme] #messages .message.mine{background:var(--agent-sent)!important;margin-left:auto;margin-right:0}html[data-agent-theme] #messages .message:not(.mine){margin-left:0;margin-right:auto}
+
+/* Light-only utilities used by the recovered client-list bundle. */
+html[data-agent-theme=light] .bg-slate-50{background-color:#f8fafc}
+html[data-agent-theme=light] .text-amber-900{color:#78350f}
+html[data-agent-theme=light] .border-slate-200{border-color:#e2e8f0}
+html[data-agent-theme=light] .border-slate-300{border-color:#cbd5e1}

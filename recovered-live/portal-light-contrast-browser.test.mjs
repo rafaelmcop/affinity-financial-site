@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
+import {launchBrowser} from './test-support/browser.mjs';
+const root=new URL('./public/',import.meta.url);
+const rgb=value=>value.match(/[\d.]+/g).slice(0,3).map(Number);
+const lum=value=>rgb(value).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((sum,v,i)=>sum+v*[.2126,.7152,.0722][i],0);
+const contrast=(a,b)=>{const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05);};
+test('light portal tokens produce readable cards, popovers and controls even with OS dark preference',async()=>{
+ const browser=await launchBrowser();try{const page=await browser.newPage();await page.emulateMediaFeatures([{name:'prefers-color-scheme',value:'dark'}]);
+ const base=await readFile(new URL('assets/index-CBbEAruF.css',root),'utf8'),theme=await readFile(new URL('agent-theme.css',root),'utf8');
+ await page.setContent('<html data-agent-theme="light"><head><style>'+base+'</style><style>'+theme+'</style></head><body><main><h1>Clientes</h1><div id="card" class="bg-card text-card-foreground rounded-xl p-6">Clientes e apólices<div id="secondary" class="bg-secondary text-secondary-foreground p-4">Informações do cliente</div></div><div id="popover" class="bg-popover text-popover-foreground p-4">Editar cliente</div><input id="field" class="bg-background text-foreground" placeholder="Buscar por nome"><button id="action" class="bg-secondary text-secondary-foreground">Abrir ficha</button></main></body></html>');
+ for(const id of ['card','secondary','popover','field','action']){const colors=await page.$eval('#'+id,e=>{const s=getComputedStyle(e);return{bg:s.backgroundColor,fg:s.color}});assert(contrast(colors.bg,colors.fg)>=4.5,JSON.stringify({id,...colors}));assert(lum(colors.bg)>.65,JSON.stringify({id,...colors}));}
+ }finally{await browser.close();}
+});
+test('client list has no hardcoded retired dark surfaces or white labels',async()=>{const source=await readFile(new URL('assets/AgentClients-B86eG3em.js',root),'utf8');assert(!/bg-black|bg-\[#(?:0b1524|050b13)\]|text-white/.test(source));});
+test('accepted terms are not presented as a fresh agreement when enabling optional AI',async()=>{
+ const browser=await launchBrowser();try{const page=await browser.newPage();await page.setRequestInterception(true);page.on('request',r=>{if(r.url().startsWith('https://fixture.invalid/api/legal/status'))return void r.respond({status:200,contentType:'application/json',body:JSON.stringify({accepted:true,authenticated:true,media:false,choices:{aiProcessing:false,aiMemory:false}})});void r.respond({status:200,contentType:'text/html',body:'<button id="portal-ai-open">IA</button>'});});await page.goto('https://fixture.invalid/agentes/clientes');await page.addScriptTag({content:await readFile(new URL('legal-privacy.js',root),'utf8')});await page.click('#portal-ai-open');await page.waitForSelector('dialog[open]');assert.equal(await page.$eval('dialog h2',e=>e.textContent),'Ativar assistente de IA');assert.equal(await page.$eval('#legal-agree',e=>e.closest('label').hidden),true);assert.equal(await page.$eval('#legal-ai-processing',e=>e.checked),false);assert.equal(await page.$eval('dialog p a',e=>e.closest('p').hidden),true);
+ }finally{await browser.close();}
+});

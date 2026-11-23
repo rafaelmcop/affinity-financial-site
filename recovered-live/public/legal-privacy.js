@@ -1,9 +1,9 @@
 (() => {
  if(window.affinityPrivacy)return;
- const path=location.pathname;
- const kind=path.startsWith('/admin/')?'admin':path.startsWith('/assistentes/')||new URLSearchParams(location.search).get('assistantView')==='1'?'assistant':path.startsWith('/afiliados/')?'affiliate':/^\/(agentes\/|agent-)/.test(path)?'agent':'public';
+ let path=location.pathname;
+ let kind=path.startsWith('/admin/')?'admin':path.startsWith('/assistentes/')||new URLSearchParams(location.search).get('assistantView')==='1'?'assistant':path.startsWith('/afiliados/')?'affiliate':/^\/(agentes\/|agent-)/.test(path)?'agent':'public';
  let status=null,loading=null,dialog=null;
- const endpoint=route=>'/api/legal/'+route+'?kind='+kind;
+ const endpoint=route=>{path=location.pathname;kind=path.startsWith('/admin/')?'admin':path.startsWith('/assistentes/')||new URLSearchParams(location.search).get('assistantView')==='1'?'assistant':path.startsWith('/afiliados/')?'affiliate':/^\/(agentes\/|agent-)/.test(path)?'agent':'public';return '/api/legal/'+route+'?kind='+kind;};
  async function api(route,input){
   const response=await fetch(endpoint(route),{credentials:'same-origin',cache:'no-store',...(input?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}:{})});
   const body=await response.json();
@@ -28,7 +28,7 @@
   const get=id=>dialog.querySelector('#'+id);
   get('legal-agree').checked=state.accepted;
   get('legal-agree').closest('label').hidden=state.accepted;
-  if(state.accepted)dialog.querySelector('h2').textContent='Preferências de privacidade';
+  if(state.accepted){dialog.querySelector('h2').textContent=purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade';const intro=dialog.querySelector('h2+p');intro.textContent=purpose==='ai'?'Seus termos já foram aceitos. Para usar a IA, escolha abaixo as permissões opcionais de processamento.':'Seus termos já foram aceitos. Você pode ajustar as permissões opcionais abaixo.';intro.nextElementSibling.hidden=true;}
   get('legal-media').checked=state.media;
   get('legal-ai').hidden=!state.authenticated;
   get('legal-ai-processing').checked=state.choices?.aiProcessing===true;
@@ -78,7 +78,7 @@
  document.addEventListener('click',event=>{
   const button=event.target.closest('button');
   if(!button||button.closest('dialog'))return;
-  if(button.id==='portal-ai-open'&&!status?.choices?.aiProcessing){event.preventDefault();event.stopImmediatePropagation();void open('privacy');return;}
+  if(button.id==='portal-ai-open'&&!status?.choices?.aiProcessing){event.preventDefault();event.stopImmediatePropagation();void open('ai');return;}
   if(status?.accepted)return;
   if(button.matches('#save,#next-step,#save-draft,#next,#portal-ai-submit,[data-step-index]')){
    event.preventDefault();event.stopImmediatePropagation();void open(path.includes('aplicacao')?'application':'portal');
