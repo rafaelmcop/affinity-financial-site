@@ -51,8 +51,7 @@ test('homepage retains a no-script alternative and structured data without flash
 // Sensitive extensions and SPA fallbacks must still reach the perimeter.
 test('asset routing cannot bypass sensitive-file checks and static assets carry security headers',()=>{
  const config=JSON.parse(fs.readFileSync(new URL('./deploy/wrangler-main.jsonc',import.meta.url),'utf8'));
- assert.deepEqual(config.assets.run_worker_first,['/*','!/assets/*.js','!/assets/*.css','!/vendor/*.js','!/vendor/*.css','!/teste/tesla','!/teste/tesla/*']);
- assert.deepEqual(fs.readdirSync(new URL('./public/teste/tesla/',import.meta.url)).sort(),['HLS-LICENSE.txt','affinity-logo.png','hls-1.7.4.mjs','index.html','iptv-account.js','iptv-compat.js','iptv-vault.js','player-core.js','player.css','player.js'].sort());
+ assert.deepEqual(config.assets.run_worker_first,['/*','!/assets/*.js','!/assets/*.css','!/vendor/*.js','!/vendor/*.css']);
  const headers=fs.readFileSync(new URL('./public/_headers',import.meta.url),'utf8');
  for(const value of ['X-Content-Type-Options: nosniff','Strict-Transport-Security: max-age=31536000','Referrer-Policy: no-referrer'])assert(headers.includes(value));
  for(const path of ['/assets/app.js.map','/vendor/.env','/assets/backup.sqlite'])assert(sensitiveResource(path));

@@ -55,8 +55,6 @@ import {birthdayHoldSchema} from './birthday-alerts.js';
 import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentResponse,recordRegistrationConsent} from './privacy-consent.js';
 import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
 import {publicDatabaseErrorMessage} from './database-error-privacy.js';
-import {youtubeSearchRoute} from './media-youtube-search.js';
-import {mediaIptvSessionRoute} from './media-iptv-session.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
@@ -48254,7 +48252,15 @@ const isNlgPilotAccount=account=>Number(account?.id)===26&&String(account.email)
 const nlgBrowserAllowed=async(env,account)=>Boolean(account&&Number(account.isActive)===1&&account.status==='approved'&&['agent','both'].includes(account.accountType)&&(isNlgPilotAccount(account)||await hasFeature(env,account.email,'national_life_browser')));
 const canonicalMenuFetchSource=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
- const url=new URL(request.url);let appsResponse=null;
+ const url=new URL(request.url);
+ // Retired test route: clear only its isolated browser connection, preserving portal storage.
+ if(url.pathname==='/teste/tesla'||url.pathname.startsWith('/teste/tesla/')){
+  const script="const message=document.getElementById('message');try{const request=indexedDB.deleteDatabase('affinity-play-device');request.onsuccess=()=>message.textContent='Dados locais deste teste removidos.';request.onerror=()=>message.textContent='O navegador não permitiu remover os dados locais.';request.onblocked=()=>message.textContent='Feche outras abas deste teste para concluir a limpeza.';}catch{message.textContent='O navegador não permitiu remover os dados locais.';}";
+  const hash=btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(script)))));
+  return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Conteúdo removido</title><h1>Conteúdo removido</h1><p id="message">Removendo os dados locais deste teste…</p><script>'+script+'</script></html>',{status:410,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; script-src 'sha256-"+hash+"'; frame-ancestors 'none'; base-uri 'none'"}});
+ }
+ if(['/api/media/youtube-search','/api/media/iptv-session'].includes(url.pathname))return new Response('Not found',{status:404,headers:{'cache-control':'no-store'}});
+let appsResponse=null;
  if(request.method==='GET'&&url.pathname==='/agentes/configuracoes'&&url.searchParams.get('view')==='profile')return Response.redirect(new URL('/agentes/empresa',url),302);
  if(request.method==='GET'){
  const destinations={'/agentes/conectar-email':'email','/agentes/conectar-agenda':'calendar','/agentes/configuracoes-agenda':'calendar','/agentes/configuracoes':'','/agentes/pagina-publica':'profile'};
@@ -48349,10 +48355,14 @@ async function staffAuditSession(request,env,affiliate){
 const auditedPortalFetch=cloudflare_staging_default.fetch;
 cloudflare_staging_default.fetch=async function(request,env,ctx){
  const url=new URL(request.url);
- const mediaIptv=await mediaIptvSessionRoute(request,env);
- if(mediaIptv)return perimeterHeaders(mediaIptv,url.pathname);
- const mediaSearch=await youtubeSearchRoute(request,env);
- if(mediaSearch)return perimeterHeaders(mediaSearch,url.pathname);
+ // Retired test route: clear only its isolated browser connection, preserving portal storage.
+ if(url.pathname==='/teste/tesla'||url.pathname.startsWith('/teste/tesla/')){
+  const script="const message=document.getElementById('message');try{const request=indexedDB.deleteDatabase('affinity-play-device');request.onsuccess=()=>message.textContent='Dados locais deste teste removidos.';request.onerror=()=>message.textContent='O navegador não permitiu remover os dados locais.';request.onblocked=()=>message.textContent='Feche outras abas deste teste para concluir a limpeza.';}catch{message.textContent='O navegador não permitiu remover os dados locais.';}";
+  const hash=btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(script)))));
+  return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Conteúdo removido</title><h1>Conteúdo removido</h1><p id="message">Removendo os dados locais deste teste…</p><script>'+script+'</script></html>',{status:410,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'no-referrer','content-security-policy':"default-src 'none'; script-src 'sha256-"+hash+"'; frame-ancestors 'none'; base-uri 'none'"}});
+ }
+ if(['/api/media/youtube-search','/api/media/iptv-session'].includes(url.pathname))return new Response('Not found',{status:404,headers:{'cache-control':'no-store'}});
+
  const legalServices={
   session:getSession,create:createSession,json:boundedJson,identity:legalIdentity
  };

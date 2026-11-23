@@ -1,10 +1,10 @@
 name: Live portal security checks
 on:
   pull_request:
-    paths: ['recovered-live/**', 'services/whatsapp/**', 'services/media-relay/**', '.github/workflows/live-security.yml']
+    paths: ['recovered-live/**', 'services/whatsapp/**', '.github/workflows/live-security.yml']
   push:
     branches: [main, agent/personalizar-mensagens-agentes]
-    paths: ['recovered-live/**', 'services/whatsapp/**', 'services/media-relay/**', '.github/workflows/live-security.yml']
+    paths: ['recovered-live/**', 'services/whatsapp/**', '.github/workflows/live-security.yml']
 permissions:
   contents: read
 concurrency:
@@ -26,4 +26,4 @@ jobs:
       - name: Install matching test browser
         run: node services/whatsapp/node_modules/puppeteer/lib/puppeteer/node/cli.js browsers install chrome
       - name: Verify portal and WhatsApp isolation, security and browser behavior
-        run: node --test --test-concurrency=2 recovered-live/*.test.mjs services/whatsapp/*.test.mjs services/media-relay/*.test.mjs
+        run: node --test --test-concurrency=2 recovered-live/*.test.mjs services/whatsapp/*.test.mjs
