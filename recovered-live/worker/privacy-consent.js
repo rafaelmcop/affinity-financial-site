@@ -16,6 +16,7 @@ export async function privacySchema(env) {
   env.DB.prepare('CREATE TABLE IF NOT EXISTS legalConsentEvents(id TEXT PRIMARY KEY,actor TEXT,purpose TEXT NOT NULL,version TEXT NOT NULL,termsHash TEXT NOT NULL,privacyHash TEXT NOT NULL,accepted INTEGER NOT NULL,media INTEGER NOT NULL DEFAULT 0,ipHash TEXT,browser TEXT,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS userPrivacyChoices(actor TEXT PRIMARY KEY,aiProcessing INTEGER NOT NULL DEFAULT 0,aiMemory INTEGER NOT NULL DEFAULT 0,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)'),
   env.DB.prepare('CREATE INDEX IF NOT EXISTS legalConsentEvents_ip_time ON legalConsentEvents(ipHash,createdAt)'),
+  env.DB.prepare('CREATE INDEX IF NOT EXISTS legalConsentEvents_actor ON legalConsentEvents(actor,accepted,createdAt)'),
   env.DB.prepare('CREATE TABLE IF NOT EXISTS privacyChoiceEvents(id TEXT PRIMARY KEY,actor TEXT NOT NULL,aiProcessing INTEGER NOT NULL,aiMemory INTEGER NOT NULL,createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)')
  ]);
  initialized.set(env.DB,pending);
@@ -35,8 +36,23 @@ async function hashIp(request, secret) {
  return Array.from(new Uint8Array(signed),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
 export async function currentLegalReceipt(request,env,auth,actor) {
+ // Account acceptance is durable. Browser expiry, logout, hosts and later document revisions do not reset it.
+ if(actor){
+  await privacySchema(env);
+  const row=await env.DB.prepare('SELECT id,version,termsHash,privacyHash,media,createdAt FROM legalConsentEvents WHERE actor=? AND accepted=1 ORDER BY createdAt DESC,id DESC LIMIT 1').bind(String(actor).trim().toLowerCase()).first();
+  return row?{type:'legal',actor:String(actor).trim().toLowerCase(),receiptId:row.id,version:row.version,termsHash:row.termsHash,privacyHash:row.privacyHash,media:Number(row.media)===1,acceptedAt:row.createdAt}:null;
+ }
+ // Anonymous forms still require a valid receipt for this browser; never inherit another account's agreement.
  const receipt=await auth.session(request,env,legalCookie);
- return receipt?.type==='legal'&&receipt.version===legalVersion&&receipt.termsHash===legalDocuments.terms&&receipt.privacyHash===legalDocuments.privacy&&String(receipt.actor||'')===String(actor||'')?receipt:null;
+ return receipt?.type==='legal'&&!receipt.actor&&receipt.version===legalVersion&&receipt.termsHash===legalDocuments.terms&&receipt.privacyHash===legalDocuments.privacy?receipt:null;
+}
+export async function recordRegistrationConsent(request,env,auth,email){
+ const receipt=await currentLegalReceipt(request,env,auth,null);
+ if(!receipt?.receiptId)return;
+ await privacySchema(env);
+ // Only called after successful creation of a new account, never on an arbitrary email supplied to the consent API.
+ await env.DB.prepare("INSERT INTO legalConsentEvents(id,actor,purpose,version,termsHash,privacyHash,accepted,media,ipHash,browser,createdAt) SELECT ?,?,'account',version,termsHash,privacyHash,1,media,ipHash,browser,createdAt FROM legalConsentEvents WHERE id=? AND actor IS NULL AND accepted=1 AND NOT EXISTS(SELECT 1 FROM legalConsentEvents WHERE actor=? AND accepted=1)")
+  .bind(crypto.randomUUID(),email.toLowerCase(),receipt.receiptId,email.toLowerCase()).run();
 }
 export async function legalRoute(request, env, auth) {
  const url=new URL(request.url);
@@ -55,7 +71,7 @@ export async function legalRoute(request, env, auth) {
  const actor=identity?.actor||null;
  if(request.method==='GET'&&url.pathname==='/api/legal/status'){
   const receipt=await currentLegalReceipt(request,env,auth,actor);
-  return json({accepted:Boolean(receipt),version:legalVersion,documents:legalDocuments,authenticated:Boolean(actor),actorKind:identity?.kind||'public',media:receipt?.media===true,choices:await privacyChoices(env,actor)});
+  return json({accepted:Boolean(receipt),version:legalVersion,documents:legalDocuments,acceptedAt:receipt?.acceptedAt||null,acceptedVersion:receipt?.version||null,authenticated:Boolean(actor),actorKind:identity?.kind||'public',media:receipt?.media===true,choices:await privacyChoices(env,actor)});
  }
  if(request.method!=='POST')return json({error:'Método inválido.'},405);
  if(request.headers.get('origin')!==url.origin||!/^application\/json(?:;|$)/i.test(request.headers.get('content-type')||''))return json({error:'Origem inválida.'},403);

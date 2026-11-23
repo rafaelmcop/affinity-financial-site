@@ -27,6 +27,8 @@
   document.body.append(dialog);
   const get=id=>dialog.querySelector('#'+id);
   get('legal-agree').checked=state.accepted;
+  get('legal-agree').closest('label').hidden=state.accepted;
+  if(state.accepted)dialog.querySelector('h2').textContent='Preferências de privacidade';
   get('legal-media').checked=state.media;
   get('legal-ai').hidden=!state.authenticated;
   get('legal-ai-processing').checked=state.choices?.aiProcessing===true;
@@ -39,7 +41,7 @@
    button.disabled=true;error.textContent='';
    try{
     const media=get('legal-media').checked;
-    await api('accept',{accepted:true,version:state.version,purpose,media});
+    if(!state.accepted||media!==state.media)await api('accept',{accepted:true,version:state.version,purpose,media});
     if(state.authenticated)await api('choices',{aiProcessing:get('legal-ai-processing').checked,aiMemory:get('legal-ai-memory').checked});
     localStorage.setItem('affinity_external_media',media?'yes':'no');
     await read();

@@ -52,7 +52,7 @@ import {usesPublicAppearance} from './public-appearance.js';
 import {afterWhatsAppReceipt} from './whatsapp-send-completion.js';
 import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdentitySafe} from './person-identity.js';
 import {birthdayHoldSchema} from './birthday-alerts.js';
-import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentResponse} from './privacy-consent.js';
+import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentResponse,recordRegistrationConsent} from './privacy-consent.js';
 import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
@@ -43032,6 +43032,7 @@ async function runProcedure(name, input, request, env, delegation=null, context=
       phone || null,
       await bcryptjs_default.hash(password, 12)
     ),selectedUpline?env.DB.prepare('INSERT INTO agentHierarchy(agentEmail,uplineEmail) VALUES(?,?)').bind(email,String(selectedUpline.key||selectedUpline.email).toLowerCase()):env.DB.prepare('INSERT INTO agentExternalUplines(agentEmail,name,email,phone) VALUES(?,?,?,?)').bind(email,externalUpline.name,externalUpline.email,externalUpline.phone)]);
+    await recordRegistrationConsent(request,env,{session:getSession},email);
     await sendEmailIfConfigured(env, {
       to: env.ADMIN_EMAIL,
       subject: "Nova conta de agente aguardando aprova\xE7\xE3o",
@@ -43165,6 +43166,7 @@ async function runProcedure(name, input, request, env, delegation=null, context=
       input.phone || null,
       code
     ).run();
+    await recordRegistrationConsent(request,env,{session:getSession},email);
     await sendEmailIfConfigured(env, {
       to: email,
       subject: "Registro de afiliado - Affinity Financial",
