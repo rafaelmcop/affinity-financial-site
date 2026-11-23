@@ -1,4 +1,4 @@
-import {connectIptvAccount,iptvStreamUrl} from './iptv-account.js?v=2';
+import {connectIptvAccount,iptvStreamUrl} from './iptv-account.js?v=3';
 import {createPlayerController,getYouTubeId,defaultVideoId,demoVideoId,demoHlsUrl} from './player-core.js';
 const $=id=>document.getElementById(id);let youtubeApi;
 function loadYouTubeApi(){
