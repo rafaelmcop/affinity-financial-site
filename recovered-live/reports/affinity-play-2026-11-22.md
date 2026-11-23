@@ -8,7 +8,7 @@ The existing static route was retained inside the live repository and existing C
 
 - Affinity navy, gold and light palette; wide player, large touch controls, fullscreen and responsive single-column mobile presentation.
 - Initial YouTube video `3HOKK2MTtNQ`, loaded only after the visitor chooses to load it. Playback itself is manual. Official YouTube IFrame API, nocookie embed host, onError handling and an official YouTube fallback link. Public search is implemented through the official YouTube Data API with a server-only `YOUTUBE_DATA_API_KEY`.
-- Search results use validated video IDs, public titles/channel names and thumbnails on the official thumbnail host. Search is disabled with an explicit setup message until an administrator configures the official API key. No Google visitor-account connection is required for public search. The Google Cloud administrator login is an external setup dependency, not a completed activation.
+- Search results use validated video IDs, public titles/channel names and thumbnails on the official thumbnail host. Search is disabled with an explicit setup message until an administrator configures the official API key. No Google visitor-account connection is required for public search. The YouTube Data API is enabled in the authorized Affinity Portal Google Cloud project; a dedicated key restricted to that API is stored as a Cloudflare Worker secret.
 - IPTV account configuration: connection name, HTTPS server, username and password. Supports providers with the Xtream-compatible live-stream API and browser CORS support. A searchable channel list stays in session memory. Credentials go directly to the configured provider, with no cookies, redirects or referrer; they are never sent to Affinity APIs, analytics or persistent browser storage. Disconnecting/leaving clears the connection and releases playback.
 - Direct authorized HTTPS HLS links remain available. Safari/native HLS is preferred; MSE browsers dynamically import the local pinned `hls.js` 1.7.4 package only when needed. Library source maps are not deployed. The Apache license is included.
 - Switching sources, stopping or leaving releases old HLS/YouTube players and removes the old video source. Pending asynchronous loads cannot resurrect an old player.
@@ -22,11 +22,11 @@ The existing static route was retained inside the live repository and existing C
 - Browser: three cycles between YouTube and HLS removed the prior iframe or native video source, leaving a single active source.
 - Mobile viewport 390 px: document width 390 px, player 356 px, control card 358 px; no horizontal overflow. Desktop layout was visually inspected. These are viewport checks, not a real iPhone/Android/Tesla hardware certification.
 - IPTV account connection and failed/malformed provider responses were validated using synthetic fixtures. An actual subscription/provider was not available for testing; HTTPS, CORS and HLS output support are required from that provider.
-- Public search logic and quota guards were tested with synthetic official-API responses. Live search is pending the Google Cloud API setup; no key was invented, leaked or silently obtained from another account.
+- Public search logic and quota guards were tested with synthetic official-API responses. Live public search returned 12 real NASA-related results on the deployed page, and selecting a result loaded its official embedded player and manual playback advanced to 9.19 seconds (readyState 4, no video error). The credential never appears in static files, repository or public responses.
 
 ## Main changed files
 
-- `public/teste/tesla/index.html`, `player.css`, `player.js`, `player-core.js`, `iptv-account.js`, local HLS module and license.
+- `public/teste/tesla/index.html`, `player.css`, `player.js`, `player-core.js`, `iptv-account.js`, local HLS module and license, and a scoped local Affinity logo.
 - `worker/media-youtube-search.js` and a small route hook in `worker/current-worker.js`.
 - `dependencies/package.json`, lockfile, `build-media-player.mjs`, scoped `public/_headers`, and regression tests.
 
