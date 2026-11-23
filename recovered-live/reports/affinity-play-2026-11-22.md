@@ -16,6 +16,8 @@ The existing static route was retained inside the live repository and existing C
 
 ## Verification
 
+- Full portal/WhatsApp regression suite: 579 tests passed, zero failures, using Node 22 and test concurrency 2. The final targeted media/security checks passed after the scoped logo adjustment.
+
 - Local build: `npm run build:media --prefix recovered-live/dependencies`; dependencies installed and pinned through npm, not a third-party CDN.
 - 24 targeted checks across parsing, URL validation, source cleanup/races, no autoplay, native HLS preference, credential-safe errors, provider configuration, search/API-key handling, rate limits, local HLS artifact consistency, static-file boundaries and homepage availability.
 - Browser: the specified initial YouTube video rendered and played in the embedded player; its playback time advanced. The requested Mux HLS sample played, reaching readyState 4 with no media error. Playback started only after manual action.
