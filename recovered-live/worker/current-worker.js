@@ -231,7 +231,7 @@ async function siteBrandingRoute(request, env, auth) {
 function applySiteBranding(response) {
   if(!response.headers.get('content-type')?.includes('text/html'))return response;
   // Stream the shared enhancement into every HTML shell; do not rewrite React-owned children.
-  return new HTMLRewriter().on('head',{element(element){element.append('<script src="/legal-privacy.js?v=4" defer></script><script src="/brand-logo.js?v=1" defer></script><script src="/site-branding.js?v=5" defer></script>',{html:true});}}).transform(response);
+  return new HTMLRewriter().on('head',{element(element){element.append('<script src="/legal-privacy.js?v=5" defer></script><script src="/brand-logo.js?v=1" defer></script><script src="/site-branding.js?v=5" defer></script>',{html:true});}}).transform(response);
 }
 
 /**
@@ -47785,7 +47785,7 @@ __name(escapeAutomationHtml, "escapeAutomationHtml");
 __name2(escapeAutomationHtml, "escapeAutomationHtml");
 var DEFAULT_AGENT_MESSAGE_SIGNATURE = "{agente_nome}\nLicense Agent\nAffinity Financial Consulting Inc.\n\u{1F4DE} {agente_telefone}\n\u{1F4F1} {agente_whatsapp}\n\u2709\uFE0F {agente_email}\n\u{1F310} www.affinityfc.org";
 var DEFAULT_MONDAY_SUBJECT = "Uma \xF3tima segunda-feira para voc\xEA, {nome}! \u2600\uFE0F";
-var DEFAULT_MONDAY_MESSAGE = "Ol\xE1, {nome}! \u2600\uFE0F\n\nBom dia e uma excelente segunda-feira!\n\nA cada semana, o sistema prepara uma mensagem diferente, motivadora e acolhedora para come\xE7ar a segunda-feira com energia e confian\xE7a.\n\nQue sua semana seja leve, produtiva e cheia de boas not\xEDcias. Sempre que precisar, conte conosco.";
+var DEFAULT_MONDAY_MESSAGE = "Olá, {nome}! ☀️\n\n{mensagem_semana}\n\nQue sua semana seja leve e cheia de boas notícias. Conte comigo!";
 function mondayMessageVariation(year, month, day) {
   const seed = Math.floor(Date.UTC(Number(year), Number(month) - 1, Number(day)) / 6048e5);
   const openings = [
@@ -48370,7 +48370,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  if(incidentResponse)return perimeterHeaders(secureResponse(incidentResponse,{privateData:true}),url.pathname);
  const legalResponse=await legalRoute(request,env,legalServices);
  if(legalResponse)return perimeterHeaders(legalResponse,url.pathname);
- const legalPages={'/legal/2026-11-21.1/terms-of-use.html':'/legal/2026-11-21.1/terms-of-use.html','/legal/2026-11-21.1/portal-privacy.html':'/legal/2026-11-21.1/portal-privacy.html','/terms-of-use.html':'/terms-of-use.html','/terms':'/terms-of-use.html','/termos':'/terms-of-use.html','/portal-privacy.html':'/portal-privacy.html','/privacy':'/portal-privacy.html','/politica-de-privacidade':'/portal-privacy.html'};
+ const legalPages={'/legal/2026-11-23.1/terms-of-use.html':'/legal/2026-11-23.1/terms-of-use.html','/legal/2026-11-23.1/portal-privacy.html':'/legal/2026-11-23.1/portal-privacy.html','/legal/2026-11-21.1/terms-of-use.html':'/legal/2026-11-21.1/terms-of-use.html','/legal/2026-11-21.1/portal-privacy.html':'/legal/2026-11-21.1/portal-privacy.html','/terms-of-use.html':'/terms-of-use.html','/terms':'/terms-of-use.html','/termos':'/terms-of-use.html','/portal-privacy.html':'/portal-privacy.html','/privacy':'/portal-privacy.html','/politica-de-privacidade':'/portal-privacy.html'};
  if(['GET','HEAD'].includes(request.method)&&Object.hasOwn(legalPages,url.pathname))return perimeterHeaders(legalDocumentResponse(await env.ASSETS.fetch(new Request(new URL(legalPages[url.pathname],url),{method:request.method}))),url.pathname);
  if(request.method==='POST'){
   const names=url.pathname.startsWith('/api/trpc/')?procedureNames(url.pathname):url.pathname.startsWith('/api/assistants/procedure/')?[url.pathname.slice('/api/assistants/procedure/'.length)]:[];

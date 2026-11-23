@@ -1,5 +1,5 @@
-export const legalVersion = '2026-11-21.1';
-export const legalDocuments = {"terms": "f5e938de81056aa3f343d5693f2b53e0ddd5b4d0daebe34fdff829ab42f431cb", "privacy": "4029aa6076eb4ea28f9aa9a8f1ecdf372f84649dc7badd41777ea8d03216489b"};
+export const legalVersion = '2026-11-23.1';
+export const legalDocuments = {"terms": "29d960f54dfb03e74e8d88e6415082bf363c5f1e55b012ed374d4019138a5ad0", "privacy": "d30370de035e57b721ffb644a04288fc13152475e383eb614313742ab07bd643"};
 export const legalCookie = 'affinity_legal_consent';
 // Preserve the exact archived document bytes: shared HTML enhancements/nonces would change the fingerprint.
 export function legalDocumentResponse(asset) {
@@ -51,8 +51,9 @@ export async function recordRegistrationConsent(request,env,auth,email){
  if(!receipt?.receiptId)return;
  await privacySchema(env);
  // Only called after successful creation of a new account, never on an arbitrary email supplied to the consent API.
- await env.DB.prepare("INSERT INTO legalConsentEvents(id,actor,purpose,version,termsHash,privacyHash,accepted,media,ipHash,browser,createdAt) SELECT ?,?,'account',version,termsHash,privacyHash,1,media,ipHash,browser,createdAt FROM legalConsentEvents WHERE id=? AND actor IS NULL AND accepted=1 AND NOT EXISTS(SELECT 1 FROM legalConsentEvents WHERE actor=? AND accepted=1)")
+ const recorded=await env.DB.prepare("INSERT INTO legalConsentEvents(id,actor,purpose,version,termsHash,privacyHash,accepted,media,ipHash,browser,createdAt) SELECT ?,?,'account',version,termsHash,privacyHash,1,media,ipHash,browser,createdAt FROM legalConsentEvents WHERE id=? AND actor IS NULL AND accepted=1 AND NOT EXISTS(SELECT 1 FROM legalConsentEvents WHERE actor=? AND accepted=1)")
   .bind(crypto.randomUUID(),email.toLowerCase(),receipt.receiptId,email.toLowerCase()).run();
+ if(recorded.meta?.changes&&typeof receipt.aiProcessing==='boolean'){const actor=email.toLowerCase(),processing=receipt.aiProcessing===true,memory=processing&&receipt.aiMemory===true;await env.DB.batch([env.DB.prepare('INSERT INTO userPrivacyChoices(actor,aiProcessing,aiMemory) VALUES(?,?,?) ON CONFLICT(actor) DO NOTHING').bind(actor,Number(processing),Number(memory)),env.DB.prepare('INSERT INTO privacyChoiceEvents(id,actor,aiProcessing,aiMemory) VALUES(?,?,?,?)').bind(crypto.randomUUID(),actor,Number(processing),Number(memory))]);}
 }
 export async function legalRoute(request, env, auth) {
  const url=new URL(request.url);
@@ -91,20 +92,19 @@ export async function legalRoute(request, env, auth) {
  await privacySchema(env);
  const id=crypto.randomUUID(),media=input.media===true,ipHash=await hashIp(request,env.JWT_SECRET);
  const previous=await currentLegalReceipt(request,env,auth,actor);
- if(previous&&previous.media===media)return json({success:true,accepted:true,receiptId:previous.receiptId,media});
+ if(previous&&previous.media===media&&(input.purpose!=='account'||previous.aiProcessing===(input.aiProcessing===true)&&previous.aiMemory===(input.aiProcessing===true&&input.aiMemory===true)))return json({success:true,accepted:true,receiptId:previous.receiptId,media});
  if(ipHash){const recent=await env.DB.prepare("SELECT count(*) n FROM legalConsentEvents WHERE ipHash=? AND datetime(createdAt)>datetime('now','-1 minute')").bind(ipHash).first();if(Number(recent?.n)>=10)return json({error:'Aguarde um minuto antes de registrar novamente.'},429,{'retry-after':'60'});}
  const purpose=['account','portal','application','review','contact','media','privacy'].includes(input.purpose)?input.purpose:'privacy';
  await env.DB.prepare('INSERT INTO legalConsentEvents(id,actor,purpose,version,termsHash,privacyHash,accepted,media,ipHash,browser) VALUES(?,?,?,?,?,?,1,?,?,?)')
   .bind(id,actor,purpose,legalVersion,legalDocuments.terms,legalDocuments.privacy,Number(media),ipHash,String(request.headers.get('user-agent')||'').slice(0,250)).run();
- const token=await auth.create({type:'legal',actor,version:legalVersion,termsHash:legalDocuments.terms,privacyHash:legalDocuments.privacy,receiptId:id,media},env,31536000);
+ const token=await auth.create({type:'legal',actor,version:legalVersion,termsHash:legalDocuments.terms,privacyHash:legalDocuments.privacy,receiptId:id,media,...(purpose==='account'?{aiProcessing:input.aiProcessing===true,aiMemory:input.aiProcessing===true&&input.aiMemory===true}:{})},env,31536000);
  return json({success:true,accepted:true,receiptId:id,media},200,{'set-cookie':legalCookie+'='+token+'; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax'});
 }
 
 export const legalProtectedProcedures = new Set([
  'agent.register','affiliate.register','applications.clientSave','applications.uploadDocument',
  'testimonials.submitReview','reviewInvites.submit','serviceFeedback.submit','calendly.contactAgent',
- 'agent.saveApplication','agent.submitApplication','agent.uploadApplicationDocument',
- 'agent.portalAssistant','admin.portalAssistant'
+ // Authenticated portal use never requests another agreement after registration.
 ]);
 
 export async function requireAiProcessing(env, actor) {

@@ -21,8 +21,10 @@
   let state;
   try{state=await read()}catch{return;}
   if(dialog)return;
+  if(purpose!=='account'&&!['privacy','ai'].includes(purpose)&&['agent','assistant','admin','affiliate'].includes(kind))return;
   if(state.accepted&&!['privacy','ai'].includes(purpose))return;
   if(purpose==='ai'&&state.choices?.aiProcessing)return;
+  const registration=purpose==='account',agreementRequired=!state.accepted&&(registration||!['agent','assistant','admin','affiliate'].includes(kind));
   dialog=document.createElement('dialog');
   dialog.setAttribute('aria-label','Privacidade e termos');
   dialog.style.cssText='width:min(620px,calc(100% - 32px));max-height:85vh;overflow:auto;border:1px solid #9fb1c4;border-radius:16px;padding:24px;background:#fff;color:#14233b;font:16px/1.5 system-ui;box-shadow:0 12px 70px #0005';
@@ -31,22 +33,22 @@
   document.body.append(dialog);
   const get=id=>dialog.querySelector('#'+id);
   get('legal-agree').checked=state.accepted;
-  if(state.accepted)get('legal-agree').closest('label').remove();
-  if(state.accepted){dialog.querySelector('h2').textContent=purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade';const intro=dialog.querySelector('h2+p');dialog.setAttribute('aria-label',purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade');intro.textContent=purpose==='ai'?'Escolha as permissões opcionais para usar a assistente de IA.':'Ajuste suas permissões opcionais de privacidade.';intro.nextElementSibling.remove();}
+  if(!agreementRequired)get('legal-agree').closest('label').remove();
+  if(!agreementRequired){dialog.querySelector('h2').textContent=purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade';const intro=dialog.querySelector('h2+p');dialog.setAttribute('aria-label',purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade');intro.textContent=purpose==='ai'?'Escolha as permissões opcionais para usar a assistente de IA.':'Ajuste suas permissões opcionais de privacidade.';intro.nextElementSibling.remove();}
   get('legal-media').checked=state.media;
   if(purpose==='ai')get('legal-media').closest('label').remove();
-  get('legal-ai').hidden=!state.authenticated;
+  get('legal-ai').hidden=!state.authenticated&&!registration;
   get('legal-ai-processing').checked=state.choices?.aiProcessing===true;
   get('legal-ai-memory').checked=state.choices?.aiMemory===true;
   get('legal-ai-processing').onchange=()=>{if(!get('legal-ai-processing').checked)get('legal-ai-memory').checked=false;};
   get('legal-close').onclick=close;
   get('legal-save').onclick=async()=>{
    const button=get('legal-save'),error=get('legal-error');
-   if(!state.accepted&&!get('legal-agree').checked){error.textContent='Marque o aceite dos termos e da política para continuar.';return;}
+   if(agreementRequired&&!get('legal-agree').checked){error.textContent='Marque o aceite dos termos e da política para continuar.';return;}
    button.disabled=true;error.textContent='';
    try{
     const media=get('legal-media')?.checked??state.media;
-    if(!state.accepted||media!==state.media)await api('accept',{accepted:true,version:state.version,purpose,media});
+    if(agreementRequired||state.accepted&&media!==state.media)await api('accept',{accepted:true,version:state.version,purpose,media,aiProcessing:get('legal-ai-processing').checked,aiMemory:get('legal-ai-memory').checked});
     if(state.authenticated)await api('choices',{aiProcessing:get('legal-ai-processing').checked,aiMemory:get('legal-ai-memory').checked});
     try{localStorage.setItem('affinity_external_media',media?'yes':'no');}catch{}
     await read();
@@ -58,7 +60,7 @@
   if(dialog.showModal)dialog.showModal();else dialog.setAttribute('open','');
  }
  async function ensure(purpose){
-  try{const state=await read();if(state.accepted)return true;await open(purpose);return false}catch{return false}
+  try{const state=await read();if(purpose!=='account'&&['agent','assistant','admin','affiliate'].includes(kind))return true;if(state.accepted)return true;await open(purpose);return false}catch{return false}
  }
  window.affinityPrivacy={open,ensure,refresh:read};
  const footer=document.createElement('div');
@@ -77,22 +79,23 @@
  // A visitor can browse without accepting service terms. Submission and portal use ask explicitly.
  document.addEventListener('submit',event=>{
   if(event.target.method==='dialog'||event.target.closest('dialog'))return;
-  const loginOnly=/\/login$/.test(path)&&event.target.querySelectorAll('input[type=password]').length<2&&!/cadastr|registr|create account|sign up/i.test(event.submitter?.textContent||'');
+  const loginOnly=/\/login$/.test(path)&&event.target.querySelectorAll('input[type=password]').length<2&&!/cadastr|registr|criar conta|create account|sign up/i.test(event.submitter?.textContent||'');
+  const registration=/\/registrar$/.test(location.pathname)||event.target.querySelectorAll('input[type=password]').length>=2||/cadastr|registr|criar conta|create account|sign up/i.test(event.submitter?.textContent||'');
   if(loginOnly)return;
+  if(['agent','assistant','admin','affiliate'].includes(kind)&&!registration)return;
   if(status?.accepted)return;
   event.preventDefault();event.stopImmediatePropagation();
-  const form=event.target,submitter=event.submitter;void read().then(state=>{if(state.accepted){if(submitter?.isConnected)form.requestSubmit(submitter);else form.requestSubmit();}else void open(path.includes('aplicacao')?'application':/registrar/.test(path)?'account':'contact');}).catch(()=>{});
+  const form=event.target,submitter=event.submitter;void read().then(state=>{if(state.accepted){if(submitter?.isConnected)form.requestSubmit(submitter);else form.requestSubmit();}else void open(registration?'account':path.includes('aplicacao')?'application':'contact');}).catch(()=>{});
  },true);
  document.addEventListener('click',event=>{
   const button=event.target.closest('button');
   if(!button||button.closest('dialog'))return;
-  if(button.id==='portal-ai-open'&&!status?.choices?.aiProcessing){event.preventDefault();event.stopImmediatePropagation();void read().then(state=>{if(state.choices?.aiProcessing)button.click();else void open('ai');}).catch(()=>{});return;}
+  if(['agent','assistant','admin','affiliate'].includes(kind))return;
   if(status?.accepted)return;
   if(button.matches('#save,#next-step,#save-draft,#next,#portal-ai-submit,[data-step-index]')){
    event.preventDefault();event.stopImmediatePropagation();void read().then(state=>{if(state.accepted)button.click();else void open(path.includes('aplicacao')?'application':'portal');}).catch(()=>{});
   }
  },true);
- read().then(state=>{
-  if(state.authenticated&&!state.accepted&&!/\/(login|registrar)$/.test(path))void open('portal');
- }).catch(()=>{});
+ // Account agreements are collected only during registration; never open them on portal load.
+ read().catch(()=>{});
 })();
