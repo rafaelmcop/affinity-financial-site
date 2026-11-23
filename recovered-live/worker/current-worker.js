@@ -54,6 +54,7 @@ import {findCrmPerson,samePersonRecord,unambiguousPersonBirthdate,birthdayIdenti
 import {birthdayHoldSchema} from './birthday-alerts.js';
 import {legalRoute,currentLegalReceipt,legalProtectedProcedures,legalDocumentResponse,recordRegistrationConsent} from './privacy-consent.js';
 import {securityIncidentRoute,flushSecurityAlerts} from './security-incidents.js';
+import {publicDatabaseErrorMessage} from './database-error-privacy.js';
 import {runtimeSmtpOptions,emailDefinitelyNotSent} from './smtp-runtime.js';
 import patchedNodemailer from '../dependencies/node_modules/nodemailer/dist/esm/nodemailer.js';
 import {sensitiveResource,privatePage,unexpectedSpaPage,perimeterHeaders} from './site-perimeter.js';
@@ -42102,6 +42103,7 @@ function trpcResult(data) {
 __name(trpcResult, "trpcResult");
 __name2(trpcResult, "trpcResult");
 function trpcError(message, code = "BAD_REQUEST", httpStatus = 400) {
+  message=publicDatabaseErrorMessage(message);
   return {
     error: {
       json: {
