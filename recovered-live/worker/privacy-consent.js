@@ -109,6 +109,6 @@ export const legalProtectedProcedures = new Set([
 
 export async function requireAiProcessing(env, actor) {
  const choices=await privacyChoices(env,actor);
- if(!choices.aiProcessing)throw Object.assign(Error('Autorize o processamento opcional por IA em Privacidade antes de usar a assistente.'),{status:403});
+ if(!choices.aiProcessing)throw Object.assign(Error('A assistente de IA está desativada nas suas configurações de privacidade.'),{status:403});
  return choices;
 }
