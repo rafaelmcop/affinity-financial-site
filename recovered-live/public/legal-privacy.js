@@ -2,7 +2,7 @@
  if(window.affinityPrivacy)return;
  let path=location.pathname;
  let kind=path.startsWith('/admin/')?'admin':path.startsWith('/assistentes/')||new URLSearchParams(location.search).get('assistantView')==='1'?'assistant':path.startsWith('/afiliados/')?'affiliate':/^\/(agentes\/|agent-)/.test(path)?'agent':'public';
- let status=null,loading=null,dialog=null;
+ let status=null,loading=null,loadingContext='',dialog=null;
  const endpoint=route=>{path=location.pathname;kind=path.startsWith('/admin/')?'admin':path.startsWith('/assistentes/')||new URLSearchParams(location.search).get('assistantView')==='1'?'assistant':path.startsWith('/afiliados/')?'affiliate':/^\/(agentes\/|agent-)/.test(path)?'agent':'public';return '/api/legal/'+route+'?kind='+kind;};
  async function api(route,input){
   const response=await fetch(endpoint(route),{credentials:'same-origin',cache:'no-store',...(input?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(input)}:{})});
@@ -11,7 +11,8 @@
   return body;
  }
  async function read(){
-  if(!loading)loading=api('status').then(value=>status=value).finally(()=>loading=null);
+  const context=location.pathname+location.search;
+  if(!loading||loadingContext!==context){loadingContext=context;const pending=api('status').then(value=>{if(context===location.pathname+location.search)status=value;return value;}).finally(()=>{if(loading===pending)loading=null;});loading=pending;}
   return loading;
  }
  function close(){dialog?.remove();dialog=null;}
@@ -19,6 +20,9 @@
   if(dialog)return;
   let state;
   try{state=await read()}catch{return;}
+  if(dialog)return;
+  if(state.accepted&&!['privacy','ai'].includes(purpose))return;
+  if(purpose==='ai'&&state.choices?.aiProcessing)return;
   dialog=document.createElement('dialog');
   dialog.setAttribute('aria-label','Privacidade e termos');
   dialog.style.cssText='width:min(620px,calc(100% - 32px));max-height:85vh;overflow:auto;border:1px solid #9fb1c4;border-radius:16px;padding:24px;background:#fff;color:#14233b;font:16px/1.5 system-ui;box-shadow:0 12px 70px #0005';
@@ -27,9 +31,10 @@
   document.body.append(dialog);
   const get=id=>dialog.querySelector('#'+id);
   get('legal-agree').checked=state.accepted;
-  get('legal-agree').closest('label').hidden=state.accepted;
-  if(state.accepted){dialog.querySelector('h2').textContent=purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade';const intro=dialog.querySelector('h2+p');intro.textContent=purpose==='ai'?'Seus termos já foram aceitos. Para usar a IA, escolha abaixo as permissões opcionais de processamento.':'Seus termos já foram aceitos. Você pode ajustar as permissões opcionais abaixo.';intro.nextElementSibling.hidden=true;}
+  if(state.accepted)get('legal-agree').closest('label').remove();
+  if(state.accepted){dialog.querySelector('h2').textContent=purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade';const intro=dialog.querySelector('h2+p');dialog.setAttribute('aria-label',purpose==='ai'?'Ativar assistente de IA':'Preferências de privacidade');intro.textContent=purpose==='ai'?'Escolha as permissões opcionais para usar a assistente de IA.':'Ajuste suas permissões opcionais de privacidade.';intro.nextElementSibling.remove();}
   get('legal-media').checked=state.media;
+  if(purpose==='ai')get('legal-media').closest('label').remove();
   get('legal-ai').hidden=!state.authenticated;
   get('legal-ai-processing').checked=state.choices?.aiProcessing===true;
   get('legal-ai-memory').checked=state.choices?.aiMemory===true;
@@ -37,13 +42,13 @@
   get('legal-close').onclick=close;
   get('legal-save').onclick=async()=>{
    const button=get('legal-save'),error=get('legal-error');
-   if(!get('legal-agree').checked){error.textContent='Marque o aceite dos termos e da política para continuar.';return;}
+   if(!state.accepted&&!get('legal-agree').checked){error.textContent='Marque o aceite dos termos e da política para continuar.';return;}
    button.disabled=true;error.textContent='';
    try{
-    const media=get('legal-media').checked;
+    const media=get('legal-media')?.checked??state.media;
     if(!state.accepted||media!==state.media)await api('accept',{accepted:true,version:state.version,purpose,media});
     if(state.authenticated)await api('choices',{aiProcessing:get('legal-ai-processing').checked,aiMemory:get('legal-ai-memory').checked});
-    localStorage.setItem('affinity_external_media',media?'yes':'no');
+    try{localStorage.setItem('affinity_external_media',media?'yes':'no');}catch{}
     await read();
     close();
     footer.setAttribute('role','status');footer.title='Escolhas salvas. Continue a operação que estava realizando.';
@@ -76,15 +81,15 @@
   if(loginOnly)return;
   if(status?.accepted)return;
   event.preventDefault();event.stopImmediatePropagation();
-  void open(path.includes('aplicacao')?'application':/registrar/.test(path)?'account':'contact');
+  const form=event.target,submitter=event.submitter;void read().then(state=>{if(state.accepted){if(submitter?.isConnected)form.requestSubmit(submitter);else form.requestSubmit();}else void open(path.includes('aplicacao')?'application':/registrar/.test(path)?'account':'contact');}).catch(()=>{});
  },true);
  document.addEventListener('click',event=>{
   const button=event.target.closest('button');
   if(!button||button.closest('dialog'))return;
-  if(button.id==='portal-ai-open'&&!status?.choices?.aiProcessing){event.preventDefault();event.stopImmediatePropagation();void open('ai');return;}
+  if(button.id==='portal-ai-open'&&!status?.choices?.aiProcessing){event.preventDefault();event.stopImmediatePropagation();void read().then(state=>{if(state.choices?.aiProcessing)button.click();else void open('ai');}).catch(()=>{});return;}
   if(status?.accepted)return;
   if(button.matches('#save,#next-step,#save-draft,#next,#portal-ai-submit,[data-step-index]')){
-   event.preventDefault();event.stopImmediatePropagation();void open(path.includes('aplicacao')?'application':'portal');
+   event.preventDefault();event.stopImmediatePropagation();void read().then(state=>{if(state.accepted)button.click();else void open(path.includes('aplicacao')?'application':'portal');}).catch(()=>{});
   }
  },true);
  read().then(state=>{

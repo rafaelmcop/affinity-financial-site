@@ -231,7 +231,7 @@ async function siteBrandingRoute(request, env, auth) {
 function applySiteBranding(response) {
   if(!response.headers.get('content-type')?.includes('text/html'))return response;
   // Stream the shared enhancement into every HTML shell; do not rewrite React-owned children.
-  return new HTMLRewriter().on('head',{element(element){element.append('<script src="/legal-privacy.js?v=3" defer></script><script src="/brand-logo.js?v=1" defer></script><script src="/site-branding.js?v=5" defer></script>',{html:true});}}).transform(response);
+  return new HTMLRewriter().on('head',{element(element){element.append('<script src="/legal-privacy.js?v=4" defer></script><script src="/brand-logo.js?v=1" defer></script><script src="/site-branding.js?v=5" defer></script>',{html:true});}}).transform(response);
 }
 
 /**
