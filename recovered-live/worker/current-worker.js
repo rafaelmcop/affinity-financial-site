@@ -1,3 +1,4 @@
+import {recruitmentRoute} from './recruitment.js';
 import {enforceAgentSetupDeadlines} from './agent-setup-deadline.js';
 import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,nlgPilotSharedPolicies,saveNlgPilotAgents,saveNlgPilotCorrection,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
 import {importConnectedWhatsapp} from './whatsapp-connected-imports.js';
@@ -48368,6 +48369,8 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  };
  const incidentResponse=await securityIncidentRoute(request,env,{...legalServices,encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:mail=>sendEmailIfConfigured(env,mail)});
  if(incidentResponse)return perimeterHeaders(secureResponse(incidentResponse,{privateData:true}),url.pathname);
+ const recruitmentResponse=await recruitmentRoute(request,env,{identity:async(req,environment)=>{const session=await getSession(req,environment,ADMIN_COOKIE);if(session?.type!=='admin'||session.auditAccess)return null;const access=await getAdminAccess(session.email,environment);const account=access.account;if(!account?.isActive||account.status!=='approved'||!['admin','both'].includes(account.accountType))return null;return {email:String(session.email).toLowerCase(),name:account.name};},encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET)});
+ if(recruitmentResponse)return recruitmentResponse;
  const legalResponse=await legalRoute(request,env,legalServices);
  if(legalResponse)return perimeterHeaders(legalResponse,url.pathname);
  const legalPages={'/legal/2026-11-23.1/terms-of-use.html':'/legal/2026-11-23.1/terms-of-use.html','/legal/2026-11-23.1/portal-privacy.html':'/legal/2026-11-23.1/portal-privacy.html','/legal/2026-11-21.1/terms-of-use.html':'/legal/2026-11-21.1/terms-of-use.html','/legal/2026-11-21.1/portal-privacy.html':'/legal/2026-11-21.1/portal-privacy.html','/terms-of-use.html':'/terms-of-use.html','/terms':'/terms-of-use.html','/termos':'/terms-of-use.html','/portal-privacy.html':'/portal-privacy.html','/privacy':'/portal-privacy.html','/politica-de-privacidade':'/portal-privacy.html'};
