@@ -1,4 +1,4 @@
-import {defaultNavigation,navigationCatalog,validateNavigation} from './portal-navigation-model.js?v=3';
+import {defaultNavigation,navigationCatalog,validateNavigation} from './portal-navigation-model.js?v=4';
 const root=document.getElementById('menu-editor'),status=document.getElementById('menu-status');let rows=[],revision=0,dirty=false;
 const esc=value=>String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function flatten(nodes,parent='',depth=0){return nodes.flatMap(node=>[{...node,parent,depth},...flatten(node.children||[],node.key,depth+1)]);}
