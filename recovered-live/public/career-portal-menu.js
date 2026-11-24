@@ -37,6 +37,7 @@
   }
   access().then(info => {
     add(info);
+    if(info?.allowed&&!document.querySelector('script[data-recruitment-notices]')){const script=document.createElement('script');script.dataset.recruitmentNotices='';script.src='/recruitment-notices.js?v=2';document.head.append(script);}
     new MutationObserver(() => {
       if (busy) return;
       busy = true;

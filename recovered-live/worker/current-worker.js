@@ -1,3 +1,4 @@
+import {runAgentRelationshipAutomations} from './agent-relationship-automations.js';
 import {recruitmentRoute} from './recruitment.js';
 import {enforceAgentSetupDeadlines} from './agent-setup-deadline.js';
 import {nlgPilotFreshPolicies,nlgPilotPendingPolicies,nlgPilotSharedPolicies,saveNlgPilotAgents,saveNlgPilotCorrection,saveNlgPilotPolicy} from './nlg-pilot-policy.js';
@@ -47647,6 +47648,7 @@ var cloudflare_staging_default = {
       ctx.waitUntil(syncMeetingReminderCalendars(env));
       ctx.waitUntil(runMessageAutomations(env));
       ctx.waitUntil(runWhatsappAutomations(env));
+      ctx.waitUntil(runAgentRelationshipAutomations(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),sendEmail:async(owner,mail)=>{if(await mailAutomationBlocked(env,owner))throw Error('mail_automation_paused');init_icloud_email();return sendAgentEmail(env,owner,mail);}}).catch(()=>console.error('agent_relationship_automation_pending')));
       ctx.waitUntil(syncAllWhatsappAudit(env));
       return;
     }
