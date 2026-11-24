@@ -1,3 +1,4 @@
+import {runMailboxSyncBatch,clearMailboxSyncFailure} from './mailbox-sync-health.js';
 import {eventRoute,runEventReminders} from './agent-events.js';
 import {recordSubmissionLicense} from './application-submission-license.js';
 import {portalNavigationRoute} from './portal-navigation.js';
@@ -39385,6 +39386,7 @@ async function syncIcloudInbox(env, agentEmail) {
     await env.DB.prepare(
       "UPDATE agentEmailSettings SET lastImapSyncAt=CURRENT_TIMESTAMP WHERE lower(agentEmail)=?"
     ).bind(owner).run();
+    await clearMailboxSyncFailure(env,owner);
     return { success: true, imported };
   } finally {
     await client.close();
@@ -39395,14 +39397,7 @@ async function syncAllIcloudInboxes(env) {
   const rows = await env.DB.prepare(
     "SELECT agentEmail FROM agentEmailSettings WHERE lower(agentEmail) IN (SELECT lower(email) FROM adminAccounts WHERE isActive=1 AND status='approved') AND imapHost IS NOT NULL AND trim(imapHost)<>'' AND imapUser IS NOT NULL AND trim(imapUser)<>''"
   ).all();
-  await Promise.all((rows.results || []).map(async (row) => {
-    try {
-      await backfillAssistantPaymentMail(env,String(row.agentEmail));
-      await syncIcloudInbox(env, String(row.agentEmail));
-    } catch (error) {
-      console.error("icloud_sync_failed", row.agentEmail, error);
-    }
-  }));
+  await runMailboxSyncBatch(env,rows.results||[],{backfill:owner=>backfillAssistantPaymentMail(env,owner),sync:owner=>syncIcloudInbox(env,owner),onError:detail=>console.error('mailbox_sync_failed',detail)});
 }
 __name(syncAllIcloudInboxes, "syncAllIcloudInboxes");
 var import_mailparser;
