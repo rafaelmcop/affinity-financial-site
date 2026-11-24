@@ -14,5 +14,7 @@ export function usHolidays(year){const items=[];for(const y of [year-1,year,year
 [10,nth(y,10,1,2),'Columbus Day','Feriado federal que marca a chegada da expedição de Cristóvão Colombo às Américas.'],
 [11,11,'Veterans Day','Homenagem aos veteranos das Forças Armadas dos Estados Unidos.'],
 [11,nth(y,11,4,4),'Thanksgiving','Dia de Ação de Graças, celebrado na quarta quinta-feira de novembro.'],
-[12,25,'Natal','Christmas Day, celebrado em 25 de dezembro.']
-];for(const [month,day,title,description]of holidays){const actual=date(y,month,day);if(actual.startsWith(year+'-'))items.push({date:actual,title,description,source,informational:true});}}return items.sort((a,b)=>a.date.localeCompare(b.date)||a.title.localeCompare(b.title));}
+[12,24,'Véspera de Natal','Dia que antecede o Natal. Data comemorativa informativa, sem bloqueio automático de atendimento.',true],
+[12,25,'Natal','Christmas Day, celebrado em 25 de dezembro.'],
+[12,31,'Véspera de Ano Novo','Último dia do ano, que antecede o Ano Novo. Data comemorativa informativa, sem bloqueio automático de atendimento.',true]
+];for(const [month,day,title,description,commemorative=false]of holidays){const actual=date(y,month,day);if(actual.startsWith(year+'-'))items.push({date:actual,title,description,commemorative,source:commemorative?null:source,informational:true});}}return items.sort((a,b)=>a.date.localeCompare(b.date)||a.title.localeCompare(b.title));}
