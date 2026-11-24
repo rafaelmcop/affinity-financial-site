@@ -118,3 +118,16 @@ export async function assistantsRoute(request,env,auth){
  return json({error:'Página não encontrada.'},404);
  }catch(error){console.error('assistant_operation_failed');return json({error:/UNIQUE constraint/i.test(String(error.message))?'Este usuário já possui um cadastro.':'Não foi possível concluir. Revise os dados ou tente novamente.'},400);}
 }
+
+export async function assistantAgentLogin(request,env,auth,input){
+ await assistantsSchema(env);
+ const email=String(input.email||'').trim().toLowerCase(),password=String(input.password||'');
+ if(password.length>200)return null;
+ const row=await env.DB.prepare('SELECT id,email,name,passwordHash,sessionVersion FROM portalAssistants WHERE email=? AND active=1 AND deletedAt IS NULL').bind(email).first();
+ if(!row||!await auth.compare(password,row.passwordHash))return null;
+ const linked=await env.DB.prepare("SELECT 1 FROM assistantAgentAccess l JOIN adminAccounts a ON lower(a.email)=l.owner WHERE l.assistantId=? AND l.active=1 AND a.isActive=1 AND a.status='approved' AND a.accountType IN ('agent','both')").bind(row.id).first();
+ if(!linked)return null;
+ const token=await auth.createSession({type:'assistant',id:Number(row.id),version:Number(row.sessionVersion)},env,28800);
+ await audit(env,email,email,'login',row.id);
+ return {user:{id:Number(row.id),email,name:row.name,accountType:'assistant',role:'assistant'},cookies:[cookie+'='+token+'; Path=/; HttpOnly; Secure; SameSite=Strict',...['affinity_admin_session','affinity_affiliate_session'].map(name=>name+'=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax')]};
+}

@@ -94,7 +94,7 @@ import {browserSnapshot} from './five-rings-browser-snapshot.js';
 import {deferFiveRingsSession,deferredFiveRingsSession} from './five-rings-session-defer.js';
 import {loadPublishedTestimonials} from './testimonial-loading.js';
 import {publicTestimonial,publicTestimonialColumns} from './public-testimonials.js';
-import {assistantsRoute,delegatedAccess} from './assistants.js';
+import {assistantsRoute,delegatedAccess,assistantAgentLogin} from './assistants.js';
 import {authenticationLimit} from './auth-rate-limit.js';
 import {trpcBoundary,boundedJson,globalTestimonialsAllowed,procedureNames} from './security-boundary.js';
 import {requestOutcomes} from './request-outcomes.js';
@@ -43055,6 +43055,7 @@ async function runProcedure(name, input, request, env, delegation=null, context=
   }
   if (name === "agent.login") {
     const email = String(input.email ?? "").trim().toLowerCase(), password = String(input.password ?? "");
+    const assistantLogin=await assistantAgentLogin(request,env,{compare:(password,hash)=>bcryptjs_default.compare(password,hash),createSession},input);if(assistantLogin)return {body:trpcResult(assistantLogin.user),cookies:assistantLogin.cookies};
     const account = await env.DB.prepare(
       "SELECT * FROM adminAccounts WHERE lower(email)=? AND accountType IN ('agent','both')"
     ).bind(email).first();
