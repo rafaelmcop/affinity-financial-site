@@ -1,3 +1,4 @@
+import {drainAgentDirectoryImports} from './agent-directory-imports.js';
 import {decorateMeetingPurposes} from './meeting-purpose.js';
 import {runAgentRelationshipAutomations} from './agent-relationship-automations.js';
 import {recruitmentRoute} from './recruitment.js';
@@ -47649,7 +47650,8 @@ var cloudflare_staging_default = {
       ctx.waitUntil(syncMeetingReminderCalendars(env));
       ctx.waitUntil(runMessageAutomations(env));
       ctx.waitUntil(runWhatsappAutomations(env));
-      ctx.waitUntil(runAgentRelationshipAutomations(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),sendEmail:async(owner,mail)=>{if(await mailAutomationBlocked(env,owner))throw Error('mail_automation_paused');init_icloud_email();return sendAgentEmail(env,owner,mail);}}).catch(()=>console.error('agent_relationship_automation_pending')));
+      ctx.waitUntil(drainAgentDirectoryImports(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET)}).catch(()=>console.error('agent_directory_import_pending')));
+      ctx.waitUntil(runAgentRelationshipAutomations(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),image:async path=>{const response=await env.ASSETS.fetch(new Request('https://www.affinityfc.org'+path));if(!response.ok)throw Error('campaign_image_unavailable');return new Uint8Array(await response.arrayBuffer());},sendEmail:async(owner,mail)=>{if(await mailAutomationBlocked(env,owner))throw Error('mail_automation_paused');init_icloud_email();return sendAgentEmail(env,owner,{...mail,transientAttachments:!!mail.attachments?.some(file=>file.cid)});}}).catch(()=>console.error('agent_relationship_automation_pending')));
       ctx.waitUntil(syncAllWhatsappAudit(env));
       return;
     }

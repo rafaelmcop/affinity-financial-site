@@ -28,7 +28,7 @@
     const settings = elements.find(el => /configurações|configuracoes/i.test(el.textContent || ''));
     if (agentPortal) {
       const nav=document.querySelector('.agent-unified-nav');
-      if(nav&&!nav.querySelector('[data-affinity-menu="recruitment"]')){const link=document.createElement('a');link.dataset.affinityMenu='recruitment';link.href='/agentes/contratacao';link.textContent='Contratação';if(path==='/agentes/contratacao')link.className='active';nav.append(link);}
+      if(nav&&!nav.querySelector('[data-affinity-menu="recruitment"]')){const link=document.createElement('a');link.dataset.affinityMenu='recruitment';link.href='/agentes/equipe';link.textContent='Agentes';if(['/agentes/equipe','/agentes/contratacao'].includes(path))link.className='active';nav.append(link);}
       return;
     }
     if (users) makeLink(users, 'careers', '/candidaturas.html?portal=admin', 'Candidaturas', Number(info.pendingCount || 0));
