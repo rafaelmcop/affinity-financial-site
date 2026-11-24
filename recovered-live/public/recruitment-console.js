@@ -1,7 +1,7 @@
 import {createRecruitmentIntake} from './recruitment-intake.js?v=1';
 import {trackingReport} from './recruitment-tracking.js?v=3';
 import {createRecruitmentManagement} from './recruitment-management.js?v=4';
-import {createAgentRelationshipMessages} from './agent-relationship-messages.js?v=5';
+import {createAgentRelationshipMessages} from './agent-relationship-messages.js?v=6';
 import {STEPS,STATES,publicPresentationState} from './recruitment-content.js?v=1';
 import {createPresentation,esc} from './recruitment-view.js?v=2';
 const root=document.getElementById('recruitment-console');
