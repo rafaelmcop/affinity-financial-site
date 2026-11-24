@@ -15,7 +15,7 @@ execFileSync('/usr/bin/python3',['-c',String.raw`
 from pathlib import Path
 import json,zipfile,sys
 repo=Path(sys.argv[1]);store=repo/'integrations/five-rings-store';source=repo/'integrations/five-rings-browser';nlg=repo/'integrations/national-life-browser'
-manifest=json.loads((source/'manifest.json').read_text());manifest.update(version='1.1.0',name='Affinity Carrier Connector',description='Sync authorized Five Rings and National Life records with your Affinity agent portal using your signed-in browser session.',minimum_chrome_version='112',icons={str(s):'assets/icon'+str(s)+'.png' for s in [16,32,48,128]},action={'default_title':'Affinity Five Rings Connector','default_popup':'consent.html'},homepage_url='https://www.affinityfc.org/five-rings-privacy.html')
+manifest=json.loads((source/'manifest.json').read_text());manifest.update(version='1.1.1',name='Affinity Carrier Connector',description='Sync authorized Five Rings and National Life records with your Affinity agent portal using your signed-in browser session.',minimum_chrome_version='112',icons={str(s):'assets/icon'+str(s)+'.png' for s in [16,32,48,128]},action={'default_title':'Affinity Five Rings Connector','default_popup':'consent.html'},homepage_url='https://www.affinityfc.org/five-rings-privacy.html')
 assert len(manifest['description'])<=132
 manifest['optional_host_permissions']=['https://www.nationallife.com/*']
 manifest['content_scripts'].append({'matches':['https://www.affinityfc.org/agentes/apps*','https://portal.affinityfc.org/agentes/apps*'],'js':['national-life-affinity.js']})

@@ -1,4 +1,4 @@
-(()=>{function remember(){for(const input of document.querySelectorAll('input[type=checkbox]'))if(/remember|trust.?device/i.test(input.name)&&!input.checked){input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));}}remember();new MutationObserver(remember).observe(document.body,{childList:true,subtree:true});let running=false,deadline=0;const base='https://portal.fiveringsfinancial.com';function cleaned(html){const doc=new DOMParser().parseFromString(html,'text/html');doc.querySelectorAll('script,style,form,input,textarea,iframe,meta,link').forEach(x=>x.remove());doc.querySelectorAll('*').forEach(x=>{for(const a of [...x.attributes])if(a.name!=='class'&&a.name!=='href')x.removeAttribute(a.name);if(x.hasAttribute('href')){try{const u=new URL(x.getAttribute('href'),base);if(u.origin!==base||u.search||!/^\/account\/(clients|policies)(?:\/[0-9a-f-]+)?$/.test(u.pathname))x.removeAttribute('href');else x.setAttribute('href',u.href);}catch{x.removeAttribute('href');}}});return doc.body.innerHTML;}
+(()=>{function remember(){for(const input of document.querySelectorAll('input[type=checkbox]'))if(/remember|trust.?device/i.test(input.name)&&!input.checked){input.checked=true;input.dispatchEvent(new Event('change',{bubbles:true}));}}remember();new MutationObserver(remember).observe(document.body,{childList:true,subtree:true});let running=false,deadline=0;const base='https://portal.fiveringsfinancial.com';function cleaned(html){const doc=new DOMParser().parseFromString(html,'text/html');doc.querySelectorAll('script,style,form,input,textarea,iframe,meta,link').forEach(x=>x.remove());doc.querySelectorAll('*').forEach(x=>{for(const a of [...x.attributes])if(a.name!=='class'&&a.name!=='href')x.removeAttribute(a.name);if(x.hasAttribute('href')){try{const u=new URL(x.getAttribute('href'),base);if(u.origin!==base||u.search||!/^\/account\/(clients|policies|agents)(?:\/[0-9a-f-]+)?$/.test(u.pathname))x.removeAttribute('href');else x.setAttribute('href',u.href);}catch{x.removeAttribute('href');}}});return doc.body.innerHTML;}
 async function read(path){
  let r,html;
  for(let attempt=0;attempt<2;attempt++){
@@ -16,8 +16,9 @@ async function read(path){
  }
  const destination=new URL(r.url),json=r.headers.get('content-type')?.includes('application/json');const doc=json?null:new DOMParser().parseFromString(html,'text/html');const loginForm=doc&&[...doc.querySelectorAll('form')].some(form=>/\/account\/login(?:$|[?#])/i.test(new URL(form.getAttribute('action')||destination.href,base).href)&&form.querySelector('input[type=password]'));const loginPage=/\/(?:login|verify|verification|challenge|captcha)(?:\/|$)/i.test(destination.pathname);if(!r.ok)throw Error('Não foi possível ler '+new URL(base+path).pathname+' no Five Rings (HTTP '+r.status+', destino '+destination.pathname+').');if(destination.origin!==base||!/^\/account(?:\/|$)/.test(destination.pathname)||loginForm||loginPage)throw Error('O Five Rings pediu autenticação na leitura de '+new URL(base+path).pathname+' (HTTP '+r.status+', destino '+destination.pathname+'). Entre no Five Rings e tente novamente.');return {body:html,contentType:json?'application/json':'text/html'};}
 
+function sanitized(value,depth=0){if(depth>6)return null;if(Array.isArray(value))return value.slice(0,20000).map(item=>sanitized(item,depth+1));if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).filter(([key])=>!/password|cookie|token|secret|csrf/i.test(key)).map(([key,item])=>[key,sanitized(item,depth+1)]));return typeof value==='string'&&value.includes('<')?cleaned(value):value;}
 async function collectTable(type,nativeQuery,cached=null){
- const label=type==='clients'?'clientes':'apólices',data=[],seen=new Set();let expected=null,sourceTotal=null,start=0;
+ const label=type==='clients'?'clientes':type==='agents'?'agentes':'apólices',data=[],seen=new Set();let expected=null,sourceTotal=null,start=0;
  const count=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isSafeInteger(Number(value))&&Number(value)>=0?Number(value):null;
  while(start<20000){
   const params=new URLSearchParams(nativeQuery);params.set('draw',String(seen.size+1));params.set('start',String(start));params.set('length','100');params.set('search[value]','');params.set('search[regex]','false');
@@ -26,7 +27,7 @@ async function collectTable(type,nativeQuery,cached=null){
   const total=count(payload.recordsTotal),filtered=payload.recordsFiltered===undefined?total:count(payload.recordsFiltered);
   if(!Array.isArray(payload.data)||total===null||filtered===null||filtered>total)throw Error('Lista de '+label+' sem contagem válida. A leitura não foi salva.');
   if(start===0&&cached&&cached.recordsTotal===total&&cached.recordsFiltered===filtered&&cached.data?.length===filtered){
-   const prefix=payload.data.map(row=>Object.fromEntries(Object.entries(row).filter(([key])=>!/password|cookie|token|secret|csrf/i.test(key)).map(([key,value])=>[key,typeof value==='string'&&value.includes('<')?cleaned(value):value])));
+   const prefix=payload.data.map(row=>sanitized(row));
    if(JSON.stringify(prefix)===JSON.stringify(cached.data.slice(0,prefix.length))){progress(type,filtered,filtered);return cached;}
   }
 
@@ -38,7 +39,7 @@ async function collectTable(type,nativeQuery,cached=null){
   seen.add(fingerprint);
   if(data.length+payload.data.length>expected)throw Error('A contagem de '+label+' não corresponde à lista recebida.');
   if(!payload.data.length&&data.length<expected)throw Error('Lista de '+label+' incompleta: recebidos '+data.length+' de '+expected+'. Nenhum registro desta leitura foi importado.');
-  for(const row of payload.data){if(!row||typeof row!=='object')throw Error('Registro de '+label+' inválido.');data.push(Object.fromEntries(Object.entries(row).filter(([key])=>!/password|cookie|token|secret|csrf/i.test(key)).map(([key,value])=>[key,typeof value==='string'&&value.includes('<')?cleaned(value):value])));}
+  for(const row of payload.data){if(!row||typeof row!=='object')throw Error('Registro de '+label+' inválido.');data.push(sanitized(row));}
   progress(type,data.length,expected);
   if(data.length===expected)return {data,recordsTotal:sourceTotal,recordsFiltered:expected};
   // Servers may cap a page below the requested length. Advance only past rows read.
@@ -57,7 +58,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   const matchedAccount=email&&cleanedDashboard.toLowerCase().includes(email);
   if(!email||(!matchedAccount&&message.manualConfirmed!==true))throw Error('Confirme que esta conta Five Rings pertence ao agente selecionado.');
   const resume=message.resume,canResume=matchedAccount&&resume?.owner===email&&Date.now()-resume.capturedAt>=0&&Date.now()-resume.capturedAt<600000&&Array.isArray(resume.pages)&&resume.pages.length<=63;
-  const saved=new Map();if(canResume){capturedAt=resume.capturedAt;for(const page of resume.pages){try{const url=new URL(page.url);if(url.origin===base&&!url.search&&/^\/account\/(clients|policies)(?:\/data|\/[0-9a-f-]+)$/.test(url.pathname)&&typeof page.body==='string'&&page.body.length<=2000000)saved.set(url.pathname,page);}catch{}}}
+  const saved=new Map();if(canResume){capturedAt=resume.capturedAt;for(const page of resume.pages){try{const url=new URL(page.url);if(url.origin===base&&!url.search&&/^\/account\/(clients|policies|agents)(?:\/data|\/[0-9a-f-]+)$/.test(url.pathname)&&typeof page.body==='string'&&page.body.length<=2000000)saved.set(url.pathname,page);}catch{}}}
   pages.push({url:base+'/account/dashboard',body:cleanedDashboard,contentType:'text/html'});
   for(const type of ['clients','policies']){
    const nativeQuery=message.queries?.[type];if(!nativeQuery)throw Error('Consulta nativa de '+type+' indisponível.');
@@ -68,7 +69,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   let cursor=0,finished=0,failure=null;progress('details',finished,links.length);
   async function worker(){while(!failure&&cursor<links.length){const link=links[cursor++],path=new URL(link).pathname;try{let page=saved.get(path);if(!page){const detail=await read(path);if(detail.contentType!=='text/html')throw Error('Detalhe de cliente indisponível.');page={url:link,body:cleaned(detail.body),contentType:'text/html'};}pages.push(page);progress('details',++finished,links.length);}catch(error){failure ||= error;}}}
   await Promise.all(Array.from({length:Math.min(3,links.length)},()=>worker()));if(failure)throw failure;
-  return {ok:true,snapshot:{version:1,capturedAt,portalEmail:email,manualConfirmed:message.manualConfirmed===true,pages}};
+  if(message.queries?.agents&&deadline-Date.now()>20000){try{const tables=[],query=new URLSearchParams(message.queries.agents),opposite=new URLSearchParams(query),swap={active:'inactive',inactive:'active',true:'false',false:'true','1':'8','8':'1','0':'1'};let flipped=false;for(const k of ['status','active','is_active','agent_status'])if(swap[query.get(k)]){const value=query.get(k);opposite.set(k,['active','is_active'].includes(k)&&value==='1'?'0':swap[value]);flipped=true;}for(const native of [query,...flipped?[opposite]:[]])tables.push(await collectTable('agents',native.toString()));pages.push({url:base+'/account/agents/data',contentType:'application/json',body:JSON.stringify({tables})});}catch{}}
+  return {ok:true,snapshot:{version:1,agentRoster:message.agentRoster===true,capturedAt,portalEmail:email,manualConfirmed:message.manualConfirmed===true,pages}};
  })().then(reply).catch(error=>{
   const interrupted=/tempo total|demorou|timeout|timed out|Failed to fetch|NetworkError/i.test(error.message||'');
   const checkpoint=interrupted&&email&&pages.length?{owner:email,capturedAt,pages:pages.filter(p=>!p.url.endsWith('/dashboard'))}:undefined;

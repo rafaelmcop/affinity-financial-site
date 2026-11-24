@@ -79,3 +79,7 @@ Version 1.0.10: adds portal.affinityfc.org to the existing Affinity-domain permi
 ## Submission status — November 6, 2026
 
 Version 1.0.10 was uploaded to the existing item `mgpnjfokklkcbgpmkcfhiadldijhapic` through the authenticated local Firefox publisher dashboard. The package page confirmed draft version 1.0.10 alongside published version 1.0.9. Submission was completed with automatic publication after review enabled; the dashboard confirmed “Seu item (extensão) foi enviado para revisão”. Google review is pending; do not describe 1.0.10 as already available in the store. Existing 1.0.9 users can synchronize through https://www.affinityfc.org/agent-five-rings-sync.html?manual=1 until the update is approved.
+
+
+## November 24, 2026 · prepared 1.1.1 update
+Adds read-only agent roster capture using native Five Rings table parameters, with completeness checks and active/inactive filters when the portal exposes them. Imports team fields into the authenticated owner’s agent directory. Portal candidate classifications and manual status choices remain independent of Five Rings membership status. Nested credentials are excluded. Existing host permissions are unchanged. The package is prepared; store submission and publication must be verified separately.

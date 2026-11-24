@@ -29,7 +29,7 @@ async function nativeTableQueryOnce(type,tab){
       query.set(`columns[${i}][search][value]`,'');query.set(`columns[${i}][search][regex]`,'false');
      });
      (data.order||[]).forEach((o,i)=>{if(Number.isInteger(Number(o.column))&&['asc','desc'].includes(o.dir)){query.set(`order[${i}][column]`,String(o.column));query.set(`order[${i}][dir]`,o.dir);}});
-     return {query:query.toString()};
+     if(type==='agents')for(const k of ['status','active','is_active','agent_status']){const value=data[k]??url.searchParams.get(k);if(value!==null&&value!==undefined&&/^(active|inactive|all|true|false|[0-9]{1,2})$/i.test(String(value)))query.set(k,String(value));}return {query:query.toString()};
     }
     await new Promise(resolve=>setTimeout(resolve,200));
    }
@@ -52,12 +52,12 @@ async function collectSnapshot(message,job){
  if(tabs.length>1)throw Error('Deixe apenas uma aba Five Rings aberta, na conta correta.');
  const reader=tabs[0]||await chrome.tabs.create({url:base+'/account/dashboard',active:false,...tabWindow(job.windowId)});
  activeReaders.set(reader.id,job);
- const original=tabs[0]?.url?(()=>{const u=new URL(tabs[0].url);return /^\/account\/(?:dashboard|clients|policies)(?:\/[0-9a-f-]+)?$/.test(u.pathname)?base+u.pathname:base+'/account/dashboard';})():null;
+ const original=tabs[0]?.url?(()=>{const u=new URL(tabs[0].url);return /^\/account\/(?:dashboard|clients|policies|agents)(?:\/[0-9a-f-]+)?$/.test(u.pathname)?base+u.pathname:base+'/account/dashboard';})():null;
  try{
   const queries={};for(const type of ['clients','policies'])queries[type]=await nativeTableQuery(type,reader);
-  await chrome.tabs.update(reader.id,{url:base+'/account/dashboard'});await loadedTab(reader.id);
+  try{queries.agents=await nativeTableQuery('agents',reader);}catch{queries.agents=null;}await chrome.tabs.update(reader.id,{url:base+'/account/dashboard'});await loadedTab(reader.id);
   const owner=String(message.portalEmail||'').trim().toLowerCase(),resume=await checkpoint(owner);
-  const request={action:'collect',portalEmail:message.portalEmail,manualConfirmed:message.manualConfirmed===true,queries,resume};
+  const request={action:'collect',portalEmail:message.portalEmail,manualConfirmed:message.manualConfirmed===true,agentRoster:true,queries,resume};
   async function collect(){const result=await chrome.tabs.sendMessage(reader.id,request);if(result?.checkpoint&&result.checkpoint.owner===owner&&JSON.stringify(result.checkpoint).length<3000000)await checkpoint(owner,result.checkpoint);else{await checkpoint(owner,null);if(result?.checkpoint)result.error='A leitura foi interrompida e excedeu o limite do progresso temporário. Os dados já salvos no portal foram preservados. Tente novamente.';}if(result)delete result.checkpoint;return result;}
   try{return await collect();}
   catch(error){
@@ -65,10 +65,10 @@ async function collectSnapshot(message,job){
    await loadedTab(reader.id);
    return await collect();
   }
- }finally{activeReaders.delete(reader.id);if(!original)await chrome.tabs.remove(reader.id).catch(()=>{});else {const current=await chrome.tabs.get(reader.id).catch(()=>null);if(current&&['/account/clients','/account/policies','/account/dashboard'].includes(new URL(current.url).pathname))await chrome.tabs.update(reader.id,{url:original}).catch(()=>{});}}
+ }finally{activeReaders.delete(reader.id);if(!original)await chrome.tabs.remove(reader.id).catch(()=>{});else {const current=await chrome.tabs.get(reader.id).catch(()=>null);if(current&&['/account/clients','/account/policies','/account/agents','/account/dashboard'].includes(new URL(current.url).pathname))await chrome.tabs.update(reader.id,{url:original}).catch(()=>{});}}
 }
 chrome.runtime.onMessage.addListener((message,sender,reply)=>{
- if(message.action==='readProgress'){const job=activeReaders.get(sender.tab?.id);if(!job||!sender.tab?.url?.startsWith(base+'/')||!['dashboard','clients','policies','details'].includes(message.progress?.stage))return;job.progress={stage:message.progress.stage,processed:Math.max(0,Math.min(20000,Number(message.progress.processed)||0)),total:Math.max(0,Math.min(20000,Number(message.progress.total)||0))};reply({ok:true});return;}
+ if(message.action==='readProgress'){const job=activeReaders.get(sender.tab?.id);if(!job||!sender.tab?.url?.startsWith(base+'/')||!['dashboard','clients','policies','details','agents'].includes(message.progress?.stage))return;job.progress={stage:message.progress.stage,processed:Math.max(0,Math.min(20000,Number(message.progress.processed)||0)),total:Math.max(0,Math.min(20000,Number(message.progress.total)||0))};reply({ok:true});return;}
  let origin;try{origin=new URL(sender.tab?.url).origin;}catch{return;}
  if(!affinityOrigins.has(origin)||Boolean(sender.tab.incognito)!==privateContext||!['open','collectStart','collectStatus','ping','backgroundStart','backgroundFinish'].includes(message.action))return;
  (async()=>{
