@@ -37,7 +37,7 @@ test('scheduled maintenance has its email failure classifier available before ba
   console,emailDefinitelyNotSent,
   pendingCommunicationProgress:noop,contactBridge:noop,storeCentralContacts:noop,protectInternalContacts:noop,
   runApplicationLifecycle:async(_,services)=>{classifiers.push(services.definitelyNotSent);},
-  flushWhatsappPolicies:noop,importConnectedWhatsapp:noop,runMeetingReminders:noop,meetingReminderServices:()=>({})
+  flushWhatsappPolicies:noop,importConnectedWhatsapp:noop,runMeetingReminders:noop,meetingReminderServices:()=>({}),runEventReminders:noop,drainAgentDirectoryImports:noop,runAgentRelationshipAutomations:noop
  });
  const worker=vm.runInContext('({'+source.slice(start,end)+'})',context);
  await worker.scheduled({cron:'* * * * *'},{},{waitUntil:promise=>jobs.push(promise)});

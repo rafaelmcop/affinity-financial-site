@@ -29,7 +29,7 @@
     if (agentPortal) {
       const nav=document.querySelector('.agent-unified-nav');
       if(nav&&nav.dataset.managedNavigation==='true')return;
-      if(nav&&!nav.querySelector('[data-affinity-menu="recruitment"]')){const group=document.createElement('details');group.dataset.affinityMenu='recruitment';if(['/agentes/equipe','/agentes/contratacao'].includes(path))group.open=true;group.innerHTML='<summary>Agentes <span>›</span></summary><div class="agent-sub"><a href="/agentes/equipe">Lista</a><a href="/agentes/contratacao">Candidatura</a></div>';nav.insertBefore(group,nav.querySelector('a[href="/agentes/agenda"]'));}
+      if(nav&&!nav.querySelector('[data-affinity-menu="recruitment"]')){const group=document.createElement('details');group.dataset.affinityMenu='recruitment';if(['/agentes/equipe','/agentes/contratacao'].includes(path))group.open=true;group.innerHTML='<summary>Agentes <span>›</span></summary><div class="agent-sub"><a href="/agentes/equipe">Lista</a><a href="/agentes/contratacao">Candidatura</a></div>';const agenda=nav.querySelector('a[href="/agentes/agenda"]'),anchor=[...nav.children].find(child=>child===agenda||child.contains(agenda));nav.insertBefore(group,anchor||null);}
       return;
     }
     if (users) makeLink(users, 'careers', '/candidaturas.html?portal=admin', 'Candidaturas', Number(info.pendingCount || 0));
