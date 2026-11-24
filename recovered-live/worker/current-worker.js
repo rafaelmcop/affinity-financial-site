@@ -1,3 +1,4 @@
+import {recordSubmissionLicense} from './application-submission-license.js';
 import {portalNavigationRoute} from './portal-navigation.js';
 import {syncFiveRingsAgentDirectory} from './five-rings-agents.js';
 import {drainAgentDirectoryImports} from './agent-directory-imports.js';
@@ -43961,6 +43962,7 @@ Detalhes: ${details}` : ""}`;
       await leadSchema(env);return trpcResult({ ...row, ...applicationFields(row,extra,sensitive),revision, applicationDate:applicationDay(row.createdAt), business:await agentBusiness(env,owner),retention:retentionForApplication(row,!(await agentBusiness(env,owner)).affinityTeam),agentDetails:await applicationAgentDetails(env,owner), referralAgentDetails:await applicationReferralDetails(env,owner,row.clientPhone), id: Number(row.id) });
     }
     if (name === "agent.saveApplication") {
+      if(input.action==='record_submission_license'){try{return trpcResult(await recordSubmissionLicense(env,owner,input));}catch(error){return trpcError(error.message,error.status===404?'NOT_FOUND':error.status===409?'CONFLICT':'BAD_REQUEST',error.status||400);}}
       const id = Number(input.id || 0), clientName = String(input.clientName || "").trim();
       const clientEmail = String(input.clientEmail || "").trim().toLowerCase();
       if (clientEmail && !validEmail(clientEmail)) return trpcError("Informe um e-mail válido ou deixe o campo em branco para salvar o rascunho");
@@ -43998,6 +44000,7 @@ Detalhes: ${details}` : ""}`;
       const id = Number(input.id || 0);
       const application = await env.DB.prepare("SELECT * FROM agentApplications WHERE id=? AND lower(agentEmail)=?").bind(id, owner).first();
       if (!application) return trpcError("Aplica\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
+      if(application.status==='submitted_elsewhere')return trpcError("A submissão já está registrada sob outra licença. A ficha continua disponível no cadastro do cliente.","CONFLICT",409);
       let completed = {}, protectedData = {};
       try {
         completed = JSON.parse(String(application.applicationData || "{}"));
