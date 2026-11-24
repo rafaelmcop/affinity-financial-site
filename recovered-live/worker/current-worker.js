@@ -47640,6 +47640,7 @@ var cloudflare_staging_default = {
     ctx.waitUntil(pendingCommunicationProgress(env).catch(()=>console.error('crm_communication_progress_pending')));
     ctx.waitUntil(runApplicationLifecycle(env,{decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:(owner,mail)=>sendAgentEmail(env,owner,{...mail,platformMail:true,transientAttachments:true}),definitelyNotSent:emailDefinitelyNotSent,alert:details=>sendEmailIfConfigured(env,{to:'info@affinityfc.org',subject:'Affinity Portal · Application processing needs attention',html:'<p>Application #'+Number(details.applicationId)+' · '+escapeAutomationHtml(details.code)+'</p>'})}).catch(()=>console.error('application_lifecycle_pending')));
     if(controller.cron==='* * * * *'){
+      ctx.waitUntil(drainAgentDirectoryImports(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET)}).catch(()=>console.error('agent_directory_import_pending')));
       ctx.waitUntil(runAgentRelationshipAutomations(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),image:async path=>{const response=await env.ASSETS.fetch(new Request('https://www.affinityfc.org'+path));if(!response.ok)throw Error('campaign_image_unavailable');return new Uint8Array(await response.arrayBuffer());},sendEmail:async(owner,mail)=>{if(await mailAutomationBlocked(env,owner))throw Error('mail_automation_paused');init_icloud_email();return sendAgentEmail(env,owner,{...mail,transientAttachments:!!mail.attachments?.some(file=>file.cid)});}}).catch(()=>console.error('agent_relationship_automation_pending')));
     ctx.waitUntil(flushWhatsappPolicies(env,owner=>contactBridge(env,owner,'policy','POST')).then(()=>importConnectedWhatsapp(env,{bridge:contactBridge,store:storeCentralContacts,protect:protectInternalContacts})).catch(()=>console.error('whatsapp_maintenance_pending')));ctx.waitUntil(runMeetingReminders(env,meetingReminderServices(env)).catch(()=>console.error('meeting_reminders_pending')));return;}
 
@@ -47655,7 +47656,6 @@ var cloudflare_staging_default = {
       ctx.waitUntil(syncMeetingReminderCalendars(env));
       ctx.waitUntil(runMessageAutomations(env));
       ctx.waitUntil(runWhatsappAutomations(env));
-      ctx.waitUntil(drainAgentDirectoryImports(env,{encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET)}).catch(()=>console.error('agent_directory_import_pending')));
       ctx.waitUntil(syncAllWhatsappAudit(env));
       return;
     }
