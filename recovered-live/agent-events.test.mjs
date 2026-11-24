@@ -18,3 +18,13 @@ test('day reminders follow New York daylight saving time and do not retain a fix
  }
  assert.equal(omitEmptyEventSections('Olá!\n\nO que levar: {levar}\n\nAté lá.',{bring:''}),'Olá!\n\nAté lá.');
  });
+
+test('event admission and prices require complete information and appear in reminder details',async()=>{
+ const {eventParticipation}=await import('./worker/agent-events.js');
+ assert.throws(()=>eventData(form({admission:'qualified'}).data));
+ assert.throws(()=>eventData(form({pricing:'paid',price:'0'}).data));
+ const data=eventData(form({admission:'qualified',qualificationRules:'Produção mínima de 5000 PC',pricing:'paid',price:'125,50',currency:'USD'}).data);
+ assert.equal(data.price,'125.50');assert(eventParticipation(data).includes('5000 PC'));assert(eventParticipation(data).includes('USD 125.50'));
+ assert.equal(eventParticipation(eventData(form().data)),'');
+ assert(eventParticipation(eventData(form({admission:'open',pricing:'free'}).data)).includes('gratuita'));
+});
