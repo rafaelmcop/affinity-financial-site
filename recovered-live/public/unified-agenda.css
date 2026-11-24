@@ -5,3 +5,7 @@ html body .unified-main .chip.confirmed,html body .unified-main .badge.confirmed
 html body .unified-main .chip.pending,html body .unified-main .badge.pending{background:#fff1ce!important;color:#765512!important;border-color:#dcca97!important}
 html body .unified-main .chip.declined,html body .unified-main .badge.declined{background:#eff1f4!important;color:#637383!important;border-color:#cad2d9!important}
 html body .unified-main .day{background:#eff8ef!important}html body .unified-main .day.outside{background:#f5f7f9!important}
+
+html body .unified-main .day.reserved,html body .unified-main .day.outside.reserved{background:#fce5e5!important;border-color:#e5b5b5!important}.legend .reserved-key{background:#fce5e5;color:#8b3030;border-color:#e5b5b5}
+
+html body .unified-main .chip.reserved-slot{background:#fce5e5!important;color:#8b3030!important;border-color:#d8a0a0!important}
