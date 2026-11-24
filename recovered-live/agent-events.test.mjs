@@ -8,3 +8,13 @@ test('email reminders honor NY dates and times, send no duplicate, include the w
 test('late-created events skip expired reminder dates and failed mail is recorded without an automatic duplicate retry',async()=>{const f=await startRecruitmentFixture();try{const event=await write(f,admin,form({remindersEnabled:true},'industry'));f.db.prepare("UPDATE agentEvents SET createdAt='2027-02-01 15:00:00' WHERE id=?").run(event.id);let attempts=0;const services={...f.services,send:async()=>{attempts++;throw Error('Synthetic failure');}};await runEventReminders(f.env,services,new Date('2027-01-31T14:00:00Z'));assert.equal(attempts,0);await runEventReminders(f.env,services,new Date('2027-02-28T14:00:00Z'));assert.equal(attempts,2);await runEventReminders(f.env,services,new Date('2027-02-28T14:01:00Z'));assert.equal(attempts,2);const detail=await read(f,admin,'?id='+event.id);assert.equal(detail.event.deliveries[0].status,'uncertain');assert.equal(detail.event.deliveries[0].total,2);}finally{await f.close();}});
 
 test('day reminders follow New York daylight saving time and do not retain a fixed UTC offset',async()=>{const f=await startRecruitmentFixture();try{const created=await write(f,admin,form({remindersEnabled:true},'industry'));f.db.prepare("UPDATE agentEvents SET createdAt='2027-01-01 00:00:00' WHERE id=?").run(created.id);let count=0;const services={...f.services,send:async()=>count++};await runEventReminders(f.env,services,new Date('2027-03-16T12:59:00Z'));assert.equal(count,0);await runEventReminders(f.env,services,new Date('2027-03-16T13:00:00Z'));assert.equal(count,2);}finally{await f.close();}});
+
+ test('empty optional event instructions omit headings and fallback text from reminders',async()=>{
+ const {omitEmptyEventSections,defaultEventReminders}=await import('./worker/agent-events.js');
+ for(const reminder of defaultEventReminders()){
+ const empty=omitEmptyEventSections(reminder.message,{bring:'',preparation:' '});
+ assert(!/levar|preparar|preparacao/.test(empty));assert(empty.includes('{evento}'));assert(empty.includes('{link_evento}'));
+ const partial=omitEmptyEventSections(reminder.message,{bring:'Identificação',preparation:''});assert(partial.includes('{levar}'));assert(!partial.includes('{preparacao}'));
+ }
+ assert.equal(omitEmptyEventSections('Olá!\n\nO que levar: {levar}\n\nAté lá.',{bring:''}),'Olá!\n\nAté lá.');
+ });
