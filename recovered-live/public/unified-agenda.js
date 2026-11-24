@@ -1,5 +1,5 @@
 import {nyDate,shiftDay,nyTime,conflictsFor} from '/unified-agenda-model.js?v=1';
-const shell=document.createElement('script');shell.src='/agent-unified-menu.js?v=20261124-unified-agenda';document.head.append(shell);
+const shell=document.createElement('script');shell.src='/agent-unified-menu.js?v=20261124-consistent-brand';document.head.append(shell);
 const $=id=>document.getElementById(id),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),today=()=>nyDate(new Date()),dateLabel=day=>day.split('-').reverse().join('/'),clock=stamp=>new Intl.DateTimeFormat('pt-BR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'}).format(new Date(stamp));
 let month=today().slice(0,7),state={events:[],meetings:[],participation:{}},sequence=0,ready=false;
 const responses={going:'Vou participar',not_going:'Não vou',undecided:'Ainda não decidi',unqualified:'Não estou qualificado'};
