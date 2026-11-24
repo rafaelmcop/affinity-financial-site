@@ -1,4 +1,4 @@
-// US federal calendar rules and observed dates: https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/
+// US federal holiday dates (without substitute observance days): https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/
 const source='https://www.opm.gov/policy-data-oversight/pay-leave/federal-holidays/';
 const date=(y,m,d)=>`${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
 const nth=(y,m,weekday,n)=>1+(weekday-new Date(Date.UTC(y,m-1,1)).getUTCDay()+7)%7+(n-1)*7;
@@ -15,4 +15,4 @@ export function usHolidays(year){const items=[];for(const y of [year-1,year,year
 [11,11,'Veterans Day','Homenagem aos veteranos das Forças Armadas dos Estados Unidos.'],
 [11,nth(y,11,4,4),'Thanksgiving','Dia de Ação de Graças, celebrado na quarta quinta-feira de novembro.'],
 [12,25,'Natal','Christmas Day, celebrado em 25 de dezembro.']
-];for(const [month,day,title,description]of holidays){const actual=date(y,month,day),weekday=new Date(actual+'T12:00:00Z').getUTCDay();if(actual.startsWith(year+'-'))items.push({date:actual,title,description,source,informational:true});if(weekday===0||weekday===6){const observed=new Date(actual+'T12:00:00Z');observed.setUTCDate(observed.getUTCDate()+(weekday===0?1:-1));const when=observed.toISOString().slice(0,10);if(when.startsWith(year+'-'))items.push({date:when,title:title+' · observado',description:`Data de observância no calendário federal de ${title}. A data comemorativa é ${actual.slice(8)}/${actual.slice(5,7)}.`,source,informational:true});}}}return items.sort((a,b)=>a.date.localeCompare(b.date)||a.title.localeCompare(b.title));}
+];for(const [month,day,title,description]of holidays){const actual=date(y,month,day);if(actual.startsWith(year+'-'))items.push({date:actual,title,description,source,informational:true});}}return items.sort((a,b)=>a.date.localeCompare(b.date)||a.title.localeCompare(b.title));}

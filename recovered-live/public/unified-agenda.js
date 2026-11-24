@@ -1,4 +1,4 @@
-import {usHolidays} from '/us-holidays.js?v=1';
+import {usHolidays} from '/us-holidays.js?v=2';
 import {nyDate,shiftDay,nyTime,conflictsFor} from '/unified-agenda-model.js?v=1';
 const shell=document.createElement('script');shell.src='/agent-unified-menu.js?v=20261124-consistent-brand';document.head.append(shell);
 const $=id=>document.getElementById(id),esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),today=()=>nyDate(new Date()),dateLabel=day=>day.split('-').reverse().join('/'),clock=stamp=>new Intl.DateTimeFormat('pt-BR',{timeZone:'America/New_York',hour:'2-digit',minute:'2-digit'}).format(new Date(stamp));
