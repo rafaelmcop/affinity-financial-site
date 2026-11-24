@@ -1,5 +1,5 @@
 import {FOLLOWUP_KINDS,RECRUIT_STAGES,SCORE_CRITERIA,CHALLENGE_STATUS,REWARD_STATUS,nyDate,addRecruitDays,recruitmentScore} from './recruitment-tracking.js?v=3';
-import {esc} from './recruitment-view.js?v=1';
+import {esc} from './recruitment-view.js?v=2';
 const options=(rows,value)=>rows.map(([key,label])=>`<option value="${key}"${key===value?' selected':''}>${esc(label)}</option>`).join('');
 const label=(rows,value)=>rows.find(([key])=>key===value)?.[1]||value||'Não definido';
 const dateLabel=day=>day?day.split('-').reverse().join('/'):'Sem data';
