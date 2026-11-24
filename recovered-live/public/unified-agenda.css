@@ -11,3 +11,5 @@ html body .unified-main .day.reserved,html body .unified-main .day.outside.reser
 html body .unified-main .chip.reserved-slot{background:#fce5e5!important;color:#8b3030!important;border-color:#d8a0a0!important}
 
 html body .unified-main .day.outside{background:#e9edf1!important;color:#667482!important;border-color:#d1d9e0!important;box-shadow:none!important}
+
+html body .unified-main .day.holiday:not(.reserved){background:#fff0de!important;border-color:#eac69c!important}html body .unified-main .holiday-name{display:block!important;width:100%!important;background:#ffdfb7!important;border:1px solid #e4b780!important;color:#82471a!important;font:700 11px/1.35 system-ui,sans-serif!important;text-align:left!important;padding:5px 6px!important;border-radius:6px!important;margin:5px 0!important;overflow-wrap:anywhere}html body .unified-main .legend .holiday-key{background:#fff0de;color:#82471a;border-color:#eac69c}
