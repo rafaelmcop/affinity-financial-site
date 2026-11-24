@@ -1,3 +1,4 @@
+import {decorateMeetingPurposes} from './meeting-purpose.js';
 import {runAgentRelationshipAutomations} from './agent-relationship-automations.js';
 import {recruitmentRoute} from './recruitment.js';
 import {enforceAgentSetupDeadlines} from './agent-setup-deadline.js';
@@ -45867,7 +45868,7 @@ Affinity Financial Consulting`,
       if (normalizedName && normalizedName.includes(" ")) closedNames.add(normalizedName);
     }, "rememberClosed");
     for (const row of [...applications.results || [], ...policies.results || [], ...agents.results || [], ...closedClients.results || []]) rememberClosed(row);
-    return trpcResult((rows.results || []).map((row) => {
+    return trpcResult(await decorateMeetingPurposes(env,owner,(rows.results || []).map((row) => {
       let answerPhone = "";
       try {
         const answers = JSON.parse(String(row.questionsJson || "[]"));
@@ -45881,7 +45882,7 @@ Affinity Financial Consulting`,
       const inviteePhone = String(resolvedPhone || answerPhone || "").trim() || null;
       const isClosed = closedIds.has(Number(row.clientId || 0)) || closedEmails.has(sourceEmail(row.inviteeEmail)) || closedPhones.has(sourcePhone(inviteePhone)) || closedNames.has(sourceName(row.inviteeName));
       return { ...meeting, inviteePhone, id: Number(row.id), clientId: Number(row.clientId || 0) || null, isClosed };
-    }));
+    })));
   }
   if (name === "agent.calendlyRecaps") {
     await ensureCalendlyTables(env);

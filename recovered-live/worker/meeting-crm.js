@@ -1,3 +1,4 @@
+import {meetingPurposes,decorateMeetingPurposes,saveMeetingPurpose} from './meeting-purpose.js';
 import {progressStatements} from './crm-progress.js';
 import {findCrmPerson} from './person-identity.js';
 import {boardSchema} from './crm-board.js';
@@ -6,10 +7,10 @@ const ready=new WeakSet();
 async function schema(env){if(ready.has(env.DB))return;await env.DB.prepare('CREATE TABLE IF NOT EXISTS meetingCrmProgress(owner TEXT NOT NULL,meetingId INTEGER NOT NULL,stage TEXT NOT NULL,followUpDate TEXT,notes TEXT NOT NULL DEFAULT \'\',updatedBy TEXT NOT NULL,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,meetingId))').run();ready.add(env.DB);}
 const fail=(message,status=400)=>Object.assign(Error(message),{status});
 export async function meetingCrm(env,owner,input={},actor=owner,save=false){
- owner=String(owner).toLowerCase();const id=Number(input.meetingId);if(!Number.isSafeInteger(id)||id<1)throw fail('Compromisso inválido.');
+ owner=String(owner).toLowerCase();if(save&&input.purposeOnly===true)return saveMeetingPurpose(env,owner,input,actor);const id=Number(input.meetingId);if(!Number.isSafeInteger(id)||id<1)throw fail('Compromisso inválido.');
  const meeting=await env.DB.prepare('SELECT id,clientId,inviteeName,inviteeEmail,inviteePhone FROM calendlyMeetings WHERE id=? AND lower(agentEmail)=?').bind(id,owner).first();if(!meeting)throw fail('Compromisso não encontrado.',404);
  await schema(env);
- if(!save)return {stages:meetingCrmStages,progress:await env.DB.prepare('SELECT stage,followUpDate,notes,updatedAt FROM meetingCrmProgress WHERE owner=? AND meetingId=?').bind(owner,id).first()||{stage:'scheduled',followUpDate:null,notes:''}};
+ if(!save)return {purposes:meetingPurposes,purpose:(await decorateMeetingPurposes(env,owner,[meeting]))[0].purpose,stages:meetingCrmStages,progress:await env.DB.prepare('SELECT stage,followUpDate,notes,updatedAt FROM meetingCrmProgress WHERE owner=? AND meetingId=?').bind(owner,id).first()||{stage:'scheduled',followUpDate:null,notes:''}};
  const stage=String(input.stage||''),date=String(input.followUpDate||'').trim(),notes=String(input.notes||'').trim();
  if(!meetingCrmStages.some(([key])=>key===stage))throw fail('Selecione uma etapa válida.');
  if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date))throw fail('Informe uma data válida para o próximo contato.');
