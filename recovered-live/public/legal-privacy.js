@@ -55,7 +55,6 @@
     try{localStorage.setItem('affinity_external_media',media?'yes':'no');}catch{}
     await read();
     close();
-    footer.setAttribute('role','status');footer.title='Escolhas salvas. Continue a operação que estava realizando.';
     window.dispatchEvent(new CustomEvent('affinity-privacy-changed',{detail:{media}}));
    }catch(e){error.textContent=e.message;button.disabled=false;}
   };
@@ -66,19 +65,6 @@
   try{const state=await read();if(state.accepted)return true;await open('account');return false}catch{return false}
  }
  window.affinityPrivacy={open,ensure,refresh:read};
- const footer=document.createElement('div');
- footer.id='affinity-legal-links';
- const footerStyle=document.createElement('style');
- footerStyle.textContent=`#affinity-legal-links{display:flex!important;flex-wrap:wrap!important;justify-content:center!important;align-items:center!important;gap:8px!important;background:#f1f5f9!important;color:#17324d!important;border-top:1px solid #cbd5e1!important;color-scheme:light!important}html body #affinity-legal-links :is(a[href],button[type]){display:inline-flex!important;align-items:center!important;justify-content:center!important;min-height:40px!important;margin:0!important;padding:8px 14px!important;border:1px solid #b8c7d8!important;border-radius:8px!important;background:#fff!important;color:#174f80!important;font:600 14px/1.4 system-ui!important;text-decoration:none!important;box-shadow:none!important;opacity:1!important}html body #affinity-legal-links :is(a[href],button[type]):hover{background:#e3edf7!important;color:#123b62!important;border-color:#7b98b6!important}html body #affinity-legal-links :is(a[href],button[type]):focus-visible{outline:3px solid #3984cc!important;outline-offset:2px!important}`;
- document.head.append(footerStyle);
- footer.style.cssText='position:relative;clear:both;padding:16px 24px;text-align:center;background:#edf2f7;color:#17324d;font:14px/1.5 system-ui';
- footer.innerHTML='<a href="/terms-of-use.html" style="color:#155a9c;margin:0 10px">Terms of Use</a><a href="/portal-privacy.html" style="color:#155a9c;margin:0 10px">Privacy Policy</a><button type="button" style="border:0;background:transparent;text-decoration:underline;color:#155a9c;font:inherit;padding:8px 10px">Privacy settings</button>';
- footer.querySelector('button').onclick=()=>void open();
- if(kind==='admin'){const a=document.createElement('a');a.href='/admin/privacidade-seguranca';a.textContent='Privacy & security records';a.style.cssText='color:#155a9c;margin:0 10px';footer.append(a);}
- document.body.append(footer);
- // Add a discoverable preference control to the existing, independently managed account menus.
- const attach=()=>{for(const menu of document.querySelectorAll('.agent-account-popover,#affinity-admin-account>div')){if(menu.querySelector('[data-privacy-settings]'))continue;const button=document.createElement('button');button.type='button';button.dataset.privacySettings='';button.textContent='Privacidade / Privacy';button.onclick=()=>void open();menu.append(button);}};
- attach();new MutationObserver(attach).observe(document.body,{childList:true,subtree:true});
  // Only account registration may interrupt a form to request service-term acceptance.
  document.addEventListener('submit',event=>{
   const form=event.target;
