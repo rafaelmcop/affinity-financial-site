@@ -19,3 +19,17 @@ test('confirmed sends are owner scoped, bind content to a request ID, record Wha
  const pending=input({requestId:'33333333-3333-4333-8333-333333333333'}),failed={...f.auth,send:async()=>{throw Error('Confirmação indisponível')}};
  assert.equal((await agentTestimonialSharing(request('/send',pending),f.env,failed)).status,400);assert.equal((await agentTestimonialSharing(request('/send',pending),f.env,f.auth)).status,409);assert.equal(f.calls.length,2);
 }finally{f.db.close()}});
+
+test('manual email and WhatsApp recipients do not require or create a CRM client and remain request-bound',async()=>{
+ const f=fixture();try{
+  const sent=[],auth={...f.auth,send:async(channel,data)=>sent.push({channel,client:data.client})};
+  const email=input({clientId:0,toEmail:'new@example.invalid',requestId:'44444444-4444-4444-8444-444444444444'});
+  assert.equal((await agentTestimonialSharing(request('/send',email),f.env,auth)).status,200);assert.equal(sent[0].client.id,null);assert.equal(sent[0].client.email,'new@example.invalid');
+  assert.equal((await agentTestimonialSharing(request('/send',{...email,toEmail:'different@example.invalid'}),f.env,auth)).status,409);
+  const whatsapp=input({clientId:0,channel:'whatsapp',toPhone:'+1 (857) 000-0003',requestId:'55555555-5555-4555-8555-555555555555'});
+  assert.equal((await agentTestimonialSharing(request('/send',whatsapp),f.env,auth)).status,200);assert.equal(sent[1].client.whatsapp,'+1 (857) 000-0003');
+  assert.equal((await agentTestimonialSharing(request('/send',input({clientId:0,toEmail:'invalid'})),f.env,auth)).status,400);
+  assert.equal((await agentTestimonialSharing(request('/send',input({clientId:0,channel:'whatsapp',toPhone:'invalid'})),f.env,auth)).status,400);
+  assert.equal(f.db.prepare('SELECT count(*) n FROM crmClients').get().n,2);assert.equal(f.db.prepare('SELECT count(*) n FROM crmActivities').get().n,0);
+ }finally{f.db.close()}
+});

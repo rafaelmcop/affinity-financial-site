@@ -26,19 +26,21 @@ export async function agentTestimonialSharing(request,env,auth){
  if(await auth.audit?.(request,env))return reply({error:'Envios indisponíveis durante auditoria.'},403);
  let input;try{input=await boundedJson(request,16000)}catch{return reply({error:'Solicitação inválida.'},400)}
  if(!input||typeof input!=='object'||Array.isArray(input))return reply({error:'Solicitação inválida.'},400);
- const channel=input.channel,clientId=Number(input.clientId),videoId=Number(input.videoId),requestId=String(input.requestId||''),message=String(input.message||'').trim(),subject=String(input.subject||'').trim();
+ const channel=input.channel,clientId=Number(input.clientId||0),videoId=Number(input.videoId),requestId=String(input.requestId||''),message=String(input.message||'').trim(),subject=String(input.subject||'').trim();
  if(!['email','whatsapp'].includes(channel)||!capabilities[channel])return reply({error:'Este canal não está liberado para sua conta.'},403);
- if(input.confirmed!==true||!uuid.test(requestId)||!Number.isSafeInteger(clientId)||clientId<=0||!Number.isSafeInteger(videoId)||videoId<=0||!message||message.length>4000||subject.length>300)return reply({error:'Revise o cliente e a mensagem antes de enviar.'},400);
- const client=await env.DB.prepare('SELECT id,name,email,phone,whatsapp FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?').bind(clientId,owner).first();
+ if(input.confirmed!==true||!uuid.test(requestId)||!Number.isSafeInteger(clientId)||clientId<0||!Number.isSafeInteger(videoId)||videoId<=0||!message||message.length>4000||subject.length>300)return reply({error:'Revise o destinatário e a mensagem antes de enviar.'},400);
+ const client=clientId?await env.DB.prepare('SELECT id,name,email,phone,whatsapp FROM crmClients WHERE id=? AND lower(assignedAdminEmail)=?').bind(clientId,owner).first():{
+  id:null,name:'Destinatário',email:String(input.toEmail||'').trim().toLowerCase(),phone:String(input.toPhone||'').trim(),whatsapp:String(input.toPhone||'').trim()
+ };
  if(!client)return reply({error:'Cliente não encontrado na sua carteira.'},404);
  const video=await env.DB.prepare('SELECT id,mediaUrl FROM testimonials WHERE id=? AND isActive=1 AND mediaType=\'video\'').bind(videoId).first();
  if(!video||!getVideoSource(video.mediaUrl))return reply({error:'Este vídeo não está publicado.'},404);
  const link='https://www.affinityfc.org/depoimentos/'+videoId;
  if(!message.includes(link))return reply({error:'Mantenha o link do depoimento na mensagem.'},400);
- if(channel==='email'&&!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(String(client.email||'')))return reply({error:'O cliente não tem um e-mail válido.'},400);
- if(channel==='whatsapp'&&!/^\d{8,15}$/.test(String(client.whatsapp||client.phone||'').replace(/\D/g,'')))return reply({error:'O cliente não tem um telefone válido.'},400);
+ if(channel==='email'&&(String(client.email||'').length>254||!/^[^\s@<>,;]+@[^\s@<>,;]+\.[^\s@<>,;]+$/.test(String(client.email||''))))return reply({error:'Informe um e-mail válido.'},400);
+ if(channel==='whatsapp'&&!/^\d{8,15}$/.test(String(client.whatsapp||client.phone||'').replace(/\D/g,'')))return reply({error:'Informe um WhatsApp válido com código do país e DDD.'},400);
  await env.DB.prepare("CREATE TABLE IF NOT EXISTS testimonialShareDispatches(owner TEXT NOT NULL,requestId TEXT NOT NULL,fingerprint TEXT NOT NULL,status TEXT NOT NULL,createdAt TEXT DEFAULT CURRENT_TIMESTAMP,updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(owner,requestId))").run();
- const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([videoId,clientId,channel,message,subject]))))).map(byte=>byte.toString(16).padStart(2,'0')).join('');
+ const fingerprint=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify([videoId,clientId,channel,message,subject,channel==='email'?client.email:String(client.whatsapp||client.phone||'').replace(/\D/g,'')]))))).map(byte=>byte.toString(16).padStart(2,'0')).join('');
  const old=await env.DB.prepare('SELECT fingerprint,status FROM testimonialShareDispatches WHERE owner=? AND requestId=?').bind(owner,requestId).first();
  if(old){if(old.fingerprint!==fingerprint)return reply({error:'Este envio já foi iniciado com outro conteúdo. Confira o histórico antes de preparar outro.'},409);if(old.status==='sent')return reply({status:'sent',alreadySent:true});if(old.status!=='not_sent')return reply({error:'O envio anterior está em processamento ou sem confirmação. Confira o histórico antes de tentar novamente.',status:'unconfirmed'},409);}
  const claim=old?await env.DB.prepare("UPDATE testimonialShareDispatches SET status='sending',updatedAt=CURRENT_TIMESTAMP WHERE owner=? AND requestId=? AND status='not_sent'").bind(owner,requestId).run():await env.DB.prepare("INSERT OR IGNORE INTO testimonialShareDispatches(owner,requestId,fingerprint,status) VALUES(?,?,?,'sending')").bind(owner,requestId,fingerprint).run();
@@ -46,7 +48,7 @@ export async function agentTestimonialSharing(request,env,auth){
  try{
   await auth.send(channel,{owner,client,videoId,requestId,message,subject:subject||'Uma história de proteção para você',request});
   const statements=[env.DB.prepare("UPDATE testimonialShareDispatches SET status='sent',updatedAt=CURRENT_TIMESTAMP WHERE owner=? AND requestId=?").bind(owner,requestId)];
-  if(channel==='whatsapp')statements.push(env.DB.prepare("INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,'whatsapp',?,?)").bind(clientId,'Depoimento enviado pelo portal\n'+message,owner));
+  if(channel==='whatsapp'&&clientId)statements.push(env.DB.prepare("INSERT INTO crmActivities(clientId,type,content,createdBy) VALUES(?,'whatsapp',?,?)").bind(clientId,'Depoimento enviado pelo portal\n'+message,owner));
   await env.DB.batch(statements);
   return reply({status:'sent',alreadySent:false});
  }catch(error){await env.DB.prepare('UPDATE testimonialShareDispatches SET status=?,updatedAt=CURRENT_TIMESTAMP WHERE owner=? AND requestId=?').bind(error.notSent?'not_sent':'unconfirmed',owner,requestId).run();return reply({status:error.notSent?'not_sent':'unconfirmed',error:error.message||'Envio não confirmado. Confira o histórico.'},400);}
