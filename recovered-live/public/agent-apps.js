@@ -6,7 +6,7 @@ if(location.hash==='#national-life'&&$('nlg-pilot'))$('nlg-pilot').open=true;
 
 if(released.has('five_rings')){
  const sync=document.createElement('script');
- sync.src='/agent-five-rings-sync.js?v=1.0.15';
+ sync.src='/agent-five-rings-sync.js?v=1.0.16';
  document.head.append(sync);
 }
 const pilotStart=$('nlg-pilot-start');
