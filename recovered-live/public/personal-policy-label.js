@@ -1,6 +1,8 @@
+import {requiredClientName,makeThankYouLetter,loadLetterFontkit} from './policy-print-kit.js?v=1';
 import QRCode from './vendor/qrcode.mjs';
 const clean=value=>String(value||'').normalize('NFC').replace(/[^\x20-\x7e\u00a0-\u00ff\u2013\u2014\u2018\u2019\u201c\u201d\u2026]/g,'').trim();
 export async function makePolicyLabel(agent,clientName,logoBytes){
+ clientName=requiredClientName(clientName);
  const {PDFDocument,StandardFonts,rgb,PDFName,PDFString}=globalThis.PDFLib;
  const target=new URL(agent.url);if(!['https://www.affinityfc.org','https://portal.affinityfc.org'].includes(target.origin)||target.pathname!=='/minha-apolice'||!/^[a-f0-9-]{36}$/.test(target.searchParams.get('agente')||''))throw Error('Link do agente inválido.');
  const doc=await PDFDocument.create(),page=doc.addPage([288,432]),font=await doc.embedFont(StandardFonts.Helvetica),bold=await doc.embedFont(StandardFonts.HelveticaBold);const black=rgb(0,0,0);
@@ -24,5 +26,21 @@ if(typeof document!=='undefined'){
  const $=id=>document.getElementById(id);let agent=null;
  $('personal-label-open')?.addEventListener('click',async()=>{$('personal-label-dialog').showModal();$('personal-agent').textContent='Carregando seus dados…';$('label-status').textContent='';$('personal-label-download').disabled=true;try{const r=await fetch('/api/materials/personalization',{cache:'no-store'}),data=await r.json();if(!r.ok)throw Error(data.error||'Não foi possível carregar seu perfil.');agent=data;$('personal-agent').textContent=[agent.name,agent.phone,agent.email].filter(Boolean).join(' · ');if(!agent.phone&&!agent.email)throw Error('Adicione seu telefone ou e-mail profissional em Perfil antes de gerar a etiqueta.');$('personal-label-download').disabled=false;}catch(e){$('personal-agent').textContent=e.message;}});
  $('personal-label-cancel')?.addEventListener('click',()=>$('personal-label-dialog').close());
- $('personal-label-download')?.addEventListener('click',async()=>{const button=$('personal-label-download');button.disabled=true;$('label-status').textContent='Preparando PDF…';try{const r=await fetch('/policy-welcome-logo.png');if(!r.ok)throw Error('Logo indisponível.');const bytes=await makePolicyLabel(agent,$('label-client').value,await r.arrayBuffer());const blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='etiqueta-affinity-'+(agent.name||'agente').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);$('label-status').textContent='Etiqueta gerada. Confira os dados antes de imprimir em 4×6, escala 100%.';}catch(e){$('label-status').textContent=e.message||'Não foi possível gerar o PDF.';}finally{button.disabled=false;}});
+ let downloads=[];
+ const clearDownloads=()=>{for(const url of downloads)URL.revokeObjectURL(url);downloads=[];$('print-files').hidden=true;};
+ $('label-client')?.addEventListener('input',()=>{clearDownloads();$('label-client').setCustomValidity('');$('label-status').textContent='';});
+ $('personal-label-download')?.addEventListener('click',async()=>{
+  const button=$('personal-label-download');let name;
+  try{name=requiredClientName($('label-client').value);}catch(error){$('label-client').setCustomValidity(error.message);$('label-client').reportValidity();$('label-status').textContent=error.message;return;}
+  button.disabled=true;$('label-client').disabled=true;clearDownloads();$('label-status').textContent='Preparando a etiqueta e a carta…';
+  try{
+   const read=async path=>{const response=await fetch(path);if(!response.ok)throw Error('Não foi possível carregar o modelo de impressão. Tente novamente.');return response.arrayBuffer()};
+   const [logo,template,font,fontkit]=await Promise.all([read('/policy-welcome-logo.png'),read('/print-templates/thank-you-letter-v1.pdf'),read('/print-templates/Caladea-Regular.ttf'),loadLetterFontkit()]);
+   const label=await makePolicyLabel(agent,name,logo),letter=await makeThankYouLetter(template,name,font,fontkit),slug=name.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,'-');
+   for(const [id,bytes,filename]of [['download-label',label,'etiqueta-'+slug+'.pdf'],['download-letter',letter,'carta-de-agradecimento-'+slug+'.pdf']]){const url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'}));downloads.push(url);$(id).href=url;$(id).download=filename;}
+   $('print-files').hidden=false;$('label-status').textContent='Dois PDFs prontos. Baixe separadamente e escolha a impressora de cada arquivo. Etiqueta: 4×6. Carta: papel Letter (8,5×11). Imprima em tamanho real (100%).';
+  }catch(error){$('label-status').textContent=error.message||'Não foi possível gerar os documentos.';}finally{button.disabled=false;$('label-client').disabled=false;}
+ });
+ $('personal-label-open')?.addEventListener('click',clearDownloads);
+ window.addEventListener('pagehide',clearDownloads);
 }

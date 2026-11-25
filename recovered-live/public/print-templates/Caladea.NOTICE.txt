@@ -1,0 +1,5 @@
+Caladea Regular
+Copyright (c) 2012 Huerta Tipografia
+Apache License, Version 2.0
+Source: bundled LibreOffice fonts
+SHA256: d2f6cad33f191e65b68bd74e6d4f7708080a41b32db635866109df3090265d91
