@@ -47251,6 +47251,7 @@ Affinity Financial Consulting`,
     return trpcResult(result.results.map(normalizeTestimonial));
   }
   if (name === "testimonials.create") {
+    if (input.language !== undefined && !isSupportedLanguage(String(input.language))) return trpcError("Idioma não suportado.");
     const mediaType = String(input.mediaType ?? "image") === "video" ? "video" : "image";
     const mediaUrl = String(input.mediaUrl ?? "").trim();
     const amountReceived = Number(input.amountReceived ?? 0);
@@ -47284,6 +47285,7 @@ Affinity Financial Consulting`,
     ).bind(id).first();
     if (!current)
       return trpcError("Avalia\xE7\xE3o n\xE3o encontrada", "NOT_FOUND", 404);
+    if (input.language !== undefined && !isSupportedLanguage(String(input.language))) return trpcError("Idioma não suportado.");
     const mediaType = String(input.mediaType ?? current.mediaType) === "video" ? "video" : "image";
     const mediaUrl = String(input.mediaUrl ?? current.mediaUrl ?? "").trim();
     const previousMediaUrl = String(current.mediaUrl ?? "").trim();

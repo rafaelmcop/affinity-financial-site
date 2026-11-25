@@ -1,6 +1,8 @@
+import {isVideoTestimonial} from '../public/testimonial-kind.js';
 // Reuse translation work while public requests render promptly.
 const pendingByDatabase = new WeakMap();
 export async function loadPublishedTestimonials(rows, language, env, context, localize, deadline = 200) {
+ rows = rows.filter(row => !isVideoTestimonial(row) || String(row.language ?? 'pt') === language);
  if (rows.every(row => String(row.language ?? 'pt') === language)) return rows;
  let jobs = pendingByDatabase.get(env.DB);
  if (!jobs) { jobs = new Map(); pendingByDatabase.set(env.DB, jobs); }
