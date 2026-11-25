@@ -1,3 +1,5 @@
+import {publicMediaRoute} from './public-media.js';
+import {getVideoSource as parsePublicVideoSource} from '../public/video-source.js';
 import {runMailboxSyncBatch,clearMailboxSyncFailure} from './mailbox-sync-health.js';
 import {eventRoute,runEventReminders} from './agent-events.js';
 import {recordSubmissionLicense} from './application-submission-license.js';
@@ -39502,33 +39504,7 @@ var init_icloud_email = __esm({
 var YOUTUBE_ID = /^[A-Za-z0-9_-]{6,20}$/;
 var VIMEO_ID = /^\d+$/;
 var VIDEO_FILE = /\.(mp4|webm|ogg|ogv|mov|m4v)$/i;
-function getVideoSource(rawValue) {
-  const value = rawValue.trim();
-  if (!value) return null;
-  if (value.startsWith("/media/") && VIDEO_FILE.test(value.split("?")[0])) return { kind: "file", url: value };
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:") return null;
-  const host = url.hostname.toLowerCase().replace(/^www\./, "");
-  const parts = url.pathname.split("/").filter(Boolean);
-  let youtubeId = null;
-  if (host === "youtu.be") youtubeId = parts[0] ?? null;
-  if (host === "youtube.com" || host === "m.youtube.com") {
-    if (url.pathname === "/watch") youtubeId = url.searchParams.get("v");
-    if (["embed", "shorts", "live"].includes(parts[0])) youtubeId = parts[1] ?? null;
-  }
-  if (youtubeId && YOUTUBE_ID.test(youtubeId)) return { kind: "youtube", embedUrl: `https://www.youtube-nocookie.com/embed/${youtubeId}` };
-  let vimeoId = null;
-  if (host === "vimeo.com") vimeoId = [...parts].reverse().find((part) => VIMEO_ID.test(part)) ?? null;
-  if (host === "player.vimeo.com" && parts[0] === "video") vimeoId = parts[1] ?? null;
-  if (vimeoId && VIMEO_ID.test(vimeoId)) return { kind: "vimeo", embedUrl: `https://player.vimeo.com/video/${vimeoId}` };
-  if (VIDEO_FILE.test(url.pathname)) return { kind: "file", url: url.toString() };
-  return null;
-}
+function getVideoSource(rawValue) { return parsePublicVideoSource(rawValue); }
 __name(getVideoSource, "getVideoSource");
 __name2(getVideoSource, "getVideoSource");
 function isValidMediaUrl(rawValue, mediaType) {
@@ -48293,7 +48269,7 @@ let appsResponse=null;
    return staffLookups.get(kind);
  };
  const meetingWebhook=await meetingWebhookRoute(request,env,ctx,{sync:(owner,eventUri)=>syncCalendlyForAgent(env,owner,{reminders:true,eventUri}),run:owner=>runMeetingReminders(env,meetingReminderServices(env),{owner})});if(meetingWebhook)return meetingWebhook;
- const domainEmailResponse=await domainEmailRoute(request,env,{email:getAdminEmail,access:getAdminAccess,validEmail,encrypt:encryptSmtpPassword,decrypt:decryptSmtpPassword});if(domainEmailResponse&&url.pathname.startsWith('/api/'))return secureResponse(domainEmailResponse,{privateData:true});
+ const domainEmailResponse=await domainEmailRoute(request,env,{audit:async(req,e)=>Boolean((await getSession(req,e,ADMIN_COOKIE))?.auditAccess),email:getAdminEmail,access:getAdminAccess,validEmail,encrypt:encryptSmtpPassword,decrypt:decryptSmtpPassword});if(domainEmailResponse&&url.pathname.startsWith('/api/'))return secureResponse(domainEmailResponse,{privateData:true});
  const rolesResponse=await userRolesRoute(request,env,{email:getAdminEmail,access:getAdminAccess});if(rolesResponse)return secureResponse(rolesResponse,{privateData:true});
  if(request.method==='GET'){const destination=legacyPortalDestination(url);if(destination)return Response.redirect(new URL(destination,url),302);}
  const assistantResponse=await assistantsRoute(request,env,{...featureAuth,decrypt:decryptSmtpPassword,whatsapp:(r,e,a)=>whatsappRoute(r,e,{...a,waitUntil:task=>ctx.waitUntil(task)}),pollAccessCodes:async(e,owner)=>{init_icloud_email();return pollAccessCodes(e,owner,{open:openAgentImap,imapDate,literal:extractLiteral,parse:raw=>import_mailparser.simpleParser(Buffer2.from(raw))});},prepareAssistant:assistant=>ctx.waitUntil(provisionAssistantEmail(env,assistant,{decrypt:decryptSmtpPassword})),session:getSession,createSession,validEmail,hash:password=>bcryptjs_default.hash(password,12),compare:(password,hash)=>bcryptjs_default.compare(password,hash),runProcedure,features:owner=>userAccess(env,owner),appearance:owner=>agentAppearance(env,'agent:'+owner),calendarLinked:async owner=>{await ensureCalendlyTables(env);return calendarLinked(env,owner);},page:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx),resource:(r,e)=>canonicalMenuFetchSource.call(this,r,e,ctx)});
@@ -48380,6 +48356,7 @@ cloudflare_staging_default.fetch=async function(request,env,ctx){
  const incidentResponse=await securityIncidentRoute(request,env,{...legalServices,encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET),send:mail=>sendEmailIfConfigured(env,mail)});
  if(incidentResponse)return perimeterHeaders(secureResponse(incidentResponse,{privateData:true}),url.pathname);
  const navigationResponse=await portalNavigationRoute(request,env,{identity:async(req,environment)=>{const session=await getSession(req,environment,ADMIN_COOKIE);if(session?.type!=='admin')return null;const access=await getAdminAccess(session.email,environment),account=access.account;if(!account?.isActive||account.status!=='approved'||account.portalDeletedAt)return null;return{email:String(session.email).toLowerCase(),master:!session.auditAccess&&account.adminRole==='master'};}});if(navigationResponse)return navigationResponse;
+ const mediaUploadResponse=await publicMediaRoute(request,env,{admin:async(req,environment)=>{const session=await getSession(req,environment,ADMIN_COOKIE);if(session?.type!=='admin'||session.auditAccess)return null;const access=await getAdminAccess(session.email,environment);return access.account?.isActive&&access.account.status==='approved'&&(access.isMaster||['admin','both'].includes(access.account.accountType))?{email:String(session.email).toLowerCase()}:null;}});if(mediaUploadResponse)return mediaUploadResponse;
  const eventsResponse=await eventRoute(request,env,{identity:async(req,environment)=>{const session=await getSession(req,environment,ADMIN_COOKIE);if(session?.type!=='admin'||session.auditAccess)return null;const access=await getAdminAccess(session.email,environment),account=access.account;if(!account?.isActive||account.status!=='approved'||!['agent','admin','both'].includes(account.accountType))return null;return{email:String(session.email).toLowerCase(),canPublish:['admin','both'].includes(account.accountType),canCalendar:['admin','both'].includes(account.accountType)||await hasFeature(environment,session.email,'calendar')};},encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET)});if(eventsResponse)return eventsResponse;
  const recruitmentResponse=await recruitmentRoute(request,env,{identity:async(req,environment)=>{const session=await getSession(req,environment,ADMIN_COOKIE);if(session?.type!=='admin'||session.auditAccess)return null;const access=await getAdminAccess(session.email,environment);const account=access.account;if(!account?.isActive||account.status!=='approved'||!['admin','both'].includes(account.accountType))return null;return {email:String(session.email).toLowerCase(),name:account.name};},encrypt:value=>encryptSmtpPassword(value,env.JWT_SECRET),decrypt:value=>decryptSmtpPassword(value,env.JWT_SECRET)});
  if(recruitmentResponse)return recruitmentResponse;

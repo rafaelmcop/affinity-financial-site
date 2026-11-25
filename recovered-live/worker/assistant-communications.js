@@ -14,11 +14,11 @@ import {boundedJson} from './security-boundary.js';
 const DOMAIN='team.affinityfc.org',ZONE='571fbc6e04919396d68b456b38ebead6',ACCOUNT='d00b4fce2ba60918d8859e92dd98cf9e';
 const json=(value,status=200)=>Response.json(value,{status,headers:{'cache-control':'no-store'}});
 export function assistantAlias(name){const parts=String(name||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().match(/[a-z0-9]+/g)||[];if(!parts.length)throw Error('Informe o nome completo.');return (parts.length>1?parts[0]+'.'+parts.at(-1):parts[0]).slice(0,55);}
-export async function communicationsSchema(env){await corporateEmailSchema(env);await env.DB.batch([
+export async function communicationsSchema(env){await corporateEmailSchema(env);await env.DB.batch([env.DB.prepare('CREATE TABLE IF NOT EXISTS assistantEmailOverrides(assistantId INTEGER PRIMARY KEY,disabled INTEGER NOT NULL DEFAULT 0)'),
  env.DB.prepare("CREATE TABLE IF NOT EXISTS assistantCommunications(assistantId INTEGER PRIMARY KEY,address TEXT NOT NULL UNIQUE,state TEXT NOT NULL DEFAULT 'pending',error TEXT,forwardVerified INTEGER NOT NULL DEFAULT 0,updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"),
  env.DB.prepare("CREATE TABLE IF NOT EXISTS assistantMailbox(id INTEGER PRIMARY KEY AUTOINCREMENT,assistantId INTEGER NOT NULL,direction TEXT NOT NULL,externalId TEXT NOT NULL,fromEmail TEXT NOT NULL,toEmail TEXT NOT NULL,subject TEXT NOT NULL,body TEXT NOT NULL,sentAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,UNIQUE(assistantId,direction,externalId))")]);}
 export async function provisionAssistantEmail(env,assistant,auth){
- await communicationsSchema(env);let saved=await env.DB.prepare('SELECT * FROM assistantCommunications WHERE assistantId=?').bind(assistant.id).first();
+ await communicationsSchema(env);if((await env.DB.prepare('SELECT disabled FROM assistantEmailOverrides WHERE assistantId=?').bind(assistant.id).first())?.disabled)return {address:null,state:'disabled',error:'E-mail corporativo desativado pelo Admin.'};let saved=await env.DB.prepare('SELECT * FROM assistantCommunications WHERE assistantId=?').bind(assistant.id).first();
  if(saved?.state==='ready'&&!(assistant.email.endsWith('@'+DOMAIN)&&saved.address!==assistant.email))return saved;
  if(env.PORTAL_MULTITENANT_MODE==='enabled'){const own=assistant.owner||((await env.DB.prepare('SELECT owner FROM portalAssistants WHERE id=?').bind(assistant.id).first())?.owner);if(!own||!(await agentBusiness(env,own)).affinityTeam)return {address:assistant.email,state:'external',error:'Este é o e-mail de login da assistente. Um endereço corporativo Affinity só pode ser atribuído pelo Admin.'};}
  try{

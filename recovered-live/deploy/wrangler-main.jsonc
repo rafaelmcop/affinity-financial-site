@@ -4,6 +4,7 @@
   "compatibility_date":"2026-08-06",
   "compatibility_flags":["nodejs_compat","global_fetch_strictly_public"],
   "assets":{"directory":"../public","binding":"ASSETS","html_handling":"none","not_found_handling":"single-page-application","run_worker_first":["/*","!/assets/*.js","!/assets/*.css","!/vendor/*.js","!/vendor/*.css"]},
+  "r2_buckets":[{"binding":"PUBLIC_MEDIA","bucket_name":"affinity-public-media"}],
   "d1_databases":[{"binding":"DB","database_name":"affinity-financial-staging-db","database_id":"aa4b6291-383d-4237-8a4b-edff1eb7f60b"}],
   "services":[{"binding":"WHATSAPP_RELAY","service":"affinity-whatsapp-relay"}],
   "send_email":[{"name":"CORPORATE_EMAIL"}],
