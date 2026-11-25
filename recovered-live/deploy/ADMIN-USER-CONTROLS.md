@@ -1,0 +1,9 @@
+# Admin user controls
+
+The user directory starts at All and uses one category selector. User profile editing contains role conversion, feature permissions (including the independent Five Rings requirement), master-only portal audit access, block and deletion controls. The standalone role and Five Rings panels are no longer mounted.
+
+Master audit entry requires a live approved master Admin identity, same-origin JSON POST and current password confirmation. It creates a one-hour signed target session with a separate audit grant; the target's own roles and feature permissions still apply. The target is not notified. An HttpOnly master restoration cookie supports returning to Admin. Each target session validates that the originating master remains approved and active; access is revoked when the grant ends or expires. Requests record the actual master, audit ID, HTTP method and path, without passwords, query parameters or request payloads. The master can review session entries under System logs. Audit access does not activate blocked or pending accounts.
+
+Hierarchy reference operations apply only to no-login upline directory nodes. Merge keeps the selected account's credentials, status, data and approval unchanged, explicitly chooses the surviving upline and transfers directory downlines. Reference deletion explicitly chooses the replacement upline (or top-level). Both require an Admin checkbox and password, validate the proposed graph for cycles and atomically audit/rewrite/remove the reference. An optimistic graph snapshot guard rejects concurrent hierarchy edits. No production reference is merged automatically from name similarity.
+
+Notification read receipts are scoped to the authenticated account/assistant/affiliate. They hide that exact bell notice after refresh without deleting the underlying task, mail, client or audit history. A changed notice is shown again. No real messages are sent by these operations.

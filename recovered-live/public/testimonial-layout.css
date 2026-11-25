@@ -1,0 +1,14 @@
+/* Keep the media and identity stable while only the story scrolls. */
+#testimonials .testimonial-fixed-card{box-sizing:border-box;height:620px;padding:20px;overflow:hidden}
+#testimonials .testimonial-fixed-layout{display:grid;grid-template-rows:auto minmax(0,1fr);gap:20px;height:100%;min-width:0}
+#testimonials .testimonial-fixed-media{min-width:0;align-self:center}
+#testimonials .testimonial-fixed-content{display:flex;flex-direction:column;gap:16px;min-width:0;min-height:0;height:100%}
+#testimonials .testimonial-scroll-text{flex:1 1 0;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#a7b9c9 transparent;scrollbar-gutter:stable;margin:0;padding-right:10px;overflow-wrap:anywhere}
+#testimonials .testimonial-scroll-text:focus-visible{outline:2px solid #ba9229;outline-offset:3px}
+#testimonials .testimonial-fixed-details{flex:0 0 auto;overflow-wrap:anywhere}
+#testimonials .testimonial-fixed-details p{margin-top:0}
+#testimonials .testimonial-fixed-content>[aria-label]{flex-shrink:0}
+@media(min-width:768px){
+ #testimonials .testimonial-fixed-card{height:420px;padding:32px}
+ #testimonials .testimonial-fixed-layout{grid-template-columns:minmax(0,45fr) minmax(0,55fr);grid-template-rows:minmax(0,1fr);gap:28px}
+}

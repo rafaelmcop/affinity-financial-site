@@ -1,0 +1,8 @@
+/* High contrast agent registration fields on both portal themes. */
+.affinity-agent-number-input,#agent-number,#my-agent-number,#agent-number-reminder input[name=number]{display:block!important;width:100%!important;max-width:520px;min-height:50px;background:#fff!important;color:#14283d!important;border:2px solid #d4af37!important;border-radius:10px!important;padding:12px 14px!important;font-size:17px!important;font-weight:600!important;caret-color:#14283d!important;box-shadow:0 0 0 1px #d4af3733}
+.affinity-agent-number-input::placeholder,#agent-number::placeholder,#my-agent-number::placeholder,#agent-number-reminder input[name=number]::placeholder{color:#526170!important;opacity:1}
+.affinity-agent-number-input:focus,#agent-number:focus,#my-agent-number:focus,#agent-number-reminder input[name=number]:focus{outline:3px solid #4c9cef!important;outline-offset:3px}
+.affinity-number-save,#agent-number-form button,#agent-number-reminder button,#profile-form button{display:inline-flex!important;align-items:center;justify-content:center;min-height:50px;background:#d4af37!important;color:#102238!important;border:2px solid #f5d76e!important;border-radius:10px!important;padding:12px 22px!important;font-size:16px!important;font-weight:800!important;cursor:pointer!important;text-decoration:none!important;box-shadow:0 3px 10px #0003}
+.affinity-number-save:hover:not(:disabled),#agent-number-form button:hover,#agent-number-reminder button:hover{background:#f0cf62!important}
+.affinity-number-save:disabled{opacity:.65!important;cursor:not-allowed!important}
+.affinity-number-save:focus-visible,#agent-number-form button:focus-visible,#agent-number-reminder button:focus-visible{outline:3px solid #4c9cef!important;outline-offset:3px}

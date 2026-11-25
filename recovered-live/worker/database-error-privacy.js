@@ -1,0 +1,3 @@
+// SQL implementation details belong in restricted diagnostics, not client-facing errors.
+const databaseFailure=/\b(?:D1_(?:ERROR|EXEC_ERROR|TYPE_ERROR|COLUMN_NOTFOUND|SESSION_ERROR)|SQLITE_[A-Z_]+|sqlite3?\.(?:OperationalError|DatabaseError))\b|\b(?:no such (?:table|column)|CHECK constraint failed|UNIQUE constraint failed|FOREIGN KEY constraint failed|syntax error near)\b/i;
+export function publicDatabaseErrorMessage(value){const message=String(value??'');return databaseFailure.test(message)?'Não foi possível concluir a operação no banco de dados. Tente novamente; se persistir, avise o suporte.':message;}
