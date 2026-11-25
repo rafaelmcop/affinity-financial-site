@@ -24,6 +24,6 @@ function capture(image){return new Promise(resolve=>{
 });}
 function drain(){while(running<2&&queue.length){const image=queue.shift();running++;capture(image).finally(()=>{running--;drain()});}}
 for(const image of document.querySelectorAll('.story-card img')){
- const fail=()=>{if(image.dataset.previewFailed)return;image.dataset.previewFailed='1';image.src=fallback;if(image.dataset.localVideo){queue.push(image);drain()}};
+ const fail=()=>{if(image.dataset.previewFailed)return;image.dataset.previewFailed='1';image.src=fallback;if(image.dataset.localVideo){queue.push(image);drain()}else if(image.dataset.vimeoUrl){const endpoint=new URL('https://vimeo.com/api/oembed.json');endpoint.searchParams.set('url',image.dataset.vimeoUrl);endpoint.searchParams.set('width','640');fetch(endpoint,{credentials:'omit',signal:AbortSignal.timeout(6000)}).then(response=>response.ok?response.json():Promise.reject()).then(data=>{const cover=new URL(data.thumbnail_url);if(cover.protocol==='https:'&&!cover.username&&!cover.password&&(cover.hostname==='vimeocdn.com'||cover.hostname.endsWith('.vimeocdn.com')))image.src=cover.href}).catch(()=>{});}};
  image.addEventListener('error',fail);if(image.complete&&image.naturalWidth===0)fail();
 }
