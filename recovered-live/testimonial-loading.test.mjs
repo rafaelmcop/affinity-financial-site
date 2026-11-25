@@ -32,3 +32,26 @@ test('videos match only their recorded language while written reviews remain ava
  }
  assert.deepEqual(await loadPublishedTestimonials(rows.filter(row=>row.id!==1),'fr',{DB:{}},null,async()=>{throw Error('must not translate videos')}),[]);
 });
+
+test('another request never awaits unfinished translation I/O, and completed plain results can be reused',async()=>{
+ const rows=[{id:1,language:'pt',quote:'Original'}],env={DB:{}},background=[];
+ let finish,calls=0;
+ const localize=()=>{calls++;return new Promise(resolve=>finish=resolve)};
+ assert.deepEqual(await loadPublishedTestimonials(rows,'en',env,{waitUntil:p=>background.push(p)},localize,1),rows);
+ const next=await loadPublishedTestimonials(rows,'en',env,null,()=>{throw Error('must reuse lease without awaiting its Promise')},10000);
+ assert.deepEqual(next,rows);assert.equal(calls,1);
+ const translated=rows.map(row=>({...row,quote:'Translated'}));finish(translated);await Promise.all(background);
+ assert.deepEqual(await loadPublishedTestimonials(rows,'en',env,null,()=>{throw Error('use plain completed results')}),translated);
+});
+test('an abandoned request lease expires so a later request can retry independently',async()=>{
+ const rows=[{id:1,language:'pt',quote:'Original'}],env={DB:{}},oldNow=Date.now;
+ let now=oldNow(),calls=0;
+ try{
+  Date.now=()=>now;
+  assert.deepEqual(await loadPublishedTestimonials(rows,'en',env,null,()=>{calls++;return new Promise(()=>{})},1),rows);
+  now+=30001;
+  const translated=rows.map(row=>({...row,quote:'Recovered'}));
+  assert.deepEqual(await loadPublishedTestimonials(rows,'en',env,null,async()=>{calls++;return translated}),translated);
+  assert.equal(calls,2);
+ }finally{Date.now=oldNow;}
+});
