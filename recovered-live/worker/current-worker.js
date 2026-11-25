@@ -1,3 +1,4 @@
+import {testimonialThumbnailRoute} from './testimonial-thumbnails.js';
 import {agentTestimonialSharing} from './agent-testimonial-sharing.js';
 import {testimonialPagesRoute} from './testimonial-pages.js';
 import {publicMediaRoute} from './public-media.js';
@@ -48267,6 +48268,7 @@ let appsResponse=null;
  }
  if(request.method==='GET'&&url.hostname==='portal.affinityfc.org'&&url.pathname==='/agent-five-rings-sync.html'&&url.searchParams.get('background')!=='1')return Response.redirect('https://www.affinityfc.org/agent-five-rings-sync.html?manual=1',302);
  const photoResponse=await profilePhotoRoute(request,env,{email:getAdminEmail,access:getAdminAccess,personalPage:async owner=>{await ensureCalendlyTables(env);return ensureAgentPersonalPage(env,owner,{publish:await hasFeature(env,owner,'public_profile')});},send:options=>sendEmail(env,options)});if(photoResponse)return secureResponse(photoResponse,{privateData:true});
+ const testimonialThumbnail=await testimonialThumbnailRoute(request,env);if(testimonialThumbnail)return testimonialThumbnail;
  const testimonialPage=await testimonialPagesRoute(request,env);if(testimonialPage)return testimonialPage;
  const boundary=trpcBoundary(request);if(boundary)return boundary;
  if(/(?:^|\/)(?:\.git|\.env(?:\.[^/]*)?|\.dev\.vars|private)(?:\/|$)/i.test(url.pathname))return new Response('Não encontrado',{status:404,headers:{'cache-control':'no-store'}});
