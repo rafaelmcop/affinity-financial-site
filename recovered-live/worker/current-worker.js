@@ -1,3 +1,4 @@
+import {agentTestimonialSharing} from './agent-testimonial-sharing.js';
 import {testimonialPagesRoute} from './testimonial-pages.js';
 import {publicMediaRoute} from './public-media.js';
 import {getVideoSource as parsePublicVideoSource} from '../public/video-source.js';
@@ -47368,6 +47369,13 @@ var cloudflare_staging_default = {
     if(hierarchyResponse)return secureResponse(hierarchyResponse,{privateData:true});
     const policyAgentResponse=await policyAgentPage(request,env);
     if(policyAgentResponse)return secureResponse(policyAgentResponse);
+    const testimonialSharingResponse=await agentTestimonialSharing(request,env,{email:getAdminEmail,access:getAdminAccess,feature:(owner,key)=>hasFeature(env,owner,key),whatsappAllowed:owner=>portalWhatsappAllowed(env,owner),audit:async(req,e)=>Boolean((await getSession(req,e,ADMIN_COOKIE))?.auditAccess),send:async(channel,data)=>{
+      if(channel==='email'){
+        const result=await runProcedure('agent.sendMailboxEmail',{clientId:data.client.id,to:data.client.email,subject:data.subject,body:data.message},data.request,env);
+        if(result.error)throw Error(result.error.json?.message||'O e-mail não foi confirmado.');
+      }else await sendMeetingMessage(env,data.owner,{id:0,inviteePhone:data.client.whatsapp||data.client.phone},{confirmed:true,channel:'whatsapp',requestId:data.requestId,message:data.message},[]);
+    }});
+    if(testimonialSharingResponse)return secureResponse(testimonialSharingResponse,{privateData:true});
     const materialsResponse=await materialLibrary(request,env,{email:getAdminEmail,access:getAdminAccess});
     if(materialsResponse)return secureResponse(materialsResponse,{privateData:true});
     const preferenceResponse = await preferenceRoute(request, env);
